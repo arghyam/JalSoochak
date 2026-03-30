@@ -512,15 +512,6 @@ public class GlificMeterWorkflowService {
             );
 
             String rawIssueReason = request.getIssueReason().trim();
-            if (rawIssueReason.matches("^\\d+$")) {
-                int numericSelection = Integer.parseInt(rawIssueReason);
-                if (numericSelection < 1 || numericSelection > 4) {
-                    return IntroResponse.builder()
-                            .success(false)
-                            .message("Please choose a number between 1 and 4.")
-                            .build();
-                }
-            }
 
             List<GlificMessageTemplatesService.TemplateOption> templateReasons =
                     templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
@@ -535,6 +526,12 @@ public class GlificMeterWorkflowService {
                     reasons = "hindi".equals(languageKey) ? DEFAULT_ISSUE_REASONS_HINDI : DEFAULT_ISSUE_REASONS;
                 }
                 selectionKeys = DEFAULT_ISSUE_REASON_SELECTION_KEYS;
+            }
+            if (rawIssueReason.matches("^\\d+$") && parseSelectionIndex(rawIssueReason, reasons.size()) == null) {
+                return IntroResponse.builder()
+                        .success(false)
+                        .message("Please choose a number between 1 and " + reasons.size() + ".")
+                        .build();
             }
             String resolvedIssueReason = rawIssueReason;
             String selectedKey = null;
