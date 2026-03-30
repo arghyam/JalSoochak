@@ -57,6 +57,35 @@ public class TelemetryEventPublisher {
     }
 
     @Async("kafkaPublisherExecutor")
+    public void publishMeterChangeReason(Integer tenantId,
+                                         Long schemeId,
+                                         Long userId,
+                                         LocalDate date,
+                                         String meterChangeReason) {
+        if (meterChangeReason == null || meterChangeReason.isBlank()) {
+            return;
+        }
+
+        WaterQuantityEvent event = WaterQuantityEvent.builder()
+                .eventType(EVENT_WATER_QUANTITY_RECORDED)
+                .tenantId(tenantId)
+                .schemeId(toInt(schemeId))
+                .userId(toInt(userId))
+                .waterQuantity(0)
+                .submissionStatus(NOT_SUBMITTED_STATUS)
+                .outageReason(null)
+                .nonSubmissionReason(meterChangeReason)
+                .date((date != null ? date : LocalDate.now()).toString())
+                .build();
+
+        boolean ok = kafkaProducer.publishJson(TOPIC, event);
+        if (!ok) {
+            log.warn("[telemetry-events] publish_failed meter_change tenantId={} schemeId={} userId={}",
+                    tenantId, schemeId, userId);
+        }
+    }
+
+    @Async("kafkaPublisherExecutor")
     public void publishAnomalyRecorded(Integer tenantId,
                                        Integer type,
                                        Long userId,
