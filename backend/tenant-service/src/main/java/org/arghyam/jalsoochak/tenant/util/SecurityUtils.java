@@ -22,6 +22,19 @@ public class SecurityUtils {
     }
 
     /**
+     * Gets the current user's tenant state code from the JWT {@code tenant_state_code} claim.
+     * Returns {@code null} if the claim is absent (e.g. for SUPER_USER tokens that carry no tenant).
+     * Throws if called outside an authenticated request context.
+     */
+    public static String getCurrentUserTenantStateCode() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof Jwt jwt) {
+            return jwt.getClaimAsString("tenant_state_code");
+        }
+        throw new AuthenticationCredentialsNotFoundException("getCurrentUserTenantStateCode() called outside an authenticated request context");
+    }
+
+    /**
      * Gets the current user's display name from the JWT.
      * Fallback chain: "name" (full name) → "preferred_username" (always present in Keycloak) → subject UUID.
      * Throws if called outside an authenticated request context — callers with a known system identity
