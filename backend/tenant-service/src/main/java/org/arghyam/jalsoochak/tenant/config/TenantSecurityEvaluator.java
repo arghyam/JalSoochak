@@ -45,6 +45,10 @@ public class TenantSecurityEvaluator {
      * {@code @ExceptionHandler} mappings and results in an unexpected 500 response.
      */
     public boolean isOwnTenant(Integer tenantId) {
+        if (tenantId == null) {
+            log.warn("STATE_ADMIN request denied: tenantId is null");
+            return false;
+        }
         String callerStateCode;
         try {
             callerStateCode = SecurityUtils.getCurrentUserTenantStateCode();
