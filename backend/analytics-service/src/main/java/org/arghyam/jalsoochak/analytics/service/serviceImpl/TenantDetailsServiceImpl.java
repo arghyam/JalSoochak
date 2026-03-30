@@ -79,7 +79,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
             response = getTenantDetailsByParent(tenant, parentLgdId);
         } else {
             Map<String, Object> boundaryResult = tenantBoundaryRepository.getMergedBoundaryForTenant(tenantId);
-            Integer boundaryCount = (Integer) boundaryResult.get("boundary_count");
+            Integer boundaryCount = intFromQueryMap(boundaryResult, "boundary_count");
             String boundaryGeoJson = (String) boundaryResult.get("boundary_geojson");
 
             response = TenantDetailsResponse.builder()
@@ -145,7 +145,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         TenantDetailsResponse response = TenantDetailsResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
-                .childBoundaryCount((Integer) mergedBoundaryResult.get("child_count"))
+                .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
                 .boundaryGeoJson((String) mergedBoundaryResult.get("boundary_geojson"))
                 .childRegions(childRegions)
                 .build();
@@ -256,10 +256,21 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         return TenantDetailsResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
-                .childBoundaryCount((Integer) mergedBoundaryResult.get("child_count"))
+                .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
                 .boundaryGeoJson((String) mergedBoundaryResult.get("boundary_geojson"))
                 .childRegions(childRegions)
                 .build();
+    }
+
+    private static Integer intFromQueryMap(Map<String, Object> row, String key) {
+        Object value = row.get(key);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        throw new IllegalArgumentException("Expected numeric column " + key + " in query result");
     }
 
     private TenantDetailsResponse readFromCache(String cacheKey) {

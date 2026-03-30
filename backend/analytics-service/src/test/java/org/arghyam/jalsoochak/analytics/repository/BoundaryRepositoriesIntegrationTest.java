@@ -54,17 +54,15 @@ class BoundaryRepositoriesIntegrationTest {
     @BeforeEach
     void setUp() {
         truncateAnalytics();
-        createTenantSchemaAndTables();
         seedAnalyticsTables();
-        seedTenantSchema();
     }
 
     @Test
     void tenantBoundaryRepository_allMethods_workIncludingValidation() {
-        Map<String, Object> merged = tenantBoundaryRepository.getMergedBoundaryForTenant("tenant_mp");
-        Integer level = tenantBoundaryRepository.getLocationLevel("tenant_mp", 101);
-        List<Map<String, Object>> children = tenantBoundaryRepository.getChildLevelByParent("tenant_mp", 100, 1);
-        Map<String, Object> mergedByParent = tenantBoundaryRepository.getMergedBoundaryByParent("tenant_mp", 100);
+        Map<String, Object> merged = tenantBoundaryRepository.getMergedBoundaryForTenant(1);
+        Integer level = tenantBoundaryRepository.getLocationLevel(101);
+        List<Map<String, Object>> children = tenantBoundaryRepository.getChildLevelByParent(1, 100, 1);
+        Map<String, Object> mergedByParent = tenantBoundaryRepository.getMergedBoundaryByParent(1, 100, 1);
 
         assertThat(((Number) merged.get("boundary_count")).intValue()).isEqualTo(2);
         assertThat(merged.get("boundary_geojson")).isNotNull();
@@ -77,17 +75,18 @@ class BoundaryRepositoriesIntegrationTest {
         assertThat(((Number) mergedByParent.get("child_count")).intValue()).isEqualTo(2);
         assertThat(mergedByParent.get("boundary_geojson")).isNotNull();
 
-        assertThat(tenantBoundaryRepository.tableExists("tenant_mp", "lgd_location_master_table")).isTrue();
-        assertThat(tenantBoundaryRepository.tableExists("tenant_mp", "missing_table")).isFalse();
-        assertThat(tenantBoundaryRepository.columnExists("tenant_mp", "lgd_location_master_table", "parent_id")).isTrue();
-        assertThat(tenantBoundaryRepository.columnExists("tenant_mp", "lgd_location_master_table", "missing_col")).isFalse();
-
-        assertThatThrownBy(() -> tenantBoundaryRepository.getMergedBoundaryForTenant("tenant-mp"))
+        assertThatThrownBy(() -> tenantBoundaryRepository.getMergedBoundaryForTenant(0))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid schema name");
-        assertThatThrownBy(() -> tenantBoundaryRepository.tableExists("tenant_mp", "bad-table"))
+                .hasMessageContaining("tenant_id must be a positive integer");
+        assertThatThrownBy(() -> tenantBoundaryRepository.getLocationLevel(0))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid table name");
+                .hasMessageContaining("lgd_id must be a positive integer");
+        assertThatThrownBy(() -> tenantBoundaryRepository.getChildLevelByParent(1, 100, 6))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("No child LGD level available");
+        assertThatThrownBy(() -> tenantBoundaryRepository.getMergedBoundaryByParent(1, 100, 6))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("No child LGD level available");
     }
 
     @Test
@@ -140,37 +139,25 @@ class BoundaryRepositoriesIntegrationTest {
                 """);
     }
 
-    private void createTenantSchemaAndTables() {
-        jdbcTemplate.execute("CREATE SCHEMA IF NOT EXISTS tenant_mp");
-        jdbcTemplate.execute("DROP TABLE IF EXISTS tenant_mp.lgd_location_master_table");
-        jdbcTemplate.execute("DROP TABLE IF EXISTS tenant_mp.location_config_master_table");
-
-        jdbcTemplate.execute("""
-                CREATE TABLE tenant_mp.location_config_master_table (
-                    id INT PRIMARY KEY,
-                    level INT NOT NULL,
-                    deleted_at TIMESTAMP NULL
-                )
-                """);
-        jdbcTemplate.execute("""
-                CREATE TABLE tenant_mp.lgd_location_master_table (
-                    id INT PRIMARY KEY,
-                    parent_id INT NULL,
-                    lgd_location_config_id INT NOT NULL,
-                    title VARCHAR(255),
-                    lgd_code VARCHAR(50),
-                    geom geometry,
-                    status INT,
-                    deleted_at TIMESTAMP NULL
-                )
-                """);
-    }
-
     private void seedAnalyticsTables() {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_tenant_table
                 (tenant_id, state_code, title, country_code, status, created_at, updated_at)
                 VALUES (1, 'mp', 'Madhya Pradesh', 'IN', 1, NOW(), NOW())
+                """);
+
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_lgd_location_table
+                (lgd_id, tenant_id, lgd_code, lgd_c_name, title, lgd_level,
+                 level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 geom, created_at, updated_at)
+                VALUES
+                (100, 1, 'P100', 'Parent', 'Parent LGD', 1, 100, NULL, NULL, NULL, NULL, NULL,
+                 ST_GeomFromText('POINT(77 28)', 4326), NOW(), NOW()),
+                (101, 1, 'C101', 'ChildA', 'Child LGD A', 2, 100, 101, NULL, NULL, NULL, NULL,
+                 ST_GeomFromText('POINT(77.1 28.1)', 4326), NOW(), NOW()),
+                (102, 1, 'C102', 'ChildB', 'Child LGD B', 2, 100, 102, NULL, NULL, NULL, NULL,
+                 ST_GeomFromText('POINT(77.2 28.2)', 4326), NOW(), NOW())
                 """);
 
         jdbcTemplate.update("""
@@ -193,22 +180,6 @@ class BoundaryRepositoriesIntegrationTest {
                 VALUES
                 (1, 1, 'Scheme A', 1001, 2001, 0.0, 0.0, 100, 100, 101, NULL, NULL, NULL, NULL, 200, 200, 201, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW()),
                 (2, 1, 'Scheme B', 1002, 2002, 0.0, 0.0, 100, 100, 102, NULL, NULL, NULL, NULL, 200, 200, 202, NULL, NULL, NULL, NULL, 1, 20, 20, 20, NOW(), NOW())
-                """);
-    }
-
-    private void seedTenantSchema() {
-        jdbcTemplate.update("""
-                INSERT INTO tenant_mp.location_config_master_table (id, level, deleted_at)
-                VALUES (1, 1, NULL), (2, 2, NULL)
-                """);
-
-        jdbcTemplate.update("""
-                INSERT INTO tenant_mp.lgd_location_master_table
-                (id, parent_id, lgd_location_config_id, title, lgd_code, geom, status, deleted_at)
-                VALUES
-                (100, NULL, 1, 'Parent LGD', 'P100', ST_GeomFromText('POINT(77 28)', 4326), 1, NULL),
-                (101, 100, 2, 'Child LGD A', 'C101', ST_GeomFromText('POINT(77.1 28.1)', 4326), 1, NULL),
-                (102, 100, 2, 'Child LGD B', 'C102', ST_GeomFromText('POINT(77.2 28.2)', 4326), 1, NULL)
                 """);
     }
 }

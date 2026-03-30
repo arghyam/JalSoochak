@@ -27,6 +27,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,6 +61,47 @@ class TenantDetailsServiceImplTest {
     }
 
     @Test
+    void getTenantDetails_nullTenantId_throws() {
+        assertThatThrownBy(() -> service.getTenantDetails(null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("tenant_id must be a positive integer");
+    }
+
+    @Test
+    void getTenantDetails_tenantNotFound_throws() {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(dimTenantRepository.findById(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getTenantDetails(99, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Tenant not found for tenant_id: 99");
+    }
+
+    @Test
+    void getTenantDetails_parentLgdIdNotFound_throws() {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
+        when(tenantBoundaryRepository.getLocationLevel(999)).thenReturn(null);
+
+        assertThatThrownBy(() -> service.getTenantDetails(1, 999))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("parent_lgd_id not found in dim_lgd_location_table");
+    }
+
+    @Test
+    void getTenantDetails_parentLgdIdNonPositive_throws() {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
+
+        assertThatThrownBy(() -> service.getTenantDetails(1, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("parent_lgd_id must be a positive integer");
+    }
+
+    @Test
     void getTenantDetails_cacheHit_returnsCachedResponse() throws Exception {
         mockRedisValueOps();
         String key = "analytics-service:api-cache:get_tenant_details:tenant:1:parent:all:v3";
@@ -78,17 +120,15 @@ class TenantDetailsServiceImplTest {
         mockRedisValueOps();
         when(valueOperations.get(any())).thenReturn(null);
         when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
-        when(tenantBoundaryRepository.tableExists("tenant_mp", "lgd_location_master_table")).thenReturn(true);
-        when(tenantBoundaryRepository.tableExists("tenant_mp", "location_config_master_table")).thenReturn(true);
-        when(tenantBoundaryRepository.columnExists("tenant_mp", "lgd_location_master_table", "geom")).thenReturn(true);
-        when(tenantBoundaryRepository.getMergedBoundaryForTenant("tenant_mp"))
-                .thenReturn(Map.of("boundary_count", 3, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(tenantBoundaryRepository.getMergedBoundaryForTenant(1))
+                .thenReturn(Map.of("boundary_count", 3L, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
 
         TenantDetailsResponse response = service.getTenantDetails(1, null);
 
         assertThat(response.getTenantId()).isEqualTo(1);
         assertThat(response.getChildBoundaryCount()).isEqualTo(3);
         assertThat(response.getChildRegions()).isEmpty();
+        verify(tenantBoundaryRepository).getMergedBoundaryForTenant(1);
     }
 
     @Test
@@ -96,21 +136,18 @@ class TenantDetailsServiceImplTest {
         mockRedisValueOps();
         when(valueOperations.get(any())).thenReturn(null);
         when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
-        when(tenantBoundaryRepository.tableExists("tenant_mp", "lgd_location_master_table")).thenReturn(true);
-        when(tenantBoundaryRepository.tableExists("tenant_mp", "location_config_master_table")).thenReturn(true);
-        when(tenantBoundaryRepository.columnExists("tenant_mp", "lgd_location_master_table", "geom")).thenReturn(true);
-        when(tenantBoundaryRepository.getLocationLevel("tenant_mp", 100)).thenReturn(2);
-        when(tenantBoundaryRepository.getChildLevelByParent("tenant_mp", 100, 1))
+        when(tenantBoundaryRepository.getLocationLevel(100)).thenReturn(1);
+        when(tenantBoundaryRepository.getChildLevelByParent(1, 100, 1))
                 .thenReturn(List.of(Map.of(
                         "lgd_id", 101,
                         "parent_lgd_id", 100,
-                        "child_level", 3,
+                        "child_level", 2,
                         "scheme_count", 2,
                         "title", "Child A",
                         "lgd_code", "C101",
                         "boundary_geojson", "{\"type\":\"Polygon\"}"
                 )));
-        when(tenantBoundaryRepository.getMergedBoundaryByParent("tenant_mp", 100))
+        when(tenantBoundaryRepository.getMergedBoundaryByParent(1, 100, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
 
         TenantDetailsResponse response = service.getTenantDetails(1, 100);
@@ -118,6 +155,9 @@ class TenantDetailsServiceImplTest {
         assertThat(response.getChildBoundaryCount()).isEqualTo(1);
         assertThat(response.getChildRegions()).hasSize(1);
         assertThat(response.getChildRegions().getFirst().getLgdId()).isEqualTo(101);
+        verify(tenantBoundaryRepository).getLocationLevel(100);
+        verify(tenantBoundaryRepository).getChildLevelByParent(1, 100, 1);
+        verify(tenantBoundaryRepository).getMergedBoundaryByParent(1, 100, 1);
     }
 
     @Test
@@ -125,6 +165,48 @@ class TenantDetailsServiceImplTest {
         assertThatThrownBy(() -> service.getTenantDetailsByParentDepartment(1, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("parent_department_id must be a positive integer");
+    }
+
+    @Test
+    void getTenantDetailsByParentDepartment_invalidTenantId_throws() {
+        assertThatThrownBy(() -> service.getTenantDetailsByParentDepartment(0, 200))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("tenant_id must be a positive integer");
+    }
+
+    @Test
+    void getTenantDetailsByParentDepartment_tenantNotFound_throws() {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(dimTenantRepository.findById(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getTenantDetailsByParentDepartment(99, 200))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Tenant not found for tenant_id: 99");
+    }
+
+    @Test
+    void getTenantDetailsByParentDepartment_parentDepartmentNotFound_throws() {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
+        when(tenantDepartmentBoundaryRepository.getDepartmentLevel(1, 999)).thenReturn(null);
+
+        assertThatThrownBy(() -> service.getTenantDetailsByParentDepartment(1, 999))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("parent_department_id not found for tenant");
+    }
+
+    @Test
+    void getTenantDetailsByParentDepartment_parentAtLevel6_throws() {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
+        when(tenantDepartmentBoundaryRepository.getDepartmentLevel(1, 200)).thenReturn(6);
+
+        assertThatThrownBy(() -> service.getTenantDetailsByParentDepartment(1, 200))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("No child department level available");
     }
 
     @Test
@@ -138,12 +220,9 @@ class TenantDetailsServiceImplTest {
         LocalDate end = LocalDate.of(2026, 1, 3);
 
         when(dimTenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant(tenantId, "mp")));
-        when(tenantBoundaryRepository.tableExists("tenant_mp", "lgd_location_master_table")).thenReturn(true);
-        when(tenantBoundaryRepository.tableExists("tenant_mp", "location_config_master_table")).thenReturn(true);
-        when(tenantBoundaryRepository.columnExists("tenant_mp", "lgd_location_master_table", "geom")).thenReturn(true);
 
-        when(tenantBoundaryRepository.getLocationLevel("tenant_mp", parentLgdId)).thenReturn(1);
-        when(tenantBoundaryRepository.getChildLevelByParent("tenant_mp", parentLgdId, tenantId))
+        when(tenantBoundaryRepository.getLocationLevel(parentLgdId)).thenReturn(1);
+        when(tenantBoundaryRepository.getChildLevelByParent(tenantId, parentLgdId, 1))
                 .thenReturn(List.of(Map.of(
                         "lgd_id", 101,
                         "parent_lgd_id", 100,
@@ -153,7 +232,7 @@ class TenantDetailsServiceImplTest {
                         "lgd_code", "C101",
                         "boundary_geojson", "{\"type\":\"Polygon\"}"
                 )));
-        when(tenantBoundaryRepository.getMergedBoundaryByParent("tenant_mp", parentLgdId))
+        when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
 
         when(schemeRegularityService.getAverageSchemeRegularity(parentLgdId, start, end))
@@ -183,14 +262,79 @@ class TenantDetailsServiceImplTest {
     }
 
     @Test
+    void getTenantDetailsWithAggregatedMetrics_nullParentLgdId_requiresLgdForMetrics() {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
+        when(tenantBoundaryRepository.getMergedBoundaryForTenant(1))
+                .thenReturn(Map.of("boundary_count", 2, "boundary_geojson", "{}"));
+        when(schemeRegularityService.getAverageSchemeRegularity(isNull(), any(), any()))
+                .thenThrow(new IllegalArgumentException("lgd_id must be a positive integer"));
+
+        LocalDate start = LocalDate.of(2026, 1, 1);
+        LocalDate end = LocalDate.of(2026, 1, 3);
+
+        assertThatThrownBy(() -> service.getTenantDetailsWithAggregatedMetrics(1, null, start, end))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("lgd_id must be a positive integer");
+    }
+
+    @Test
+    void getTenantDetailsByParentDepartmentWithAggregatedMetrics_mergesPerformanceByDepartment() {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+
+        Integer tenantId = 1;
+        Integer parentDepartmentId = 200;
+        LocalDate start = LocalDate.of(2026, 1, 1);
+        LocalDate end = LocalDate.of(2026, 1, 3);
+
+        when(dimTenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant(tenantId, "mp")));
+        when(tenantDepartmentBoundaryRepository.getDepartmentLevel(tenantId, parentDepartmentId)).thenReturn(2);
+        when(tenantDepartmentBoundaryRepository.getChildDepartmentsByParent(tenantId, parentDepartmentId, 2))
+                .thenReturn(List.of(Map.of(
+                        "department_id", 201,
+                        "parent_department_id", 200,
+                        "child_level", 3,
+                        "scheme_count", 5,
+                        "title", "Dept Child",
+                        "lgd_code", "D201",
+                        "boundary_geojson", "{\"type\":\"Polygon\"}"
+                )));
+        when(tenantDepartmentBoundaryRepository.getMergedBoundaryByParentDepartment(tenantId, parentDepartmentId, 2))
+                .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+
+        when(schemeRegularityService.getAverageSchemeRegularityByDepartment(parentDepartmentId, start, end))
+                .thenReturn(AverageSchemeRegularityResponse.builder()
+                        .averageRegularity(new BigDecimal("0.66"))
+                        .build());
+        when(schemeRegularityService.getReadingSubmissionRateByDepartment(parentDepartmentId, start, end))
+                .thenReturn(ReadingSubmissionRateResponse.builder()
+                        .readingSubmissionRate(new BigDecimal("0.77"))
+                        .build());
+        when(schemeRegularityService.getChildAveragePerformanceScoreByDepartment(parentDepartmentId, start, end))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionPerformanceScore(
+                                null, 201, new BigDecimal("0.88"))));
+        when(schemeRegularityService.getAveragePerformanceScoreByDepartment(parentDepartmentId, start, end))
+                .thenReturn(new BigDecimal("0.55"));
+
+        TenantDetailsResponse response = service.getTenantDetailsByParentDepartmentWithAggregatedMetrics(
+                tenantId, parentDepartmentId, start, end);
+
+        assertThat(response.getAverageSchemeRegularity()).isEqualByComparingTo("0.66");
+        assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.77");
+        assertThat(response.getAveragePerformanceScore()).isEqualByComparingTo("0.55");
+        assertThat(response.getChildRegions()).hasSize(1);
+        assertThat(response.getChildRegions().getFirst().getAveragePerformanceScore())
+                .isEqualByComparingTo("0.88");
+    }
+
+    @Test
     void getTenantDetailsByParentDepartment_valid_returnsChildRowsAndBoundary() {
         mockRedisValueOps();
         when(valueOperations.get(any())).thenReturn(null);
         when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
-        when(tenantDepartmentBoundaryRepository.tableExists("analytics_schema", "dim_department_location_table"))
-                .thenReturn(true);
-        when(tenantDepartmentBoundaryRepository.columnExists("analytics_schema", "dim_department_location_table", "geom"))
-                .thenReturn(true);
         when(tenantDepartmentBoundaryRepository.getDepartmentLevel(1, 200)).thenReturn(2);
         when(tenantDepartmentBoundaryRepository.getChildDepartmentsByParent(1, 200, 2))
                 .thenReturn(List.of(Map.of(
