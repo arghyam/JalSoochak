@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.stereotype.Component;
 
 /**
@@ -44,7 +45,13 @@ public class TenantSecurityEvaluator {
      * {@code @ExceptionHandler} mappings and results in an unexpected 500 response.
      */
     public boolean isOwnTenant(Integer tenantId) {
-        String callerStateCode = SecurityUtils.getCurrentUserTenantStateCode();
+        String callerStateCode;
+        try {
+            callerStateCode = SecurityUtils.getCurrentUserTenantStateCode();
+        } catch (AuthenticationCredentialsNotFoundException e) {
+            log.warn("STATE_ADMIN request to tenant {} denied: authentication context unavailable", tenantId, e);
+            return false;
+        }
         if (callerStateCode == null || callerStateCode.isBlank()) {
             log.warn("STATE_ADMIN request to tenant {} denied: tenant_state_code claim absent from JWT", tenantId);
             return false;

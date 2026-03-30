@@ -1,6 +1,5 @@
 package org.arghyam.jalsoochak.tenant.config;
 
-import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
@@ -18,7 +17,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -117,11 +115,10 @@ class TenantSecurityEvaluatorTest {
     // ── isOwnTenant: no security context ─────────────────────────────────────
 
     @Test
-    @DisplayName("Throws AuthenticationCredentialsNotFoundException when called outside auth context")
-    void isOwnTenant_noSecurityContext_throwsAuthException() {
+    @DisplayName("Returns false when called outside auth context — catches AuthenticationCredentialsNotFoundException")
+    void isOwnTenant_noSecurityContext_returnsFalse() {
         // SecurityContextHolder is cleared by @AfterEach; no auth set up here
-        assertThrows(AuthenticationCredentialsNotFoundException.class,
-                () -> tenantSecurityEvaluator.isOwnTenant(1));
+        assertFalse(tenantSecurityEvaluator.isOwnTenant(1));
         verify(tenantCommonRepository, never()).findById(1);
     }
 }
