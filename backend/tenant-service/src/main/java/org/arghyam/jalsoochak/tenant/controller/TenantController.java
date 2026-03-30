@@ -31,6 +31,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.arghyam.jalsoochak.tenant.config.RequiresTenantAccess;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -180,7 +181,7 @@ public class TenantController {
                         @ApiResponse(responseCode = "404", description = "Tenant not found"),
                         @ApiResponse(responseCode = "500", description = "Internal server error")
         })
-        @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+        @RequiresTenantAccess
         @GetMapping("/{tenantId}/config")
         public ResponseEntity<ApiResponseDTO<TenantConfigResponseDTO>> getTenantConfigs(
                         @PathVariable Integer tenantId,
@@ -228,7 +229,7 @@ public class TenantController {
                         @ApiResponse(responseCode = "404", description = "Tenant not found"),
                         @ApiResponse(responseCode = "500", description = "Internal server error")
         })
-        @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+        @RequiresTenantAccess
         @GetMapping("/{tenantId}/config/status")
         public ResponseEntity<ApiResponseDTO<TenantConfigStatusResponseDTO>> getTenantConfigStatus(
                         @PathVariable Integer tenantId) {
@@ -248,7 +249,7 @@ public class TenantController {
                         @ApiResponse(responseCode = "404", description = "Tenant not found"),
                         @ApiResponse(responseCode = "500", description = "Internal server error")
         })
-        @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+        @RequiresTenantAccess
         @PutMapping("/{tenantId}/config")
         public ResponseEntity<ApiResponseDTO<TenantConfigResponseDTO>> setTenantConfigs(
                         @PathVariable Integer tenantId,
@@ -273,7 +274,7 @@ public class TenantController {
                         @ApiResponse(responseCode = "404", description = "Tenant not found"),
                         @ApiResponse(responseCode = "500", description = "Storage or server error")
         })
-        @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+        @RequiresTenantAccess
         @PutMapping(value = "/{tenantId}/logo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
         public ResponseEntity<ApiResponseDTO<TenantConfigResponseDTO>> setTenantLogo(
                         @PathVariable Integer tenantId,
@@ -347,7 +348,7 @@ public class TenantController {
                         @ApiResponse(responseCode = "404", description = "Tenant not found"),
                         @ApiResponse(responseCode = "500", description = "Internal server error")
         })
-        @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+        @RequiresTenantAccess
         @GetMapping("/{tenantId}/location-hierarchy/{hierarchyType}/edit-constraints")
         public ResponseEntity<ApiResponseDTO<LocationHierarchyEditConstraintsResponseDTO>> getLocationHierarchyEditConstraints(
                         @PathVariable Integer tenantId,
@@ -373,7 +374,7 @@ public class TenantController {
                         @ApiResponse(responseCode = "409", description = "Structural change blocked — seeded data exists"),
                         @ApiResponse(responseCode = "500", description = "Internal server error")
         })
-        @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+        @RequiresTenantAccess
         @PutMapping("/{tenantId}/location-hierarchy/{hierarchyType}")
         public ResponseEntity<ApiResponseDTO<LocationHierarchyResponseDTO>> updateLocationHierarchy(
                         @PathVariable Integer tenantId,

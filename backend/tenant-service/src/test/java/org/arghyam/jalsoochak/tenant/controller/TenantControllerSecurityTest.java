@@ -20,6 +20,7 @@ import java.util.Map;
 import org.arghyam.jalsoochak.tenant.config.JwtAuthConverter;
 import org.arghyam.jalsoochak.tenant.config.SecurityConfig;
 import org.arghyam.jalsoochak.tenant.config.SecurityExceptionHandler;
+import org.arghyam.jalsoochak.tenant.config.TenantSecurityEvaluator;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
@@ -63,6 +64,9 @@ class TenantControllerSecurityTest {
 
     @MockBean
     private TenantManagementService tenantManagementService;
+
+    @MockBean(name = "tenantSecurity")
+    private TenantSecurityEvaluator tenantSecurityEvaluator;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -284,14 +288,27 @@ class TenantControllerSecurityTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN role proceeds")
-        void getTenantConfig_StateAdmin_Proceeds() throws Exception {
+        @DisplayName("STATE_ADMIN accessing own tenant proceeds")
+        void getTenantConfig_StateAdmin_OwnTenant_Proceeds() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(1)).thenReturn(true);
             when(tenantManagementService.getTenantConfigs(anyInt(), any()))
                     .thenReturn(TenantConfigResponseDTO.builder().tenantId(1).configs(Collections.emptyMap()).build());
 
             mockMvc.perform(get("/api/v1/tenants/1/config")
                     .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN accessing a different tenant returns 403")
+        void getTenantConfig_StateAdmin_DifferentTenant_Returns403() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(2)).thenReturn(false);
+
+            mockMvc.perform(get("/api/v1/tenants/2/config")
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
+                    .andExpect(status().isForbidden());
+
+            verify(tenantManagementService, never()).getTenantConfigs(anyInt(), any());
         }
 
         @Test
@@ -332,14 +349,27 @@ class TenantControllerSecurityTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN role proceeds")
-        void getTenantConfigStatus_StateAdmin_Proceeds() throws Exception {
+        @DisplayName("STATE_ADMIN accessing own tenant proceeds")
+        void getTenantConfigStatus_StateAdmin_OwnTenant_Proceeds() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(1)).thenReturn(true);
             when(tenantManagementService.getTenantConfigStatus(anyInt()))
                     .thenReturn(TenantConfigStatusResponseDTO.builder().build());
 
             mockMvc.perform(get("/api/v1/tenants/1/config/status")
                     .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN accessing a different tenant returns 403")
+        void getTenantConfigStatus_StateAdmin_DifferentTenant_Returns403() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(2)).thenReturn(false);
+
+            mockMvc.perform(get("/api/v1/tenants/2/config/status")
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
+                    .andExpect(status().isForbidden());
+
+            verify(tenantManagementService, never()).getTenantConfigStatus(anyInt());
         }
 
         @Test
@@ -392,8 +422,9 @@ class TenantControllerSecurityTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN role proceeds")
-        void setTenantConfig_StateAdmin_Proceeds() throws Exception {
+        @DisplayName("STATE_ADMIN accessing own tenant proceeds")
+        void setTenantConfig_StateAdmin_OwnTenant_Proceeds() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(1)).thenReturn(true);
             when(tenantManagementService.setTenantConfigs(anyInt(), any()))
                     .thenReturn(TenantConfigResponseDTO.builder().tenantId(1).configs(Collections.emptyMap()).build());
 
@@ -407,6 +438,25 @@ class TenantControllerSecurityTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN accessing a different tenant returns 403")
+        void setTenantConfig_StateAdmin_DifferentTenant_Returns403() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(2)).thenReturn(false);
+
+            Map<TenantConfigKeyEnum, JsonNode> cfgs = new HashMap<>();
+            cfgs.put(TenantConfigKeyEnum.DATE_FORMAT_SCREEN, objectMapper.readTree("{\"format\":\"DD/MM/YYYY\"}"));
+            String body = objectMapper.writeValueAsString(
+                    SetTenantConfigRequestDTO.builder().configs(cfgs).build());
+
+            mockMvc.perform(put("/api/v1/tenants/2/config")
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN")))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body))
+                    .andExpect(status().isForbidden());
+
+            verify(tenantManagementService, never()).setTenantConfigs(anyInt(), any());
         }
 
         @Test
@@ -458,8 +508,9 @@ class TenantControllerSecurityTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN role proceeds")
-        void setTenantLogo_StateAdmin_Proceeds() throws Exception {
+        @DisplayName("STATE_ADMIN accessing own tenant proceeds")
+        void setTenantLogo_StateAdmin_OwnTenant_Proceeds() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(1)).thenReturn(true);
             when(tenantManagementService.setTenantLogo(anyInt(), any()))
                     .thenReturn(TenantConfigResponseDTO.builder().tenantId(1).configs(Collections.emptyMap()).build());
 
@@ -468,6 +519,20 @@ class TenantControllerSecurityTest {
                     .with(request -> { request.setMethod("PUT"); return request; })
                     .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN accessing a different tenant returns 403")
+        void setTenantLogo_StateAdmin_DifferentTenant_Returns403() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(2)).thenReturn(false);
+
+            mockMvc.perform(multipart("/api/v1/tenants/2/logo")
+                    .file(new MockMultipartFile("file", "logo.png", "image/png", new byte[]{1}))
+                    .with(request -> { request.setMethod("PUT"); return request; })
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
+                    .andExpect(status().isForbidden());
+
+            verify(tenantManagementService, never()).setTenantLogo(anyInt(), any());
         }
 
         @Test
@@ -511,14 +576,27 @@ class TenantControllerSecurityTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN role proceeds")
-        void getEditConstraints_StateAdmin_Proceeds() throws Exception {
+        @DisplayName("STATE_ADMIN accessing own tenant proceeds")
+        void getEditConstraints_StateAdmin_OwnTenant_Proceeds() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(1)).thenReturn(true);
             when(tenantManagementService.getLocationHierarchyEditConstraints(anyInt(), any()))
                     .thenReturn(LocationHierarchyEditConstraintsResponseDTO.builder().build());
 
             mockMvc.perform(get("/api/v1/tenants/1/location-hierarchy/LGD/edit-constraints")
                     .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN accessing a different tenant returns 403")
+        void getEditConstraints_StateAdmin_DifferentTenant_Returns403() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(2)).thenReturn(false);
+
+            mockMvc.perform(get("/api/v1/tenants/2/location-hierarchy/LGD/edit-constraints")
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
+                    .andExpect(status().isForbidden());
+
+            verify(tenantManagementService, never()).getLocationHierarchyEditConstraints(anyInt(), any());
         }
 
         @Test
@@ -567,8 +645,9 @@ class TenantControllerSecurityTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN role proceeds")
-        void updateLocationHierarchy_StateAdmin_Proceeds() throws Exception {
+        @DisplayName("STATE_ADMIN accessing own tenant proceeds")
+        void updateLocationHierarchy_StateAdmin_OwnTenant_Proceeds() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(1)).thenReturn(true);
             when(tenantManagementService.updateLocationHierarchy(anyInt(), any(), any()))
                     .thenReturn(LocationHierarchyResponseDTO.builder().build());
 
@@ -579,6 +658,22 @@ class TenantControllerSecurityTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN accessing a different tenant returns 403")
+        void updateLocationHierarchy_StateAdmin_DifferentTenant_Returns403() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(2)).thenReturn(false);
+
+            String body = objectMapper.writeValueAsString(List.of(LocationLevelConfigDTO.builder().build()));
+
+            mockMvc.perform(put("/api/v1/tenants/2/location-hierarchy/LGD")
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN")))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body))
+                    .andExpect(status().isForbidden());
+
+            verify(tenantManagementService, never()).updateLocationHierarchy(anyInt(), any(), any());
         }
 
         @Test
