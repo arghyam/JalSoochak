@@ -190,6 +190,18 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
     @Override
     public TenantDetailsResponse getTenantDetailsByParentDepartmentWithAggregatedMetrics(
             Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        String cacheKey = TENANT_DETAILS_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":parent_department:" + parentDepartmentId
+                + ":from:" + startDate
+                + ":to:" + endDate
+                + ":v3";
+
+        TenantDetailsResponse cached = readFromCache(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
         TenantDetailsResponse response = getTenantDetailsByParentDepartment(tenantId, parentDepartmentId);
 
         AverageSchemeRegularityResponse averageRegularity =
@@ -219,6 +231,8 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                         parentDepartmentId, startDate, endDate));
         response.setAverageSchemeRegularity(averageRegularity.getAverageRegularity());
         response.setReadingSubmissionRate(submissionRate.getReadingSubmissionRate());
+
+        writeToCache(cacheKey, response);
         return response;
     }
 

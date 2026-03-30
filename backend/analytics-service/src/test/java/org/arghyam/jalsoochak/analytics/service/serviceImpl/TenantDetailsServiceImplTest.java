@@ -331,6 +331,51 @@ class TenantDetailsServiceImplTest {
     }
 
     @Test
+    void getTenantDetailsByParentDepartmentWithAggregatedMetrics_cacheHit_returnsCachedResponse() throws Exception {
+        mockRedisValueOps();
+
+        Integer tenantId = 1;
+        Integer parentDepartmentId = 200;
+        LocalDate start = LocalDate.of(2026, 1, 1);
+        LocalDate end = LocalDate.of(2026, 1, 3);
+
+        String cacheKey = "analytics-service:api-cache:get_tenant_details"
+                + ":tenant:" + tenantId
+                + ":parent_department:" + parentDepartmentId
+                + ":from:" + start
+                + ":to:" + end
+                + ":v3";
+
+        TenantDetailsResponse cached = TenantDetailsResponse.builder()
+                .tenantId(tenantId)
+                .stateCode("mp")
+                .averageSchemeRegularity(new BigDecimal("0.11"))
+                .readingSubmissionRate(new BigDecimal("0.22"))
+                .averagePerformanceScore(new BigDecimal("0.33"))
+                .build();
+
+        when(valueOperations.get(cacheKey)).thenReturn("cached");
+        when(objectMapper.readValue("cached", TenantDetailsResponse.class)).thenReturn(cached);
+
+        TenantDetailsResponse response =
+                service.getTenantDetailsByParentDepartmentWithAggregatedMetrics(tenantId, parentDepartmentId, start, end);
+
+        assertThat(response).isEqualTo(cached);
+
+        // On cache hit none of the expensive downstream calls should run.
+        verify(dimTenantRepository, never()).findById(any());
+        verify(tenantDepartmentBoundaryRepository, never()).getDepartmentLevel(any(), any());
+        verify(tenantDepartmentBoundaryRepository, never()).getChildDepartmentsByParent(any(), any(), any());
+        verify(tenantDepartmentBoundaryRepository, never()).getMergedBoundaryByParentDepartment(any(), any(), any());
+        verify(schemeRegularityService, never()).getAverageSchemeRegularityByDepartment(any(), any(), any());
+        verify(schemeRegularityService, never()).getReadingSubmissionRateByDepartment(any(), any(), any());
+        verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByDepartment(any(), any(), any());
+        verify(schemeRegularityService, never()).getAveragePerformanceScoreByDepartment(any(), any(), any());
+
+        verify(valueOperations, never()).set(any(), any(), any());
+    }
+
+    @Test
     void getTenantDetailsByParentDepartment_valid_returnsChildRowsAndBoundary() {
         mockRedisValueOps();
         when(valueOperations.get(any())).thenReturn(null);

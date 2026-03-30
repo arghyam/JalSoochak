@@ -43,7 +43,7 @@ public class TenantDepartmentBoundaryRepository {
                     ) AS scheme_count,
                     d.title AS title,
                     NULL::varchar AS lgd_code,
-                    ST_AsGeoJSON(d.geom) AS boundary_geojson
+                    analytics_schema.ST_AsGeoJSON(d.geom) AS boundary_geojson
                 FROM analytics_schema.dim_department_location_table d
                 WHERE d.tenant_id = ?
                   AND d.department_level = ?
@@ -61,9 +61,9 @@ public class TenantDepartmentBoundaryRepository {
         String sql = String.format("""
                 SELECT
                     COUNT(*)::int AS child_count,
-                    ST_AsGeoJSON(
-                        ST_UnaryUnion(
-                            ST_Collect(d.geom) FILTER (WHERE d.geom IS NOT NULL)
+                    analytics_schema.ST_AsGeoJSON(
+                        analytics_schema.ST_UnaryUnion(
+                            analytics_schema.ST_Collect(d.geom) FILTER (WHERE d.geom IS NOT NULL)
                         )
                     ) AS boundary_geojson
                 FROM analytics_schema.dim_department_location_table d
