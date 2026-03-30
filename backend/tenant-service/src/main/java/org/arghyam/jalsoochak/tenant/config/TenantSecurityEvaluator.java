@@ -60,19 +60,25 @@ public class TenantSecurityEvaluator {
             log.warn("STATE_ADMIN request to tenant {} denied: tenant_state_code claim absent from JWT", tenantId);
             return false;
         }
-        return tenantCommonRepository.findById(tenantId)
-                .map(tenant -> {
-                    boolean allowed = tenant.getStateCode() != null && callerStateCode.equalsIgnoreCase(tenant.getStateCode());
-                    if (!allowed) {
-                        log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {} (state_code='{}')",
-                                callerStateCode, tenantId, tenant.getStateCode());
-                    }
-                    return allowed;
-                })
-                .orElseGet(() -> {
-                    log.warn("STATE_ADMIN with tenant_state_code='{}' attempted access to non-existent tenant {}",
-                            callerStateCode, tenantId);
-                    return false;
-                });
+        try {
+            return tenantCommonRepository.findById(tenantId)
+                    .map(tenant -> {
+                        boolean allowed = tenant.getStateCode() != null && callerStateCode.equalsIgnoreCase(tenant.getStateCode());
+                        if (!allowed) {
+                            log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {} (state_code='{}')",
+                                    callerStateCode, tenantId, tenant.getStateCode());
+                        }
+                        return allowed;
+                    })
+                    .orElseGet(() -> {
+                        log.warn("STATE_ADMIN with tenant_state_code='{}' attempted access to non-existent tenant {}",
+                                callerStateCode, tenantId);
+                        return false;
+                    });
+        } catch (Exception e) {
+            log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {}: repository lookup failed",
+                    callerStateCode, tenantId, e);
+            return false;
+        }
     }
 }
