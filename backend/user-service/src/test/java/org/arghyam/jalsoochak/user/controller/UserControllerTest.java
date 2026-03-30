@@ -361,7 +361,7 @@ class UserControllerTest {
                     .id(2L).email("admin@mp.com").role("STATE_ADMIN").tenantCode("MP").status(AdminUserStatus.ACTIVE.name()).build();
             PageResponseDTO<AdminUserResponseDTO> page = PageResponseDTO.of(List.of(dto), 1L, 0, 20);
 
-            when(userManagementService.listStateAdmins(any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
+            when(userManagementService.listStateAdmins(any(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/users/state-admins")
                             .param("tenantCode", "MP")
@@ -378,7 +378,7 @@ class UserControllerTest {
                     .id(2L).email("admin@mp.com").role("STATE_ADMIN").tenantCode("MP").status(AdminUserStatus.INACTIVE.name()).build();
             PageResponseDTO<AdminUserResponseDTO> page = PageResponseDTO.of(List.of(dto), 1L, 0, 20);
 
-            when(userManagementService.listStateAdmins(any(), eq(AdminUserStatus.INACTIVE), any(), anyInt(), anyInt())).thenReturn(page);
+            when(userManagementService.listStateAdmins(any(), eq(AdminUserStatus.INACTIVE), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/users/state-admins")
                             .param("status", "INACTIVE")

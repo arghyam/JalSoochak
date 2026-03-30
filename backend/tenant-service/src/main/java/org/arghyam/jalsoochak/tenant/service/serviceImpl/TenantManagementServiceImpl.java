@@ -5,8 +5,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +19,7 @@ import java.util.stream.Collectors;
 
 import org.arghyam.jalsoochak.tenant.config.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
@@ -54,6 +57,7 @@ import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.springframework.web.multipart.MultipartFile;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
+import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
@@ -83,6 +87,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final ApplicationEventPublisher eventPublisher;
     private final TenantSchedulerManager schedulerManager;
     private final ObjectStorageService objectStorageService;
+    private final SystemManagementService systemManagementService;
 
 
     // TODO: Re-enable "image/svg+xml" only after implementing SVG sanitization and serving from an isolated origin.
@@ -214,6 +219,27 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         }
 
+        if (configMap.containsKey(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS)) {
+            ChannelListConfigDTO stored = (ChannelListConfigDTO) configMap.get(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS);
+            if (stored == null || stored.getChannels() == null) {
+                throw new InvalidConfigValueException("Stored TENANT_SUPPORTED_CHANNELS config is missing channels field");
+            }
+            Set<String> systemChannels = new HashSet<>(fetchSystemSupportedChannels());
+            List<String> effective = stored.getChannels().stream()
+                    .filter(systemChannels::contains)
+                    .collect(Collectors.toList());
+            List<String> removed = stored.getChannels().stream()
+                    .filter(ch -> !systemChannels.contains(ch))
+                    .collect(Collectors.toList());
+            boolean degraded = !removed.isEmpty();
+            configMap.put(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS,
+                    ChannelListConfigDTO.builder()
+                            .channels(effective)
+                            .degraded(degraded ? Boolean.TRUE : null)
+                            .removedChannels(degraded ? removed : null)
+                            .build());
+        }
+
         return TenantConfigResponseDTO.builder()
                 .tenantId(tenantId)
                 .configs(configMap)
@@ -245,6 +271,30 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             } catch (JsonProcessingException e) {
                 throw new InvalidConfigValueException(
                         "Invalid value for config key " + key + ": " + e.getMessage(), e);
+            }
+
+            if (key == TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS) {
+                ChannelListConfigDTO channelDto = (ChannelListConfigDTO) dto;
+                if (channelDto == null) {
+                    throw new InvalidConfigValueException("TENANT_SUPPORTED_CHANNELS must not be null");
+                }
+                channelDto.setDegraded(null);
+                channelDto.setRemovedChannels(null);
+                if (channelDto.getChannels() == null) {
+                    throw new InvalidConfigValueException("channels must not be null");
+                }
+                Set<String> systemChannels = new HashSet<>(fetchSystemSupportedChannels());
+                if (systemChannels.isEmpty()) {
+                    throw new InvalidConfigValueException(
+                            "The system currently does not support any channels.");
+                }
+                List<String> invalid = channelDto.getChannels().stream()
+                        .filter(ch -> !systemChannels.contains(ch))
+                        .collect(Collectors.toList());
+                if (!invalid.isEmpty()) {
+                    throw new InvalidConfigValueException(
+                            "Channels not supported at system level: " + invalid);
+                }
             }
 
             if (key.getType() == ConfigType.GENERIC) {
@@ -713,6 +763,10 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private boolean isExternalUrl(String value) {
         String lower = value.toLowerCase();
         return lower.startsWith("http://") || lower.startsWith("https://");
+    }
+
+    private List<String> fetchSystemSupportedChannels() {
+        return systemManagementService.getSystemSupportedChannels();
     }
 
     private Integer resolveCurrentUserId() {

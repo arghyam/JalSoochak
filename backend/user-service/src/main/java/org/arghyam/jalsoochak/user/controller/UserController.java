@@ -121,7 +121,7 @@ public class UserController {
     }
 
     @Operation(summary = "List state admins",
-            description = "Paginated list of STATE_ADMIN accounts, optionally filtered by tenant. STATE_ADMIN callers are automatically scoped to their own state.")
+            description = "Paginated list of STATE_ADMIN accounts, optionally filtered by tenant. STATE_ADMIN callers are automatically scoped to their own state. Name search is exact and case-insensitive; applies to all statuses.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "State admins retrieved"),
         @ApiResponse(responseCode = "400", description = "Invalid status value"),
@@ -134,13 +134,15 @@ public class UserController {
             @Parameter(description = "Tenant state code filter (optional for SUPER_USER)") @RequestParam(required = false) String tenantCode,
             @Parameter(description = "Filter by account status (ACTIVE, INACTIVE, PENDING). When null, no status filter is applied.")
                 @RequestParam(required = false) AdminUserStatus status,
+            @Parameter(description = "Exact full-name filter (case-insensitive). Applies to all statuses.")
+                @RequestParam(required = false) String name,
             @Parameter(description = "Zero-based page number") @RequestParam(defaultValue = "0") @Min(0) int page,
             @Parameter(description = "Page size (1–100)") @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             Authentication authentication) {
         log.info("GET /api/v1/users/state-admins – status={}, page={}, size={}", status, page, size);
-        log.debug("GET /api/v1/users/state-admins – tenantCode={}", tenantCode);
+        log.debug("GET /api/v1/users/state-admins – tenantCode={}, name={}", tenantCode, name);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "State admins retrieved",
-                userManagementService.listStateAdmins(tenantCode, status, authentication, page, size)));
+                userManagementService.listStateAdmins(tenantCode, status, name, authentication, page, size)));
     }
 
     @Operation(summary = "Get user by ID")

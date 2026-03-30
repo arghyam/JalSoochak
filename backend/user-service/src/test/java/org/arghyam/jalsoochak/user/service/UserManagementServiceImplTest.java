@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
@@ -268,11 +270,11 @@ class UserManagementServiceImplTest {
             AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
 
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
-            when(userCommonRepository.listStateAdminsByTenant(1, null, 0, 20)).thenReturn(List.of(row));
-            when(userCommonRepository.countStateAdminsByTenant(1, null)).thenReturn(1L);
+            when(userCommonRepository.listStateAdminsByTenant(1, null, null, 0, 20)).thenReturn(List.of(row));
+            when(userCommonRepository.countStateAdminsByTenant(1, null, null)).thenReturn(1L);
             when(keycloakAdminHelper.buildAdminUserResponse(row)).thenReturn(dto);
 
-            PageResponseDTO<AdminUserResponseDTO> result = userManagementService.listStateAdmins("MP", null, auth, 0, 20);
+            PageResponseDTO<AdminUserResponseDTO> result = userManagementService.listStateAdmins("MP", null, null, auth, 0, 20);
 
             assertEquals(1, result.getContent().size());
         }
@@ -285,11 +287,11 @@ class UserManagementServiceImplTest {
             AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
 
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
-            when(userCommonRepository.listStateAdminsByTenant(1, null, 0, 20)).thenReturn(List.of(row));
-            when(userCommonRepository.countStateAdminsByTenant(1, null)).thenReturn(1L);
+            when(userCommonRepository.listStateAdminsByTenant(1, null, null, 0, 20)).thenReturn(List.of(row));
+            when(userCommonRepository.countStateAdminsByTenant(1, null, null)).thenReturn(1L);
             when(keycloakAdminHelper.buildAdminUserResponse(row)).thenReturn(dto);
 
-            PageResponseDTO<AdminUserResponseDTO> result = userManagementService.listStateAdmins(null, null, auth, 0, 20);
+            PageResponseDTO<AdminUserResponseDTO> result = userManagementService.listStateAdmins(null, null, null, auth, 0, 20);
 
             assertEquals(1, result.getContent().size());
         }
@@ -304,14 +306,50 @@ class UserManagementServiceImplTest {
                     .status(AdminUserStatus.PENDING.name()).build();
 
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
-            when(userCommonRepository.listStateAdminsByTenant(1, AdminUserStatus.PENDING, 0, 20)).thenReturn(List.of(row));
-            when(userCommonRepository.countStateAdminsByTenant(1, AdminUserStatus.PENDING)).thenReturn(1L);
+            when(userCommonRepository.listStateAdminsByTenant(1, AdminUserStatus.PENDING, null, 0, 20)).thenReturn(List.of(row));
+            when(userCommonRepository.countStateAdminsByTenant(1, AdminUserStatus.PENDING, null)).thenReturn(1L);
             when(keycloakAdminHelper.buildAdminUserResponse(row)).thenReturn(dto);
 
-            PageResponseDTO<AdminUserResponseDTO> result = userManagementService.listStateAdmins("MP", AdminUserStatus.PENDING, auth, 0, 20);
+            PageResponseDTO<AdminUserResponseDTO> result = userManagementService.listStateAdmins("MP", AdminUserStatus.PENDING, null, auth, 0, 20);
 
             assertEquals(1, result.getContent().size());
             assertEquals(AdminUserStatus.PENDING.name(), result.getContent().get(0).getStatus());
+        }
+
+        @Test
+        @DisplayName("Name filter should resolve matching UUIDs from tenant user table and return filtered page")
+        void listStateAdmins_withNameFilter_matchFound_returnsFilteredPage() {
+            Authentication auth = superUserAuth("kc-super");
+            AdminUserRow row = userRow(2L, "kc-2", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
+
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(pii.hmac("jane doe")).thenReturn("name-hash-hex");
+            when(userTenantRepository.findUuidsByTitleHash("tenant_mp", "name-hash-hex")).thenReturn(List.of("kc-2"));
+            when(userCommonRepository.findPendingAdminUuidsByNameHash(eq("name-hash-hex"), eq(1))).thenReturn(java.util.Set.of());
+            when(userCommonRepository.listStateAdminsByTenant(anyInt(), any(), any(), anyLong(), anyInt())).thenReturn(List.of(row));
+            when(userCommonRepository.countStateAdminsByTenant(anyInt(), any(), any())).thenReturn(1L);
+            when(keycloakAdminHelper.buildAdminUserResponse(row)).thenReturn(dto);
+
+            PageResponseDTO<AdminUserResponseDTO> result = userManagementService.listStateAdmins("MP", null, "Jane Doe", auth, 0, 20);
+
+            assertEquals(1, result.getContent().size());
+        }
+
+        @Test
+        @DisplayName("Name filter with no match should return empty page without calling list repository method")
+        void listStateAdmins_withNameFilter_noMatch_returnsEmptyPage() {
+            Authentication auth = superUserAuth("kc-super");
+
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(pii.hmac("nobody")).thenReturn("no-match-hash");
+            when(userTenantRepository.findUuidsByTitleHash("tenant_mp", "no-match-hash")).thenReturn(List.of());
+            when(userCommonRepository.findPendingAdminUuidsByNameHash(eq("no-match-hash"), eq(1))).thenReturn(java.util.Set.of());
+
+            PageResponseDTO<AdminUserResponseDTO> result = userManagementService.listStateAdmins("MP", null, "Nobody", auth, 0, 20);
+
+            assertEquals(0, result.getContent().size());
+            assertEquals(0L, result.getTotalElements());
         }
     }
 
@@ -832,6 +870,7 @@ class UserManagementServiceImplTest {
             String storedMetadata = metadataCaptor.getValue();
             assertTrue(storedMetadata.contains("\"firstName\""), "metadata should contain firstName key");
             assertTrue(storedMetadata.contains("\"lastName\""), "metadata should contain lastName key");
+            assertTrue(storedMetadata.contains("\"nameHash\""), "metadata should contain nameHash key for name search");
         }
 
         @Test

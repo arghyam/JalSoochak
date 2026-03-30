@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.controller;
 
+import java.util.List;
 import java.util.Set;
 
 import org.arghyam.jalsoochak.tenant.dto.common.ApiResponseDTO;
@@ -34,7 +35,7 @@ public class SystemController {
     private final SystemManagementService systemManagementService;
 
     /**
-     * 1. Get system configurations
+     * Get system configurations
      */
     @Operation(summary = "Get system configurations", description = "Retrieves global platform settings. Super User only.")
     @ApiResponses(value = {
@@ -53,7 +54,26 @@ public class SystemController {
     }
 
     /**
-     * 2. Update system configurations
+     * Get system-supported channels (accessible to STATE_ADMIN for config UI)
+     */
+    @Operation(summary = "Get system-supported channels",
+            description = "Returns the list of channel codes enabled at platform level. Used by State Admin to populate channel selection during tenant configuration.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "System supported channels retrieved successfully"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
+            @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error")
+    })
+    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @GetMapping("/channels")
+    public ResponseEntity<ApiResponseDTO<List<String>>> getSystemSupportedChannels() {
+        log.info("GET /api/v1/system/channels");
+        List<String> channels = systemManagementService.getSystemSupportedChannels();
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "System supported channels retrieved successfully", channels));
+    }
+
+    /**
+     * Update system configurations
      */
     @Operation(summary = "Set system configurations", description = "Updates global system settings. Super User only.")
     @ApiResponses(value = {

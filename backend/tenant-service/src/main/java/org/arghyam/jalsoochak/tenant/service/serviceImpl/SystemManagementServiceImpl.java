@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.tenant.service.serviceImpl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetSystemConfigRequestDTO;
@@ -21,6 +22,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -83,6 +85,11 @@ public class SystemManagementServiceImpl implements SystemManagementService {
                         "Invalid value for config key " + key + ": " + e.getMessage(), e);
             }
 
+            if (dto instanceof ChannelListConfigDTO channelDto) {
+                channelDto.setDegraded(null);
+                channelDto.setRemovedChannels(null);
+            }
+
             String serialized;
             try {
                 serialized = objectMapper.writeValueAsString(dto);
@@ -105,5 +112,29 @@ public class SystemManagementServiceImpl implements SystemManagementService {
         }
 
         return SystemConfigResponseDTO.builder().configs(results).build();
+    }
+
+    @Override
+    public List<String> getSystemSupportedChannels() {
+        log.info("Fetching system supported channels");
+        List<ConfigDTO> configs = tenantCommonRepository.findConfigsByTenantId(TenantConstants.SYSTEM_TENANT_ID);
+        return configs.stream()
+                .filter(cfg -> SystemConfigKeyEnum.SYSTEM_SUPPORTED_CHANNELS.name().equals(cfg.getConfigKey()))
+                .findFirst()
+                .map(cfg -> {
+                    ChannelListConfigDTO parsed;
+                    try {
+                        parsed = objectMapper.readValue(cfg.getConfigValue(), ChannelListConfigDTO.class);
+                    } catch (JsonProcessingException e) {
+                        log.error("Malformed SYSTEM_SUPPORTED_CHANNELS config value", e);
+                        throw new InvalidConfigValueException("Malformed SYSTEM_SUPPORTED_CHANNELS config value", e);
+                    }
+                    if (parsed.getChannels() == null) {
+                        log.error("SYSTEM_SUPPORTED_CHANNELS config is missing channels field [value={}]", cfg.getConfigValue());
+                        throw new InvalidConfigValueException("SYSTEM_SUPPORTED_CHANNELS config is missing channels field");
+                    }
+                    return parsed.getChannels();
+                })
+                .orElse(Collections.emptyList());
     }
 }
