@@ -308,6 +308,43 @@ public class GlificWebhookController {
         }
     }
 
+    @PostMapping(
+            value = "/telemetry/meterChange",
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<String> meterChangeReasons(@RequestBody @Valid IntroRequest request) {
+        try {
+            String response = glificWebhookService.meterChangeReasons(request);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(response);
+        } catch (Exception e) {
+            log.error("Error fetching meter change reasons: {}", e.getMessage(), e);
+            log.debug("Error fetching meter change reasons for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"message\":\"Meter change reasons could not be fetched.\"}");
+        }
+    }
+
+    @PostMapping("/telemetry/meterChange/submit")
+    public ResponseEntity<IntroResponse> meterChangeSubmit(@RequestBody @Valid MeterChangeRequest request) {
+        try {
+            IntroResponse response = glificWebhookService.meterChangeSubmitMessage(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error saving meter change reason: {}", e.getMessage(), e);
+            log.debug("Error saving meter change reason for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    IntroResponse.builder()
+                            .success(false)
+                            .message("Meter change reason could not be saved.")
+                            .build()
+            );
+        }
+    }
+
     @PostMapping("/others")
     public ResponseEntity<IntroResponse> othersPrompt(@RequestBody @Valid IntroRequest request) {
         try {

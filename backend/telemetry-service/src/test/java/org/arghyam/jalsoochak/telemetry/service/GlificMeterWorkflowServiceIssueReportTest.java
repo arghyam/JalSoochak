@@ -203,6 +203,87 @@ class GlificMeterWorkflowServiceIssueReportTest {
     }
 
     @Test
+    void issueReportSubmitUsesTemplateReasonKeyForSelected() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+
+        List<GlificMessageTemplatesService.TemplateOption> templateReasons = List.of(
+                new GlificMessageTemplatesService.TemplateOption("REASON_1", 1, java.util.Map.of("en", "Meter Replaced")),
+                new GlificMessageTemplatesService.TemplateOption("REASON_2", 2, java.util.Map.of("en", "Incorrect Reading Entered Previously")),
+                new GlificMessageTemplatesService.TemplateOption("REASON_3", 3, java.util.Map.of("en", "No Reading Submission")),
+                new GlificMessageTemplatesService.TemplateOption("REASON_4", 4, java.util.Map.of("en", "No Water Supply"))
+        );
+
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(templateReasons);
+        when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
+        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
+
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+
+        IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("3")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+        assertEquals("noReadingSubmission", resp.getSelected());
+
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                eq("tenant_test"),
+                eq(1L),
+                eq(10L),
+                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
+                eq("No Reading Submission"),
+                eq(AnomalyConstants.STATUS_OPEN)
+        );
+    }
+
+    @Test
+    void issueReportSubmitRejectsOutOfRangeNumericSelection() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+
+        IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("7")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(false, resp.isSuccess());
+        assertEquals("Please choose a number between 1 and 4.", resp.getMessage());
+
+        verify(telemetryTenantRepository, never()).createIssueReportRecord(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()
+        );
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt()
+        );
+    }
+
+    @Test
     void othersSubmittedStoresFreeTextAsAnomalyAndNotInFlowReading() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",

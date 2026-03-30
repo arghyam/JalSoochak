@@ -103,6 +103,14 @@ public class GlificWebhookService {
         return meterWorkflowService.issueReportTelemetryReasons(request);
     }
 
+    public String meterChangeReasons(IntroRequest request) {
+        return meterWorkflowService.meterChangeReasons(request);
+    }
+
+    public IntroResponse meterChangeSubmitMessage(MeterChangeRequest request) {
+        return meterWorkflowService.meterChangeSubmitMessage(request);
+    }
+
     public IntroResponse othersPromptMessage(IntroRequest request) {
         return meterWorkflowService.othersPromptMessage(request);
     }
