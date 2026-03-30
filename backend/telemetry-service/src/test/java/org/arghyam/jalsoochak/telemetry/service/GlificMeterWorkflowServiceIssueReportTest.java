@@ -263,7 +263,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
 
         assertNotNull(resp);
         assertEquals(false, resp.isSuccess());
-        assertEquals("Please choose a number between 1 and 4.", resp.getMessage());
+        assertEquals("Please choose a number between 1 and 6.", resp.getMessage());
 
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 org.mockito.ArgumentMatchers.anyString(),
