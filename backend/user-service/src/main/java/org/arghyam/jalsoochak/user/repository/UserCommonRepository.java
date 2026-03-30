@@ -103,7 +103,7 @@ public class UserCommonRepository {
 
     public List<String> findAllTenantStateCodes() {
         return jdbcTemplate.queryForList(
-                "SELECT state_code FROM common_schema.tenant_master_table ORDER BY state_code",
+                "SELECT state_code FROM common_schema.tenant_master_table WHERE tenant_id != 0 ORDER BY state_code",
                 String.class);
     }
 
