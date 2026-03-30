@@ -689,6 +689,26 @@ class TenantManagementServiceImplTest {
             assertNull(channels.getDegraded());
             assertNull(channels.getRemovedChannels());
         }
+
+        @Test
+        @DisplayName("Should throw InvalidConfigValueException when stored TENANT_SUPPORTED_CHANNELS has null channels field")
+        void getTenantConfigs_NullChannelsInStoredConfig_ThrowsInvalidConfigValueException() {
+            // Arrange: stored config JSON parses successfully but channels field is absent (null)
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+
+            List<ConfigDTO> tenantConfigs = List.of(
+                    ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS.name())
+                            .configValue("{}")  // valid JSON but missing channels field → getChannels() == null
+                            .build());
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(tenantCommonRepository.findConfigsByTenantId(tenantId)).thenReturn(tenantConfigs);
+
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.getTenantConfigs(tenantId, null));
+        }
     }
 
     @Nested
@@ -911,26 +931,6 @@ class TenantManagementServiceImplTest {
             assertThrows(InvalidConfigValueException.class,
                     () -> tenantManagementService.setTenantConfigs(tenantId, request));
             verify(tenantCommonRepository, never()).upsertConfig(any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("Should throw InvalidConfigValueException when stored TENANT_SUPPORTED_CHANNELS has null channels field")
-        void getTenantConfigs_NullChannelsInStoredConfig_ThrowsInvalidConfigValueException() {
-            // Arrange: stored config JSON parses successfully but channels field is absent (null)
-            Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
-
-            List<ConfigDTO> tenantConfigs = List.of(
-                    ConfigDTO.builder()
-                            .configKey(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS.name())
-                            .configValue("{}")  // valid JSON but missing channels field → getChannels() == null
-                            .build());
-
-            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
-            when(tenantCommonRepository.findConfigsByTenantId(tenantId)).thenReturn(tenantConfigs);
-
-            assertThrows(InvalidConfigValueException.class,
-                    () -> tenantManagementService.getTenantConfigs(tenantId, null));
         }
 
         @Test

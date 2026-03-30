@@ -277,6 +277,9 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 ChannelListConfigDTO channelDto = (ChannelListConfigDTO) dto;
                 channelDto.setDegraded(null);
                 channelDto.setRemovedChannels(null);
+                if (channelDto.getChannels() == null) {
+                    throw new InvalidConfigValueException("channels must not be null");
+                }
                 Set<String> systemChannels = new HashSet<>(fetchSystemSupportedChannels());
                 if (systemChannels.isEmpty()) {
                     throw new InvalidConfigValueException(
