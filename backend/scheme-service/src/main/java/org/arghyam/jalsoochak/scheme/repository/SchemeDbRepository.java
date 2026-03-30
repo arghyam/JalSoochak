@@ -644,6 +644,20 @@ public class SchemeDbRepository {
         });
     }
 
+    /**
+     * Batch existence check for scheme -> LGD mappings.
+     */
+    public Set<String> findExistingSchemeLgdMappingKeys(String schemaName, List<Integer> schemeIds, List<Integer> lgdIds) {
+        return findExistingPairs(schemaName, "scheme_lgd_mapping_table", "scheme_id", "parent_lgd_id", schemeIds, lgdIds);
+    }
+
+    /**
+     * Batch existence check for scheme -> department mappings.
+     */
+    public Set<String> findExistingSchemeDepartmentMappingKeys(String schemaName, List<Integer> schemeIds, List<Integer> departmentIds) {
+        return findExistingPairs(schemaName, "scheme_department_mapping_table", "scheme_id", "parent_department_id", schemeIds, departmentIds);
+    }
+
     private void validateSchemaName(String schemaName) {
         if (schemaName == null || schemaName.isBlank() || !SAFE_SCHEMA.matcher(schemaName).matches()) {
             throw new IllegalArgumentException("Invalid schema name: " + schemaName);
@@ -773,6 +787,63 @@ public class SchemeDbRepository {
         Object[] args = uniq.toArray();
         List<Integer> existing = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getInt("id"), args);
         return new HashSet<>(existing);
+    }
+
+    private Set<String> findExistingPairs(
+            String schemaName,
+            String table,
+            String leftColumn,
+            String rightColumn,
+            List<Integer> leftIds,
+            List<Integer> rightIds
+    ) {
+        validateSchemaName(schemaName);
+        if (leftIds == null || leftIds.isEmpty() || rightIds == null || rightIds.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<Integer> left = new HashSet<>();
+        for (Integer id : leftIds) {
+            if (id != null) {
+                left.add(id);
+            }
+        }
+        Set<Integer> right = new HashSet<>();
+        for (Integer id : rightIds) {
+            if (id != null) {
+                right.add(id);
+            }
+        }
+        if (left.isEmpty() || right.isEmpty()) {
+            return Set.of();
+        }
+
+        String leftPlaceholders = String.join(",", java.util.Collections.nCopies(left.size(), "?"));
+        String rightPlaceholders = String.join(",", java.util.Collections.nCopies(right.size(), "?"));
+
+        String sql = String.format(
+                "SELECT %s AS l, %s AS r FROM %s.%s WHERE deleted_at IS NULL AND %s IN (%s) AND %s IN (%s)",
+                leftColumn,
+                rightColumn,
+                schemaName,
+                table,
+                leftColumn,
+                leftPlaceholders,
+                rightColumn,
+                rightPlaceholders
+        );
+
+        List<Object> args = new ArrayList<>(left.size() + right.size());
+        args.addAll(left);
+        args.addAll(right);
+
+        Set<String> out = new HashSet<>();
+        jdbcTemplate.query(sql, rs -> {
+            int l = rs.getInt("l");
+            int r = rs.getInt("r");
+            out.add(l + "|" + r);
+        }, args.toArray());
+        return out;
     }
 
     private Map<String, Integer> findIdsByLowerTextKey(String schemaName, String table, String keyColumn, List<String> values) {

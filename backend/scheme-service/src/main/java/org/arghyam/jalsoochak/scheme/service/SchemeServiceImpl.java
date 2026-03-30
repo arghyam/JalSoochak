@@ -248,7 +248,7 @@ public class SchemeServiceImpl implements SchemeService {
         String extension = extractExtension(file.getOriginalFilename());
         List<String> activeHeaders = resolveHeaders(file, extension, List.of(SCHEME_HEADERS_V3, SCHEME_HEADERS_V3_LEGACY_CENTRE));
 
-        int totalRows = validateSchemes(file, extension, activeHeaders);
+        int totalRows = validateSchemes(schemaName, file, extension, activeHeaders);
         int uploadedRows = processSchemes(schemaName, file, extension, activeHeaders, actorUserId);
 
         return SchemeUploadResponseDTO.builder()
@@ -406,10 +406,11 @@ public class SchemeServiceImpl implements SchemeService {
         );
     }
 
-    private int validateSchemes(MultipartFile file, String extension, List<String> activeHeaders) {
+    private int validateSchemes(String schemaName, MultipartFile file, String extension, List<String> activeHeaders) {
         List<SchemeUploadErrorDTO> errors = new ArrayList<>();
         final int[] total = {0};
         Set<String> seenStateSchemeIds = new HashSet<>();
+        List<SchemeRow> chunk = new ArrayList<>(CHUNK_SIZE);
 
         try {
             streamRows(file, extension, activeHeaders, (rowNumber, values) -> {
@@ -449,6 +450,15 @@ public class SchemeServiceImpl implements SchemeService {
                     parseEnum(values.get("operating_status"), rowNumber, "operating_status", OPERATING_STATUS_MAP, "Operative, Non-Operative, Partially Operative or 1/2/3", errors);
                 }
 
+                if (errors.size() == before && !stateSchemeId.isBlank()) {
+                    chunk.add(new SchemeRow(rowNumber, stateSchemeId));
+                }
+
+                if (chunk.size() >= CHUNK_SIZE) {
+                    validateSchemeChunk(schemaName, chunk, errors);
+                    chunk.clear();
+                }
+
                 if (errors.size() > before && errors.size() >= MAX_VALIDATION_ERRORS) {
                     errors.add(error(rowNumber, "file", "Too many validation errors; showing first " + MAX_VALIDATION_ERRORS));
                     throw new TooManyErrorsException();
@@ -461,6 +471,10 @@ public class SchemeServiceImpl implements SchemeService {
                     "Failed to read uploaded file",
                     List.of(error(0, "file", "Unable to read file content"))
             );
+        }
+
+        if (!chunk.isEmpty()) {
+            validateSchemeChunk(schemaName, chunk, errors);
         }
 
         if (!errors.isEmpty()) {
@@ -632,17 +646,57 @@ public class SchemeServiceImpl implements SchemeService {
         Map<String, Integer> lgdIdsByCode = schemeDbRepository.findLgdIdsByCodes(schemaName, villageCodes);
         Map<String, Integer> deptIdsByTitle = schemeDbRepository.findDepartmentIdsByTitles(schemaName, subDivisionNames);
 
+        List<Integer> schemeIds = new ArrayList<>(schemeIdsByStateSchemeId.values());
+        List<Integer> lgdIds = new ArrayList<>(lgdIdsByCode.values());
+        List<Integer> deptIds = new ArrayList<>(deptIdsByTitle.values());
+
+        Set<String> existingLgdMappings = schemeDbRepository.findExistingSchemeLgdMappingKeys(schemaName, schemeIds, lgdIds);
+        Set<String> existingDeptMappings = schemeDbRepository.findExistingSchemeDepartmentMappingKeys(schemaName, schemeIds, deptIds);
+
         for (MappingRow r : rows) {
-            if (!schemeIdsByStateSchemeId.containsKey(r.stateSchemeId().toLowerCase(Locale.ROOT))) {
+            Integer schemeId = schemeIdsByStateSchemeId.get(r.stateSchemeId().toLowerCase(Locale.ROOT));
+            if (schemeId == null) {
                 errors.add(error(r.rowNumber(), "state_scheme_id", "state_scheme_id does not exist"));
                 continue;
             }
-            if (!lgdIdsByCode.containsKey(r.villageLgdCode().toLowerCase(Locale.ROOT))) {
+            Integer lgdId = lgdIdsByCode.get(r.villageLgdCode().toLowerCase(Locale.ROOT));
+            if (lgdId == null) {
                 errors.add(error(r.rowNumber(), "village_lgd_code", "village_lgd_code does not exist"));
                 continue;
             }
-            if (!deptIdsByTitle.containsKey(r.subDivisionName().toLowerCase(Locale.ROOT))) {
+            Integer deptId = deptIdsByTitle.get(r.subDivisionName().toLowerCase(Locale.ROOT));
+            if (deptId == null) {
                 errors.add(error(r.rowNumber(), "sub_division_name", "sub_division_name does not exist"));
+                continue;
+            }
+
+            String lgdKey = schemeId + "|" + lgdId;
+            if (existingLgdMappings.contains(lgdKey)) {
+                errors.add(error(r.rowNumber(), "village_lgd_code", "Duplicate village_lgd_code mapping already exists"));
+                continue;
+            }
+
+            String deptKey = schemeId + "|" + deptId;
+            if (existingDeptMappings.contains(deptKey)) {
+                errors.add(error(r.rowNumber(), "sub_division_name", "Duplicate sub_division_name mapping already exists"));
+            }
+        }
+    }
+
+    private void validateSchemeChunk(
+            String schemaName,
+            List<SchemeRow> rows,
+            List<SchemeUploadErrorDTO> errors
+    ) {
+        List<String> stateSchemeIds = new ArrayList<>(rows.size());
+        for (SchemeRow row : rows) {
+            stateSchemeIds.add(row.stateSchemeId());
+        }
+
+        Map<String, Integer> existing = schemeDbRepository.findSchemeIdsByStateSchemeIds(schemaName, stateSchemeIds);
+        for (SchemeRow row : rows) {
+            if (existing.containsKey(row.stateSchemeId().toLowerCase(Locale.ROOT))) {
+                errors.add(error(row.rowNumber(), "state_scheme_id", "Duplicate state_scheme_id already exists"));
             }
         }
     }
@@ -960,6 +1014,12 @@ public class SchemeServiceImpl implements SchemeService {
             String stateSchemeId,
             String villageLgdCode,
             String subDivisionName
+    ) {
+    }
+
+    private record SchemeRow(
+            int rowNumber,
+            String stateSchemeId
     ) {
     }
 

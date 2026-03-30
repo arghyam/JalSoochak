@@ -134,10 +134,11 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
     private int validateUpload(String schemaName, MultipartFile file, String extension, Map<String, Integer> schemeIdCache) {
         List<UploadErrorDTO> errors = new ArrayList<>();
         LongHashSet seenPhones = new LongHashSet(2048);
+        Map<String, Boolean> phoneExistsCache = new HashMap<>();
 
         int totalRows = "csv".equals(extension)
-                ? validateCsv(schemaName, file, schemeIdCache, seenPhones, errors)
-                : validateXlsx(schemaName, file, schemeIdCache, seenPhones, errors);
+                ? validateCsv(schemaName, file, schemeIdCache, seenPhones, phoneExistsCache, errors)
+                : validateXlsx(schemaName, file, schemeIdCache, seenPhones, phoneExistsCache, errors);
 
         if (!errors.isEmpty()) {
             throw new BadRequestException("Validation failed for uploaded file", errors);
@@ -171,6 +172,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             MultipartFile file,
             Map<String, Integer> schemeIdCache,
             LongHashSet seenPhones,
+            Map<String, Boolean> phoneExistsCache,
             List<UploadErrorDTO> errors
     ) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
@@ -196,7 +198,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 PumpOperatorUploadChunkProcessor.UploadRow row = toUploadRow((int) record.getRecordNumber(), map);
                 total++;
-                validateRow(schemaName, row, schemeIdCache, seenPhones, errors);
+                validateRow(schemaName, row, schemeIdCache, seenPhones, phoneExistsCache, errors);
                 if (errors.size() >= MAX_VALIDATION_ERRORS) {
                     errors.add(err(row.rowNumber(), "file", "Too many validation errors; showing first " + MAX_VALIDATION_ERRORS));
                     break;
@@ -217,6 +219,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             MultipartFile file,
             Map<String, Integer> schemeIdCache,
             LongHashSet seenPhones,
+            Map<String, Boolean> phoneExistsCache,
             List<UploadErrorDTO> errors
     ) {
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
@@ -249,7 +252,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 PumpOperatorUploadChunkProcessor.UploadRow uploadRow = toUploadRow(i + 1, map);
                 total++;
-                validateRow(schemaName, uploadRow, schemeIdCache, seenPhones, errors);
+                validateRow(schemaName, uploadRow, schemeIdCache, seenPhones, phoneExistsCache, errors);
                 if (errors.size() >= MAX_VALIDATION_ERRORS) {
                     errors.add(err(uploadRow.rowNumber(), "file", "Too many validation errors; showing first " + MAX_VALIDATION_ERRORS));
                     break;
@@ -389,6 +392,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             PumpOperatorUploadChunkProcessor.UploadRow row,
             Map<String, Integer> schemeIdCache,
             LongHashSet seenPhones,
+            Map<String, Boolean> phoneExistsCache,
             List<UploadErrorDTO> errors
     ) {
         if (row.fullName().isBlank()) {
@@ -416,6 +420,17 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             }
         } catch (NumberFormatException nfe) {
             errors.add(err(row.rowNumber(), "phone_number", "Phone number must be numeric"));
+            return;
+        }
+
+        Boolean exists = phoneExistsCache.get(row.phone());
+        if (exists == null) {
+            Integer userId = userUploadRepository.findUserIdByEmailOrPhone(schemaName, null, row.phone());
+            exists = userId != null;
+            phoneExistsCache.put(row.phone(), exists);
+        }
+        if (Boolean.TRUE.equals(exists)) {
+            errors.add(err(row.rowNumber(), "phone_number", "Duplicate phone_number already exists"));
             return;
         }
 
