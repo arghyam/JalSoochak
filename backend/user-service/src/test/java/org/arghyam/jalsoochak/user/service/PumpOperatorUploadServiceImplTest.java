@@ -27,6 +27,7 @@ import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
 import org.arghyam.jalsoochak.user.service.serviceImpl.PumpOperatorUploadServiceImpl;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -72,6 +73,11 @@ class PumpOperatorUploadServiceImplTest {
     @AfterEach
     void cleanupTenant() {
         TenantContext.clear();
+    }
+
+    @BeforeEach
+    void defaultUploadRepoStubs() {
+        when(userUploadRepository.findUserIdByEmailOrPhone(anyString(), any(), any())).thenReturn(null);
     }
 
     @Test
