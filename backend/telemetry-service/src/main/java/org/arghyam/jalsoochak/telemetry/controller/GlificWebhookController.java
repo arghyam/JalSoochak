@@ -324,7 +324,7 @@ public class GlificWebhookController {
             log.debug("Error fetching meter change reasons for contactId {}: {}", request.getContactId(), e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"message\":\"Meter change reasons could not be fetched.\"}");
+                    .body("{\"success\":false,\"message\":\"Meter change reasons could not be fetched.\"}");
         }
     }
 
