@@ -396,7 +396,10 @@ public class GlificMeterWorkflowService {
         }
 
         try {
-            return objectMapper.writeValueAsString(java.util.Map.of("message", message.toString()));
+            return objectMapper.writeValueAsString(java.util.Map.of(
+                    "success", true,
+                    "message", message.toString()
+            ));
         } catch (Exception e) {
             throw new IllegalStateException("Failed to serialize meter change reasons message", e);
         }
