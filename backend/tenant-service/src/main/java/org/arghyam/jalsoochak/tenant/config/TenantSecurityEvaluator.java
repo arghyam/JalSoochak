@@ -58,7 +58,7 @@ public class TenantSecurityEvaluator {
         }
         return tenantCommonRepository.findById(tenantId)
                 .map(tenant -> {
-                    boolean allowed = tenant.getStateCode().equalsIgnoreCase(callerStateCode);
+                    boolean allowed = tenant.getStateCode() != null && callerStateCode.equalsIgnoreCase(tenant.getStateCode());
                     if (!allowed) {
                         log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {} (state_code='{}')",
                                 callerStateCode, tenantId, tenant.getStateCode());
