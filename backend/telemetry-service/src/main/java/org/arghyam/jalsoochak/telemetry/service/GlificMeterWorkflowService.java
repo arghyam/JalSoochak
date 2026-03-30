@@ -479,9 +479,15 @@ public class GlificMeterWorkflowService {
                     selectedReason
             );
 
+            String fallbackMessage = "Successfully selected.";
+            String confirmationMessage = templatesService
+                    .resolveScreenConfirmationTemplate(tenantId, "METER_CHANGE", languageKey)
+                    .or(() -> tenantConfigRepository.findMeterChangeConfirmationTemplate(tenantId, languageKey))
+                    .orElse(localizationService.localizeMessage(fallbackMessage, languageKey));
+
             return IntroResponse.builder()
                     .success(true)
-                    .message("Meter change reason submitted.")
+                    .message(confirmationMessage)
                     .correlationId(correlationId)
                     .selected(selectedKey)
                     .notOthers("OTHERS".equalsIgnoreCase(selectedKey))
