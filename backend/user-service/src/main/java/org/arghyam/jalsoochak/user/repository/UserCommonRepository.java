@@ -74,6 +74,28 @@ public class UserCommonRepository {
     }
 
     /**
+     * Returns {@code true} if the user with the given ID exists and belongs to the tenant
+     * identified by {@code tenantStateCode} (case-insensitive). Returns {@code false} if the
+     * user does not exist, has no tenant (tenant_id = 0), or belongs to a different tenant.
+     *
+     * <p>Used by {@code UserSecurityEvaluator} to enforce tenant-scoped access in a single
+     * round-trip instead of two separate lookups.
+     */
+    public boolean userBelongsToTenant(Long userId, String tenantStateCode) {
+        String sql = """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM common_schema.tenant_admin_user_master_table u
+                    JOIN common_schema.tenant_master_table t ON t.id = u.tenant_id
+                    WHERE u.id = ?
+                    AND UPPER(t.state_code) = UPPER(?)
+                )
+                """;
+        Boolean result = jdbcTemplate.queryForObject(sql, Boolean.class, userId, tenantStateCode);
+        return Boolean.TRUE.equals(result);
+    }
+
+    /**
      * Returns UUIDs of PENDING state-admin users whose invite token metadata contains
      * a {@code nameHash} matching the given HMAC-SHA256 value.
      * Scoped to {@code tenantId} when non-null, or all tenants when null.
