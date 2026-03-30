@@ -50,7 +50,7 @@ public class GlificMeterWorkflowService {
     private static final String LEGACY_ISSUE_PROMPT_HINDI =
             "कृपया अपनी समस्या संक्षेप में लिखें।";
     private static final String DEFAULT_METER_CHANGE_PROMPT_ENGLISH =
-            "Please select the meter change reason by typing any of the number";
+            "Please select the no submission reasons by typing any of the number";
 
     private static final List<String> DEFAULT_ISSUE_REASONS = List.of(
             "Meter Replaced",
