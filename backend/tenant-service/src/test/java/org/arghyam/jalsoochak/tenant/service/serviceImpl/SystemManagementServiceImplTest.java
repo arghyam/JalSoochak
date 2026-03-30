@@ -8,7 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import org.mockito.ArgumentCaptor;
 
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -17,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
@@ -297,9 +301,59 @@ class SystemManagementServiceImplTest {
                             .build());
             when(tenantCommonRepository.findConfigsByTenantId(0)).thenReturn(configs);
 
-            assertThrows(
-                    org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException.class,
+            assertThrows(InvalidConfigValueException.class,
                     () -> systemManagementService.getSystemSupportedChannels());
+        }
+
+        @Test
+        @DisplayName("Should throw InvalidConfigValueException when channels field is null in stored config")
+        void getSystemSupportedChannels_NullChannelsField_ThrowsInvalidConfigValueException() {
+            // Stored JSON parses fine but has no channels field → getChannels() == null
+            List<ConfigDTO> configs = List.of(
+                    ConfigDTO.builder()
+                            .configKey(SystemConfigKeyEnum.SYSTEM_SUPPORTED_CHANNELS.name())
+                            .configValue("{}")
+                            .build());
+            when(tenantCommonRepository.findConfigsByTenantId(0)).thenReturn(configs);
+
+            assertThrows(InvalidConfigValueException.class,
+                    () -> systemManagementService.getSystemSupportedChannels());
+        }
+    }
+
+    @Nested
+    @DisplayName("Set System Configs — Channel transient fields Tests")
+    class SetSystemConfigsChannelTests {
+
+        @Test
+        @DisplayName("Should strip degraded and removedChannels before persisting SYSTEM_SUPPORTED_CHANNELS")
+        void setSystemConfigs_ChannelListConfig_TransientFieldsStripped() throws Exception {
+            // Arrange: client sends degraded + removedChannels — both must be absent from the persisted value
+            Map<SystemConfigKeyEnum, JsonNode> newConfigs = new HashMap<>();
+            newConfigs.put(SystemConfigKeyEnum.SYSTEM_SUPPORTED_CHANNELS,
+                    objectMapper.readTree("{\"channels\":[\"BFM\",\"ELM\"],\"degraded\":true,\"removedChannels\":[\"PDU\"]}"));
+            SetSystemConfigRequestDTO request = SetSystemConfigRequestDTO.builder().configs(newConfigs).build();
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(SystemConfigKeyEnum.SYSTEM_SUPPORTED_CHANNELS.name())
+                    .configValue("{\"channels\":[\"BFM\",\"ELM\"]}")
+                    .build();
+
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("admin-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("admin-uuid")).thenReturn(Optional.of(1));
+            when(tenantCommonRepository.upsertConfig(eq(0),
+                    eq(SystemConfigKeyEnum.SYSTEM_SUPPORTED_CHANNELS.name()), anyString(), eq(1)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            systemManagementService.setSystemConfigs(request);
+
+            // Assert: the string passed to upsertConfig must not contain degraded or removedChannels
+            ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+            verify(tenantCommonRepository).upsertConfig(eq(0),
+                    eq(SystemConfigKeyEnum.SYSTEM_SUPPORTED_CHANNELS.name()), captor.capture(), eq(1));
+            String persisted = captor.getValue();
+            assertFalse(persisted.contains("degraded"), "degraded must not be persisted");
+            assertFalse(persisted.contains("removedChannels"), "removedChannels must not be persisted");
         }
     }
 }

@@ -390,6 +390,10 @@ public class UserManagementServiceImpl implements UserManagementService {
                     : userCommonRepository.findAllTenantStateCodes().stream()
                             .map(c -> "tenant_" + c.toLowerCase(Locale.ROOT))
                             .toList();
+            if (resolvedStateCode == null) {
+                log.warn("Cross-tenant name search executing sequentially across {} tenant schemas [nameHash={}]; this may be slow at scale",
+                        schemas.size(), nameHash);
+            }
             for (String schema : schemas) {
                 nameFilterUuids.addAll(userTenantRepository.findUuidsByTitleHash(schema, nameHash));
             }

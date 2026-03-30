@@ -42,7 +42,6 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.ConfigStatusEnum;
 import org.arghyam.jalsoochak.tenant.enums.RegionTypeEnum;
-import org.arghyam.jalsoochak.tenant.enums.SystemConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum.ConfigType;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
@@ -58,6 +57,7 @@ import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.springframework.web.multipart.MultipartFile;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
+import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
@@ -87,6 +87,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final ApplicationEventPublisher eventPublisher;
     private final TenantSchedulerManager schedulerManager;
     private final ObjectStorageService objectStorageService;
+    private final SystemManagementService systemManagementService;
 
 
     // TODO: Re-enable "image/svg+xml" only after implementing SVG sanitization and serving from an isolated origin.
@@ -220,6 +221,9 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         if (configMap.containsKey(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS)) {
             ChannelListConfigDTO stored = (ChannelListConfigDTO) configMap.get(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS);
+            if (stored == null || stored.getChannels() == null) {
+                throw new InvalidConfigValueException("Stored TENANT_SUPPORTED_CHANNELS config is missing channels field");
+            }
             Set<String> systemChannels = new HashSet<>(fetchSystemSupportedChannels());
             List<String> effective = stored.getChannels().stream()
                     .filter(systemChannels::contains)
@@ -271,6 +275,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
             if (key == TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS) {
                 ChannelListConfigDTO channelDto = (ChannelListConfigDTO) dto;
+                channelDto.setDegraded(null);
+                channelDto.setRemovedChannels(null);
                 Set<String> systemChannels = new HashSet<>(fetchSystemSupportedChannels());
                 if (systemChannels.isEmpty()) {
                     throw new InvalidConfigValueException(
@@ -754,19 +760,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     }
 
     private List<String> fetchSystemSupportedChannels() {
-        List<ConfigDTO> systemConfigs = tenantCommonRepository.findConfigsByTenantId(TenantConstants.SYSTEM_TENANT_ID);
-        return systemConfigs.stream()
-                .filter(cfg -> SystemConfigKeyEnum.SYSTEM_SUPPORTED_CHANNELS.name().equals(cfg.getConfigKey()))
-                .findFirst()
-                .map(cfg -> {
-                    try {
-                        return objectMapper.readValue(cfg.getConfigValue(), ChannelListConfigDTO.class).getChannels();
-                    } catch (JsonProcessingException e) {
-                        log.error("Malformed SYSTEM_SUPPORTED_CHANNELS config value", e);
-                        throw new InvalidConfigValueException("Malformed SYSTEM_SUPPORTED_CHANNELS config value", e);
-                    }
-                })
-                .orElse(Collections.emptyList());
+        return systemManagementService.getSystemSupportedChannels();
     }
 
     private Integer resolveCurrentUserId() {

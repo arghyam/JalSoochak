@@ -180,7 +180,7 @@ public class UserTenantRepository {
                 uuid,
                 tenantId,
                 pii.encrypt(title),
-                pii.hmac(title.trim().toLowerCase(Locale.ROOT)),
+                pii.hmac(title == null ? "" : title.trim().toLowerCase(Locale.ROOT)),
                 email,
                 userTypeId,
                 pii.encrypt(phoneNumber),
@@ -200,7 +200,7 @@ public class UserTenantRepository {
                 WHERE id = ?
                 """, schemaName);
         jdbcTemplate.update(sql,
-                pii.encrypt(title), pii.hmac(title.trim().toLowerCase(Locale.ROOT)),
+                pii.encrypt(title), pii.hmac(title == null ? "" : title.trim().toLowerCase(Locale.ROOT)),
                 pii.encrypt(phoneNumber), pii.hmac(phoneNumber),
                 id);
     }

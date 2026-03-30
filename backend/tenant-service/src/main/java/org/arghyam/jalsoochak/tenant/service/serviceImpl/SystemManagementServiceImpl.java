@@ -85,6 +85,11 @@ public class SystemManagementServiceImpl implements SystemManagementService {
                         "Invalid value for config key " + key + ": " + e.getMessage(), e);
             }
 
+            if (dto instanceof ChannelListConfigDTO channelDto) {
+                channelDto.setDegraded(null);
+                channelDto.setRemovedChannels(null);
+            }
+
             String serialized;
             try {
                 serialized = objectMapper.writeValueAsString(dto);
@@ -117,12 +122,18 @@ public class SystemManagementServiceImpl implements SystemManagementService {
                 .filter(cfg -> SystemConfigKeyEnum.SYSTEM_SUPPORTED_CHANNELS.name().equals(cfg.getConfigKey()))
                 .findFirst()
                 .map(cfg -> {
+                    ChannelListConfigDTO parsed;
                     try {
-                        return objectMapper.readValue(cfg.getConfigValue(), ChannelListConfigDTO.class).getChannels();
+                        parsed = objectMapper.readValue(cfg.getConfigValue(), ChannelListConfigDTO.class);
                     } catch (JsonProcessingException e) {
                         log.error("Malformed SYSTEM_SUPPORTED_CHANNELS config value", e);
                         throw new InvalidConfigValueException("Malformed SYSTEM_SUPPORTED_CHANNELS config value", e);
                     }
+                    if (parsed.getChannels() == null) {
+                        log.error("SYSTEM_SUPPORTED_CHANNELS config is missing channels field [value={}]", cfg.getConfigValue());
+                        throw new InvalidConfigValueException("SYSTEM_SUPPORTED_CHANNELS config is missing channels field");
+                    }
+                    return parsed.getChannels();
                 })
                 .orElse(Collections.emptyList());
     }
