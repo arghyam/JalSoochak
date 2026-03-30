@@ -286,12 +286,12 @@ public class TenantCommonRepository {
     }
 
     /**
-     * Soft-deletes a tenant by setting status to INACTIVE and recording deleted_at.
+     * Deactivated a tenant by setting status to INACTIVE and recording updated_at.
      */
     public void deactivateTenant(Integer tenantId, Integer currentUserId) {
         String sql = """
                 UPDATE common_schema.tenant_master_table
-                SET status = ?, deleted_at = NOW(), updated_at = NOW(), deleted_by = ?, updated_by = ?
+                SET status = ?, updated_at = NOW(), updated_by = ?
                 WHERE id = ?
                 """;
         int rows = jdbcTemplate.update(sql, TenantStatusEnum.INACTIVE.getCode(), currentUserId, currentUserId,
