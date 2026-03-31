@@ -1,15 +1,18 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -39,11 +42,17 @@ class BfmReadingServiceMeterReplacedTest {
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
 
+    @Mock
+    private TenantConfigRepository tenantConfigRepository;
+
+    @Spy
+    private ObjectMapper objectMapper = new ObjectMapper();
+
     @InjectMocks
     private BfmReadingService service;
 
     @Test
-    void createReadingRejectsLowerReadingWhenMeterNotReplaced() {
+    void createReadingAcceptsLowerReadingWhenMeterNotReplacedIfAboveThreshold() {
         String schemaName = "tenant_test";
         TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
 
@@ -65,9 +74,47 @@ class BfmReadingServiceMeterReplacedTest {
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
         assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
+
+        verify(telemetryTenantRepository).createFlowReading(
+                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
+        );
+    }
+
+    @Test
+    void createReadingRejectsWhenBelowWaterThreshold() {
+        String schemaName = "tenant_test";
+        TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
+
+        CreateReadingRequest request = CreateReadingRequest.builder()
+                .schemeId(10L)
+                .operatorId(1L)
+                .readingValue(new BigDecimal("800"))
+                .build();
+
+        when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
+        when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
+        when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
+
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("1200"), LocalDateTime.now().minusDays(1))));
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(schemaName, 10L, LocalDate.now().minusDays(1), null))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("1200"), LocalDateTime.now().minusDays(1))));
+
+        when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
+                .thenReturn(Optional.empty());
+        when(tenantConfigRepository.findConfigValue(1, "WATER_QUANTITY_SUPPLY_THRESHOLD"))
+                .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":10,\"oversupplyThresholdPercent\":20}"));
+        when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
+                .thenReturn(Optional.of("{\"value\":\"1000\"}"));
+
+        CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
+
+        assertNotNull(resp);
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
-        assertTrue(resp.getMessage().contains("Reading cannot be less than previous reading"));
+        assertTrue(resp.getMessage().contains("below the allowed minimum"));
 
         verify(telemetryTenantRepository, never()).createFlowReading(
                 anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
