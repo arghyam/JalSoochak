@@ -137,6 +137,14 @@ public class AuthServiceImpl implements AuthService {
             throw new UserAlreadyExistsException("Account already exists");
         }
 
+        if (!"SUPER_USER".equals(role)) {
+            String tenantCode = parseMetadata(tokenRow.metadata(), "tenantCode");
+            Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
+                    .orElseThrow(() -> new AccountDeactivatedException("Tenant not found or no longer exists."));
+            Integer adminLevel = "STATE_ADMIN".equals(role) ? 2 : null;
+            validateTenantStatus(tenantId, adminLevel);
+        }
+
         String phoneNumber = userCommonRepository.findAdminUserByEmail(email)
                 .map(AdminUserRow::phoneNumber)
                 .orElse(null);
@@ -163,6 +171,13 @@ public class AuthServiceImpl implements AuthService {
 
         if (pendingUser.status() != AdminUserStatus.PENDING) {
             throw new UserAlreadyExistsException("Account already exists");
+        }
+
+        Integer tenantId = "SUPER_USER".equals(role) ? 0
+                : userCommonRepository.findTenantIdByStateCode(tenantCode)
+                        .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for code: " + tenantCode));
+        if (!"SUPER_USER".equals(role)) {
+            validateTenantStatus(tenantId, pendingUser.adminLevel());
         }
 
         String keycloakUuid = null;
@@ -198,10 +213,6 @@ public class AuthServiceImpl implements AuthService {
             } else if (!"SUPER_USER".equals(role)) {
                 setKeycloakUserAttribute(usersResource, keycloakUuid, "user_type", role);
             }
-
-            Integer tenantId = "SUPER_USER".equals(role) ? 0
-                    : userCommonRepository.findTenantIdByStateCode(tenantCode)
-                            .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for code: " + tenantCode));
 
             // Update the PENDING user record with the real Keycloak UUID and activate it
             userCommonRepository.activatePendingAdminUser(pendingUser.id(), keycloakUuid, request.getPhoneNumber());
