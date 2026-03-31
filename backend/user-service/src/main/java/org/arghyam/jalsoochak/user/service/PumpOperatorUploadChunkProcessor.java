@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserSchemeMappingCreateRow;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
+import org.arghyam.jalsoochak.user.util.PhoneNumberUtil;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -77,14 +78,15 @@ public class PumpOperatorUploadChunkProcessor {
                     continue;
                 }
 
-                TenantUserRecord user = userTenantRepository.findUserByPhone(schemaName, row.phone()).orElse(null);
+                String normalizedPhone = PhoneNumberUtil.normalizeIndianMobileForDb(row.phone());
+                TenantUserRecord user = userTenantRepository.findUserByPhone(schemaName, normalizedPhone).orElse(null);
                 Long userId;
                 if (user == null) {
                     String title = !row.fullName().isBlank()
                             ? row.fullName()
                             : (row.firstName() + " " + row.lastName()).trim();
                     if (title.isBlank()) {
-                        title = defaultTitle(typeKey) + " " + row.phone();
+                        title = defaultTitle(typeKey) + " " + normalizedPhone;
                     }
 
                     userId = userTenantRepository.createUser(
@@ -92,9 +94,9 @@ public class PumpOperatorUploadChunkProcessor {
                             java.util.UUID.randomUUID().toString(),
                             actor.tenantId(),
                             title,
-                            uniqueEmail(schemaName, row.phone(), typeKey),
+                            uniqueEmail(schemaName, normalizedPhone, typeKey),
                             userTypeId,
-                            row.phone(),
+                            normalizedPhone,
                             "CSV_ONBOARDED",
                             actor.id()
                     );
@@ -115,7 +117,7 @@ public class PumpOperatorUploadChunkProcessor {
 
                 // Idempotent insert (ON CONFLICT DO NOTHING) will safely handle re-uploads + concurrent chunks.
                 insertRows.add(new UserSchemeMappingCreateRow(userId, schemeId));
-                phonesForInsertRows.add(row.phone());
+                phonesForInsertRows.add(normalizedPhone);
                 typesForInsertRows.add(typeKey);
 
                 uploaded++;
