@@ -78,7 +78,15 @@ class BfmReadingServiceMeterReplacedTest {
         assertEquals("CONFIRMED", resp.getQualityStatus());
 
         verify(telemetryTenantRepository).createFlowReading(
-                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
+                anyString(),
+                anyLong(),
+                anyLong(),
+                any(),
+                any(),
+                any(),
+                anyString(),
+                any(),
+                any()
         );
     }
 
@@ -117,7 +125,15 @@ class BfmReadingServiceMeterReplacedTest {
         assertTrue(resp.getMessage().contains("below the allowed minimum"));
 
         verify(telemetryTenantRepository, never()).createFlowReading(
-                anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
+                anyString(),
+                anyLong(),
+                anyLong(),
+                any(),
+                any(),
+                any(),
+                anyString(),
+                any(),
+                any()
         );
     }
 
