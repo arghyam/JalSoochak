@@ -766,7 +766,7 @@ class NotificationEventRouterTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void route_rethrowsException_whenUpdateLanguageFails_forSomePhones() {
+    void route_rethrowsException_whenUpdateLanguageFails_forPhoneNotFound() {
         when(jdbcTemplate.query(
                 argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
                 any(RowMapper.class),

@@ -101,6 +101,7 @@ class TenantEventListenerTest {
         listener.handleTenantCreated(event);
 
         verify(redisTemplate, never()).opsForHash();
+        verify(redisTemplate, never()).opsForSet();
         // Kafka publish also skipped because stateCode is null
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
@@ -126,6 +127,20 @@ class TenantEventListenerTest {
         listener.handleTenantCreated(event);
 
         verify(kafkaProducer).publishJson(eq("tenant-service-topic"), any());
+    }
+
+    @Test
+    void handleTenantCreated_stillCachesInRedis_whenKafkaFails() {
+        stubRedisOps();
+        doThrow(new RuntimeException("Kafka unavailable"))
+                .when(kafkaProducer).publishJson(anyString(), any());
+        TenantResponseDTO t = tenant(6, "hr", "Haryana", "ACTIVE");
+        TenantCreatedEvent event = new TenantCreatedEvent(t, "tenant_hr");
+
+        listener.handleTenantCreated(event);
+
+        verify(hashOperations).putAll(eq("tenant-service:tenants:HR:profile"), any());
+        verify(setOperations).add("tenant-service:tenants:index", "HR");
     }
 
     // ── handleTenantUpdated ───────────────────────────────────────────────────────
