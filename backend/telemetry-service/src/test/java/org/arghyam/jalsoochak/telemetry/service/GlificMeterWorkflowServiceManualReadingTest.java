@@ -172,7 +172,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
-    void manualReadingRejectsLowerReadingWhenMeterNotReplaced() {
+    void manualReadingAcceptsLowerReadingWhenMeterNotReplacedIfAboveThreshold() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -187,8 +187,12 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString()))
+                .thenReturn(Optional.empty());
 
-        // Less-than-previous path should short-circuit before any flow-reading mutations.
+        // Lower than yesterday should be accepted as long as it is above threshold.
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
                 .manualReading("100")
@@ -196,13 +200,13 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .build());
 
         assertNotNull(resp);
-        assertEquals(false, resp.isSuccess());
-        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
 
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
-        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
 
     @Test
