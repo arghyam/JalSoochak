@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.util.List;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
@@ -27,6 +28,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -60,6 +63,9 @@ class NotificationEventRouterTest {
 
     @Mock
     private AccountEmailService accountEmailService;
+
+    @Mock
+    private JdbcTemplate jdbcTemplate;
 
     @InjectMocks
     private NotificationEventRouter router;
@@ -606,5 +612,183 @@ class NotificationEventRouterTest {
                 """);
 
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
+    }
+
+    // ───────────────────────────── SEND_LOGIN_OTP ──────────────────────────────
+
+    @Test
+    void route_sendsLoginOtp_usingStoredGlificId() {
+        when(whatsAppChannel.sendLoginOtp(42L, "123456")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO Singh",
+                 "OTP":"123456","glific_id":"42","officerPhoneNumber":"919876500010"}
+                """);
+
+        verify(whatsAppChannel).sendLoginOtp(42L, "123456");
+        verify(glificWhatsAppService, never()).optIn(anyString());
+    }
+
+    @Test
+    void route_sendsLoginOtp_usingOptIn_whenGlificIdAbsent() {
+        when(glificWhatsAppService.optIn("919876500010")).thenReturn(77L);
+        when(whatsAppChannel.sendLoginOtp(77L, "654321")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO Singh",
+                 "OTP":"654321","glific_id":"","officerPhoneNumber":"919876500010"}
+                """);
+
+        verify(glificWhatsAppService).optIn("919876500010");
+        verify(whatsAppChannel).sendLoginOtp(77L, "654321");
+    }
+
+    @Test
+    void route_skipsLoginOtp_whenOtpIsBlank() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"","glific_id":"42"}
+                """);
+
+        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsLoginOtp_whenNeitherGlificIdNorPhoneProvided() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"999999",
+                 "glific_id":"","officerPhoneNumber":""}
+                """);
+
+        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsLoginOtp_whenGlificIdIsInvalidNumber() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"111111",
+                 "glific_id":"not-a-number"}
+                """);
+
+        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+    }
+
+    @Test
+    void route_rethrowsException_whenLoginOtpDeliveryFails() {
+        when(glificWhatsAppService.optIn(anyString())).thenReturn(55L);
+        when(whatsAppChannel.sendLoginOtp(anyLong(), anyString()))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"222222",
+                 "glific_id":"","officerPhoneNumber":"919000000002"}
+                """))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
+    }
+
+    // ──────────────────────── SEND_WELCOME_MESSAGE ─────────────────────────────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void route_sendsWelcomeMessage_whenContactIdFound() {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("919111111111")))
+                .thenReturn(List.of(88L));
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919111111111"]}
+                """);
+
+        verify(glificWhatsAppService).startWelcomeFlow(88L);
+        verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void route_routesToDlt_whenNoContactIdFound() {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("919222222222")))
+                .thenReturn(List.of());
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919222222222"]}
+                """);
+
+        verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong());
+        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"), any());
+    }
+
+    @Test
+    void route_skipsWelcomeMessage_whenTenantCodeIsBlank() {
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"",
+                 "pumpOperatorPhones":["919333333333"]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsWelcomeMessage_whenPhonesListIsEmpty() {
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":[]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService);
+    }
+
+    // ──────────────────────── UPDATE_USER_LANGUAGE ─────────────────────────────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void route_updatesLanguage_whenContactIdFound() {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("919444444444")))
+                .thenReturn(List.of(99L));
+
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "glificLanguageId":3,
+                 "pumpOperatorPhones":["919444444444"]}
+                """);
+
+        verify(glificWhatsAppService).updateContactLanguage(99L, 3);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void route_rethrowsException_whenUpdateLanguageFails_forSomePhones() {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("919555555555")))
+                .thenReturn(List.of());
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "glificLanguageId":2,
+                 "pumpOperatorPhones":["919555555555"]}
+                """))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
+    }
+
+    @Test
+    void route_skipsUpdateLanguage_whenTenantCodeIsInvalid() {
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"INVALID CODE!",
+                 "glificLanguageId":1,
+                 "pumpOperatorPhones":["919666666666"]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService, jdbcTemplate);
+    }
+
+    @Test
+    void route_skipsUpdateLanguage_whenGlificLanguageIdIsZero() {
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "glificLanguageId":0,
+                 "pumpOperatorPhones":["919777777777"]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService, jdbcTemplate);
     }
 }

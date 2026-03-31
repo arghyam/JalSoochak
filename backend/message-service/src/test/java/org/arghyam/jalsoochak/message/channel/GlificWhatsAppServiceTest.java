@@ -408,6 +408,48 @@ class GlificWhatsAppServiceTest {
                 .hasMessageContaining("updateContact");
     }
 
+    // ──────────────────────────── sendLoginOtpHsm ──────────────────────────────
+
+    @Test
+    void sendLoginOtpHsm_callsSendHsmMutation_withOtpParameter() throws Exception {
+        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+        JsonNode response = mapper.readTree("""
+                {"sendHsmMessage":{"message":{"id":5,"body":"otp","isHSM":true},"errors":[]}}
+                """);
+        when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(response);
+
+        service.sendLoginOtpHsm(11L, "654321");
+
+        ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
+        verify(client).execute(contains("sendHsmMessage"), varsCaptor.capture());
+        Map<String, Object> vars = varsCaptor.getValue();
+        assertThat(vars.get("templateId")).isEqualTo("otp-tmpl-1");
+        assertThat(vars.get("receiverId")).isEqualTo(11L);
+        assertThat(vars.get("parameters").toString()).contains("654321");
+    }
+
+    @Test
+    void sendLoginOtpHsm_throwsException_whenTemplateIdNotConfigured() {
+        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "");
+
+        assertThatThrownBy(() -> service.sendLoginOtpHsm(11L, "000000"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("login-otp-id");
+    }
+
+    @Test
+    void sendLoginOtpHsm_throwsException_whenGraphQLErrorsReturned() throws Exception {
+        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+        JsonNode response = mapper.readTree("""
+                {"sendHsmMessage":{"message":null,"errors":[{"key":"contact","message":"blocked"}]}}
+                """);
+        when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(response);
+
+        assertThatThrownBy(() -> service.sendLoginOtpHsm(11L, "654321"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("sendHsmMessage");
+    }
+
     // ────────────────────────────── helpers ────────────────────────────────────
 
     @SuppressWarnings("unchecked")
