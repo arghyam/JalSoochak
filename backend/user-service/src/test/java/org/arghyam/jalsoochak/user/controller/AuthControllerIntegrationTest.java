@@ -427,7 +427,7 @@ class AuthControllerIntegrationTest {
                     piiEncryptionService.hmac("9112345678"));
             String rawToken = "raw-invite-token-info";
             seedToken("new@example.com", rawToken, "INVITE",
-                    "{\"role\":\"STATE_ADMIN\",\"tenantName\":\"Madhya Pradesh\",\"firstName\":\"John\",\"lastName\":\"Doe\"}",
+                    "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\",\"tenantName\":\"Madhya Pradesh\",\"firstName\":\"John\",\"lastName\":\"Doe\"}",
                     LocalDateTime.now().plusHours(24));
 
             mockMvc.perform(get("/api/v1/auth/invite/info").param("token", rawToken))

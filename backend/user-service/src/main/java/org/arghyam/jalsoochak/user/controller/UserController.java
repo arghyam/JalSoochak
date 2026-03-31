@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.user.dto.request.InviteRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.UpdateProfileRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.AdminUserResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
+import org.arghyam.jalsoochak.user.config.RequiresUserAccess;
 import org.arghyam.jalsoochak.user.service.UserManagementService;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
 import org.springframework.http.ResponseEntity;
@@ -148,11 +149,11 @@ public class UserController {
     @Operation(summary = "Get user by ID")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "User retrieved"),
-        @ApiResponse(responseCode = "403", description = "STATE_ADMIN attempted cross-state access"),
+        @ApiResponse(responseCode = "403", description = "STATE_ADMIN attempted cross-tenant access or insufficient permissions"),
         @ApiResponse(responseCode = "404", description = "User not found")
     })
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @RequiresUserAccess
     public ResponseEntity<ApiResponseDTO<AdminUserResponseDTO>> getUserById(
             @Parameter(description = "User ID") @PathVariable Long id,
             Authentication authentication) {
@@ -165,11 +166,11 @@ public class UserController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "User updated"),
         @ApiResponse(responseCode = "400", description = "User is PENDING or INACTIVE"),
-        @ApiResponse(responseCode = "403", description = "STATE_ADMIN attempted cross-state update"),
+        @ApiResponse(responseCode = "403", description = "STATE_ADMIN attempted cross-tenant update or insufficient permissions"),
         @ApiResponse(responseCode = "404", description = "User not found")
     })
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @RequiresUserAccess
     public ResponseEntity<ApiResponseDTO<AdminUserResponseDTO>> updateUserById(
             @Parameter(description = "User ID") @PathVariable Long id,
             Authentication authentication,
@@ -183,12 +184,12 @@ public class UserController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "User deactivated"),
         @ApiResponse(responseCode = "400", description = "User is PENDING"),
-        @ApiResponse(responseCode = "403", description = "Self-deactivation or cross-state attempt"),
+        @ApiResponse(responseCode = "403", description = "Self-deactivation, cross-tenant attempt, or insufficient permissions"),
         @ApiResponse(responseCode = "404", description = "User not found"),
         @ApiResponse(responseCode = "409", description = "User is the last active admin in their role")
     })
     @PutMapping("/{id}/deactivate")
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @RequiresUserAccess
     public ResponseEntity<ApiResponseDTO<Void>> deactivate(
             @Parameter(description = "User ID") @PathVariable Long id,
             Authentication authentication) {
@@ -202,11 +203,11 @@ public class UserController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "User activated"),
         @ApiResponse(responseCode = "400", description = "User is PENDING"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized cross-state activation attempt"),
+        @ApiResponse(responseCode = "403", description = "Cross-tenant activation attempt or insufficient permissions"),
         @ApiResponse(responseCode = "404", description = "User not found")
     })
     @PutMapping("/{id}/activate")
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @RequiresUserAccess
     public ResponseEntity<ApiResponseDTO<Void>> activate(
             @Parameter(description = "User ID") @PathVariable Long id,
             Authentication authentication) {
@@ -220,11 +221,11 @@ public class UserController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Invitation resent"),
         @ApiResponse(responseCode = "400", description = "User has already activated their account"),
-        @ApiResponse(responseCode = "403", description = "STATE_ADMIN attempted cross-state reinvite"),
+        @ApiResponse(responseCode = "403", description = "Cross-tenant reinvite attempt or insufficient permissions"),
         @ApiResponse(responseCode = "404", description = "User not found")
     })
     @PostMapping("/{id}/reinvite")
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @RequiresUserAccess
     public ResponseEntity<ApiResponseDTO<Void>> reinvite(
             @Parameter(description = "User ID") @PathVariable Long id,
             Authentication authentication) {

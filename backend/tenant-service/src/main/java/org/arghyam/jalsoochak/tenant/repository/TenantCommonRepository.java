@@ -286,15 +286,15 @@ public class TenantCommonRepository {
     }
 
     /**
-     * Soft-deletes a tenant by setting status to INACTIVE and recording deleted_at.
+     * Deactivates a tenant by setting status to INACTIVE and recording updated_at and updated_by.
      */
     public void deactivateTenant(Integer tenantId, Integer currentUserId) {
         String sql = """
                 UPDATE common_schema.tenant_master_table
-                SET status = ?, deleted_at = NOW(), updated_at = NOW(), deleted_by = ?, updated_by = ?
+                SET status = ?, updated_at = NOW(), updated_by = ?
                 WHERE id = ?
                 """;
-        int rows = jdbcTemplate.update(sql, TenantStatusEnum.INACTIVE.getCode(), currentUserId, currentUserId,
+        int rows = jdbcTemplate.update(sql, TenantStatusEnum.INACTIVE.getCode(), currentUserId,
                 tenantId);
         if (rows == 0) {
             throw new IllegalArgumentException("Tenant with tenantId " + tenantId + " does not exist");

@@ -7,8 +7,16 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.http.HttpMethod;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -18,6 +26,45 @@ import static org.mockito.Mockito.when;
 class GlobalExceptionHandlerTest {
 
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
+
+    @Test
+    void handleAccessDenied_returns403() {
+        ResponseEntity<ApiErrorResponseDTO> response = handler.handleAccessDenied(new AccessDeniedException("Access Denied"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getMessage()).isEqualTo("Access denied");
+    }
+
+    @Test
+    void handleNoResourceFound_returns404() {
+        ResponseEntity<ApiErrorResponseDTO> response = handler.handleNoResourceFound(
+                new NoResourceFoundException(HttpMethod.GET, "/unknown/path"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getMessage()).isEqualTo("Resource not found");
+    }
+
+    @Test
+    void handleMediaTypeNotSupported_returns415() {
+        ResponseEntity<ApiErrorResponseDTO> response = handler.handleMediaTypeNotSupported(
+                new HttpMediaTypeNotSupportedException(MediaType.APPLICATION_XML, List.of(MediaType.APPLICATION_JSON)));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getMessage()).contains("application/xml");
+    }
+
+    @Test
+    void handleMediaTypeNotAcceptable_returns406() {
+        ResponseEntity<ApiErrorResponseDTO> response = handler.handleMediaTypeNotAcceptable(
+                new HttpMediaTypeNotAcceptableException(List.of(MediaType.APPLICATION_JSON)));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_ACCEPTABLE);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getMessage()).isEqualTo("Requested media type not acceptable");
+    }
 
     @Test
     void handleTypeMismatch_enumType_includesAcceptedValuesAndFallsBackToExName() {

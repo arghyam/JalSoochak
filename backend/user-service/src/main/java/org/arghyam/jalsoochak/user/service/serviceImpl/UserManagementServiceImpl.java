@@ -367,6 +367,7 @@ public class UserManagementServiceImpl implements UserManagementService {
             if (callerTenantCode == null) {
                 throw new ForbiddenAccessException("Unable to determine caller's tenant");
             }
+            // STATE_ADMIN can only list admins from their own tenant
             if (tenantCode != null && !tenantCode.equalsIgnoreCase(callerTenantCode)) {
                 throw new ForbiddenAccessException("State admin can only list admins within their own state");
             }
@@ -374,6 +375,7 @@ public class UserManagementServiceImpl implements UserManagementService {
                     .orElseThrow(() -> new ForbiddenAccessException("Caller's tenant not found"));
             resolvedStateCode = callerTenantCode.toUpperCase(Locale.ROOT);
         } else if (tenantCode != null && !tenantCode.isBlank()) {
+            // SUPER_USER can optionally filter by tenantCode
             tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
                     .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for state code: " + tenantCode));
             resolvedStateCode = tenantCode.toUpperCase(Locale.ROOT);
@@ -577,7 +579,7 @@ public class UserManagementServiceImpl implements UserManagementService {
                     ? userCommonRepository.findTenantStateCodeById(target.tenantId()).orElse(null)
                     : null;
             if (callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(targetTenantCode)) {
-                throw new UnauthorizedAccessException("Cannot activate user from another state");
+                throw new ForbiddenAccessException("Cannot activate user from another state");
             }
         }
 
