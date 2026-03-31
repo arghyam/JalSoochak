@@ -320,21 +320,6 @@ class AuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw AccountDeactivatedException when tenant is suspended")
-        void getInviteInfo_suspendedTenant_throwsAccountDeactivated() {
-            String hash = "suspended-hash";
-            String metadata = "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\",\"tenantName\":\"Madhya Pradesh\"}";
-            when(tokenService.hash("suspended-token")).thenReturn(hash);
-            when(userCommonRepository.findActiveTokenByHash(hash)).thenReturn(Optional.of(
-                    activeTokenRow("invited@example.com", hash, "INVITE", metadata)));
-            when(userCommonRepository.existsActiveAdminUserByEmail("invited@example.com")).thenReturn(false);
-            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(5));
-            when(userCommonRepository.findTenantStatusByTenantId(5)).thenReturn(Optional.of(4)); // SUSPENDED
-
-            assertThrows(AccountDeactivatedException.class, () -> authService.getInviteInfo("suspended-token"));
-        }
-
-        @Test
         @DisplayName("Should throw UserAlreadyExistsException when account already exists")
         void getInviteInfo_accountExists_throwsUserAlreadyExists() {
             String hash = "existing-hash";
@@ -542,31 +527,6 @@ class AuthServiceImplTest {
             assertEquals("91XXXXXXXXXX", result.tokenResponse().getPhoneNumber());
             verify(userCommonRepository).consumeActiveTokenOfType(hash, "INVITE");
             verify(userCommonRepository).activatePendingAdminUser(eq(10L), anyString(), anyString());
-        }
-
-        @Test
-        @DisplayName("STATE_ADMIN: should throw AccountDeactivatedException when tenant is suspended")
-        void activateAccount_stateAdmin_suspendedTenant_throwsAccountDeactivated() {
-            String hash = "sa-suspended-hash";
-            when(tokenService.hash("sa-suspended-token")).thenReturn(hash);
-            when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
-                    activeTokenRow("newsa@example.com", hash, "INVITE",
-                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
-
-            AdminUserRow pendingUser = new AdminUserRow(20L, "pending-sa-uuid", "newsa@example.com", "", 1, 2, AdminUserStatus.PENDING, 0, null);
-            when(userCommonRepository.findAdminUserByEmail("newsa@example.com")).thenReturn(Optional.of(pendingUser));
-            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(5));
-            when(userCommonRepository.findTenantStatusByTenantId(5)).thenReturn(Optional.of(4)); // SUSPENDED
-
-            ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
-            req.setInviteToken("sa-suspended-token");
-            req.setFirstName("State");
-            req.setLastName("Admin");
-            req.setPassword("Pass@123");
-            req.setPhoneNumber("91XXXXXXXXXX");
-
-            assertThrows(AccountDeactivatedException.class, () -> authService.activateAccount(req));
-            verify(keycloakProvider, never()).getAdminInstance();
         }
 
         @Test

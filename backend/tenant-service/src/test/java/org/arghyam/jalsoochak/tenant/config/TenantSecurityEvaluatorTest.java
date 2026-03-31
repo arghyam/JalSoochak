@@ -54,7 +54,7 @@ class TenantSecurityEvaluatorTest {
     void isOwnTenant_matchingStateCode_returnsTrue() {
         setUpJwtContext("mp");
         when(tenantCommonRepository.findById(1))
-                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").build()));
+                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("ACTIVE").build()));
 
         assertTrue(tenantSecurityEvaluator.isOwnTenant(1));
     }
@@ -64,7 +64,7 @@ class TenantSecurityEvaluatorTest {
     void isOwnTenant_caseInsensitiveMatch_returnsTrue() {
         setUpJwtContext("MP");
         when(tenantCommonRepository.findById(1))
-                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").build()));
+                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("ACTIVE").build()));
 
         assertTrue(tenantSecurityEvaluator.isOwnTenant(1));
     }
