@@ -70,7 +70,7 @@ BEGIN
     -- ============================================================
 
     EXECUTE format('
-        CREATE TABLE %1$I.location_config_master_table (
+        CREATE TABLE IF NOT EXISTS %1$I.location_config_master_table (
             id              SERIAL          PRIMARY KEY,
             uuid            VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             region_type     INTEGER         NOT NULL,
@@ -110,7 +110,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.lgd_location_master_table (
+        CREATE TABLE IF NOT EXISTS %1$I.lgd_location_master_table (
             id                      SERIAL          PRIMARY KEY,
             uuid                    VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             title                   VARCHAR(255)    NOT NULL,
@@ -135,7 +135,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.department_location_master_table (
+        CREATE TABLE IF NOT EXISTS %1$I.department_location_master_table (
             id                              SERIAL          PRIMARY KEY,
             uuid                            VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             title                           VARCHAR(255)    NOT NULL,
@@ -181,7 +181,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.scheme_lgd_mapping_table (
+        CREATE TABLE IF NOT EXISTS %1$I.scheme_lgd_mapping_table (
             id                  SERIAL          PRIMARY KEY,
             scheme_id           INTEGER         NOT NULL,
             parent_lgd_id       INTEGER         NOT NULL,
@@ -208,7 +208,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.scheme_department_mapping_table (
+        CREATE TABLE IF NOT EXISTS %1$I.scheme_department_mapping_table (
             id                          SERIAL          PRIMARY KEY,
             scheme_id                   INTEGER         NOT NULL,
             parent_department_id        INTEGER         NOT NULL,
@@ -235,7 +235,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.flow_reading_table (
+        CREATE TABLE IF NOT EXISTS %1$I.flow_reading_table (
             id                          SERIAL          PRIMARY KEY,
             uuid                        VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             scheme_id                   INTEGER         NOT NULL,
@@ -271,7 +271,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.user_scheme_mapping_table (
+        CREATE TABLE IF NOT EXISTS %1$I.user_scheme_mapping_table (
             id              SERIAL          PRIMARY KEY,
             uuid            VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             user_id         INTEGER         NOT NULL,
@@ -293,7 +293,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.notification_table (
+        CREATE TABLE IF NOT EXISTS %1$I.notification_table (
             id              SERIAL          PRIMARY KEY,
             uuid            VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             user_id         INTEGER         NOT NULL,
@@ -313,7 +313,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.anomaly_table (
+        CREATE TABLE IF NOT EXISTS %1$I.anomaly_table (
             id              SERIAL          PRIMARY KEY,
             uuid            VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             user_id         INTEGER,
@@ -337,7 +337,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.language_master_table (
+        CREATE TABLE IF NOT EXISTS %1$I.language_master_table (
             id              SERIAL          PRIMARY KEY,
             language_name   VARCHAR(255)    NOT NULL,
             preference      INTEGER,
@@ -352,7 +352,7 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
-        CREATE TABLE %1$I.user_token_table (
+        CREATE TABLE IF NOT EXISTS %1$I.user_token_table (
             id          BIGSERIAL    PRIMARY KEY,
             uuid        VARCHAR(36)  NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             email       VARCHAR(255) NOT NULL,

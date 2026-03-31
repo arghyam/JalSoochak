@@ -68,6 +68,46 @@ class UserSecurityEvaluatorTest {
         return new AdminUserRow(1L, uuid, "user@example.com", null, 1, 1, AdminUserStatus.ACTIVE, 1, null);
     }
 
+    private static AdminUserRow inactiveAdminRow(String uuid) {
+        return new AdminUserRow(2L, uuid, "inactive@example.com", null, 1, 1, AdminUserStatus.INACTIVE, 1, null);
+    }
+
+    private JwtAuthenticationToken authForUuid(String uuid) {
+        Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").claim("sub", uuid).build();
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"),
+                new SimpleGrantedAuthority("TENANT_MP")));
+    }
+
+    // ── Caller validation ─────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Caller validation")
+    class CallerValidation {
+
+        @Test
+        @DisplayName("is denied when caller is not found in the database")
+        void deniedWhenCallerNotFound() {
+            when(userCommonRepository.findAdminUserByUuid("missing-uuid")).thenReturn(Optional.empty());
+
+            boolean result = evaluator.canAccessUser(10L, authForUuid("missing-uuid"));
+
+            assertFalse(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("is denied when caller exists but is not ACTIVE")
+        void deniedWhenCallerInactive() {
+            when(userCommonRepository.findAdminUserByUuid("inactive-uuid"))
+                    .thenReturn(Optional.of(inactiveAdminRow("inactive-uuid")));
+
+            boolean result = evaluator.canAccessUser(10L, authForUuid("inactive-uuid"));
+
+            assertFalse(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
+        }
+    }
+
     // ── SUPER_USER ────────────────────────────────────────────────────────────────
 
     @Nested

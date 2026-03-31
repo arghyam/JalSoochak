@@ -75,8 +75,11 @@ public class UserCommonRepository {
 
     /**
      * Returns {@code true} if the user with the given ID exists and belongs to the tenant
-     * identified by {@code tenantStateCode} (case-insensitive). Returns {@code false} if the
-     * user does not exist, has no tenant (tenant_id = 0), or belongs to a different tenant.
+     * identified by {@code tenantStateCode} (case-insensitive), and that tenant is not
+     * deactivated, suspended, or archived (i.e. status is not INACTIVE=0, SUSPENDED=4,
+     * or ARCHIVED=6). Returns {@code false} if the user does not exist, has no tenant
+     * (tenant_id = 0), belongs to a different tenant, or belongs to a tenant in a
+     * blocked status.
      *
      * <p>Used by {@code UserSecurityEvaluator} to enforce tenant-scoped access in a single
      * round-trip instead of two separate lookups.
@@ -89,6 +92,7 @@ public class UserCommonRepository {
                     JOIN common_schema.tenant_master_table t ON t.id = u.tenant_id
                     WHERE u.id = ?
                     AND UPPER(t.state_code) = UPPER(?)
+                    AND t.status NOT IN (0, 4, 6)
                 )
                 """;
         Boolean result = jdbcTemplate.queryForObject(sql, Boolean.class, userId, tenantStateCode);

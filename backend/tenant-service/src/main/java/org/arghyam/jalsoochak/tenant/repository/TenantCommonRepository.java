@@ -286,7 +286,7 @@ public class TenantCommonRepository {
     }
 
     /**
-     * Deactivated a tenant by setting status to INACTIVE and recording updated_at.
+     * Deactivates a tenant by setting status to INACTIVE and recording updated_at and updated_by.
      */
     public void deactivateTenant(Integer tenantId, Integer currentUserId) {
         String sql = """
