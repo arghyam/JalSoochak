@@ -49,6 +49,7 @@ public class NudgeRepository {
                     AND fr.created_by = u.id
                     AND fr.reading_date = ?
                 WHERE usm.status = 1
+                  AND u.status = 1
                   AND UPPER(ut.c_name) = 'PUMP_OPERATOR'
                   AND fr.id IS NULL
                 """, schema, schema, schema);
@@ -131,6 +132,7 @@ public class NudgeRepository {
                         ON fr.scheme_id = usm.scheme_id AND fr.created_by = u.id
                     LEFT JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
                     WHERE usm.status = 1
+                      AND u.status = 1
                       AND UPPER(ut.c_name) = 'PUMP_OPERATOR'
                     GROUP BY u.id, u.title, u.phone_number, u.language_id, u.whatsapp_connection_id,
                              usm.scheme_id, sm.state_scheme_id
@@ -182,7 +184,7 @@ public class NudgeRepository {
                 FROM %s.user_scheme_mapping_table usm
                 JOIN %s.user_table u ON u.id = usm.user_id
                 JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type
-                WHERE usm.scheme_id = ? AND UPPER(ut.c_name) = UPPER(?) AND usm.status = 1
+                WHERE usm.scheme_id = ? AND UPPER(ut.c_name) = UPPER(?) AND usm.status = 1 AND u.status = 1
                 ORDER BY u.id
                 LIMIT 1
                 """, schema, schema);
@@ -220,7 +222,7 @@ public class NudgeRepository {
                 FROM %s.user_scheme_mapping_table usm
                 JOIN %s.user_table u ON u.id = usm.user_id
                 JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type
-                WHERE UPPER(ut.c_name) = UPPER(?) AND usm.status = 1
+                WHERE UPPER(ut.c_name) = UPPER(?) AND usm.status = 1 AND u.status = 1
                 ORDER BY usm.scheme_id, u.id
                 """, schema, schema);
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, userTypeName);
