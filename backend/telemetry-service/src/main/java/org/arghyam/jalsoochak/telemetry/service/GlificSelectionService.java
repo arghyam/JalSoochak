@@ -371,9 +371,14 @@ public class GlificSelectionService {
         } catch (Exception e) {
             log.error("Error building item selection message: {}", e.getMessage(), e);
             log.debug("Error building item selection message for contactId {}: {}", request.getContactId(), e.getMessage());
+            String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             return IntroResponse.builder()
                     .success(false)
-                    .message("Item selection could not be prepared.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Item selection could not be prepared.",
+                            languageKey
+                    ))
                     .build();
         }
     }
