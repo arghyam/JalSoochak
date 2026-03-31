@@ -42,7 +42,7 @@ class JwtAuthConverterTest {
         Set<String> authorities = authorities(token);
 
         assertThat(token.getName()).isEqualTo("admin@example.com");
-        assertThat(authorities).contains(
+        assertThat(authorities).containsExactlyInAnyOrder(
                 "ROLE_SUPER_USER",
                 "ROLE_STATE_ADMIN",
                 "TENANT_MP",
@@ -104,6 +104,30 @@ class JwtAuthConverterTest {
     @Test
     void convert_blankClientId_producesNoClientRoles() {
         JwtAuthConverter converterNoClient = new JwtAuthConverter("");
+        Jwt jwt = buildJwt(Map.of(
+                "sub", "user-uuid",
+                "resource_access", Map.of(CLIENT_ID, Map.of("roles", List.of("STATE_ADMIN")))));
+
+        JwtAuthenticationToken token = (JwtAuthenticationToken) converterNoClient.convert(jwt);
+
+        assertThat(authorities(token)).doesNotContain("ROLE_STATE_ADMIN");
+    }
+
+    @Test
+    void convert_nullClientId_producesNoClientRoles() {
+        JwtAuthConverter converterNoClient = new JwtAuthConverter(null);
+        Jwt jwt = buildJwt(Map.of(
+                "sub", "user-uuid",
+                "resource_access", Map.of(CLIENT_ID, Map.of("roles", List.of("STATE_ADMIN")))));
+
+        JwtAuthenticationToken token = (JwtAuthenticationToken) converterNoClient.convert(jwt);
+
+        assertThat(authorities(token)).doesNotContain("ROLE_STATE_ADMIN");
+    }
+
+    @Test
+    void convert_whitespaceClientId_producesNoClientRoles() {
+        JwtAuthConverter converterNoClient = new JwtAuthConverter("   ");
         Jwt jwt = buildJwt(Map.of(
                 "sub", "user-uuid",
                 "resource_access", Map.of(CLIENT_ID, Map.of("roles", List.of("STATE_ADMIN")))));

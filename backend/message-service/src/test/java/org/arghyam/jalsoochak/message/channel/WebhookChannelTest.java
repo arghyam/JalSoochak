@@ -18,6 +18,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Uses WireMock to stub the HTTP server. Verifies that successful POSTs
  * return {@code true}, HTTP errors return {@code false}, missing URLs
  * return {@code false}, and the recipient URL overrides the default.</p>
+ *
+ * <p><b>Rationale for manual WireMock setup:</b> This test uses plain
+ * WireMock without Spring context to keep the test fast and focused on the
+ * WebClient-based channel logic. Spring Boot context initialization is not
+ * required for this pure unit test, as all dependencies are constructed
+ * directly without autowiring.</p>
  */
 class WebhookChannelTest {
 

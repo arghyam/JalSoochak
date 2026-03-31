@@ -76,6 +76,9 @@ class TimeZoneValidatorTest {
         when(context.buildConstraintViolationWithTemplate(anyString())).thenReturn(violationBuilder);
 
         assertThat(validator.isValid("Asia/", context)).isFalse();
+
+        verify(context).disableDefaultConstraintViolation();
+        verify(violationBuilder).addConstraintViolation();
     }
 
     @Test
@@ -84,5 +87,15 @@ class TimeZoneValidatorTest {
         when(context.buildConstraintViolationWithTemplate(anyString())).thenReturn(violationBuilder);
 
         assertThat(validator.isValid("GMT+25:00", context)).isFalse();
+
+        verify(context).disableDefaultConstraintViolation();
+        verify(violationBuilder).addConstraintViolation();
+    }
+
+    @Test
+    void isValid_acceptsValidOffset() {
+        // Document that valid offset strings like "+05:30" are accepted by ZoneId.of()
+        assertThat(validator.isValid("+05:30", context)).isTrue();
+        verifyNoInteractions(context);
     }
 }

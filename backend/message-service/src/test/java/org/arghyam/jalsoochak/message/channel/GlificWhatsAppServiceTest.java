@@ -425,7 +425,7 @@ class GlificWhatsAppServiceTest {
         Map<String, Object> vars = varsCaptor.getValue();
         assertThat(vars.get("templateId")).isEqualTo("otp-tmpl-1");
         assertThat(vars.get("receiverId")).isEqualTo(11L);
-        assertThat(vars.get("parameters").toString()).contains("654321");
+        assertThat(vars.get("parameters")).isEqualTo(List.of("654321"));
     }
 
     @Test

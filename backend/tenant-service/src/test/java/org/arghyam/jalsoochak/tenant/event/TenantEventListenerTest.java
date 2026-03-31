@@ -75,8 +75,9 @@ class TenantEventListenerTest {
         }));
         verify(setOperations).add("tenant-service:tenants:index", "MP");
         verify(kafkaProducer).publishJson(eq("tenant-service-topic"), argThat(payload -> {
-            String s = payload.toString();
-            return s.contains("TENANT_CREATED") && s.contains("mp");
+            if (!(payload instanceof Map)) return false;
+            Map<?, ?> m = (Map<?, ?>) payload;
+            return "TENANT_CREATED".equals(m.get("eventType")) && "mp".equals(m.get("stateCode"));
         }));
     }
 
@@ -136,8 +137,11 @@ class TenantEventListenerTest {
         listener.handleTenantUpdated(event);
 
         verify(hashOperations).putAll(eq("tenant-service:tenants:MP:profile"), any());
-        verify(kafkaProducer).publishJson(eq("tenant-service-topic"), argThat(payload ->
-                payload.toString().contains("TENANT_UPDATED")));
+        verify(kafkaProducer).publishJson(eq("tenant-service-topic"), argThat(payload -> {
+            if (!(payload instanceof Map)) return false;
+            Map<?, ?> m = (Map<?, ?>) payload;
+            return "TENANT_UPDATED".equals(m.get("eventType"));
+        }));
     }
 
     @Test
@@ -174,8 +178,11 @@ class TenantEventListenerTest {
 
         verify(redisTemplate).delete("tenant-service:tenants:MP:profile");
         verify(setOperations).remove("tenant-service:tenants:index", "MP");
-        verify(kafkaProducer).publishJson(eq("tenant-service-topic"), argThat(payload ->
-                payload.toString().contains("TENANT_DEACTIVATED")));
+        verify(kafkaProducer).publishJson(eq("tenant-service-topic"), argThat(payload -> {
+            if (!(payload instanceof Map)) return false;
+            Map<?, ?> m = (Map<?, ?>) payload;
+            return "TENANT_DEACTIVATED".equals(m.get("eventType"));
+        }));
     }
 
     @Test
@@ -235,6 +242,8 @@ class TenantEventListenerTest {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaProducer).publishJson(anyString(), captor.capture());
         // ACTIVE = code 3
-        assertThat(captor.getValue().toString()).contains("3");
+        assertThat(captor.getValue()).isInstanceOf(Map.class);
+        Map<?, ?> payload = (Map<?, ?>) captor.getValue();
+        assertThat(payload.get("status")).isEqualTo(3);
     }
 }

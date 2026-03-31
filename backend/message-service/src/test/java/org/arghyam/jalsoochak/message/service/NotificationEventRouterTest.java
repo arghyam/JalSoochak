@@ -691,7 +691,10 @@ class NotificationEventRouterTest {
     @Test
     @SuppressWarnings("unchecked")
     void route_sendsWelcomeMessage_whenContactIdFound() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("919111111111")))
+        when(jdbcTemplate.query(
+                argThat(sql -> sql.contains("FROM tenant_mp.whatsapp_connection") && sql.contains("WHERE msisdn = ?")),
+                any(RowMapper.class),
+                eq("919111111111")))
                 .thenReturn(List.of(88L));
 
         router.route("""
@@ -706,7 +709,10 @@ class NotificationEventRouterTest {
     @Test
     @SuppressWarnings("unchecked")
     void route_routesToDlt_whenNoContactIdFound() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("919222222222")))
+        when(jdbcTemplate.query(
+                argThat(sql -> sql.contains("FROM tenant_mp.whatsapp_connection") && sql.contains("WHERE msisdn = ?")),
+                any(RowMapper.class),
+                eq("919222222222")))
                 .thenReturn(List.of());
 
         router.route("""
@@ -743,7 +749,10 @@ class NotificationEventRouterTest {
     @Test
     @SuppressWarnings("unchecked")
     void route_updatesLanguage_whenContactIdFound() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("919444444444")))
+        when(jdbcTemplate.query(
+                argThat(sql -> sql.contains("FROM tenant_mp.whatsapp_connection") && sql.contains("WHERE msisdn = ?")),
+                any(RowMapper.class),
+                eq("919444444444")))
                 .thenReturn(List.of(99L));
 
         router.route("""
@@ -758,7 +767,10 @@ class NotificationEventRouterTest {
     @Test
     @SuppressWarnings("unchecked")
     void route_rethrowsException_whenUpdateLanguageFails_forSomePhones() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("919555555555")))
+        when(jdbcTemplate.query(
+                argThat(sql -> sql.contains("FROM tenant_mp.whatsapp_connection") && sql.contains("WHERE msisdn = ?")),
+                any(RowMapper.class),
+                eq("919555555555")))
                 .thenReturn(List.of());
 
         assertThatThrownBy(() -> router.route("""

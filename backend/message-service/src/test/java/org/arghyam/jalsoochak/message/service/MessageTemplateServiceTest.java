@@ -192,4 +192,18 @@ class MessageTemplateServiceTest {
         assertThat(result).isEqualTo("Report enclosed.");
         verify(jdbcTemplate, never()).query(anyString(), any(RowMapper.class), eq(2), eq("language_0"));
     }
+
+    @Test
+    void findEscalationMessage_fallsBackToEnglishKey_whenLocalizedKeyAbsent() {
+        stubConfig(2, "language_3", "Telugu");
+        stubConfigAbsent(2, "escalation_message_telugu");
+        stubConfig(2, "escalation_message_english", "English escalation report.");
+
+        String result = service.findEscalationMessage(2, 3);
+
+        assertThat(result).isEqualTo("English escalation report.");
+        verify(jdbcTemplate).query(anyString(), any(RowMapper.class), eq(2), eq("language_3"));
+        verify(jdbcTemplate).query(anyString(), any(RowMapper.class), eq(2), eq("escalation_message_telugu"));
+        verify(jdbcTemplate).query(anyString(), any(RowMapper.class), eq(2), eq("escalation_message_english"));
+    }
 }

@@ -34,12 +34,14 @@ class ChannelValidatorTest {
     @Test
     void isValid_returnsTrue_forAllAllowedChannels() {
         assertThat(validator.isValid(List.of("BFM", "ELM", "PDU", "IOT", "MAN"), context)).isTrue();
+        verifyNoInteractions(context);
     }
 
     @Test
     void isValid_returnsTrue_forSingleValidChannel() {
         assertThat(validator.isValid(List.of("BFM"), context)).isTrue();
         assertThat(validator.isValid(List.of("IOT"), context)).isTrue();
+        verifyNoInteractions(context);
     }
 
     @Test
@@ -74,6 +76,8 @@ class ChannelValidatorTest {
         assertThat(validator.isValid(List.of("BFM", "UNKNOWN"), context)).isFalse();
 
         verify(context).disableDefaultConstraintViolation();
+        verify(context).buildConstraintViolationWithTemplate(anyString());
+        verify(violationBuilder).addConstraintViolation();
     }
 
     @Test
@@ -82,5 +86,9 @@ class ChannelValidatorTest {
 
         // Validator is case-sensitive — "bfm" is not the same as "BFM"
         assertThat(validator.isValid(List.of("bfm"), context)).isFalse();
+
+        verify(context).disableDefaultConstraintViolation();
+        verify(context).buildConstraintViolationWithTemplate(anyString());
+        verify(violationBuilder).addConstraintViolation();
     }
 }
