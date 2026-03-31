@@ -644,7 +644,11 @@ public class GlificMeterWorkflowService {
             log.error("Error saving issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report could not be saved.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Issue report could not be saved.",
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())
+                    ))
                     .build();
         }
     }
@@ -851,7 +855,11 @@ public class GlificMeterWorkflowService {
             log.error("Error saving telemetry issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report could not be saved.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Issue report could not be saved.",
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())
+                    ))
                     .build();
         }
     }

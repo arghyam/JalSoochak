@@ -31,6 +31,8 @@ public class GlificOperatorContextService {
                 .findPreferredTenantIdByContactId(contactId)
                 .orElse(null);
 
+        System.out.println("prefered lang " + preferredTenantId);
+
         return resolveOperatorWithSchema(contactId, preferredTenantId);
     }
 
