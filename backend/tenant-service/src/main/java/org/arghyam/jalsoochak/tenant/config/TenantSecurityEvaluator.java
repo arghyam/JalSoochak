@@ -2,8 +2,11 @@ package org.arghyam.jalsoochak.tenant.config;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
+import org.arghyam.jalsoochak.tenant.util.TenantAccessValidator;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.stereotype.Component;
 
@@ -28,7 +31,8 @@ public class TenantSecurityEvaluator {
 
     /**
      * Returns {@code true} if the authenticated STATE_ADMIN's tenant state code matches
-     * the state code of the tenant identified by {@code tenantId}.
+     * the state code of the tenant identified by {@code tenantId} and the tenant status
+     * permits access.
      *
      * <p>Returns {@code false} (→ 403) when:
      * <ul>
@@ -37,6 +41,7 @@ public class TenantSecurityEvaluator {
      *       to prevent STATE_ADMIN callers from probing valid tenant IDs via differing
      *       error codes (OWASP API1 — Broken Object Level Authorization)</li>
      *   <li>The caller's state code does not match the tenant's state code</li>
+     *   <li>The tenant status does not permit STATE_ADMIN access (e.g., ARCHIVED)</li>
      * </ul>
      *
      * <p>NOTE: Exceptions must not be thrown from this method. A {@code RuntimeException}
@@ -63,12 +68,25 @@ public class TenantSecurityEvaluator {
         try {
             return tenantCommonRepository.findById(tenantId)
                     .map(tenant -> {
-                        boolean allowed = tenant.getStateCode() != null && callerStateCode.equalsIgnoreCase(tenant.getStateCode());
-                        if (!allowed) {
+                        // Check if state code matches
+                        boolean stateCodeMatches = tenant.getStateCode() != null && callerStateCode.equalsIgnoreCase(tenant.getStateCode());
+                        if (!stateCodeMatches) {
                             log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {} (state_code='{}')",
                                     callerStateCode, tenantId, tenant.getStateCode());
+                            return false;
                         }
-                        return allowed;
+
+                        // Check if tenant status permits STATE_ADMIN access
+                        try {
+                            // Parse status string to code
+                            int statusCode = TenantStatusEnum.valueOf(tenant.getStatus()).getCode();
+                            TenantAccessValidator.validateSystemUserAccess(statusCode, true);
+                            return true;
+                        } catch (Exception e) {
+                            log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {} due to status: {}",
+                                    callerStateCode, tenantId, tenant.getStatus());
+                            return false;
+                        }
                     })
                     .orElseGet(() -> {
                         log.warn("STATE_ADMIN with tenant_state_code='{}' attempted access to non-existent tenant {}",

@@ -38,6 +38,7 @@ import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
 import org.arghyam.jalsoochak.user.service.MetadataDecryptionHelper;
 import org.arghyam.jalsoochak.user.service.TokenService;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
+import org.arghyam.jalsoochak.user.util.TenantAccessValidator;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -348,9 +349,24 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * Blocks login for tenants that do not allow user access.
-     * Only ACTIVE (3) and DEGRADED (5) tenants permit login.
-     * tenantId == 0 is the system tenant (SUPER_USER) — always allowed.
+     * Validates tenant status for user access based on their role.
+     * 
+     * <p>System Users (SUPER_USER, STATE_ADMIN):
+     * <ul>
+     *   <li>Can access: ONBOARDED (1), CONFIGURED (2), ACTIVE (3), INACTIVE (0), DEGRADED (5), SUSPENDED (4)</li>
+     *   <li>SUPER_USER only: ARCHIVED (6)</li>
+     * </ul>
+     * 
+     * <p>Staff Users (adminLevel=null):
+     * <ul>
+     *   <li>Can access: ACTIVE (3), DEGRADED (5)</li>
+     * </ul>
+     * 
+     * <p>tenantId == 0 is the system tenant (SUPER_USER) — always allowed.
+     * 
+     * @param tenantId The tenant ID
+     * @param adminLevel The admin level (2 for STATE_ADMIN, null for staff users)
+     * @throws ForbiddenAccessException if the tenant status does not permit access
      */
     private void validateTenantStatus(Integer tenantId, Integer adminLevel) {
         if (tenantId == null || tenantId == 0) return;
@@ -359,18 +375,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Tenant not found or no longer exists.");
         }
         int status = statusOpt.get();
-        boolean isStateAdmin = adminLevel != null && adminLevel == 2;
-        if (status == 3 || status == 5) return; // ACTIVE or DEGRADED — always allowed
-        if (isStateAdmin && status == 2) return; // CONFIGURED — allowed for STATE_ADMIN only
-        String message = switch (status) {
-            case 1 -> "Tenant setup is not yet complete.";
-            case 2 -> "Tenant is not yet operational.";
-            case 0 -> "Tenant access has been deactivated.";
-            case 4 -> "Tenant has been suspended.";
-            case 6 -> "Tenant is archived and no longer accessible.";
-            default -> "Tenant is not accessible.";
-        };
-        throw new AccountDeactivatedException(message);
+        TenantAccessValidator.validateTenantAccess(status, adminLevel);
     }
 
     private String parseMetadata(String json, String key) {
