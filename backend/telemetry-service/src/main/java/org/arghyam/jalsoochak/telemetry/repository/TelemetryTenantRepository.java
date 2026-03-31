@@ -1028,6 +1028,18 @@ public class TelemetryTenantRepository {
 
     private Optional<TelemetryOperator> findOperatorByPhone(String schemaName, String rawPhoneNumber, String normalizedPhone) {
         validateSchemaName(schemaName);
+        if (columnExists(schemaName, "user_table", "phone_number_hash")) {
+            Optional<TelemetryOperator> hashMatch = findOperatorByPhoneHash(schemaName, rawPhoneNumber);
+            if (hashMatch.isPresent()) {
+                return hashMatch;
+            }
+            if (normalizedPhone != null && !normalizedPhone.isBlank() && !normalizedPhone.equals(rawPhoneNumber)) {
+                hashMatch = findOperatorByPhoneHash(schemaName, normalizedPhone);
+                if (hashMatch.isPresent()) {
+                    return hashMatch;
+                }
+            }
+        }
         String languageColumn = resolveSelectColumn(schemaName, "user_table", "language_id", "NULL::integer AS language_id");
         String sql = String.format("""
                 SELECT id, tenant_id, title, email, phone_number, language_id
@@ -1058,6 +1070,23 @@ public class TelemetryTenantRepository {
         return Optional.empty();
     }
 
+    private Optional<TelemetryOperator> findOperatorByPhoneHash(String schemaName, String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return Optional.empty();
+        }
+        String languageColumn = resolveSelectColumn(schemaName, "user_table", "language_id", "NULL::integer AS language_id");
+        String sql = String.format("""
+                SELECT id, tenant_id, title, email, phone_number, language_id
+                FROM %s.user_table
+                WHERE phone_number_hash = ?
+                LIMIT 1
+                """, schemaName);
+        sql = sql.replace("language_id", languageColumn);
+        String lookupHash = piiEncryptionService.hmac(phoneNumber.trim());
+        List<TelemetryOperator> rows = jdbcTemplate.query(sql, (rs, n) -> mapOperator(rs), lookupHash);
+        return rows.stream().findFirst();
+    }
+
     private TelemetryOperator mapOperator(ResultSet rs) {
         try {
             return new TelemetryOperator(
@@ -1074,18 +1103,7 @@ public class TelemetryTenantRepository {
     }
 
     private String decryptPhoneIfNeeded(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        if (trimmed.isEmpty()) {
-            return trimmed;
-        }
-        String digits = trimmed.replaceAll("\\\\D", "");
-        if (!digits.isEmpty() && digits.length() >= 8 && digits.length() <= 15) {
-            return trimmed;
-        }
-        return piiEncryptionService.decrypt(trimmed);
+        return piiEncryptionService.safeDecrypt(value);
     }
 
     private String normalizePhone(String value) {

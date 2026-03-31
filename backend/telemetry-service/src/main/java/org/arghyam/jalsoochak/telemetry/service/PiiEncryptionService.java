@@ -125,6 +125,29 @@ public class PiiEncryptionService {
     }
 
     /**
+     * Decrypts a PII column value read from the database, with a fallback for
+     * legacy rows stored as plaintext before encryption.
+     *
+     * <p>A value is treated as legacy plaintext when it is either not valid Base64 or its
+     * decoded length is less than 28 bytes (12-byte IV + 16-byte GCM auth tag — the
+     * minimum AES-GCM payload for empty plaintext).
+     *
+     * @return decrypted plaintext, raw value for legacy rows, or {@code null} if input is {@code null}
+     */
+    public String safeDecrypt(String encoded) {
+        if (encoded == null) return null;
+        try {
+            byte[] decoded = Base64.getDecoder().decode(encoded);
+            if (decoded.length < IV_LENGTH_BYTES + 16) {
+                return encoded;
+            }
+        } catch (IllegalArgumentException e) {
+            return encoded;
+        }
+        return decrypt(encoded);
+    }
+
+    /**
      * Returns a hex-encoded HMAC-SHA256 of the trimmed {@code plaintext}.
      * Used to produce a deterministic lookup key for encrypted fields.
      *
