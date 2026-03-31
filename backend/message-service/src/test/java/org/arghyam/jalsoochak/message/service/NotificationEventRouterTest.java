@@ -692,7 +692,7 @@ class NotificationEventRouterTest {
     @SuppressWarnings("unchecked")
     void route_sendsWelcomeMessage_whenContactIdFound() {
         when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_mp.whatsapp_connection") && sql.contains("WHERE msisdn = ?")),
+                argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
                 any(RowMapper.class),
                 eq("919111111111")))
                 .thenReturn(List.of(88L));
@@ -710,7 +710,7 @@ class NotificationEventRouterTest {
     @SuppressWarnings("unchecked")
     void route_routesToDlt_whenNoContactIdFound() {
         when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_mp.whatsapp_connection") && sql.contains("WHERE msisdn = ?")),
+                argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
                 any(RowMapper.class),
                 eq("919222222222")))
                 .thenReturn(List.of());
@@ -750,7 +750,7 @@ class NotificationEventRouterTest {
     @SuppressWarnings("unchecked")
     void route_updatesLanguage_whenContactIdFound() {
         when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_mp.whatsapp_connection") && sql.contains("WHERE msisdn = ?")),
+                argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
                 any(RowMapper.class),
                 eq("919444444444")))
                 .thenReturn(List.of(99L));
@@ -768,7 +768,7 @@ class NotificationEventRouterTest {
     @SuppressWarnings("unchecked")
     void route_rethrowsException_whenUpdateLanguageFails_forSomePhones() {
         when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_mp.whatsapp_connection") && sql.contains("WHERE msisdn = ?")),
+                argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
                 any(RowMapper.class),
                 eq("919555555555")))
                 .thenReturn(List.of());

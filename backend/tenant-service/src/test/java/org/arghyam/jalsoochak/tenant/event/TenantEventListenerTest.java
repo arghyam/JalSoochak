@@ -113,6 +113,8 @@ class TenantEventListenerTest {
         listener.handleTenantCreated(event);
 
         verify(kafkaProducer, never()).publishJson(anyString(), any());
+        verify(redisTemplate, never()).opsForHash();
+        verify(redisTemplate, never()).opsForSet();
     }
 
     @Test

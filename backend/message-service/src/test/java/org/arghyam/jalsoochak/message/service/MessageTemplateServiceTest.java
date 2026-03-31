@@ -32,11 +32,13 @@ class MessageTemplateServiceTest {
 
     // ── helpers ──────────────────────────────────────────────────────────────────
 
+    @SuppressWarnings("unchecked")
     private void stubConfig(int tenantId, String key, String value) {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq(tenantId), eq(key)))
                 .thenReturn(List.of(value));
     }
 
+    @SuppressWarnings("unchecked")
     private void stubConfigAbsent(int tenantId, String key) {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq(tenantId), eq(key)))
                 .thenReturn(Collections.emptyList());
