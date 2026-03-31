@@ -294,7 +294,7 @@ public class TenantCommonRepository {
                 SET status = ?, updated_at = NOW(), updated_by = ?
                 WHERE id = ?
                 """;
-        int rows = jdbcTemplate.update(sql, TenantStatusEnum.INACTIVE.getCode(), currentUserId, currentUserId,
+        int rows = jdbcTemplate.update(sql, TenantStatusEnum.INACTIVE.getCode(), currentUserId,
                 tenantId);
         if (rows == 0) {
             throw new IllegalArgumentException("Tenant with tenantId " + tenantId + " does not exist");

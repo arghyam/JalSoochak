@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.user.config;
 
+import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
+import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -14,9 +16,12 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,6 +64,10 @@ class UserSecurityEvaluatorTest {
         return new JwtAuthenticationToken(jwt, List.of());
     }
 
+    private static AdminUserRow activeAdminRow(String uuid) {
+        return new AdminUserRow(1L, uuid, "user@example.com", null, 1, 1, AdminUserStatus.ACTIVE, 1, null);
+    }
+
     // ── SUPER_USER ────────────────────────────────────────────────────────────────
 
     @Nested
@@ -68,10 +77,12 @@ class UserSecurityEvaluatorTest {
         @Test
         @DisplayName("can access any user without hitting the database")
         void canAccessAnyUser() {
+            when(userCommonRepository.findAdminUserByUuid("su-uuid")).thenReturn(Optional.of(activeAdminRow("su-uuid")));
+
             boolean result = evaluator.canAccessUser(42L, superUserAuth());
 
             assertTrue(result);
-            verify(userCommonRepository, never()).userBelongsToTenant(42L, "any");
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
         }
     }
 
@@ -84,6 +95,7 @@ class UserSecurityEvaluatorTest {
         @Test
         @DisplayName("can access user in their own tenant")
         void canAccessOwnTenant() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
             when(userCommonRepository.userBelongsToTenant(10L, "MP")).thenReturn(true);
 
             boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
@@ -94,6 +106,7 @@ class UserSecurityEvaluatorTest {
         @Test
         @DisplayName("cannot access user in a different tenant")
         void cannotAccessDifferentTenant() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
             when(userCommonRepository.userBelongsToTenant(10L, "MP")).thenReturn(false);
 
             boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
@@ -104,6 +117,7 @@ class UserSecurityEvaluatorTest {
         @Test
         @DisplayName("returns false (not 404) when user does not exist — prevents ID probing")
         void returnsFalseForNonExistentUser() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
             when(userCommonRepository.userBelongsToTenant(999L, "MP")).thenReturn(false);
 
             boolean result = evaluator.canAccessUser(999L, stateAdminAuth("MP"));
@@ -114,18 +128,21 @@ class UserSecurityEvaluatorTest {
         @Test
         @DisplayName("is denied when JWT has no tenant_state_code claim")
         void deniedWhenNoTenantClaim() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+
             boolean result = evaluator.canAccessUser(10L, stateAdminAuthNoTenant());
 
             assertFalse(result);
-            verify(userCommonRepository, never()).userBelongsToTenant(10L, null);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
         }
 
         @Test
-        @DisplayName("tenant code comparison is case-insensitive")
+        @DisplayName("tenant code normalization to uppercase")
         void tenantCodeCaseInsensitive() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
             when(userCommonRepository.userBelongsToTenant(10L, "MP")).thenReturn(true);
 
-            // Authority stored as TENANT_MP → extracted as "MP"; DB comparison is UPPER() in SQL
+            // Authority stored as TENANT_MP → extracted as "MP" via toUpperCase() in stateAdminAuth helper
             boolean result = evaluator.canAccessUser(10L, stateAdminAuth("mp"));
 
             assertTrue(result);
@@ -141,10 +158,12 @@ class UserSecurityEvaluatorTest {
         @Test
         @DisplayName("is always denied")
         void alwaysDenied() {
+            when(userCommonRepository.findAdminUserByUuid("anon-uuid")).thenReturn(Optional.of(activeAdminRow("anon-uuid")));
+
             boolean result = evaluator.canAccessUser(10L, noRoleAuth());
 
             assertFalse(result);
-            verify(userCommonRepository, never()).userBelongsToTenant(10L, null);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
         }
     }
 
@@ -157,6 +176,7 @@ class UserSecurityEvaluatorTest {
         @Test
         @DisplayName("returns false (not 500) when repository throws DataAccessException")
         void returnsFalseOnRepositoryException() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
             when(userCommonRepository.userBelongsToTenant(10L, "MP"))
                     .thenThrow(new QueryTimeoutException("DB timeout"));
 
@@ -168,6 +188,7 @@ class UserSecurityEvaluatorTest {
         @Test
         @DisplayName("returns false (not 500) when an unexpected RuntimeException is thrown")
         void returnsFalseOnUnexpectedException() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
             when(userCommonRepository.userBelongsToTenant(10L, "MP"))
                     .thenThrow(new RuntimeException("unexpected"));
 

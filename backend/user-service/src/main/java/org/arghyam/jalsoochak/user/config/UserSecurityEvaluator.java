@@ -2,7 +2,9 @@ package org.arghyam.jalsoochak.user.config;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
+import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
@@ -18,7 +20,7 @@ import java.util.Optional;
  * {@code @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN') and @userSecurity.canAccessUser(#id, authentication)")}
  * </pre>
  *
- * <p>SUPER_USER short-circuits the expression and bypasses the DB lookup entirely.
+ * <p>SUPER_USER short-circuits the expression and bypasses the tenant DB lookup entirely.
  * STATE_ADMIN callers are checked against the {@code tenant_state_code} claim in their JWT.
  */
 @Component("userSecurity")
@@ -36,6 +38,7 @@ public class UserSecurityEvaluator {
      *
      * <p>Returns {@code false} (→ 403) when:
      * <ul>
+     *   <li>The caller is not found in the database or is not active (stale/orphaned token)</li>
      *   <li>The user with the given ID does not exist — intentionally returns 403, not 404,
      *       to prevent STATE_ADMIN callers from probing valid user IDs via differing
      *       error codes (OWASP API1 — Broken Object Level Authorization)</li>
@@ -55,6 +58,14 @@ public class UserSecurityEvaluator {
      */
     public boolean canAccessUser(Long userId, Authentication authentication) {
         try {
+            // Verify caller exists and is active — rejects stale/orphaned tokens regardless of role
+            String callerUuid = SecurityUtils.getKeycloakId(authentication);
+            Optional<AdminUserRow> caller = userCommonRepository.findAdminUserByUuid(callerUuid);
+            if (caller.isEmpty() || caller.get().status() != AdminUserStatus.ACTIVE) {
+                log.warn("Request to user {} denied: caller '{}' is missing or inactive", userId, callerUuid);
+                return false;
+            }
+
             Optional<String> callerRole = SecurityUtils.extractRole(authentication);
 
             // SUPER_USER can access any user
