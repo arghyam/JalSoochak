@@ -794,12 +794,32 @@ public class TelemetryTenantRepository {
                                           String reason,
                                           Integer status) {
         validateSchemaName(schemaName);
-        String sql = String.format("""
-                INSERT INTO %s.anomaly_table
-                    (user_id, scheme_id, type, reason, status, created_at)
-                VALUES (?, ?, ?, ?, ?, NOW())
-                """, schemaName);
-        jdbcTemplate.update(sql, userId, schemeId, type, reason, status);
+        boolean hasDetail = columnExists(schemaName, "anomaly_table", "detail");
+        boolean hasReason = columnExists(schemaName, "anomaly_table", "reason");
+
+        String sql;
+        if (hasDetail && hasReason) {
+            sql = String.format("""
+                    INSERT INTO %s.anomaly_table
+                        (user_id, scheme_id, type, reason, detail, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, NOW())
+                    """, schemaName);
+            jdbcTemplate.update(sql, userId, schemeId, type, reason, reason, status);
+        } else if (hasDetail) {
+            sql = String.format("""
+                    INSERT INTO %s.anomaly_table
+                        (user_id, scheme_id, type, detail, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, NOW())
+                    """, schemaName);
+            jdbcTemplate.update(sql, userId, schemeId, type, reason, status);
+        } else {
+            sql = String.format("""
+                    INSERT INTO %s.anomaly_table
+                        (user_id, scheme_id, type, reason, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, NOW())
+                    """, schemaName);
+            jdbcTemplate.update(sql, userId, schemeId, type, reason, status);
+        }
     }
 
     public Optional<TelemetryReadingRecord> findReadingByCorrelationId(String schemaName, String correlationId) {
