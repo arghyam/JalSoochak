@@ -169,6 +169,7 @@ class TenantEventListenerTest {
         listener.handleTenantUpdated(event);
 
         verify(redisTemplate, never()).opsForHash();
+        verify(redisTemplate, never()).opsForSet();
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 
@@ -210,6 +211,7 @@ class TenantEventListenerTest {
         listener.handleTenantDeactivated(event);
 
         verify(redisTemplate, never()).delete(anyString());
+        verify(redisTemplate, never()).opsForSet();
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 

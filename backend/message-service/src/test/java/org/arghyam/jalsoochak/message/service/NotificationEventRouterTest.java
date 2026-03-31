@@ -81,6 +81,19 @@ class NotificationEventRouterTest {
         ReflectionTestUtils.setField(router, "baseUrl", "https://example.com");
     }
 
+    /**
+     * Helper method to stub jdbcTemplate.query for user lookup.
+     * Centralizes the SQL matcher and return list handling.
+     */
+    @SuppressWarnings("unchecked")
+    private void stubUserLookup(String tenantCode, String phone, List<Long> returnList) {
+        when(jdbcTemplate.query(
+                argThat(sql -> sql.contains("FROM tenant_" + tenantCode + ".user_table") && sql.contains("WHERE phone_number = ?")),
+                any(RowMapper.class),
+                eq(phone)))
+                .thenReturn(returnList);
+    }
+
     // ──────────────────────────────── NUDGE ────────────────────────────────────
 
     @Test
@@ -689,13 +702,8 @@ class NotificationEventRouterTest {
     // ──────────────────────── SEND_WELCOME_MESSAGE ─────────────────────────────
 
     @Test
-    @SuppressWarnings("unchecked")
     void route_sendsWelcomeMessage_whenContactIdFound() {
-        when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
-                any(RowMapper.class),
-                eq("919111111111")))
-                .thenReturn(List.of(88L));
+        stubUserLookup("mp", "919111111111", List.of(88L));
 
         router.route("""
                 {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
@@ -707,13 +715,8 @@ class NotificationEventRouterTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void route_routesToDlt_whenNoContactIdFound() {
-        when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
-                any(RowMapper.class),
-                eq("919222222222")))
-                .thenReturn(List.of());
+        stubUserLookup("mp", "919222222222", List.of());
 
         router.route("""
                 {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
@@ -747,13 +750,8 @@ class NotificationEventRouterTest {
     // ──────────────────────── UPDATE_USER_LANGUAGE ─────────────────────────────
 
     @Test
-    @SuppressWarnings("unchecked")
     void route_updatesLanguage_whenContactIdFound() {
-        when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
-                any(RowMapper.class),
-                eq("919444444444")))
-                .thenReturn(List.of(99L));
+        stubUserLookup("mp", "919444444444", List.of(99L));
 
         router.route("""
                 {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
@@ -765,13 +763,8 @@ class NotificationEventRouterTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void route_rethrowsException_whenUpdateLanguageFails_forPhoneNotFound() {
-        when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_mp.user_table") && sql.contains("WHERE phone_number = ?")),
-                any(RowMapper.class),
-                eq("919555555555")))
-                .thenReturn(List.of());
+        stubUserLookup("mp", "919555555555", List.of());
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
