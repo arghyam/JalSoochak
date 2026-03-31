@@ -304,7 +304,7 @@ public class GlificWebhookController {
             log.debug("Error fetching telemetry issue report reasons for contactId {}: {}", request.getContactId(), e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"message\":\"Supply outage reasons could not be fetched.\"}");
+                    .body("{\"success\":false,\"message\":\"Supply outage reasons could not be fetched.\"}");
         }
     }
 
