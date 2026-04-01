@@ -110,13 +110,13 @@ class StaffAuthControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("POST /api/v1/auth/staff/request-otp")
+    @DisplayName("POST /api/v1/auth/staff/otp")
     class RequestOtp {
 
         @Test
         @DisplayName("returns 200 for a valid registered phone")
         void returns200ForRegisteredPhone() throws Exception {
-            mockMvc.perform(post("/api/v1/auth/staff/request-otp")
+            mockMvc.perform(post("/api/v1/auth/staff/otp")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"phoneNumber":"919876543210","tenantCode":"MP"}
@@ -134,7 +134,7 @@ class StaffAuthControllerIntegrationTest {
         @Test
         @DisplayName("returns 200 even for an unregistered phone (anti-enumeration)")
         void returns200ForUnknownPhone() throws Exception {
-            MvcResult knownResult = mockMvc.perform(post("/api/v1/auth/staff/request-otp")
+            MvcResult knownResult = mockMvc.perform(post("/api/v1/auth/staff/otp")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"phoneNumber":"919876543210","tenantCode":"MP"}
@@ -142,7 +142,7 @@ class StaffAuthControllerIntegrationTest {
                     .andExpect(status().isOk())
                     .andReturn();
 
-            MvcResult unknownResult = mockMvc.perform(post("/api/v1/auth/staff/request-otp")
+            MvcResult unknownResult = mockMvc.perform(post("/api/v1/auth/staff/otp")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"phoneNumber":"911111111111","tenantCode":"MP"}
@@ -157,7 +157,7 @@ class StaffAuthControllerIntegrationTest {
         @Test
         @DisplayName("returns 400 for missing phoneNumber")
         void returns400ForMissingPhone() throws Exception {
-            mockMvc.perform(post("/api/v1/auth/staff/request-otp")
+            mockMvc.perform(post("/api/v1/auth/staff/otp")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"tenantCode":"MP"}
@@ -167,7 +167,7 @@ class StaffAuthControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("POST /api/v1/auth/staff/verify-otp")
+    @DisplayName("POST /api/v1/auth/staff/otp/verify")
     class VerifyOtp {
 
         private String seedOtp(String rawOtp) {
@@ -204,7 +204,7 @@ class StaffAuthControllerIntegrationTest {
                             .withHeader("Content-Type", "application/json")
                             .withBody(KEYCLOAK_TOKEN_RESPONSE)));
 
-            mockMvc.perform(post("/api/v1/auth/staff/verify-otp")
+            mockMvc.perform(post("/api/v1/auth/staff/otp/verify")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"phoneNumber":"919876543210","tenantCode":"MP","otp":"%s"}
@@ -230,7 +230,7 @@ class StaffAuthControllerIntegrationTest {
         void returns400ForWrongOtp() throws Exception {
             seedOtp("123456");
 
-            mockMvc.perform(post("/api/v1/auth/staff/verify-otp")
+            mockMvc.perform(post("/api/v1/auth/staff/otp/verify")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"phoneNumber":"919876543210","tenantCode":"MP","otp":"999999"}
@@ -243,7 +243,7 @@ class StaffAuthControllerIntegrationTest {
         @Test
         @DisplayName("returns 400 when no OTP was requested")
         void returns400WhenNoOtpExists() throws Exception {
-            mockMvc.perform(post("/api/v1/auth/staff/verify-otp")
+            mockMvc.perform(post("/api/v1/auth/staff/otp/verify")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"phoneNumber":"919876543210","tenantCode":"MP","otp":"123456"}

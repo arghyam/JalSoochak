@@ -14,18 +14,18 @@ When accessed through the API gateway, prefix each path with the service slug (e
 | POST | `/api/v1/auth/login` | Login with email + password |
 | POST | `/api/v1/auth/refresh` | Refresh access token |
 | POST | `/api/v1/auth/logout` | Logout |
-| GET | `/api/v1/auth/invite/info` | Get invite token metadata |
-| POST | `/api/v1/auth/activate-account` | Activate account from invite |
+| GET | `/api/v1/auth/invites` | Get invite token metadata |
+| POST | `/api/v1/auth/invites/activate` | Activate account from invite |
 | POST | `/api/v1/auth/forgot-password` | Trigger forgot-password email |
 | POST | `/api/v1/auth/reset-password` | Reset password with token |
-| POST | `/api/v1/auth/staff/request-otp` | Request WhatsApp OTP (staff login) |
-| POST | `/api/v1/auth/staff/verify-otp` | Verify WhatsApp OTP |
+| POST | `/api/v1/auth/staff/otp` | Request WhatsApp OTP (staff login) |
+| POST | `/api/v1/auth/staff/otp/verify` | Verify WhatsApp OTP |
 
 ### Users
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/v1/users/invite` | Invite a new user |
+| POST | `/api/v1/users/invitations` | Invite a new user |
 | GET | `/api/v1/users/me` | Get current user profile |
 | PATCH | `/api/v1/users/me` | Update current user profile |
 | PATCH | `/api/v1/users/me/password` | Change own password |
@@ -33,9 +33,9 @@ When accessed through the API gateway, prefix each path with the service slug (e
 | GET | `/api/v1/users/state-admins` | List all state admins |
 | GET | `/api/v1/users/{id}` | Get user by ID |
 | PATCH | `/api/v1/users/{id}` | Update user by ID |
-| PUT | `/api/v1/users/{id}/deactivate` | Deactivate user |
-| PUT | `/api/v1/users/{id}/activate` | Activate user |
-| POST | `/api/v1/users/{id}/reinvite` | Resend invite email |
+| POST | `/api/v1/users/{id}/deactivate` | Deactivate user |
+| POST | `/api/v1/users/{id}/activate` | Activate user |
+| POST | `/api/v1/users/{id}/invitations` | Resend invite email |
 
 ### Tenant Staff
 
@@ -70,9 +70,9 @@ When accessed through the API gateway, prefix each path with the service slug (e
 | GET | `/api/v1/tenants` | List all tenants |
 | GET | `/api/v1/tenants/summary` | Tenant summary list |
 | PUT | `/api/v1/tenants/{tenantId}` | Update tenant |
-| PUT | `/api/v1/tenants/{tenantId}/deactivate` | Deactivate tenant |
+| POST | `/api/v1/tenants/{tenantId}/deactivate` | Deactivate tenant |
 | GET | `/api/v1/tenants/{tenantId}/config` | Get tenant config |
-| GET | `/api/v1/tenants/{tenantId}/public-config` | Get public tenant config |
+| GET | `/api/v1/tenants/{tenantId}/config/public` | Get public tenant config |
 | GET | `/api/v1/tenants/{tenantId}/config/status` | Get tenant config status |
 | PUT | `/api/v1/tenants/{tenantId}/config` | Update tenant config |
 | PUT | `/api/v1/tenants/{tenantId}/logo` | Upload tenant logo |
@@ -80,7 +80,7 @@ When accessed through the API gateway, prefix each path with the service slug (e
 | GET | `/api/v1/tenants/{tenantId}/location-hierarchy/{hierarchyType}` | Get location hierarchy |
 | GET | `/api/v1/tenants/{tenantId}/location-hierarchy/{hierarchyType}/edit-constraints` | Location hierarchy edit constraints |
 | PUT | `/api/v1/tenants/{tenantId}/location-hierarchy/{hierarchyType}` | Update location hierarchy |
-| GET | `/api/v1/tenants/{tenantId}/locations/{hierarchyType}/children/{parentId}` | Get child locations |
+| GET | `/api/v1/tenants/{tenantId}/locations/{hierarchyType}` | Get child locations |
 
 ### System Config
 
@@ -169,6 +169,38 @@ When accessed through the API gateway, prefix each path with the service slug (e
 ## All Endpoint Changes — Migration Reference
 
 The tables below list every endpoint that changed across all services. If your frontend or any integration hardcodes a URL from the **Old** column, update it to the **New** column.
+
+---
+
+### Auth service — invite and OTP endpoints
+
+| Old | New | Notes |
+|-----|-----|-------|
+| `GET /api/v1/auth/invite/info` | `GET /api/v1/auth/invites` | Renamed to use RESTful resource naming |
+| `POST /api/v1/auth/activate-account` | `POST /api/v1/auth/invites/activate` | Moved under `/invites` resource |
+| `POST /api/v1/auth/staff/request-otp` | `POST /api/v1/auth/staff/otp` | Simplified endpoint path |
+| `POST /api/v1/auth/staff/verify-otp` | `POST /api/v1/auth/staff/otp/verify` | Moved under `/otp` resource |
+
+---
+
+### User service — invite and user action endpoints
+
+| Old | New | Notes |
+|-----|-----|-------|
+| `POST /api/v1/users/invite` | `POST /api/v1/users/invitations` | Renamed to use RESTful resource naming |
+| `PUT /api/v1/users/{id}/deactivate` | `POST /api/v1/users/{id}/deactivate` | Changed HTTP method from PUT to POST (action verb) |
+| `PUT /api/v1/users/{id}/activate` | `POST /api/v1/users/{id}/activate` | Changed HTTP method from PUT to POST (action verb) |
+| `POST /api/v1/users/{id}/reinvite` | `POST /api/v1/users/{id}/invitations` | Renamed to use RESTful resource naming |
+
+---
+
+### Tenant service — deactivate and public config endpoints
+
+| Old | New | Notes |
+|-----|-----|-------|
+| `PUT /api/v1/tenants/{tenantId}/deactivate` | `POST /api/v1/tenants/{tenantId}/deactivate` | Changed HTTP method from PUT to POST (action verb) |
+| `GET /api/v1/tenants/{tenantId}/public-config` | `GET /api/v1/tenants/{tenantId}/config/public` | Moved under `/config` resource for consistency |
+| `GET /api/v1/tenants/{tenantId}/locations/{hierarchyType}/children/{parentId}` | `GET /api/v1/tenants/{tenantId}/locations/{hierarchyType}` | Simplified path; use `?parentId=` query parameter instead |
 
 ---
 
