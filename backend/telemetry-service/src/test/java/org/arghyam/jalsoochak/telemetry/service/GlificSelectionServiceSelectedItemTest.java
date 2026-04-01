@@ -70,6 +70,8 @@ class GlificSelectionServiceSelectedItemTest {
 
         when(tenantConfigRepository.findChannelOptions(eq(tenantId), eq("english"))).thenReturn(List.of("OnlyChannel"));
         when(tenantConfigRepository.findLanguageOptions(eq(tenantId))).thenReturn(List.of("English"));
+        when(tenantConfigRepository.findConfigValue(eq(tenantId), eq("TENANT_SUPPORTED_CHANNELS")))
+                .thenReturn(Optional.empty());
 
         when(templatesService.resolveScreenConfirmationTemplate(eq(tenantId), eq("ITEM_SELECTION"), eq("english")))
                 .thenReturn(Optional.empty());
@@ -124,6 +126,8 @@ class GlificSelectionServiceSelectedItemTest {
 
         when(tenantConfigRepository.findChannelOptions(eq(tenantId), eq("english"))).thenReturn(List.of("OnlyChannel"));
         when(tenantConfigRepository.findLanguageOptions(eq(tenantId))).thenReturn(List.of("English"));
+        when(tenantConfigRepository.findConfigValue(eq(tenantId), eq("TENANT_SUPPORTED_CHANNELS")))
+                .thenReturn(Optional.empty());
 
         when(templatesService.resolveScreenConfirmationTemplate(eq(tenantId), eq("ITEM_SELECTION"), eq("english")))
                 .thenReturn(Optional.empty());
