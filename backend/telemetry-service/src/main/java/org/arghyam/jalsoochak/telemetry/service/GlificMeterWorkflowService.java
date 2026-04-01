@@ -604,7 +604,7 @@ public class GlificMeterWorkflowService {
                         0,
                         resolvedIssueReason,
                         AnomalyConstants.STATUS_OPEN,
-                        null
+                        correlationId
                 );
                 telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                         tenantId,

@@ -289,6 +289,12 @@ public class FactServiceImpl implements FactService {
     @Override
     @Transactional
     public void ingestAnomalyRecorded(AnomalyEvent event) {
+        if (event.getType() != null
+                && event.getType().equals(EscalationType.NO_WATER_SUPPLY.code)
+                && (event.getCorrelationId() == null || event.getCorrelationId().isBlank())) {
+            log.warn("Skipping NO_WATER_SUPPLY anomaly without correlationId (uuid={})", event.getUuid());
+            return;
+        }
         OffsetDateTime now = OffsetDateTime.now();
         String uuid = event.getUuid();
         if (uuid == null || uuid.isBlank()) {
