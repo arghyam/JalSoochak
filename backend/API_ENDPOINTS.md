@@ -227,7 +227,7 @@ The tables below list every endpoint that changed across all services. If your f
 
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
-| POST | `/api/v1/telemetry/glific`                        | Receive the generic Glific webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/readings`                      | Receive the generic Glific webhook payload for image-based meter readings |
 | POST | `/api/v1/telemetry/intro`                         | Send the flow intro message for a contact |
 | POST | `/api/v1/telemetry/closing`                       | Send the flow closing message for a contact |
 | POST | `/api/v1/telemetry/language/selection`            | Return the language selection prompt/options for a contact |
