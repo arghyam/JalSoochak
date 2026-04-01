@@ -790,51 +790,38 @@ public class GlificMeterWorkflowService {
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             String correlationId = "issue-report-" + UUID.randomUUID();
-            if (shouldStoreIssueAsAnomaly(selectedKey, rawIssueReason, ISSUE_REPORT_ANOMALY_SELECTION_KEYS)) {
-                int anomalyType = ("noWaterSupply".equals(selectedKey) || "noWaterSupplied".equals(selectedKey))
-                        ? AnomalyConstants.TYPE_NO_WATER_SUPPLY
-                        : AnomalyConstants.TYPE_NO_SUBMISSION;
-                telemetryTenantRepository.createTenantAnomalyRecord(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        anomalyType,
-                        resolvedIssueReason,
-                        AnomalyConstants.STATUS_OPEN
-                );
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        anomalyType,
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        null,
-                        null,
-                        null,
-                        0,
-                        null,
-                        null,
-                        0,
-                        resolvedIssueReason,
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
-                telemetryEventPublisher.publishOutageOrNonSubmissionReason(
-                        tenantId,
-                        schemeId,
-                        operatorWithSchema.operator().id(),
-                        LocalDate.now(),
-                        anomalyType
-                );
-            } else {
-                telemetryTenantRepository.createIssueReportRecord(
-                        operatorWithSchema.schemaName(),
-                        schemeId,
-                        operatorWithSchema.operator().id(),
-                        LocalDateTime.now(),
-                        correlationId,
-                        resolvedIssueReason
-                );
-            }
+            int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
+            telemetryTenantRepository.createTenantAnomalyRecord(
+                    operatorWithSchema.schemaName(),
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    anomalyType,
+                    resolvedIssueReason,
+                    AnomalyConstants.STATUS_OPEN
+            );
+            telemetryEventPublisher.publishAnomalyRecorded(
+                    tenantId,
+                    anomalyType,
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    null,
+                    0,
+                    resolvedIssueReason,
+                    AnomalyConstants.STATUS_OPEN,
+                    null
+            );
+            telemetryEventPublisher.publishOutageOrNonSubmissionReason(
+                    tenantId,
+                    schemeId,
+                    operatorWithSchema.operator().id(),
+                    LocalDate.now(),
+                    anomalyType
+            );
 
             String fallbackMessage = "Issue reported. Thank you.";
             if ("hindi".equals(languageKey)) {
