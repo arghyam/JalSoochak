@@ -210,31 +210,31 @@ The tables below list every endpoint that changed across all services. If your f
 
 > These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
 
-| Method | Endpoint                                     | Description |
-|--------|----------------------------------------------|-------------|
-| POST | `/api/v1/telemetry/glific`                   | Receive the generic Glific webhook payload for image-based meter readings |
-| POST | `/api/v1/telemetry/intro`                    | Send the flow intro message for a contact |
-| POST | `/api/v1/telemetry/closing`                  | Send the flow closing message for a contact |
-| POST | `/api/v1/telemetry/language/selection`       | Return the language selection prompt/options for a contact |
-| POST | `/api/v1/telemetry/selected/language`        | Persist the selected language for a contact |
-| POST | `/api/v1/telemetry/channel/selection`        | Return the channel selection prompt/options for a contact |
-| POST | `/api/v1/telemetry/selected/channel`         | Persist the selected channel for a contact |
-| POST | `/api/v1/telemetry/item/selection`           | Return the item selection prompt/options for a contact |
-| POST | `/api/v1/telemetry/selected/item`            | Persist the selected item for a contact |
-| POST | `/api/v1/telemetry/meterChange`              | Return meter-change reason prompts/options |
-| POST | `/api/v1/telemetry/issueReport`              | Return issue-report prompt/options |
-| POST | `/api/v1/telemetry/issueReport/submit`       | Save the issue report details provided by the contact |
-| POST | `/api/v1/telemetry/issueReport/telemetry`    | Return telemetry-specific issue-report prompt/options |
-| POST | `/api/v1/telemetry/issueReport/telemetry/submit` | Save telemetry issue report details |
-| POST | `/api/v1/telemetry/telemetry/issueReport`    | Return telemetry issue-report reasons (JSON list) |
-| POST | `/api/v1/telemetry/telemetry/meterChange`    | Return meter-change reasons (JSON list) |
-| POST | `/api/v1/telemetry/telemetry/meterChange/submit` | Save the selected meter-change reason |
-| POST | `/api/v1/telemetry/others`                   | Return the “other issue” prompt/options |
-| POST | `/api/v1/telemetry/others/submitted`         | Save “other issue” details |
-| POST | `/api/v1/telemetry/takemeterreading`         | Return the take‑meter‑reading prompt/options |
-| POST | `/api/v1/telemetry/manualReading`            | Submit a manual meter reading |
-| POST | `/api/v1/telemetry/location`                 | Submit/update location details for a contact |
-| POST | `/api/v1/telemetry/updatedPreviousReading`   | Update the previous reading for a contact |
+| Method | Endpoint                                          | Description |
+|--------|---------------------------------------------------|-------------|
+| POST | `/api/v1/telemetry/glific`                        | Receive the generic Glific webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/intro`                         | Send the flow intro message for a contact |
+| POST | `/api/v1/telemetry/closing`                       | Send the flow closing message for a contact |
+| POST | `/api/v1/telemetry/language/selection`            | Return the language selection prompt/options for a contact |
+| POST | `/api/v1/telemetry/selected/language`             | Persist the selected language for a contact |
+| POST | `/api/v1/telemetry/channel/selection`             | Return the channel selection prompt/options for a contact |
+| POST | `/api/v1/telemetry/selected/channel`              | Persist the selected channel for a contact |
+| POST | `/api/v1/telemetry/item/selection`                | Return the item selection prompt/options for a contact |
+| POST | `/api/v1/telemetry/selected/item`                 | Persist the selected item for a contact |
+| POST | `/api/v1/telemetry/meter-change`                  | Return meter-change reason prompts/options |
+| POST | `/api/v1/telemetry/issue-report`                  | Return issue-report prompt/options |
+| POST | `/api/v1/telemetry/issue-report/submit`           | Save the issue report details provided by the contact |
+| POST | `/api/v1/telemetry/issue-report/telemetry`        | Return telemetry-specific issue-report prompt/options |
+| POST | `/api/v1/telemetry/issue-report/telemetry/submit` | Save telemetry issue report details |
+| POST | `/api/v1/telemetry/telemetry/issue-report`        | Return telemetry issue-report reasons (JSON list) |
+| POST | `/api/v1/telemetry/telemetry/meter-change`        | Return meter-change reasons (JSON list) |
+| POST | `/api/v1/telemetry/telemetry/meter-change/submit` | Save the selected meter-change reason |
+| POST | `/api/v1/telemetry/others`                        | Return the “other issue” prompt/options |
+| POST | `/api/v1/telemetry/others/submitted`              | Save “other issue” details |
+| POST | `/api/v1/telemetry/take-meter-reading`            | Return the take‑meter‑reading prompt/options |
+| POST | `/api/v1/telemetry/manual-reading`                | Submit a manual meter reading |
+| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact |
+| POST | `/api/v1/telemetry/update-previous-reading`       | Update the previous reading for a contact |
 
 ---
 
