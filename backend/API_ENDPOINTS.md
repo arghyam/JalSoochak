@@ -138,36 +138,6 @@ When accessed through the API gateway, prefix each path with the service slug (e
 
 ---
 
-## Telemetry · Webhook (`telemetry-service` · port 8084)
-
-> These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/webhook/glific` | Generic Glific webhook |
-| POST | `/api/v1/webhook/intro` | Flow intro step |
-| POST | `/api/v1/webhook/closing` | Flow closing step |
-| POST | `/api/v1/webhook/language/selection` | Language selection step |
-| POST | `/api/v1/webhook/selected/language` | Language selected |
-| POST | `/api/v1/webhook/channel/selection` | Channel selection step |
-| POST | `/api/v1/webhook/selected/channel` | Channel selected |
-| POST | `/api/v1/webhook/item/selection` | Item selection step |
-| POST | `/api/v1/webhook/selected/item` | Item selected |
-| POST | `/api/v1/webhook/meterChange` | Meter change report |
-| POST | `/api/v1/webhook/issueReport` | Issue report |
-| POST | `/api/v1/webhook/issueReport/submit` | Submit issue report |
-| POST | `/api/v1/webhook/issueReport/telemetry` | Issue report with telemetry |
-| POST | `/api/v1/webhook/issueReport/telemetry/submit` | Submit issue report with telemetry |
-| POST | `/api/v1/webhook/telemetry/issueReport` | Telemetry issue report |
-| POST | `/api/v1/webhook/telemetry/meterChange` | Telemetry meter change |
-| POST | `/api/v1/webhook/telemetry/meterChange/submit` | Submit telemetry meter change |
-| POST | `/api/v1/webhook/others` | Other issue type |
-| POST | `/api/v1/webhook/others/submitted` | Other issue submitted |
-| POST | `/api/v1/webhook/takemeterreading` | Take meter reading |
-| POST | `/api/v1/webhook/manualReading` | Manual reading entry |
-| POST | `/api/v1/webhook/location` | Location update |
-| POST | `/api/v1/webhook/updatedPreviousReading` | Update previous reading |
-
 ### Telemetry · Internal
 
 | Method | Endpoint | Description |
@@ -204,33 +174,35 @@ The tables below list every endpoint that changed across all services. If your f
 
 ### Telemetry service — webhook base URL (affects all 23 Glific webhook endpoints)
 
-> ⚠️ Also update the **Glific admin configuration** webhook base URL from `/api/v2/webhook` to `/api/v1/webhook`.
+> ## Telemetry · Webhook (`telemetry-service` · port 8084)
 
-| Old | New |
-|-----|-----|
-| `POST /api/v2/webhook/glific` | `POST /api/v1/webhook/glific` |
-| `POST /api/v2/webhook/intro` | `POST /api/v1/webhook/intro` |
-| `POST /api/v2/webhook/closing` | `POST /api/v1/webhook/closing` |
-| `POST /api/v2/webhook/language/selection` | `POST /api/v1/webhook/language/selection` |
-| `POST /api/v2/webhook/selected/language` | `POST /api/v1/webhook/selected/language` |
-| `POST /api/v2/webhook/channel/selection` | `POST /api/v1/webhook/channel/selection` |
-| `POST /api/v2/webhook/selected/channel` | `POST /api/v1/webhook/selected/channel` |
-| `POST /api/v2/webhook/item/selection` | `POST /api/v1/webhook/item/selection` |
-| `POST /api/v2/webhook/selected/item` | `POST /api/v1/webhook/selected/item` |
-| `POST /api/v2/webhook/meterChange` | `POST /api/v1/webhook/meterChange` |
-| `POST /api/v2/webhook/issueReport` | `POST /api/v1/webhook/issueReport` |
-| `POST /api/v2/webhook/issueReport/submit` | `POST /api/v1/webhook/issueReport/submit` |
-| `POST /api/v2/webhook/issueReport/telemetry` | `POST /api/v1/webhook/issueReport/telemetry` |
-| `POST /api/v2/webhook/issueReport/telemetry/submit` | `POST /api/v1/webhook/issueReport/telemetry/submit` |
-| `POST /api/v2/webhook/telemetry/issueReport` | `POST /api/v1/webhook/telemetry/issueReport` |
-| `POST /api/v2/webhook/telemetry/meterChange` | `POST /api/v1/webhook/telemetry/meterChange` |
-| `POST /api/v2/webhook/telemetry/meterChange/submit` | `POST /api/v1/webhook/telemetry/meterChange/submit` |
-| `POST /api/v2/webhook/others` | `POST /api/v1/webhook/others` |
-| `POST /api/v2/webhook/others/submitted` | `POST /api/v1/webhook/others/submitted` |
-| `POST /api/v2/webhook/takemeterreading` | `POST /api/v1/webhook/takemeterreading` |
-| `POST /api/v2/webhook/manualReading` | `POST /api/v1/webhook/manualReading` |
-| `POST /api/v2/webhook/location` | `POST /api/v1/webhook/location` |
-| `POST /api/v2/webhook/updatedPreviousReading` | `POST /api/v1/webhook/updatedPreviousReading` |
+> These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
+
+| Method | Endpoint                                     | Description |
+|--------|----------------------------------------------|-------------|
+| POST | `/api/v1/telemetry/glific`                   | Receive the generic Glific webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/intro`                    | Send the flow intro message for a contact |
+| POST | `/api/v1/telemetry/closing`                  | Send the flow closing message for a contact |
+| POST | `/api/v1/telemetry/language/selection`       | Return the language selection prompt/options for a contact |
+| POST | `/api/v1/telemetry/selected/language`        | Persist the selected language for a contact |
+| POST | `/api/v1/telemetry/channel/selection`        | Return the channel selection prompt/options for a contact |
+| POST | `/api/v1/telemetry/selected/channel`         | Persist the selected channel for a contact |
+| POST | `/api/v1/telemetry/item/selection`           | Return the item selection prompt/options for a contact |
+| POST | `/api/v1/telemetry/selected/item`            | Persist the selected item for a contact |
+| POST | `/api/v1/telemetry/meterChange`              | Return meter-change reason prompts/options |
+| POST | `/api/v1/telemetry/issueReport`              | Return issue-report prompt/options |
+| POST | `/api/v1/telemetry/issueReport/submit`       | Save the issue report details provided by the contact |
+| POST | `/api/v1/telemetry/issueReport/telemetry`    | Return telemetry-specific issue-report prompt/options |
+| POST | `/api/v1/telemetry/issueReport/telemetry/submit` | Save telemetry issue report details |
+| POST | `/api/v1/telemetry/telemetry/issueReport`    | Return telemetry issue-report reasons (JSON list) |
+| POST | `/api/v1/telemetry/telemetry/meterChange`    | Return meter-change reasons (JSON list) |
+| POST | `/api/v1/telemetry/telemetry/meterChange/submit` | Save the selected meter-change reason |
+| POST | `/api/v1/telemetry/others`                   | Return the “other issue” prompt/options |
+| POST | `/api/v1/telemetry/others/submitted`         | Save “other issue” details |
+| POST | `/api/v1/telemetry/takemeterreading`         | Return the take‑meter‑reading prompt/options |
+| POST | `/api/v1/telemetry/manualReading`            | Submit a manual meter reading |
+| POST | `/api/v1/telemetry/location`                 | Submit/update location details for a contact |
+| POST | `/api/v1/telemetry/updatedPreviousReading`   | Update the previous reading for a contact |
 
 ---
 
