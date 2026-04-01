@@ -65,7 +65,7 @@ public class UserController {
     public ResponseEntity<ApiResponseDTO<Void>> inviteUser(@Valid @RequestBody InviteRequestDTO request,
                                                            Authentication authentication) {
         log.info("POST /api/v1/users/invitations – role={}", request.getRole());
-        log.debug("POST /api/v1/users/invite – tenantCode={}", request.getTenantCode());
+        log.debug("POST /api/v1/users/invitations – tenantCode={}", request.getTenantCode());
         userManagementService.inviteUser(request, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Invitation sent successfully"));
     }

@@ -55,7 +55,9 @@ public class AuthController {
         @ApiResponse(responseCode = "200", description = "Login successful – returns access token"),
         @ApiResponse(responseCode = "400", description = "Validation error",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
-        @ApiResponse(responseCode = "401", description = "Invalid credentials, account not yet activated, or deactivated",
+        @ApiResponse(responseCode = "401", description = "Invalid credentials or account not yet activated",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+        @ApiResponse(responseCode = "403", description = "Account deactivated or forbidden",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/login")
@@ -208,7 +210,7 @@ public class AuthController {
         @ApiResponse(responseCode = "200", description = "OTP verified – returns access token"),
         @ApiResponse(responseCode = "400", description = "OTP is invalid or expired",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
-        @ApiResponse(responseCode = "401", description = "Account is deactivated",
+        @ApiResponse(responseCode = "403", description = "Account is deactivated",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/staff/otp/verify")
