@@ -37,6 +37,7 @@ import org.arghyam.jalsoochak.user.service.AuthService;
 import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
 import org.arghyam.jalsoochak.user.service.MetadataDecryptionHelper;
 import org.arghyam.jalsoochak.user.service.TokenService;
+import org.arghyam.jalsoochak.user.enums.TenantAccessRole;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
 import org.arghyam.jalsoochak.user.util.TenantAccessValidator;
 import org.keycloak.admin.client.resource.UserResource;
@@ -83,7 +84,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Account is deactivated");
         }
 
-        validateTenantStatus(user.tenantId(), user.adminLevel());
+        validateTenantStatus(user.tenantId(), TenantAccessRole.fromAdminLevel(user.adminLevel()));
 
         KeycloakTokenResponse token = keycloakClient.obtainToken(request.getEmail(), request.getPassword());
         return buildEnrichedAuthResult(token, user);
@@ -107,7 +108,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Account is deactivated");
         }
 
-        validateTenantStatus(user.tenantId(), user.adminLevel());
+        validateTenantStatus(user.tenantId(), TenantAccessRole.fromAdminLevel(user.adminLevel()));
 
         return buildEnrichedAuthResult(token, user);
     }
@@ -142,8 +143,8 @@ public class AuthServiceImpl implements AuthService {
             String tenantCode = parseMetadata(tokenRow.metadata(), "tenantCode");
             Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
                     .orElseThrow(() -> new AccountDeactivatedException("Tenant not found or no longer exists."));
-            Integer adminLevel = "STATE_ADMIN".equals(role) ? 2 : null;
-            validateTenantStatus(tenantId, adminLevel);
+            TenantAccessRole accessRole = "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN : TenantAccessRole.STAFF;
+            validateTenantStatus(tenantId, accessRole);
         }
 
         String phoneNumber = userCommonRepository.findAdminUserByEmail(email)
@@ -178,7 +179,7 @@ public class AuthServiceImpl implements AuthService {
                 : userCommonRepository.findTenantIdByStateCode(tenantCode)
                         .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for code: " + tenantCode));
         if (!"SUPER_USER".equals(role)) {
-            validateTenantStatus(tenantId, pendingUser.adminLevel());
+            validateTenantStatus(tenantId, TenantAccessRole.fromAdminLevel(pendingUser.adminLevel()));
         }
 
         String keycloakUuid = null;
@@ -365,17 +366,17 @@ public class AuthServiceImpl implements AuthService {
      * <p>tenantId == 0 is the system tenant (SUPER_USER) — always allowed.
      * 
      * @param tenantId The tenant ID
-     * @param adminLevel The admin level (2 for STATE_ADMIN, null for staff users)
+     * @param role     The caller's access role
      * @throws ForbiddenAccessException if the tenant status does not permit access
      */
-    private void validateTenantStatus(Integer tenantId, Integer adminLevel) {
+    private void validateTenantStatus(Integer tenantId, TenantAccessRole role) {
         if (tenantId == null || tenantId == 0) return;
         Optional<Integer> statusOpt = userCommonRepository.findTenantStatusByTenantId(tenantId);
         if (statusOpt.isEmpty()) {
             throw new AccountDeactivatedException("Tenant not found or no longer exists.");
         }
         int status = statusOpt.get();
-        TenantAccessValidator.validateTenantAccess(status, adminLevel);
+        TenantAccessValidator.validateTenantAccess(status, role);
     }
 
     private String parseMetadata(String json, String key) {

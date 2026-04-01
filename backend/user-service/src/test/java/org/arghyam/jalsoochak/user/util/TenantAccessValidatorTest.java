@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.user.util;
 
+import org.arghyam.jalsoochak.user.enums.TenantAccessRole;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -17,79 +18,79 @@ class TenantAccessValidatorTest {
         @Test
         @DisplayName("SUPER_USER can access ONBOARDED tenant")
         void superUserCanAccessOnboarded() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(1, false));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(1, TenantAccessRole.SUPER_USER));
         }
 
         @Test
         @DisplayName("SUPER_USER can access CONFIGURED tenant")
         void superUserCanAccessConfigured() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(2, false));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(2, TenantAccessRole.SUPER_USER));
         }
 
         @Test
         @DisplayName("SUPER_USER can access ACTIVE tenant")
         void superUserCanAccessActive() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(3, false));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(3, TenantAccessRole.SUPER_USER));
         }
 
         @Test
         @DisplayName("SUPER_USER can access INACTIVE tenant")
         void superUserCanAccessInactive() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(0, false));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(0, TenantAccessRole.SUPER_USER));
         }
 
         @Test
         @DisplayName("SUPER_USER can access DEGRADED tenant")
         void superUserCanAccessDegraded() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(5, false));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(5, TenantAccessRole.SUPER_USER));
         }
 
         @Test
         @DisplayName("SUPER_USER can access SUSPENDED tenant")
         void superUserCanAccessSuspended() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(4, false));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(4, TenantAccessRole.SUPER_USER));
         }
 
         @Test
         @DisplayName("SUPER_USER can access ARCHIVED tenant")
         void superUserCanAccessArchived() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(6, false));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(6, TenantAccessRole.SUPER_USER));
         }
 
         @Test
         @DisplayName("STATE_ADMIN can access ONBOARDED tenant")
         void stateAdminCanAccessOnboarded() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(1, true));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(1, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
         @DisplayName("STATE_ADMIN can access CONFIGURED tenant")
         void stateAdminCanAccessConfigured() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(2, true));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(2, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
         @DisplayName("STATE_ADMIN can access ACTIVE tenant")
         void stateAdminCanAccessActive() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(3, true));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(3, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
         @DisplayName("STATE_ADMIN can access INACTIVE tenant")
         void stateAdminCanAccessInactive() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(0, true));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(0, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
         @DisplayName("STATE_ADMIN can access DEGRADED tenant")
         void stateAdminCanAccessDegraded() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(5, true));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(5, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
         @DisplayName("STATE_ADMIN can access SUSPENDED tenant")
         void stateAdminCanAccessSuspended() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(4, true));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(4, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
@@ -97,17 +98,17 @@ class TenantAccessValidatorTest {
         void stateAdminCannotAccessArchived() {
             ForbiddenAccessException exception = assertThrows(
                     ForbiddenAccessException.class,
-                    () -> TenantAccessValidator.validateSystemUserAccess(6, true)
+                    () -> TenantAccessValidator.validateSystemUserAccess(6, TenantAccessRole.STATE_ADMIN)
             );
             assertTrue(exception.getMessage().contains("archived"));
         }
 
         @Test
-        @DisplayName("Invalid status code throws exception")
+        @DisplayName("Invalid status code throws exception for STATE_ADMIN")
         void invalidStatusCodeThrowsException() {
             assertThrows(
                     ForbiddenAccessException.class,
-                    () -> TenantAccessValidator.validateSystemUserAccess(999, false)
+                    () -> TenantAccessValidator.validateSystemUserAccess(999, TenantAccessRole.STATE_ADMIN)
             );
         }
     }
@@ -193,88 +194,86 @@ class TenantAccessValidatorTest {
     class TenantAccessTests {
 
         @Test
-        @DisplayName("System user (adminLevel=2) can access ACTIVE tenant")
-        void systemUserCanAccessActive() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(3, 2));
+        @DisplayName("STATE_ADMIN can access ACTIVE tenant")
+        void stateAdminCanAccessActive() {
+            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(3, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
-        @DisplayName("System user (adminLevel=2) can access ONBOARDED tenant")
-        void systemUserCanAccessOnboarded() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(1, 2));
+        @DisplayName("STATE_ADMIN can access ONBOARDED tenant")
+        void stateAdminCanAccessOnboarded() {
+            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(1, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
-        @DisplayName("System user (adminLevel=2) cannot access ARCHIVED tenant")
-        void systemUserCannotAccessArchived() {
+        @DisplayName("STATE_ADMIN cannot access ARCHIVED tenant")
+        void stateAdminCannotAccessArchived() {
             assertThrows(
                     ForbiddenAccessException.class,
-                    () -> TenantAccessValidator.validateTenantAccess(6, 2)
+                    () -> TenantAccessValidator.validateTenantAccess(6, TenantAccessRole.STATE_ADMIN)
             );
         }
 
         @Test
-        @DisplayName("SUPER_USER (adminLevel=null is not staff) can access ARCHIVED tenant")
+        @DisplayName("SUPER_USER can access ARCHIVED tenant")
         void superUserCanAccessArchived() {
-            // When adminLevel is null but it's actually a SUPER_USER, we need to pass a non-null value
-            // This test demonstrates that SUPER_USER access is handled at a higher level
-            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(6, 1));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(6, TenantAccessRole.SUPER_USER));
         }
 
         @Test
-        @DisplayName("Staff user (adminLevel=null) can access ACTIVE tenant")
+        @DisplayName("STAFF can access ACTIVE tenant")
         void staffCanAccessActive() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(3, null));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(3, TenantAccessRole.STAFF));
         }
 
         @Test
-        @DisplayName("Staff user (adminLevel=null) can access DEGRADED tenant")
+        @DisplayName("STAFF can access DEGRADED tenant")
         void staffCanAccessDegraded() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(5, null));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(5, TenantAccessRole.STAFF));
         }
 
         @Test
-        @DisplayName("Staff user (adminLevel=null) cannot access ONBOARDED tenant")
+        @DisplayName("STAFF cannot access ONBOARDED tenant")
         void staffCannotAccessOnboarded() {
             assertThrows(
                     ForbiddenAccessException.class,
-                    () -> TenantAccessValidator.validateTenantAccess(1, null)
+                    () -> TenantAccessValidator.validateTenantAccess(1, TenantAccessRole.STAFF)
             );
         }
 
         @Test
-        @DisplayName("Staff user (adminLevel=null) cannot access CONFIGURED tenant")
+        @DisplayName("STAFF cannot access CONFIGURED tenant")
         void staffCannotAccessConfigured() {
             assertThrows(
                     ForbiddenAccessException.class,
-                    () -> TenantAccessValidator.validateTenantAccess(2, null)
+                    () -> TenantAccessValidator.validateTenantAccess(2, TenantAccessRole.STAFF)
             );
         }
 
         @Test
-        @DisplayName("Staff user (adminLevel=null) cannot access INACTIVE tenant")
+        @DisplayName("STAFF cannot access INACTIVE tenant")
         void staffCannotAccessInactive() {
             assertThrows(
                     ForbiddenAccessException.class,
-                    () -> TenantAccessValidator.validateTenantAccess(0, null)
+                    () -> TenantAccessValidator.validateTenantAccess(0, TenantAccessRole.STAFF)
             );
         }
 
         @Test
-        @DisplayName("Staff user (adminLevel=null) cannot access SUSPENDED tenant")
+        @DisplayName("STAFF cannot access SUSPENDED tenant")
         void staffCannotAccessSuspended() {
             assertThrows(
                     ForbiddenAccessException.class,
-                    () -> TenantAccessValidator.validateTenantAccess(4, null)
+                    () -> TenantAccessValidator.validateTenantAccess(4, TenantAccessRole.STAFF)
             );
         }
 
         @Test
-        @DisplayName("Staff user (adminLevel=null) cannot access ARCHIVED tenant")
+        @DisplayName("STAFF cannot access ARCHIVED tenant")
         void staffCannotAccessArchived() {
             assertThrows(
                     ForbiddenAccessException.class,
-                    () -> TenantAccessValidator.validateTenantAccess(6, null)
+                    () -> TenantAccessValidator.validateTenantAccess(6, TenantAccessRole.STAFF)
             );
         }
     }
@@ -328,25 +327,25 @@ class TenantAccessValidatorTest {
         @Test
         @DisplayName("isAccessibleToSystemUser returns true for SUPER_USER accessing ARCHIVED")
         void isAccessibleToSystemUserSuperUserArchived() {
-            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(6, false));
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(6, TenantAccessRole.SUPER_USER));
         }
 
         @Test
         @DisplayName("isAccessibleToSystemUser returns false for STATE_ADMIN accessing ARCHIVED")
         void isAccessibleToSystemUserStateAdminArchived() {
-            assertFalse(TenantAccessValidator.isAccessibleToSystemUser(6, true));
+            assertFalse(TenantAccessValidator.isAccessibleToSystemUser(6, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
         @DisplayName("isAccessibleToSystemUser returns true for STATE_ADMIN accessing ACTIVE")
         void isAccessibleToSystemUserStateAdminActive() {
-            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(3, true));
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(3, TenantAccessRole.STATE_ADMIN));
         }
 
         @Test
         @DisplayName("isAccessibleToSystemUser returns true for SUPER_USER accessing ACTIVE")
         void isAccessibleToSystemUserSuperUserActive() {
-            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(3, false));
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(3, TenantAccessRole.SUPER_USER));
         }
     }
 }

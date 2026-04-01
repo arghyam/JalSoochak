@@ -149,6 +149,18 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("returns silently when tenant is not accessible (anti-enumeration)")
+        void silentWhenTenantNotAccessible() {
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(4)); // SUSPENDED
+
+            service.requestOtp(request);
+
+            verify(otpService, never()).requestOtp(any(), any(), any());
+            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any());
+        }
+
+        @Test
         @DisplayName("normalises tenantCode to uppercase before lookup")
         void normalisesToUppercase() {
             request.setTenantCode("mp");
@@ -196,6 +208,17 @@ class StaffAuthServiceImplTest {
             assertThat(result.tokenResponse().getTenantCode()).isEqualTo("MP");
             assertThat(result.tokenResponse().getRole()).isEqualTo("SECTION_OFFICER");
             assertThat(result.refreshToken()).isEqualTo("rt");
+        }
+
+        @Test
+        @DisplayName("throws BadRequestException when tenant is not accessible")
+        void throwsWhenTenantNotAccessible() {
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(4)); // SUSPENDED
+
+            assertThatThrownBy(() -> service.verifyOtp(request))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("Invalid or expired OTP");
         }
 
         @Test

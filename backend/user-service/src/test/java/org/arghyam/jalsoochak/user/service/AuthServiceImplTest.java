@@ -32,6 +32,7 @@ import org.arghyam.jalsoochak.user.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
+import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
@@ -320,6 +321,21 @@ class AuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("STATE_ADMIN: throws ForbiddenAccessException when tenant is archived")
+        void getInviteInfo_archivedTenant_throwsForbiddenAccess() {
+            String hash = "invite-hash";
+            when(tokenService.hash("raw")).thenReturn(hash);
+            when(userCommonRepository.findActiveTokenByHash(hash)).thenReturn(Optional.of(
+                    activeTokenRow("invited@example.com", hash, "INVITE",
+                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
+            when(userCommonRepository.existsActiveAdminUserByEmail("invited@example.com")).thenReturn(false);
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(6)); // ARCHIVED
+
+            assertThrows(ForbiddenAccessException.class, () -> authService.getInviteInfo("raw"));
+        }
+
+        @Test
         @DisplayName("Should throw UserAlreadyExistsException when account already exists")
         void getInviteInfo_accountExists_throwsUserAlreadyExists() {
             String hash = "existing-hash";
@@ -527,6 +543,29 @@ class AuthServiceImplTest {
             assertEquals("91XXXXXXXXXX", result.tokenResponse().getPhoneNumber());
             verify(userCommonRepository).consumeActiveTokenOfType(hash, "INVITE");
             verify(userCommonRepository).activatePendingAdminUser(eq(10L), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN: throws ForbiddenAccessException when tenant is archived")
+        void activateAccount_stateAdmin_archivedTenant_throwsForbiddenAccess() {
+            String hash = "sa-hash";
+            when(tokenService.hash("sa-token")).thenReturn(hash);
+            when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
+                    activeTokenRow("newsa@example.com", hash, "INVITE",
+                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
+            AdminUserRow pendingUser = new AdminUserRow(20L, "pending-sa-uuid", "newsa@example.com", "", 1, 2, AdminUserStatus.PENDING, 0, null);
+            when(userCommonRepository.findAdminUserByEmail("newsa@example.com")).thenReturn(Optional.of(pendingUser));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(6)); // ARCHIVED
+
+            ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
+            req.setInviteToken("sa-token");
+            req.setFirstName("State");
+            req.setLastName("Admin");
+            req.setPassword("Pass@123");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            assertThrows(ForbiddenAccessException.class, () -> authService.activateAccount(req));
         }
 
         @Test
