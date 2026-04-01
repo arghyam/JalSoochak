@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
                 // jwk-set-uri is loaded lazily (only when a JWT is validated).
                 "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost:9999/jwks"
         })
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class OpenApiSpecGeneratorTest {
 
     @Container

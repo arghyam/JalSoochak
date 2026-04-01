@@ -1,16 +1,17 @@
 package org.arghyam.jalsoochak.user.controller;
 
+import org.arghyam.jalsoochak.user.dto.common.ApiErrorResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.internal.AuthResult;
 import org.arghyam.jalsoochak.user.dto.request.ActivateAccountRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.ForgotPasswordRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.LoginRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.ResetPasswordRequestDTO;
+import org.arghyam.jalsoochak.user.dto.request.StaffOtpRequestDTO;
+import org.arghyam.jalsoochak.user.dto.request.StaffOtpVerifyDTO;
 import org.arghyam.jalsoochak.user.dto.response.InviteInfoResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.TokenResponseDTO;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
-import org.arghyam.jalsoochak.user.dto.request.StaffOtpRequestDTO;
-import org.arghyam.jalsoochak.user.dto.request.StaffOtpVerifyDTO;
 import org.arghyam.jalsoochak.user.service.AuthService;
 import org.arghyam.jalsoochak.user.service.StaffAuthService;
 import org.arghyam.jalsoochak.user.util.CookieHelper;
@@ -26,6 +27,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -50,8 +53,12 @@ public class AuthController {
             security = {})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Login successful – returns access token"),
-        @ApiResponse(responseCode = "400", description = "Validation error"),
-        @ApiResponse(responseCode = "401", description = "Invalid credentials, account not yet activated, or deactivated")
+        @ApiResponse(responseCode = "400", description = "Validation error",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+        @ApiResponse(responseCode = "401", description = "Invalid credentials or account not yet activated",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+        @ApiResponse(responseCode = "403", description = "Account deactivated or forbidden",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/login")
     public ResponseEntity<ApiResponseDTO<TokenResponseDTO>> login(
@@ -69,8 +76,10 @@ public class AuthController {
             security = {})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Token refreshed"),
-        @ApiResponse(responseCode = "400", description = "Refresh token cookie is missing"),
-        @ApiResponse(responseCode = "401", description = "Refresh token is invalid or expired")
+        @ApiResponse(responseCode = "400", description = "Refresh token cookie is missing",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+        @ApiResponse(responseCode = "401", description = "Refresh token is invalid or expired",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponseDTO<TokenResponseDTO>> refresh(
@@ -91,7 +100,8 @@ public class AuthController {
             security = {})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Logged out successfully"),
-        @ApiResponse(responseCode = "502", description = "Keycloak session revocation failed; local cookie was still cleared")
+        @ApiResponse(responseCode = "502", description = "Keycloak session revocation failed; local cookie was still cleared",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/logout")
     public ResponseEntity<ApiResponseDTO<Void>> logout(
@@ -119,12 +129,14 @@ public class AuthController {
             security = {})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Invite info retrieved"),
-        @ApiResponse(responseCode = "400", description = "Token is invalid or expired"),
-        @ApiResponse(responseCode = "409", description = "Account already exists")
+        @ApiResponse(responseCode = "400", description = "Token is invalid or expired",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+        @ApiResponse(responseCode = "409", description = "Account already exists",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @GetMapping("/invite/info")
+    @GetMapping("/invites")
     public ResponseEntity<ApiResponseDTO<InviteInfoResponseDTO>> inviteInfo(@RequestParam String token) {
-        log.info("GET /api/v1/auth/invite/info");
+        log.info("GET /api/v1/auth/invites");
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Invite info retrieved", authService.getInviteInfo(token)));
     }
 
@@ -133,14 +145,16 @@ public class AuthController {
             security = {})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Account activated – returns access token"),
-        @ApiResponse(responseCode = "400", description = "Invite link is invalid, expired, or already used"),
-        @ApiResponse(responseCode = "409", description = "Account already exists")
+        @ApiResponse(responseCode = "400", description = "Invite link is invalid, expired, or already used",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+        @ApiResponse(responseCode = "409", description = "Account already exists",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PostMapping("/activate-account")
+    @PostMapping("/invites/activate")
     public ResponseEntity<ApiResponseDTO<TokenResponseDTO>> activateAccount(
             @Valid @RequestBody ActivateAccountRequestDTO request,
             HttpServletResponse response) {
-        log.info("POST /api/v1/auth/activate-account");
+        log.info("POST /api/v1/auth/invites/activate");
         AuthResult result = authService.activateAccount(request);
         response.addHeader(HttpHeaders.SET_COOKIE,
                 cookieHelper.buildRefreshCookie(result.refreshToken(), result.refreshExpiresIn()).toString());
@@ -150,9 +164,7 @@ public class AuthController {
     @Operation(summary = "Forgot password",
             description = "Request a password reset email. Response is identical whether or not the email exists (OWASP anti-enumeration).",
             security = {})
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "If the email is registered, a reset link has been sent")
-    })
+    @ApiResponse(responseCode = "200", description = "If the email is registered, a reset link has been sent")
     @PostMapping("/forgot-password")
     public ResponseEntity<ApiResponseDTO<Void>> forgotPassword(@Valid @RequestBody ForgotPasswordRequestDTO request) {
         log.info("POST /api/v1/auth/forgot-password");
@@ -165,7 +177,8 @@ public class AuthController {
             security = {})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Password reset successfully"),
-        @ApiResponse(responseCode = "400", description = "Reset link is invalid, expired, or already used")
+        @ApiResponse(responseCode = "400", description = "Reset link is invalid, expired, or already used",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/reset-password")
     public ResponseEntity<ApiResponseDTO<Void>> resetPassword(@Valid @RequestBody ResetPasswordRequestDTO request) {
@@ -180,11 +193,12 @@ public class AuthController {
             security = {})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "OTP sent if the phone is registered and active"),
-        @ApiResponse(responseCode = "400", description = "Validation error or cooldown active")
+        @ApiResponse(responseCode = "400", description = "Validation error or cooldown active",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PostMapping("/staff/request-otp")
+    @PostMapping("/staff/otp")
     public ResponseEntity<ApiResponseDTO<Void>> staffRequestOtp(@Valid @RequestBody StaffOtpRequestDTO request) {
-        log.info("POST /api/v1/auth/staff/request-otp");
+        log.info("POST /api/v1/auth/staff/otp");
         staffAuthService.requestOtp(request);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "OTP sent if this number is registered"));
     }
@@ -194,14 +208,16 @@ public class AuthController {
             security = {})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "OTP verified – returns access token"),
-        @ApiResponse(responseCode = "400", description = "OTP is invalid or expired"),
-        @ApiResponse(responseCode = "401", description = "Account is deactivated")
+        @ApiResponse(responseCode = "400", description = "OTP is invalid or expired",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+        @ApiResponse(responseCode = "403", description = "Account is deactivated",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PostMapping("/staff/verify-otp")
+    @PostMapping("/staff/otp/verify")
     public ResponseEntity<ApiResponseDTO<TokenResponseDTO>> staffVerifyOtp(
             @Valid @RequestBody StaffOtpVerifyDTO request,
             HttpServletResponse response) {
-        log.info("POST /api/v1/auth/staff/verify-otp");
+        log.info("POST /api/v1/auth/staff/otp/verify");
         AuthResult result = staffAuthService.verifyOtp(request);
         response.addHeader(HttpHeaders.SET_COOKIE,
                 cookieHelper.buildRefreshCookie(result.refreshToken(), result.refreshExpiresIn()).toString());

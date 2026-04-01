@@ -19,7 +19,7 @@ import reactor.core.scheduler.Schedulers;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/v1/message")
 @RequiredArgsConstructor
 @Slf4j
 public class ApiController {
@@ -32,7 +32,7 @@ public class ApiController {
 
     @GetMapping("/notifications")
     public ResponseEntity<List<SampleDTO>> getAllNotifications() {
-        log.info("GET /api/notifications called");
+        log.info("GET /api/v1/message/notifications called");
         return ResponseEntity.ok(businessService.getAllNotifications());
     }
 
@@ -41,21 +41,21 @@ public class ApiController {
     // Offloaded to boundedElastic: WebhookChannel and EmailChannel call .block() internally,
     // which must not run on the Netty event-loop thread. GlificGraphQLClient also uses .block()
     // but is only ever called from Kafka listener threads, so it is unaffected by this change.
-    @PostMapping("/notifications/send")
+    @PostMapping("/notifications")
     public Mono<ResponseEntity<String>> sendNotification(@RequestBody NotificationRequest request) {
-        log.info("POST /api/notifications/send called – channel={}", request.getChannel());
-        log.debug("POST /api/notifications/send called – channel={}, recipient={}",
+        log.info("POST /api/v1/message/notifications called – channel={}", request.getChannel());
+        log.debug("POST /api/v1/message/notifications called – channel={}, recipient={}",
                 request.getChannel(), request.getRecipient());
         return Mono.fromCallable(() -> notificationService.send(request))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(ResponseEntity::ok);
     }
 
-    // ── POST publish Kafka message ────────────────────────────
+    // ── POST dispatch a Kafka event ───────────────────────────
 
-    @PostMapping("/publish")
-    public ResponseEntity<String> publishMessage(@RequestBody String message) {
-        log.info("POST /api/publish called with message: {}", message);
+    @PostMapping("/events")
+    public ResponseEntity<String> dispatchEvent(@RequestBody String message) {
+        log.info("POST /api/v1/message/events called with message: {}", message);
         kafkaProducer.sendMessage(message);
         return ResponseEntity.ok("Message published to message-service-topic");
     }

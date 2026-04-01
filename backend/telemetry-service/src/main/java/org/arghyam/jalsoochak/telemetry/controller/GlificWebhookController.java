@@ -28,7 +28,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v2/webhook")
+@RequestMapping("/api/v1/telemetry")
 public class GlificWebhookController {
     private static final Logger log = LoggerFactory.getLogger(GlificWebhookController.class);
     private final GlificWebhookService glificWebhookService;
@@ -38,7 +38,7 @@ public class GlificWebhookController {
     }
 
     @PostMapping(
-            value = "/glific",
+            value = "/readings",
             consumes = "application/json",
             produces = "application/json"
     )
@@ -203,7 +203,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/meterChange")
+    @PostMapping("/meter-change")
     public ResponseEntity<IntroResponse> meterChange(@RequestBody @Valid MeterChangeRequest request) {
         try {
             IntroResponse response = glificWebhookService.meterChangeMessage(request);
@@ -220,7 +220,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/issueReport")
+    @PostMapping("/issue-report")
     public ResponseEntity<IntroResponse> issueReportPrompt(@RequestBody @Valid IntroRequest request) {
         try {
             IntroResponse response = glificWebhookService.issueReportPromptMessage(request);
@@ -237,7 +237,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/issueReport/submit")
+    @PostMapping("/issue-report/submit")
     public ResponseEntity<IntroResponse> issueReportSubmit(@RequestBody @Valid IssueReportRequest request) {
         try {
             IntroResponse response = glificWebhookService.issueReportSubmitMessage(request);
@@ -254,7 +254,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/issueReport/telemetry")
+    @PostMapping("/issue-report/telemetry")
     public ResponseEntity<IntroResponse> issueReportTelemetryPrompt(@RequestBody @Valid IntroRequest request) {
         try {
             IntroResponse response = glificWebhookService.issueReportTelemetryPromptMessage(request);
@@ -271,7 +271,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/issueReport/telemetry/submit")
+    @PostMapping("/issue-report/telemetry/submit")
     public ResponseEntity<IntroResponse> issueReportTelemetrySubmit(@RequestBody @Valid IssueReportRequest request) {
         try {
             IntroResponse response = glificWebhookService.issueReportTelemetrySubmitMessage(request);
@@ -289,7 +289,7 @@ public class GlificWebhookController {
     }
 
     @PostMapping(
-            value = "/telemetry/issueReport",
+            value = "/meter/issue-report",
             consumes = "application/json",
             produces = "application/json"
     )
@@ -309,7 +309,7 @@ public class GlificWebhookController {
     }
 
     @PostMapping(
-            value = "/telemetry/meterChange",
+            value = "/meter/meter-change",
             consumes = "application/json",
             produces = "application/json"
     )
@@ -328,7 +328,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/telemetry/meterChange/submit")
+    @PostMapping("/meter/meter-change/submit")
     public ResponseEntity<IntroResponse> meterChangeSubmit(@RequestBody @Valid MeterChangeRequest request) {
         try {
             IntroResponse response = glificWebhookService.meterChangeSubmitMessage(request);
@@ -379,7 +379,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/takemeterreading")
+    @PostMapping("/take-meter-reading")
     public ResponseEntity<IntroResponse> takeMeterReading(@RequestBody @Valid MeterChangeRequest request) {
         try {
             IntroResponse response = glificWebhookService.takeMeterReadingMessage(request);
@@ -396,7 +396,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/manualReading")
+    @PostMapping("/manual-reading")
     public ResponseEntity<CreateReadingResponse> manualReading(@RequestBody @Valid ManualReadingRequest request) {
         try {
             CreateReadingResponse response = glificWebhookService.manualReadingMessage(request);
@@ -435,7 +435,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/updatedPreviousReading")
+    @PostMapping("/update-previous-reading")
     public ResponseEntity<CreateReadingResponse> updatedPreviousReading(@RequestBody @Valid UpdatedPreviousReadingRequest request) {
         try {
             CreateReadingResponse response = glificWebhookService.updatePreviousReadingMessage(request);

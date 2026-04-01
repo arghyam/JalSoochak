@@ -422,12 +422,12 @@ curl "http://localhost:8080/analytics/api/v1/analytics/tenants"
 
 ### Anomaly Service (`:8083`)
 
-| Method | Endpoint          | Description            |
-|--------|-------------------|------------------------|
-| GET    | `/api/anomalies`  | Get all anomalies      |
-| POST   | `/api/publish`    | Publish Kafka message  |
+| Method | Endpoint             | Description            |
+|--------|----------------------|------------------------|
+| GET    | `/api/v1/anomalies`  | Get all anomalies      |
+| POST   | `/api/v1/publish`    | Publish Kafka message  |
 
-**Sample Response** — `GET /api/anomalies`:
+**Sample Response** — `GET /api/v1/anomalies`:
 ```json
 [
   { "id": 1, "type": "Leak Detection" },
@@ -437,12 +437,12 @@ curl "http://localhost:8080/analytics/api/v1/analytics/tenants"
 
 ### Telemetry Service (`:8084`)
 
-| Method | Endpoint          | Description              |
-|--------|-------------------|--------------------------|
-| GET    | `/api/telemetry`  | Get all telemetry data   |
-| POST   | `/api/publish`    | Publish Kafka message    |
+| Method | Endpoint             | Description              |
+|--------|----------------------|--------------------------|
+| GET    | `/api/v1/telemetry`  | Get all telemetry data   |
+| POST   | `/api/v1/publish`    | Publish Kafka message    |
 
-**Sample Response** — `GET /api/telemetry`:
+**Sample Response** — `GET /api/v1/telemetry`:
 ```json
 [
   { "id": 1, "meterId": "METER-001", "readingValue": 150.5 },
@@ -452,10 +452,11 @@ curl "http://localhost:8080/analytics/api/v1/analytics/tenants"
 
 ### Message Service (`:8085`)
 
-| Method | Endpoint          | Description            |
-|--------|-------------------|------------------------|
-| GET    | `/api/messages`   | Get all messages       |
-| POST   | `/api/publish`    | Publish Kafka message  |
+| Method | Endpoint                         | Description                        |
+|--------|----------------------------------|------------------------------------|
+| GET    | `/api/v1/message/notifications`  | Get all notifications              |
+| POST   | `/api/v1/message/notifications`  | Send notification via channel      |
+| POST   | `/api/v1/message/events`         | Dispatch a Kafka event             |
 
 ### Scheme Service (`:8086`)
 

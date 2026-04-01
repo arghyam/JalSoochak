@@ -275,7 +275,7 @@ class AuthControllerTest {
     // ── /invite/info ──────────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("GET /api/v1/auth/invite/info")
+    @DisplayName("GET /api/v1/auth/invites")
     class InviteInfoTests {
 
         @Test
@@ -284,7 +284,7 @@ class AuthControllerTest {
             InviteInfoResponseDTO info = new InviteInfoResponseDTO("invited@example.com", "STATE_ADMIN", "Madhya Pradesh", "John", "Doe", "9112345678");
             when(authService.getInviteInfo("valid-token")).thenReturn(info);
 
-            mockMvc.perform(get("/api/v1/auth/invite/info")
+            mockMvc.perform(get("/api/v1/auth/invites")
                             .param("token", "valid-token"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200))
@@ -298,7 +298,7 @@ class AuthControllerTest {
             when(authService.getInviteInfo(anyString()))
                     .thenThrow(new UserAlreadyExistsException("Account already exists"));
 
-            mockMvc.perform(get("/api/v1/auth/invite/info")
+            mockMvc.perform(get("/api/v1/auth/invites")
                             .param("token", "used-token"))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.status").value(409));
