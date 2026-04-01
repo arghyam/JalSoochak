@@ -132,9 +132,9 @@ public class AuthController {
         @ApiResponse(responseCode = "409", description = "Account already exists",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @GetMapping("/invite/info")
+    @GetMapping("/invites")
     public ResponseEntity<ApiResponseDTO<InviteInfoResponseDTO>> inviteInfo(@RequestParam String token) {
-        log.info("GET /api/v1/auth/invite/info");
+        log.info("GET /api/v1/auth/invites");
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Invite info retrieved", authService.getInviteInfo(token)));
     }
 
@@ -148,11 +148,11 @@ public class AuthController {
         @ApiResponse(responseCode = "409", description = "Account already exists",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PostMapping("/activate-account")
+    @PostMapping("/invites/activate")
     public ResponseEntity<ApiResponseDTO<TokenResponseDTO>> activateAccount(
             @Valid @RequestBody ActivateAccountRequestDTO request,
             HttpServletResponse response) {
-        log.info("POST /api/v1/auth/activate-account");
+        log.info("POST /api/v1/auth/invites/activate");
         AuthResult result = authService.activateAccount(request);
         response.addHeader(HttpHeaders.SET_COOKIE,
                 cookieHelper.buildRefreshCookie(result.refreshToken(), result.refreshExpiresIn()).toString());
@@ -194,9 +194,9 @@ public class AuthController {
         @ApiResponse(responseCode = "400", description = "Validation error or cooldown active",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PostMapping("/staff/request-otp")
+    @PostMapping("/staff/otp")
     public ResponseEntity<ApiResponseDTO<Void>> staffRequestOtp(@Valid @RequestBody StaffOtpRequestDTO request) {
-        log.info("POST /api/v1/auth/staff/request-otp");
+        log.info("POST /api/v1/auth/staff/otp");
         staffAuthService.requestOtp(request);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "OTP sent if this number is registered"));
     }
@@ -211,11 +211,11 @@ public class AuthController {
         @ApiResponse(responseCode = "401", description = "Account is deactivated",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PostMapping("/staff/verify-otp")
+    @PostMapping("/staff/otp/verify")
     public ResponseEntity<ApiResponseDTO<TokenResponseDTO>> staffVerifyOtp(
             @Valid @RequestBody StaffOtpVerifyDTO request,
             HttpServletResponse response) {
-        log.info("POST /api/v1/auth/staff/verify-otp");
+        log.info("POST /api/v1/auth/staff/otp/verify");
         AuthResult result = staffAuthService.verifyOtp(request);
         response.addHeader(HttpHeaders.SET_COOKIE,
                 cookieHelper.buildRefreshCookie(result.refreshToken(), result.refreshExpiresIn()).toString());

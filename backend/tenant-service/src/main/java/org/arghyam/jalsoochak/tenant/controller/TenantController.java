@@ -145,9 +145,9 @@ public class TenantController {
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @PreAuthorize("hasRole('SUPER_USER')")
-        @PutMapping("/{tenantId}/deactivate")
+        @PostMapping("/{tenantId}/deactivate")
         public ResponseEntity<ApiResponseDTO<Void>> deactivateTenant(@PathVariable Integer tenantId) {
-                log.info("PUT /api/v1/tenants/{}/deactivate", tenantId);
+                log.info("POST /api/v1/tenants/{}/deactivate", tenantId);
                 tenantManagementService.deactivateTenant(tenantId);
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Tenant deactivated successfully"));
         }
@@ -175,10 +175,10 @@ public class TenantController {
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
-        @GetMapping("/{tenantId}/public-config")
+        @GetMapping("/{tenantId}/config/public")
         public ResponseEntity<ApiResponseDTO<TenantConfigResponseDTO>> getPublicTenantConfigs(
                         @PathVariable Integer tenantId) {
-                log.info("GET /api/v1/tenants/{}/public-config", tenantId);
+                log.info("GET /api/v1/tenants/{}/config/public", tenantId);
                 Set<TenantConfigKeyEnum> publicKeys = Arrays.stream(TenantConfigKeyEnum.values())
                                 .filter(TenantConfigKeyEnum::isPublic)
                                 .collect(Collectors.toCollection(() -> EnumSet.noneOf(TenantConfigKeyEnum.class)));
@@ -336,21 +336,20 @@ public class TenantController {
         }
 
         @Operation(summary = "Get child locations by parent ID", description = "Fetches all child locations under the specified parent location in the given hierarchy type. "
-                        + "Pass parentId as 0 to fetch root-level locations (where parent_id IS NULL).")
+                        + "Omit parentId to fetch root-level locations (where parent_id IS NULL).")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Child locations retrieved successfully"),
                         @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or tenant could not be resolved",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
-        @GetMapping("/{tenantId}/locations/{hierarchyType}/children/{parentId}")
+        @GetMapping("/{tenantId}/locations/{hierarchyType}")
         public ResponseEntity<ApiResponseDTO<List<LocationResponseDTO>>> getLocationChildren(
                         @PathVariable Integer tenantId,
                         @Parameter(description = "Hierarchy type: LGD or DEPARTMENT", example = "LGD") @PathVariable String hierarchyType,
-                        @Parameter(description = "Parent location ID (use 0 for root-level locations)", example = "1") @PathVariable Integer parentId) {
-                log.info("GET /api/v1/tenants/{}/locations/{}/children/{}", tenantId, hierarchyType, parentId);
-                Integer actualParentId = parentId.equals(0) ? null : parentId;
+                        @Parameter(description = "Parent location ID (omit for root-level locations)", example = "1") @RequestParam(required = false) Integer parentId) {
+                log.info("GET /api/v1/tenants/{}/locations/{} parentId={}", tenantId, hierarchyType, parentId);
                 List<LocationResponseDTO> children = tenantManagementService.getLocationChildren(tenantId,
-                                hierarchyType, actualParentId);
+                                hierarchyType, parentId);
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Child locations retrieved successfully", children));
         }
 

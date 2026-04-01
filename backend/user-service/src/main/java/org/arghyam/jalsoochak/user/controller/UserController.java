@@ -60,11 +60,11 @@ public class UserController {
         @ApiResponse(responseCode = "409", description = "User with this email already exists",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PostMapping("/invite")
+    @PostMapping("/invitations")
     @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
     public ResponseEntity<ApiResponseDTO<Void>> inviteUser(@Valid @RequestBody InviteRequestDTO request,
                                                            Authentication authentication) {
-        log.info("POST /api/v1/users/invite – role={}", request.getRole());
+        log.info("POST /api/v1/users/invitations – role={}", request.getRole());
         log.debug("POST /api/v1/users/invite – tenantCode={}", request.getTenantCode());
         userManagementService.inviteUser(request, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Invitation sent successfully"));
@@ -202,13 +202,13 @@ public class UserController {
         @ApiResponse(responseCode = "409", description = "User is the last active admin in their role",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PutMapping("/{id}/deactivate")
+    @PostMapping("/{id}/deactivate")
     @RequiresUserAccess
     public ResponseEntity<ApiResponseDTO<Void>> deactivate(
             @Parameter(description = "User ID") @PathVariable Long id,
             Authentication authentication) {
-        log.info("PUT /api/v1/users/[id]/deactivate");
-        log.debug("PUT /api/v1/users/{}/deactivate", id);
+        log.info("POST /api/v1/users/[id]/deactivate");
+        log.debug("POST /api/v1/users/{}/deactivate", id);
         userManagementService.deactivateUser(id, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "User deactivated successfully"));
     }
@@ -221,13 +221,13 @@ public class UserController {
         @ApiResponse(responseCode = "404", description = "User not found",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PutMapping("/{id}/activate")
+    @PostMapping("/{id}/activate")
     @RequiresUserAccess
     public ResponseEntity<ApiResponseDTO<Void>> activate(
             @Parameter(description = "User ID") @PathVariable Long id,
             Authentication authentication) {
-        log.info("PUT /api/v1/users/[id]/activate");
-        log.debug("PUT /api/v1/users/{}/activate", id);
+        log.info("POST /api/v1/users/[id]/activate");
+        log.debug("POST /api/v1/users/{}/activate", id);
         userManagementService.activateUser(id, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "User activated successfully"));
     }
@@ -240,13 +240,13 @@ public class UserController {
         @ApiResponse(responseCode = "404", description = "User not found",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
-    @PostMapping("/{id}/reinvite")
+    @PostMapping("/{id}/invitations")
     @RequiresUserAccess
     public ResponseEntity<ApiResponseDTO<Void>> reinvite(
             @Parameter(description = "User ID") @PathVariable Long id,
             Authentication authentication) {
-        log.info("POST /api/v1/users/[id]/reinvite");
-        log.debug("POST /api/v1/users/{}/reinvite", id);
+        log.info("POST /api/v1/users/[id]/invitations");
+        log.debug("POST /api/v1/users/{}/invitations", id);
         userManagementService.reinviteUser(id, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Invitation resent successfully"));
     }
