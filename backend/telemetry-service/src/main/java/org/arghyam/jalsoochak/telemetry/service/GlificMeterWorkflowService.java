@@ -582,12 +582,6 @@ public class GlificMeterWorkflowService {
                 int anomalyType = ("noWaterSupply".equals(anomalySelectedKey) || "noWaterSupplied".equals(anomalySelectedKey))
                         ? AnomalyConstants.TYPE_NO_WATER_SUPPLY
                         : AnomalyConstants.TYPE_NO_SUBMISSION;
-                if (telemetryTenantRepository.countAnomaliesByTypeForToday(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        anomalyType
-                ) == 0) {
                 telemetryTenantRepository.createTenantAnomalyRecord(
                         operatorWithSchema.schemaName(),
                         operatorWithSchema.operator().id(),
@@ -619,7 +613,6 @@ public class GlificMeterWorkflowService {
                         LocalDate.now(),
                         anomalyType
                 );
-                }
             } else {
                 telemetryTenantRepository.createIssueReportRecord(
                         operatorWithSchema.schemaName(),
@@ -799,12 +792,6 @@ public class GlificMeterWorkflowService {
             String correlationId = "issue-report-" + UUID.randomUUID();
             int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
             String anomalyReason = "No Water Supply";
-            if (telemetryTenantRepository.countAnomaliesByTypeForToday(
-                    operatorWithSchema.schemaName(),
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    anomalyType
-            ) == 0) {
                 telemetryTenantRepository.createTenantAnomalyRecord(
                         operatorWithSchema.schemaName(),
                         operatorWithSchema.operator().id(),
@@ -836,7 +823,6 @@ public class GlificMeterWorkflowService {
                         LocalDate.now(),
                         anomalyType
                 );
-            }
 
             String fallbackMessage = "Issue reported. Thank you.";
             if ("hindi".equals(languageKey)) {
