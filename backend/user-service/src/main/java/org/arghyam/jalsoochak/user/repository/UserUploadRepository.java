@@ -167,6 +167,35 @@ public class UserUploadRepository {
         });
     }
 
+    public int markUserSchemeMappingsDeleted(String schemaName, List<Long> userIds, int actorUserId) {
+        validateSchemaName(schemaName);
+        if (userIds == null || userIds.isEmpty()) {
+            return 0;
+        }
+
+        StringBuilder placeholders = new StringBuilder();
+        for (int i = 0; i < userIds.size(); i++) {
+            if (i > 0) {
+                placeholders.append(',');
+            }
+            placeholders.append('?');
+        }
+
+        String sql = String.format("""
+                UPDATE %s.user_scheme_mapping_table
+                SET deleted_at = NOW(), deleted_by = ?, updated_by = ?, updated_at = NOW()
+                WHERE deleted_at IS NULL
+                  AND user_id IN (%s)
+                """, schemaName, placeholders);
+
+        List<Object> args = new java.util.ArrayList<>(userIds.size() + 2);
+        args.add(actorUserId);
+        args.add(actorUserId);
+        args.addAll(userIds);
+
+        return jdbcTemplate.update(sql, args.toArray());
+    }
+
     private void validateSchemaName(String schemaName) {
         if (schemaName == null || schemaName.isBlank() || !SAFE_SCHEMA.matcher(schemaName).matches()) {
             throw new IllegalArgumentException("Invalid schema name: " + schemaName);

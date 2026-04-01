@@ -592,6 +592,53 @@ public class SchemeDbRepository {
         });
     }
 
+    public void updateSchemes(String schemaName, List<SchemeUpdateRecord> rows) {
+        validateSchemaName(schemaName);
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        String sql = String.format("""
+                UPDATE %s.scheme_master_table
+                SET state_scheme_id = ?,
+                    centre_scheme_id = ?,
+                    scheme_name = ?,
+                    fhtc_count = ?,
+                    planned_fhtc = ?,
+                    house_hold_count = ?,
+                    latitude = ?,
+                    longitude = ?,
+                    work_status = ?,
+                    operating_status = ?,
+                    updated_at = NOW(),
+                    updated_by = ?
+                WHERE id = ?
+                """, schemaName);
+
+        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement ps, int i) throws SQLException {
+                SchemeUpdateRecord row = rows.get(i);
+                ps.setString(1, row.stateSchemeId());
+                ps.setString(2, row.centreSchemeId());
+                ps.setString(3, row.schemeName());
+                ps.setInt(4, row.fhtcCount());
+                ps.setInt(5, row.plannedFhtc());
+                ps.setInt(6, row.houseHoldCount());
+                ps.setObject(7, row.latitude());
+                ps.setObject(8, row.longitude());
+                ps.setInt(9, row.workStatus());
+                ps.setInt(10, row.operatingStatus());
+                ps.setInt(11, row.updatedBy());
+                ps.setInt(12, row.id());
+            }
+
+            @Override
+            public int getBatchSize() {
+                return rows.size();
+            }
+        });
+    }
+
     public void insertLgdMappings(String schemaName, List<SchemeLgdMappingCreateRecord> rows) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -642,6 +689,43 @@ public class SchemeDbRepository {
                 return rows.size();
             }
         });
+    }
+
+    public int clearSchemeMappingsForSchemes(String schemaName, List<Integer> schemeIds, int actorUserId) {
+        validateSchemaName(schemaName);
+        if (schemeIds == null || schemeIds.isEmpty()) {
+            return 0;
+        }
+        StringBuilder placeholders = new StringBuilder();
+        for (int i = 0; i < schemeIds.size(); i++) {
+            if (i > 0) {
+                placeholders.append(',');
+            }
+            placeholders.append('?');
+        }
+
+        String lgdSql = String.format("""
+                UPDATE %s.scheme_lgd_mapping_table
+                SET deleted_at = NOW(), deleted_by = ?, updated_by = ?, updated_at = NOW()
+                WHERE deleted_at IS NULL
+                  AND scheme_id IN (%s)
+                """, schemaName, placeholders);
+        String deptSql = String.format("""
+                UPDATE %s.scheme_department_mapping_table
+                SET deleted_at = NOW(), deleted_by = ?, updated_by = ?, updated_at = NOW()
+                WHERE deleted_at IS NULL
+                  AND scheme_id IN (%s)
+                """, schemaName, placeholders);
+
+        List<Object> args = new ArrayList<>(schemeIds.size() + 2);
+        args.add(actorUserId);
+        args.add(actorUserId);
+        args.addAll(schemeIds);
+        Object[] argArray = args.toArray();
+
+        int lgdUpdated = jdbcTemplate.update(lgdSql, argArray);
+        int deptUpdated = jdbcTemplate.update(deptSql, argArray);
+        return lgdUpdated + deptUpdated;
     }
 
     /**

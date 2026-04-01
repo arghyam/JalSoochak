@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.scheme.repository.SchemeCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.arghyam.jalsoochak.scheme.repository.SchemeLgdMappingCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeSubdivisionMappingCreateRecord;
+import org.arghyam.jalsoochak.scheme.repository.SchemeUpdateRecord;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,16 @@ public class SchemeUploadChunkProcessor {
     }
 
     @Transactional
+    public int updateSchemesChunk(String schemaName, List<SchemeUpdateRecord> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return 0;
+        }
+        schemeDbRepository.updateSchemes(schemaName, rows);
+        log.info("[scheme-upload] chunk_updated type=schemes count={}", rows.size());
+        return rows.size();
+    }
+
+    @Transactional
     public int insertMappingsChunk(
             String schemaName,
             List<SchemeLgdMappingCreateRecord> lgdRows,
@@ -51,4 +62,3 @@ public class SchemeUploadChunkProcessor {
         return inserted;
     }
 }
-

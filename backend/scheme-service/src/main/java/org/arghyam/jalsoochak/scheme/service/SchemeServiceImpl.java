@@ -25,6 +25,7 @@ import org.arghyam.jalsoochak.scheme.repository.SchemeCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.arghyam.jalsoochak.scheme.repository.SchemeLgdMappingCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeSubdivisionMappingCreateRecord;
+import org.arghyam.jalsoochak.scheme.repository.SchemeUpdateRecord;
 import org.arghyam.jalsoochak.scheme.util.TenantSchemaResolver;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -534,9 +535,9 @@ public class SchemeServiceImpl implements SchemeService {
                 ));
 
                 if (chunk.size() >= CHUNK_SIZE) {
-                    // Insert and clear.
+                    // Upsert and clear.
                     // Use a copy so the chunk processor can safely retain the list if needed.
-                    uploaded[0] += chunkProcessor.insertSchemesChunk(schemaName, new ArrayList<>(chunk));
+                    uploaded[0] += upsertSchemesChunk(schemaName, new ArrayList<>(chunk), actorUserId);
                     chunk.clear();
                 }
             });
@@ -548,9 +549,55 @@ public class SchemeServiceImpl implements SchemeService {
         }
 
         if (!chunk.isEmpty()) {
-            uploaded[0] += chunkProcessor.insertSchemesChunk(schemaName, chunk);
+            uploaded[0] += upsertSchemesChunk(schemaName, chunk, actorUserId);
         }
         return uploaded[0];
+    }
+
+    private int upsertSchemesChunk(String schemaName, List<SchemeCreateRecord> rows, int actorUserId) {
+        if (rows == null || rows.isEmpty()) {
+            return 0;
+        }
+
+        List<String> stateSchemeIds = new ArrayList<>(rows.size());
+        for (SchemeCreateRecord row : rows) {
+            stateSchemeIds.add(row.stateSchemeId());
+        }
+        Map<String, Integer> existing = schemeDbRepository.findSchemeIdsByStateSchemeIds(schemaName, stateSchemeIds);
+
+        List<SchemeCreateRecord> inserts = new ArrayList<>(rows.size());
+        List<SchemeUpdateRecord> updates = new ArrayList<>();
+        for (SchemeCreateRecord row : rows) {
+            String key = row.stateSchemeId() == null ? "" : row.stateSchemeId().trim().toLowerCase(Locale.ROOT);
+            Integer existingId = existing.get(key);
+            if (existingId == null) {
+                inserts.add(row);
+            } else {
+                updates.add(new SchemeUpdateRecord(
+                        existingId,
+                        row.stateSchemeId(),
+                        row.centreSchemeId(),
+                        row.schemeName(),
+                        row.fhtcCount(),
+                        row.plannedFhtc(),
+                        row.houseHoldCount(),
+                        row.latitude(),
+                        row.longitude(),
+                        row.workStatus(),
+                        row.operatingStatus(),
+                        actorUserId
+                ));
+            }
+        }
+
+        int uploaded = 0;
+        if (!inserts.isEmpty()) {
+            uploaded += chunkProcessor.insertSchemesChunk(schemaName, inserts);
+        }
+        if (!updates.isEmpty()) {
+            uploaded += chunkProcessor.updateSchemesChunk(schemaName, updates);
+        }
+        return uploaded;
     }
 
     private int validateMappings(String schemaName, MultipartFile file, String extension, List<String> activeHeaders) {
@@ -646,13 +693,6 @@ public class SchemeServiceImpl implements SchemeService {
         Map<String, Integer> lgdIdsByCode = schemeDbRepository.findLgdIdsByCodes(schemaName, villageCodes);
         Map<String, Integer> deptIdsByTitle = schemeDbRepository.findDepartmentIdsByTitles(schemaName, subDivisionNames);
 
-        List<Integer> schemeIds = new ArrayList<>(schemeIdsByStateSchemeId.values());
-        List<Integer> lgdIds = new ArrayList<>(lgdIdsByCode.values());
-        List<Integer> deptIds = new ArrayList<>(deptIdsByTitle.values());
-
-        Set<String> existingLgdMappings = schemeDbRepository.findExistingSchemeLgdMappingKeys(schemaName, schemeIds, lgdIds);
-        Set<String> existingDeptMappings = schemeDbRepository.findExistingSchemeDepartmentMappingKeys(schemaName, schemeIds, deptIds);
-
         for (MappingRow r : rows) {
             Integer schemeId = schemeIdsByStateSchemeId.get(r.stateSchemeId().toLowerCase(Locale.ROOT));
             if (schemeId == null) {
@@ -669,17 +709,6 @@ public class SchemeServiceImpl implements SchemeService {
                 errors.add(error(r.rowNumber(), "sub_division_name", "sub_division_name does not exist"));
                 continue;
             }
-
-            String lgdKey = schemeId + "|" + lgdId;
-            if (existingLgdMappings.contains(lgdKey)) {
-                errors.add(error(r.rowNumber(), "village_lgd_code", "Duplicate village_lgd_code mapping already exists"));
-                continue;
-            }
-
-            String deptKey = schemeId + "|" + deptId;
-            if (existingDeptMappings.contains(deptKey)) {
-                errors.add(error(r.rowNumber(), "sub_division_name", "Duplicate sub_division_name mapping already exists"));
-            }
         }
     }
 
@@ -688,17 +717,7 @@ public class SchemeServiceImpl implements SchemeService {
             List<SchemeRow> rows,
             List<SchemeUploadErrorDTO> errors
     ) {
-        List<String> stateSchemeIds = new ArrayList<>(rows.size());
-        for (SchemeRow row : rows) {
-            stateSchemeIds.add(row.stateSchemeId());
-        }
-
-        Map<String, Integer> existing = schemeDbRepository.findSchemeIdsByStateSchemeIds(schemaName, stateSchemeIds);
-        for (SchemeRow row : rows) {
-            if (existing.containsKey(row.stateSchemeId().toLowerCase(Locale.ROOT))) {
-                errors.add(error(row.rowNumber(), "state_scheme_id", "Duplicate state_scheme_id already exists"));
-            }
-        }
+        // Allow overwriting existing schemes on re-upload (no DB-duplicate validation needed).
     }
 
     private int processMappings(
@@ -710,6 +729,7 @@ public class SchemeServiceImpl implements SchemeService {
     ) {
         List<MappingRow> chunk = new ArrayList<>(CHUNK_SIZE);
         final int[] uploaded = {0};
+        Set<Integer> clearedSchemeIds = new HashSet<>();
 
         try {
             streamRows(file, extension, activeHeaders, (rowNumber, values) -> {
@@ -724,7 +744,7 @@ public class SchemeServiceImpl implements SchemeService {
                         normalize(values.get("sub_division_name"))
                 ));
                 if (chunk.size() >= CHUNK_SIZE) {
-                    insertMappingChunk(schemaName, chunk, actorUserId);
+                    insertMappingChunk(schemaName, chunk, actorUserId, clearedSchemeIds);
                     uploaded[0] += chunk.size();
                     chunk.clear();
                 }
@@ -737,13 +757,13 @@ public class SchemeServiceImpl implements SchemeService {
         }
 
         if (!chunk.isEmpty()) {
-            insertMappingChunk(schemaName, chunk, actorUserId);
+            insertMappingChunk(schemaName, chunk, actorUserId, clearedSchemeIds);
             uploaded[0] += chunk.size();
         }
         return uploaded[0];
     }
 
-    private void insertMappingChunk(String schemaName, List<MappingRow> rows, int actorUserId) {
+    private void insertMappingChunk(String schemaName, List<MappingRow> rows, int actorUserId, Set<Integer> clearedSchemeIds) {
         List<String> stateSchemeIds = new ArrayList<>(rows.size());
         List<String> villageCodes = new ArrayList<>(rows.size());
         List<String> subDivisionNames = new ArrayList<>(rows.size());
@@ -756,6 +776,20 @@ public class SchemeServiceImpl implements SchemeService {
         Map<String, Integer> schemeIdsByStateSchemeId = schemeDbRepository.findSchemeIdsByStateSchemeIds(schemaName, stateSchemeIds);
         Map<String, Integer> lgdIdsByCode = schemeDbRepository.findLgdIdsByCodes(schemaName, villageCodes);
         Map<String, Integer> deptIdsByTitle = schemeDbRepository.findDepartmentIdsByTitles(schemaName, subDivisionNames);
+
+        if (clearedSchemeIds == null) {
+            clearedSchemeIds = new HashSet<>();
+        }
+        List<Integer> schemesToClear = new ArrayList<>();
+        for (MappingRow r : rows) {
+            Integer schemeId = schemeIdsByStateSchemeId.get(r.stateSchemeId().toLowerCase(Locale.ROOT));
+            if (schemeId != null && clearedSchemeIds.add(schemeId)) {
+                schemesToClear.add(schemeId);
+            }
+        }
+        if (!schemesToClear.isEmpty()) {
+            schemeDbRepository.clearSchemeMappingsForSchemes(schemaName, schemesToClear, actorUserId);
+        }
 
         // Row-level existence is validated in the pre-pass; during insert we best-effort skip missing lookups
         // (protects against concurrent deletes/changes between validation and insert).
