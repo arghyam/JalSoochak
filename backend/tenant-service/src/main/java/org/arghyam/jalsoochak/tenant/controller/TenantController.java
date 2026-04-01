@@ -8,9 +8,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.arghyam.jalsoochak.tenant.config.CommonApiResponses;
+import org.arghyam.jalsoochak.tenant.config.RequiresTenantAccess;
+import org.arghyam.jalsoochak.tenant.dto.common.ApiErrorResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
+import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
@@ -23,16 +28,12 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
-import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
-import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
-import org.arghyam.jalsoochak.tenant.config.RequiresTenantAccess;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -40,11 +41,14 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -60,24 +64,21 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Validated
 @Tag(name = "Tenant Management", description = "APIs for tenant onboarding, schema provisioning, and tenant management")
+@CommonApiResponses
 public class TenantController {
 
         private static final int MAX_PAGE_SIZE = 100;
 
         private final TenantManagementService tenantManagementService;
 
-        /**
-         * Create a new tenant
-         */
         @Operation(summary = "Create a new tenant", description = "Registers a new tenant in the common schema and provisions a dedicated "
                         + "database schema (tenant_<stateCode>) with all required tables and indexes.")
         @ApiResponses({
                         @ApiResponse(responseCode = "201", description = "Tenant created and schema provisioned successfully"),
-                        @ApiResponse(responseCode = "400", description = "Invalid request — missing or malformed fields"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "409", description = "Tenant with the given state code already exists"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error during tenant creation")
+                        @ApiResponse(responseCode = "400", description = "Invalid request — missing or malformed fields",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+                        @ApiResponse(responseCode = "409", description = "Tenant with the given state code already exists",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @PreAuthorize("hasRole('SUPER_USER')")
         @PostMapping
@@ -89,16 +90,8 @@ public class TenantController {
                                 .body(ApiResponseDTO.of(201, "Tenant created successfully", tenant));
         }
 
-        /**
-         * Get tenant status summary
-         */
         @Operation(summary = "Get all tenant's status summary", description = "Returns aggregate counts of all non-system tenants grouped by status: total, onboarded, configured, active, inactive, suspended, degraded, and archived.")
-        @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Tenant summary retrieved successfully"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
-        })
+        @ApiResponse(responseCode = "200", description = "Tenant summary retrieved successfully")
         @PreAuthorize("hasRole('SUPER_USER')")
         @GetMapping("/summary")
         public ResponseEntity<ApiResponseDTO<TenantSummaryResponseDTO>> getTenantSummary() {
@@ -107,15 +100,12 @@ public class TenantController {
                                 tenantManagementService.getTenantSummary()));
         }
 
-        /**
-         * Get all tenants
-         */
         @Operation(summary = "List all tenants with pagination", description = "Returns a paginated list of tenants registered in the common schema, ordered by ID. "
                         + "Optionally filter by status and/or search by name (case-insensitive partial match).")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Paginated list of tenants"),
-                        @ApiResponse(responseCode = "400", description = "Invalid query parameter"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "400", description = "Invalid query parameter",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @GetMapping
         public ResponseEntity<ApiResponseDTO<PageResponseDTO<TenantResponseDTO>>> getAllTenants(
@@ -128,17 +118,13 @@ public class TenantController {
                                 tenantManagementService.getAllTenants(page, size, status, search)));
         }
 
-        /**
-         * Update a tenant
-         */
         @Operation(summary = "Update tenant", description = "Updates the status of an existing tenant identified by tenantId.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Tenant updated successfully"),
-                        @ApiResponse(responseCode = "400", description = "Tenant updation failed"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "404", description = "Tenant with given tenantId does not exist"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "400", description = "Tenant updation failed",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+                        @ApiResponse(responseCode = "404", description = "Tenant with given tenantId does not exist",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @PreAuthorize("hasRole('SUPER_USER')")
         @PutMapping("/{tenantId}")
@@ -150,17 +136,13 @@ public class TenantController {
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Tenant updated successfully", updated));
         }
 
-        /**
-         * Deactivate a tenant
-         */
         @Operation(summary = "Deactivate (soft-delete) a tenant", description = "Sets the tenant status to INACTIVE for the given tenantId.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Tenant deactivated successfully"),
-                        @ApiResponse(responseCode = "400", description = "Tenant deactivation failed"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "404", description = "Tenant with given tenantId does not exist"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "400", description = "Tenant deactivation failed",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+                        @ApiResponse(responseCode = "404", description = "Tenant with given tenantId does not exist",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @PreAuthorize("hasRole('SUPER_USER')")
         @PutMapping("/{tenantId}/deactivate")
@@ -170,16 +152,11 @@ public class TenantController {
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Tenant deactivated successfully"));
         }
 
-        /**
-         * Get all configurations for a tenant
-         */
         @Operation(summary = "Get the configurations for a tenant", description = "Retrieves either all or the selected configuration key-value pairs for a specific tenant in a Map format.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Tenant configurations retrieved successfully"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "404", description = "Tenant not found"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "404", description = "Tenant not found",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @RequiresTenantAccess
         @GetMapping("/{tenantId}/config")
@@ -191,15 +168,12 @@ public class TenantController {
                                 tenantManagementService.getTenantConfigs(tenantId, keys)));
         }
 
-        /**
-         * Get public configurations for a tenant (no authentication required)
-         */
         @Operation(summary = "Get public configurations for a tenant", description = "Returns only the configuration keys explicitly marked as public (isPublic=true). "
                         + "No authentication required. Suitable for use by public-facing dashboards.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Public tenant configurations retrieved successfully"),
-                        @ApiResponse(responseCode = "404", description = "Tenant not found"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "404", description = "Tenant not found",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @GetMapping("/{tenantId}/public-config")
         public ResponseEntity<ApiResponseDTO<TenantConfigResponseDTO>> getPublicTenantConfigs(
@@ -216,18 +190,13 @@ public class TenantController {
                                 tenantManagementService.getTenantConfigs(tenantId, publicKeys)));
         }
 
-        /**
-         * Get configuration completeness status for a tenant
-         */
         @Operation(summary = "Get configuration status for a tenant", description = "Returns the configuration completeness status for a tenant. "
                         + "Each known configuration key is listed with a CONFIGURED or PENDING status, "
                         + "along with an aggregate summary of total, configured, and pending counts.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Configuration status retrieved successfully"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "404", description = "Tenant not found"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "404", description = "Tenant not found",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @RequiresTenantAccess
         @GetMapping("/{tenantId}/config/status")
@@ -238,16 +207,11 @@ public class TenantController {
                                 tenantManagementService.getTenantConfigStatus(tenantId)));
         }
 
-        /**
-         * Set or update multiple configurations for a tenant
-         */
         @Operation(summary = "Set or update multiple tenant configurations", description = "Batch updates or creates configurations for the specified tenant using a Map structure.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Configurations set successfully"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "404", description = "Tenant not found"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "404", description = "Tenant not found",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @RequiresTenantAccess
         @PutMapping("/{tenantId}/config")
@@ -259,20 +223,16 @@ public class TenantController {
                                 tenantManagementService.setTenantConfigs(tenantId, request)));
         }
 
-        /**
-         * Set tenant logo
-         */
         @Operation(summary = "Set tenant logo", description = "Sets the tenant logo from either a file upload or an external URL — exactly one must be provided. "
                         + "File (PNG, JPEG, WebP — max 2 MB): uploaded to internal object storage. "
                         + "URL (http/https): stored as a reference. "
                         + "In both cases, the previous managed object is deleted from storage if one existed.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Logo set and TENANT_LOGO config updated successfully"),
-                        @ApiResponse(responseCode = "400", description = "Neither or both of file/url provided, unsupported MIME type, or invalid URL"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "404", description = "Tenant not found"),
-                        @ApiResponse(responseCode = "500", description = "Storage or server error")
+                        @ApiResponse(responseCode = "400", description = "Neither or both of file/url provided, unsupported MIME type, or invalid URL",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+                        @ApiResponse(responseCode = "404", description = "Tenant not found",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @RequiresTenantAccess
         @PutMapping(value = "/{tenantId}/logo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -285,17 +245,15 @@ public class TenantController {
                                 tenantManagementService.setTenantLogo(tenantId, LogoSource.from(file, url))));
         }
 
-        /**
-         * Get (proxy) tenant logo
-         */
         @Operation(summary = "Get tenant logo", description = "Proxies the tenant logo from internal object storage. "
                         + "For external logos (set via PUT /logo), responds with a 302 redirect to the external URL. "
                         + "Returns 404 if no logo has been configured for the tenant.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Logo image returned"),
+                        @ApiResponse(responseCode = "200", description = "Logo image returned",
+                                        content = @Content(mediaType = "image/*")),
                         @ApiResponse(responseCode = "302", description = "Redirect to external logo URL"),
-                        @ApiResponse(responseCode = "404", description = "Tenant not found or logo not configured"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "404", description = "Tenant not found or logo not configured",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @GetMapping("/{tenantId}/logo")
         public ResponseEntity<StreamingResponseBody> getTenantLogo(@PathVariable Integer tenantId) {
@@ -314,15 +272,13 @@ public class TenantController {
                 };
         }
 
-        /**
-         * Get tenant location hierarchy by hierarchy type
-         */
-        @Operation(summary = "Get location hierarchy configuration for a tenant", description = "Retrieves the location hierarchy structure (levels) for the specified hierarchy type (LGD or DEPARTMENT). ")
+        @Operation(summary = "Get location hierarchy configuration for a tenant", description = "Retrieves the location hierarchy structure (levels) for the specified hierarchy type (LGD or DEPARTMENT).")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Location hierarchy configuration retrieved successfully"),
-                        @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or tenant could not be resolved"),
-                        @ApiResponse(responseCode = "404", description = "Hierarchy configuration not found for the tenant"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or tenant could not be resolved",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+                        @ApiResponse(responseCode = "404", description = "Hierarchy configuration not found for the tenant",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @GetMapping("/{tenantId}/location-hierarchy/{hierarchyType}")
         public ResponseEntity<ApiResponseDTO<LocationHierarchyResponseDTO>> getTenantLocationHierarchy(
@@ -335,18 +291,14 @@ public class TenantController {
                                 .ok(ApiResponseDTO.of(200, "Location hierarchy retrieved successfully", hierarchy));
         }
 
-        /**
-         * Get location hierarchy edit constraints
-         */
         @Operation(summary = "Get location hierarchy edit constraints", description = "Returns whether structural changes (add/remove levels) are permitted for the given hierarchy type. "
                         + "Structural changes are blocked when seeded location data exists in the master table.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Edit constraints retrieved successfully"),
-                        @ApiResponse(responseCode = "400", description = "Invalid hierarchy type"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "404", description = "Tenant not found"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "400", description = "Invalid hierarchy type",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+                        @ApiResponse(responseCode = "404", description = "Tenant not found",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @RequiresTenantAccess
         @GetMapping("/{tenantId}/location-hierarchy/{hierarchyType}/edit-constraints")
@@ -359,20 +311,17 @@ public class TenantController {
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Edit constraints retrieved successfully", constraints));
         }
 
-        /**
-         * Update location hierarchy
-         */
         @Operation(summary = "Update location hierarchy for a tenant", description = "Updates the location hierarchy levels. "
                         + "If no seeded data exists, full structural changes (add/remove levels) are allowed. "
                         + "If seeded data exists, only level name changes are permitted; structural changes return 409.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Location hierarchy updated successfully"),
-                        @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or empty levels"),
-                        @ApiResponse(responseCode = "401", description = "Unauthorized — valid Bearer token required"),
-                        @ApiResponse(responseCode = "403", description = "Forbidden — insufficient scope or role"),
-                        @ApiResponse(responseCode = "404", description = "Tenant not found"),
-                        @ApiResponse(responseCode = "409", description = "Structural change blocked — seeded data exists"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or empty levels",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+                        @ApiResponse(responseCode = "404", description = "Tenant not found",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+                        @ApiResponse(responseCode = "409", description = "Structural change blocked — seeded data exists",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @RequiresTenantAccess
         @PutMapping("/{tenantId}/location-hierarchy/{hierarchyType}")
@@ -386,15 +335,12 @@ public class TenantController {
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Location hierarchy updated successfully", updated));
         }
 
-        /**
-         * Get child locations by parent id and hierarchy type
-         */
         @Operation(summary = "Get child locations by parent ID", description = "Fetches all child locations under the specified parent location in the given hierarchy type. "
                         + "Pass parentId as 0 to fetch root-level locations (where parent_id IS NULL).")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Child locations retrieved successfully"),
-                        @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or tenant could not be resolved"),
-                        @ApiResponse(responseCode = "500", description = "Internal server error")
+                        @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or tenant could not be resolved",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
         @GetMapping("/{tenantId}/locations/{hierarchyType}/children/{parentId}")
         public ResponseEntity<ApiResponseDTO<List<LocationResponseDTO>>> getLocationChildren(
