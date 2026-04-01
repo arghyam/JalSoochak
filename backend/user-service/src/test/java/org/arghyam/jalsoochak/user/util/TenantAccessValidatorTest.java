@@ -122,6 +122,16 @@ class TenantAccessValidatorTest {
                     () -> TenantAccessValidator.validateSystemUserAccess(999, TenantAccessRole.STATE_ADMIN)
             );
         }
+
+        @Test
+        @DisplayName("STAFF role throws ForbiddenAccessException")
+        void staffRoleThrowsForbiddenAccess() {
+            ForbiddenAccessException exception = assertThrows(
+                    ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.ACTIVE, TenantAccessRole.STAFF)
+            );
+            assertTrue(exception.getMessage().contains("invalid user role"));
+        }
     }
 
     @Nested
@@ -373,6 +383,12 @@ class TenantAccessValidatorTest {
         @DisplayName("isAccessibleToSystemUser returns true for SUPER_USER accessing ACTIVE")
         void isAccessibleToSystemUserSuperUserActive() {
             assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.ACTIVE, TenantAccessRole.SUPER_USER));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns false for STAFF accessing ACTIVE")
+        void isAccessibleToSystemUserStaffActive() {
+            assertFalse(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.ACTIVE, TenantAccessRole.STAFF));
         }
     }
 }

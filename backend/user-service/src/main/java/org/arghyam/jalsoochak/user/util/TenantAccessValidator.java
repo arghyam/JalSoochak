@@ -47,7 +47,7 @@ public class TenantAccessValidator {
      * @throws ForbiddenAccessException if role is null or if the tenant status does not permit access
      */
     public static void validateSystemUserAccess(int tenantStatus, TenantAccessRole role) {
-        if (role == null) {
+        if (role == null || (role != TenantAccessRole.SUPER_USER && role != TenantAccessRole.STATE_ADMIN)) {
             throw new ForbiddenAccessException("Access denied: invalid user role.");
         }
         if (tenantStatus == ARCHIVED && role == TenantAccessRole.STATE_ADMIN) {
@@ -65,9 +65,15 @@ public class TenantAccessValidator {
      * Staff users can only access: ACTIVE, DEGRADED.
      *
      * @param tenantStatus The tenant status code
-     * @throws ForbiddenAccessException if the tenant status does not permit staff user access
+     * @throws ForbiddenAccessException if tenantStatus is invalid or if the tenant status does not permit staff user access
      */
     public static void validateStaffUserAccess(int tenantStatus) {
+        // Validate status is one of the allowed values
+        if (tenantStatus != INACTIVE && tenantStatus != ONBOARDED && tenantStatus != CONFIGURED
+                && tenantStatus != ACTIVE && tenantStatus != SUSPENDED && tenantStatus != DEGRADED
+                && tenantStatus != ARCHIVED) {
+            throw new ForbiddenAccessException("Tenant is not accessible.");
+        }
         switch (tenantStatus) {
             case ACTIVE, DEGRADED -> { /* allowed */ }
             case ONBOARDED -> throw new ForbiddenAccessException("Tenant setup is not yet complete.");
