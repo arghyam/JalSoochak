@@ -20,6 +20,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -136,6 +137,7 @@ class UserSecurityEvaluatorTest {
         @DisplayName("can access user in their own tenant")
         void canAccessOwnTenant() {
             when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userCommonRepository.userBelongsToTenant(10L, "MP")).thenReturn(true);
 
             boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
@@ -147,6 +149,7 @@ class UserSecurityEvaluatorTest {
         @DisplayName("cannot access user in a different tenant")
         void cannotAccessDifferentTenant() {
             when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userCommonRepository.userBelongsToTenant(10L, "MP")).thenReturn(false);
 
             boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
@@ -158,6 +161,7 @@ class UserSecurityEvaluatorTest {
         @DisplayName("returns false (not 404) when user does not exist — prevents ID probing")
         void returnsFalseForNonExistentUser() {
             when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userCommonRepository.userBelongsToTenant(999L, "MP")).thenReturn(false);
 
             boolean result = evaluator.canAccessUser(999L, stateAdminAuth("MP"));
@@ -173,6 +177,7 @@ class UserSecurityEvaluatorTest {
             boolean result = evaluator.canAccessUser(10L, stateAdminAuthNoTenant());
 
             assertFalse(result);
+            verify(userCommonRepository, never()).findTenantStatusByTenantId(anyInt());
             verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
         }
 
@@ -180,12 +185,49 @@ class UserSecurityEvaluatorTest {
         @DisplayName("tenant code normalization to uppercase")
         void tenantCodeCaseInsensitive() {
             when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userCommonRepository.userBelongsToTenant(10L, "MP")).thenReturn(true);
 
             // Authority stored as TENANT_MP → extracted as "MP" via toUpperCase() in stateAdminAuth helper
             boolean result = evaluator.canAccessUser(10L, stateAdminAuth("mp"));
 
             assertTrue(result);
+        }
+
+        @Test
+        @DisplayName("is denied when tenant is ARCHIVED")
+        void deniedWhenTenantArchived() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(6)); // ARCHIVED
+
+            boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
+
+            assertFalse(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("can access user when tenant is SUSPENDED")
+        void allowedWhenTenantSuspended() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(4)); // SUSPENDED
+            when(userCommonRepository.userBelongsToTenant(10L, "MP")).thenReturn(true);
+
+            boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
+
+            assertTrue(result);
+        }
+
+        @Test
+        @DisplayName("is denied when tenant status is not found")
+        void deniedWhenTenantStatusNotFound() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.empty());
+
+            boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
+
+            assertFalse(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
         }
     }
 
@@ -217,6 +259,7 @@ class UserSecurityEvaluatorTest {
         @DisplayName("returns false (not 500) when repository throws DataAccessException")
         void returnsFalseOnRepositoryException() {
             when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userCommonRepository.userBelongsToTenant(10L, "MP"))
                     .thenThrow(new QueryTimeoutException("DB timeout"));
 
@@ -229,6 +272,7 @@ class UserSecurityEvaluatorTest {
         @DisplayName("returns false (not 500) when an unexpected RuntimeException is thrown")
         void returnsFalseOnUnexpectedException() {
             when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userCommonRepository.userBelongsToTenant(10L, "MP"))
                     .thenThrow(new RuntimeException("unexpected"));
 
