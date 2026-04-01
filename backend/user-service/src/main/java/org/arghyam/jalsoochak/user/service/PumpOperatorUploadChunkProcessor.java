@@ -60,6 +60,7 @@ public class PumpOperatorUploadChunkProcessor {
         List<UserSchemeMappingCreateRow> insertRows = new ArrayList<>(rows.size());
         List<String> phonesForInsertRows = new ArrayList<>(rows.size());
         List<String> typesForInsertRows = new ArrayList<>(rows.size());
+        Set<Long> userIdsToReplace = new LinkedHashSet<>();
         int uploaded = 0;
         int skipped = 0;
 
@@ -81,14 +82,8 @@ public class PumpOperatorUploadChunkProcessor {
                 String normalizedPhone = PhoneNumberUtil.normalizeIndianMobileForDb(row.phone());
                 TenantUserRecord user = userTenantRepository.findUserByPhone(schemaName, normalizedPhone).orElse(null);
                 Long userId;
+                String title = resolveTitle(row, typeKey, normalizedPhone);
                 if (user == null) {
-                    String title = !row.fullName().isBlank()
-                            ? row.fullName()
-                            : (row.firstName() + " " + row.lastName()).trim();
-                    if (title.isBlank()) {
-                        title = defaultTitle(typeKey) + " " + normalizedPhone;
-                    }
-
                     userId = userTenantRepository.createUser(
                             schemaName,
                             java.util.UUID.randomUUID().toString(),
@@ -112,10 +107,12 @@ public class PumpOperatorUploadChunkProcessor {
                         continue;
                     }
                     userId = user.id();
+                    userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
                     userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
                 }
 
-                // Idempotent insert (ON CONFLICT DO NOTHING) will safely handle re-uploads + concurrent chunks.
+                // Replace existing mappings so the upload overwrites prior assignments.
+                userIdsToReplace.add(userId);
                 insertRows.add(new UserSchemeMappingCreateRow(userId, schemeId));
                 phonesForInsertRows.add(normalizedPhone);
                 typesForInsertRows.add(typeKey);
@@ -130,6 +127,9 @@ public class PumpOperatorUploadChunkProcessor {
             }
         }
 
+        if (!userIdsToReplace.isEmpty()) {
+            userUploadRepository.markUserSchemeMappingsDeleted(schemaName, new ArrayList<>(userIdsToReplace), actorUserId);
+        }
         int[] insertCounts = userUploadRepository.insertUserSchemeMappings(schemaName, insertRows, actorUserId);
         Set<String> phonesToNotify = new LinkedHashSet<>();
         int inserted = 0;
@@ -208,6 +208,17 @@ public class PumpOperatorUploadChunkProcessor {
             case "sub_divisional_officer" -> "Sub Divisional Officer";
             default -> "Pump Operator";
         };
+    }
+
+    private String resolveTitle(UploadRow row, String typeKey, String normalizedPhone) {
+        String title = row.fullName() == null ? "" : row.fullName().trim();
+        if (title.isBlank()) {
+            title = (row.firstName() + " " + row.lastName()).trim();
+        }
+        if (title.isBlank()) {
+            title = defaultTitle(typeKey) + " " + normalizedPhone;
+        }
+        return title;
     }
 
     private String emailPrefix(String typeKey) {
