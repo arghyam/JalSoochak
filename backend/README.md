@@ -452,11 +452,11 @@ curl "http://localhost:8080/analytics/api/v1/analytics/tenants"
 
 ### Message Service (`:8085`)
 
-| Method | Endpoint                    | Description                        |
-|--------|-----------------------------|------------------------------------|
-| GET    | `/api/v1/notifications`     | Get all notifications              |
-| POST   | `/api/v1/notifications/send`| Send notification via channel      |
-| POST   | `/api/v1/publish`           | Publish Kafka message              |
+| Method | Endpoint                         | Description                        |
+|--------|----------------------------------|------------------------------------|
+| GET    | `/api/v1/message/notifications`  | Get all notifications              |
+| POST   | `/api/v1/message/notifications`  | Send notification via channel      |
+| POST   | `/api/v1/message/events`         | Dispatch a Kafka event             |
 
 ### Scheme Service (`:8086`)
 
