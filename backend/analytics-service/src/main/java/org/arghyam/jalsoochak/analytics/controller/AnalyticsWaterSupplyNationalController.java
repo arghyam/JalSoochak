@@ -209,39 +209,39 @@ public class AnalyticsWaterSupplyNationalController {
         }
     }
 
-    @PostMapping("/date-dimension/populate")
-    @Operation(
-            summary = "Pre-populate the date dimension for a given range",
-            responses = {
-                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                            responseCode = "200",
-                            description = "Date dimension populated successfully",
-                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
-                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.DATE_DIMENSION_POPULATE_SUCCESS))
-                    ),
-                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                            responseCode = "500",
-                            description = "Unexpected error",
-                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
-                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
-                    )
-            }
-    )
-    public ResponseEntity<ApiResponse<String>> populateDateDimension(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        try {
-            dateDimensionService.populateDateRange(startDate, endDate);
-            return ResponseEntity.ok(ApiResponse.<String>builder()
-                    .success(true)
-                    .data("Date dimension populated from " + startDate + " to " + endDate)
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<String>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
-    }
+//     @PostMapping("/date-dimension")
+//     @Operation(
+//             summary = "Pre-populate the date dimension for a given range",
+//             responses = {
+//                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+//                             responseCode = "200",
+//                             description = "Date dimension populated successfully",
+//                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+//                                     examples = @ExampleObject(name = "success", value = SwaggerExamples.DATE_DIMENSION_POPULATE_SUCCESS))
+//                     ),
+//                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+//                             responseCode = "500",
+//                             description = "Unexpected error",
+//                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+//                                     examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
+//                     )
+//             }
+//     )
+//     public ResponseEntity<ApiResponse<String>> populateDateDimension(
+//             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+//             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+//         try {
+//             dateDimensionService.populateDateRange(startDate, endDate);
+//             return ResponseEntity.ok(ApiResponse.<String>builder()
+//                     .success(true)
+//                     .data("Date dimension populated from " + startDate + " to " + endDate)
+//                     .build());
+//         } catch (Exception e) {
+//             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<String>builder()
+//                     .success(false)
+//                     .data(null)
+//                     .build());
+//         }
+//     }
 }
 
