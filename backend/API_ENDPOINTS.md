@@ -5,6 +5,22 @@ When accessed through the API gateway, prefix each path with the service slug (e
 
 ---
 
+## Required Environment Variables
+
+Set the following environment variables before running the Telemetry services:
+
+- `GLIFIC_API_URL`
+- `GLIFIC_API_KEY`
+- `GLIFIC_NUDGE_TEMPLATE_ID`
+- `GLIFIC_ESCALATION_TEMPLATE_ID`
+- `MINIO_ENDPOINT`
+- `MINIO_ACCESS_KEY`
+- `MINIO_SECRET_KEY`
+- `MINIO_BUCKET`
+- `MINIO_BASE_URL`
+
+---
+
 ## Auth & Users (`user-service` · port 8082)
 
 ### Authentication
@@ -207,7 +223,6 @@ The tables below list every endpoint that changed across all services. If your f
 ### Telemetry service — webhook base URL (affects all 23 Glific webhook endpoints)
 
 > ## Telemetry · Webhook (`telemetry-service` · port 8084)
-
 > These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
 
 | Method | Endpoint                                          | Description |
@@ -226,9 +241,9 @@ The tables below list every endpoint that changed across all services. If your f
 | POST | `/api/v1/telemetry/issue-report/submit`           | Save the issue report details provided by the contact |
 | POST | `/api/v1/telemetry/issue-report/telemetry`        | Return telemetry-specific issue-report prompt/options |
 | POST | `/api/v1/telemetry/issue-report/telemetry/submit` | Save telemetry issue report details |
-| POST | `/api/v1/telemetry/telemetry/issue-report`        | Return telemetry issue-report reasons (JSON list) |
-| POST | `/api/v1/telemetry/telemetry/meter-change`        | Return meter-change reasons (JSON list) |
-| POST | `/api/v1/telemetry/telemetry/meter-change/submit` | Save the selected meter-change reason |
+| POST | `/api/v1/telemetry/meter/issue-report`            | Return telemetry issue-report reasons (JSON list) |
+| POST | `/api/v1/telemetry/meter/change`                  | Return meter-change reasons (JSON list) |
+| POST | `/api/v1/telemetry/meter/change/submit`           | Save the selected meter-change reason |
 | POST | `/api/v1/telemetry/others`                        | Return the “other issue” prompt/options |
 | POST | `/api/v1/telemetry/others/submitted`              | Save “other issue” details |
 | POST | `/api/v1/telemetry/take-meter-reading`            | Return the take‑meter‑reading prompt/options |
