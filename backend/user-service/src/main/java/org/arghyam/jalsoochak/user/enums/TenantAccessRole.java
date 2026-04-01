@@ -7,7 +7,7 @@ package org.arghyam.jalsoochak.user.enums;
  * <ul>
  *   <li>{@code 1}    → {@link #SUPER_USER}</li>
  *   <li>{@code 2}    → {@link #STATE_ADMIN}</li>
- *   <li>any other value (including {@code null}) → {@link #STAFF}</li>
+ *   <li>any other value (including {@code null}) → throws {@link IllegalArgumentException}</li>
  * </ul>
  */
 public enum TenantAccessRole {
@@ -22,19 +22,21 @@ public enum TenantAccessRole {
      * <ul>
      *   <li>{@code 1}    → {@link #SUPER_USER}</li>
      *   <li>{@code 2}    → {@link #STATE_ADMIN}</li>
-     *   <li>{@code null} → {@link #STAFF}</li>
-     *   <li>any other non-null value → {@link #STAFF} (fail-safe default)</li>
+     *   <li>{@code null} or any other non-null value → throws {@link IllegalArgumentException}</li>
      * </ul>
      *
      * @param adminLevel the {@code admin_level} column value from {@code admin_user_master_table}
      * @return the corresponding {@code TenantAccessRole}
+     * @throws IllegalArgumentException if adminLevel is null or not a recognised system-user level
      */
     public static TenantAccessRole fromAdminLevel(Integer adminLevel) {
-        if (adminLevel == null) return STAFF;
+        if (adminLevel == null) {
+            throw new IllegalArgumentException("Unrecognised admin_level: null");
+        }
         return switch (adminLevel) {
             case 1 -> SUPER_USER;
             case 2 -> STATE_ADMIN;
-            default -> STAFF;
+            default -> throw new IllegalArgumentException("Unrecognised admin_level: " + adminLevel);
         };
     }
 }

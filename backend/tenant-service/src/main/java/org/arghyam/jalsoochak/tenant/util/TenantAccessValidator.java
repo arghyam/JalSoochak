@@ -8,6 +8,11 @@ import org.arghyam.jalsoochak.tenant.exception.ForbiddenAccessException;
 /**
  * Utility class for validating tenant access based on tenant status and user role.
  *
+ * <p>Tenant status constants are defined in user-service at
+ * {@code org.arghyam.jalsoochak.user.constants.TenantStatusConstants}.
+ * These must stay in sync with {@link org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum}
+ * and {@code common_schema.tenant_master_table} (database).
+ *
  * <p>Tenant Status Access Rules:
  * <ul>
  *   <li>ONBOARDED: Only System Users (Super User, State Admin) can access</li>
@@ -44,6 +49,12 @@ public class TenantAccessValidator {
         if (tenantStatus == TenantStatusEnum.ARCHIVED && role == TenantAccessRole.STATE_ADMIN) {
             throw new ForbiddenAccessException("Tenant is archived and no longer accessible.");
         }
+        if (tenantStatus != TenantStatusEnum.INACTIVE && tenantStatus != TenantStatusEnum.ONBOARDED
+                && tenantStatus != TenantStatusEnum.CONFIGURED && tenantStatus != TenantStatusEnum.ACTIVE
+                && tenantStatus != TenantStatusEnum.SUSPENDED && tenantStatus != TenantStatusEnum.DEGRADED
+                && tenantStatus != TenantStatusEnum.ARCHIVED) {
+            throw new ForbiddenAccessException("Tenant is not accessible.");
+        }
     }
 
     /**
@@ -61,6 +72,7 @@ public class TenantAccessValidator {
             case INACTIVE -> throw new ForbiddenAccessException("Tenant access has been deactivated.");
             case SUSPENDED -> throw new ForbiddenAccessException("Tenant has been suspended.");
             case ARCHIVED -> throw new ForbiddenAccessException("Tenant is archived and no longer accessible.");
+            default -> throw new ForbiddenAccessException("Tenant is not accessible.");
         }
     }
 
@@ -111,12 +123,27 @@ public class TenantAccessValidator {
      * @return true if the system user can access this tenant, false otherwise
      */
     public static boolean isAccessibleToSystemUser(TenantStatusEnum tenantStatus, TenantAccessRole role) {
-        if (role == null) {
+        // Validate role is a system user role
+        if (role == null || role == TenantAccessRole.STAFF) {
             return false;
         }
+        
+        // Validate tenant status is one of the allowed values
+        if (tenantStatus == null) {
+            return false;
+        }
+        
+        // ARCHIVED is only accessible to SUPER_USER
         if (tenantStatus == TenantStatusEnum.ARCHIVED) {
             return role == TenantAccessRole.SUPER_USER;
         }
-        return true;
+        
+        // All other valid statuses are accessible to SUPER_USER and STATE_ADMIN
+        return tenantStatus == TenantStatusEnum.ONBOARDED
+                || tenantStatus == TenantStatusEnum.CONFIGURED
+                || tenantStatus == TenantStatusEnum.ACTIVE
+                || tenantStatus == TenantStatusEnum.INACTIVE
+                || tenantStatus == TenantStatusEnum.SUSPENDED
+                || tenantStatus == TenantStatusEnum.DEGRADED;
     }
 }

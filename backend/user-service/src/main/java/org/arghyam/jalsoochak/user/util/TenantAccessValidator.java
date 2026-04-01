@@ -1,11 +1,19 @@
 package org.arghyam.jalsoochak.user.util;
 
 import lombok.experimental.UtilityClass;
+import org.arghyam.jalsoochak.user.constants.TenantStatusConstants;
 import org.arghyam.jalsoochak.user.enums.TenantAccessRole;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 
 /**
  * Utility class for validating tenant access based on tenant status and user role.
+ *
+ * <p>Tenant status constants are defined in {@link TenantStatusConstants}.
+ * These must stay in sync with:
+ * <ul>
+ *   <li>{@code common_schema.tenant_master_table} (database)</li>
+ *   <li>{@link org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum} (tenant-service)</li>
+ * </ul>
  *
  * <p>Tenant Status Access Rules:
  * <ul>
@@ -21,14 +29,14 @@ import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 @UtilityClass
 public class TenantAccessValidator {
 
-    // Status codes — must stay in sync with common_schema.tenant_master_table and TenantStatusEnum in tenant-service
-    private static final int INACTIVE   = 0;
-    private static final int ONBOARDED  = 1;
-    private static final int CONFIGURED = 2;
-    private static final int ACTIVE     = 3;
-    private static final int SUSPENDED  = 4;
-    private static final int DEGRADED   = 5;
-    private static final int ARCHIVED   = 6;
+    // Use shared constants from TenantStatusConstants
+    private static final int INACTIVE   = TenantStatusConstants.INACTIVE;
+    private static final int ONBOARDED  = TenantStatusConstants.ONBOARDED;
+    private static final int CONFIGURED = TenantStatusConstants.CONFIGURED;
+    private static final int ACTIVE     = TenantStatusConstants.ACTIVE;
+    private static final int SUSPENDED  = TenantStatusConstants.SUSPENDED;
+    private static final int DEGRADED   = TenantStatusConstants.DEGRADED;
+    private static final int ARCHIVED   = TenantStatusConstants.ARCHIVED;
 
     /**
      * Validates if a system user (SUPER_USER or STATE_ADMIN) can access a tenant.
@@ -115,15 +123,20 @@ public class TenantAccessValidator {
      *
      * @param tenantStatus The tenant status code
      * @param role         The caller's access role
-     * @return true if the system user can access this tenant, false otherwise (including when role is null)
+     * @return true if the system user can access this tenant, false otherwise
      */
     public static boolean isAccessibleToSystemUser(int tenantStatus, TenantAccessRole role) {
-        if (role == null) {
+        // Validate role is a system user role
+        if (role == null || role == TenantAccessRole.STAFF) {
             return false;
         }
+        
+        // ARCHIVED is only accessible to SUPER_USER
         if (tenantStatus == ARCHIVED) {
             return role == TenantAccessRole.SUPER_USER;
         }
+        
+        // All other valid statuses are accessible to SUPER_USER and STATE_ADMIN
         return tenantStatus == INACTIVE || tenantStatus == ONBOARDED || tenantStatus == CONFIGURED
                 || tenantStatus == ACTIVE || tenantStatus == SUSPENDED || tenantStatus == DEGRADED;
     }
