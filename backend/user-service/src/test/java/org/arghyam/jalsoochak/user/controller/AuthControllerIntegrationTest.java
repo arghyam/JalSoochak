@@ -407,7 +407,7 @@ class AuthControllerIntegrationTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // GET /api/v1/auth/invite/info
+    // GET /api/v1/auth/invites
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Nested
@@ -474,7 +474,7 @@ class AuthControllerIntegrationTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // POST /api/v1/auth/activate-account
+    // POST /api/v1/auth/invites/activate
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Nested

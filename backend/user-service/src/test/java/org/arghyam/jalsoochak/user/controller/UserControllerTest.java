@@ -145,7 +145,8 @@ class UserControllerTest {
 
             mockMvc.perform(post("/api/v1/users/invitations")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(payload))
+                            .content(payload)
+                            .with(mockJwt()))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.status").value(409));
         }
@@ -168,7 +169,8 @@ class UserControllerTest {
 
             mockMvc.perform(post("/api/v1/users/invitations")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(payload))
+                            .content(payload)
+                            .with(mockJwt()))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.status").value(403));
         }

@@ -26,6 +26,7 @@ public class OpenApiConfig {
     @Bean
     public OpenApiCustomizer voidResponseSchemaCustomizer() {
         return openApi -> {
+            if (openApi.getComponents() == null) return;
             var schemas = openApi.getComponents().getSchemas();
             if (schemas == null) return;
             var voidSchema = schemas.get("ApiResponseDTOVoid");
