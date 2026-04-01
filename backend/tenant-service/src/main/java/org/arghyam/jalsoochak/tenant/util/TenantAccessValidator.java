@@ -126,8 +126,8 @@ public class TenantAccessValidator {
      * @return true if the system user can access this tenant, false otherwise
      */
     public static boolean isAccessibleToSystemUser(TenantStatusEnum tenantStatus, TenantAccessRole role) {
-        // Validate role is a system user role
-        if (role == null || role == TenantAccessRole.STAFF) {
+        // Validate role is a system user role (explicit allowlist)
+        if (role == null || (role != TenantAccessRole.SUPER_USER && role != TenantAccessRole.STATE_ADMIN)) {
             return false;
         }
         
