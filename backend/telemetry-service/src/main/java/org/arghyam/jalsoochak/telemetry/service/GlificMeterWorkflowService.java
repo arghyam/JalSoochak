@@ -644,7 +644,11 @@ public class GlificMeterWorkflowService {
             log.error("Error saving issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report could not be saved.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Issue report could not be saved.",
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())
+                    ))
                     .build();
         }
     }
@@ -851,7 +855,11 @@ public class GlificMeterWorkflowService {
             log.error("Error saving telemetry issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report could not be saved.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Issue report could not be saved.",
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())
+                    ))
                     .build();
         }
     }
@@ -1000,51 +1008,6 @@ public class GlificMeterWorkflowService {
                             yesterday,
                             null
                     );
-
-            // When the meter is replaced, treat the submitted reading as the new baseline.
-            // That means we must not reject lower readings vs the previous meter's last confirmed reading.
-            if (!isMeterReplaced && previousSnapshotOpt.isPresent()
-                    && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
-                TelemetryConfirmedReadingSnapshot previousSnapshot = previousSnapshotOpt.get();
-                String submittedReadingText = manualReadingValue.stripTrailingZeros().toPlainString();
-                String previousReadingText = previousSnapshot.confirmedReading().stripTrailingZeros().toPlainString();
-                telemetryTenantRepository.createTenantAnomalyRecord(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                        "Manual reading is less than previous confirmed reading.",
-                        AnomalyConstants.STATUS_OPEN
-                );
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                        null,
-                        manualReadingValue,
-                        0,
-                        previousSnapshot.confirmedReading(),
-                        previousSnapshot.createdAt(),
-                        0,
-                        "Manual reading is less than previous confirmed reading.",
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
-                return CreateReadingResponse.builder()
-                        .success(false)
-                        .message(localizationService.localizeMessage(
-                                "Reading cannot be less than previous reading. Submitted reading: "
-                                        + submittedReadingText + ". Previous reading: " + previousReadingText + ".",
-                                languageKey
-                        ))
-                        .qualityStatus("REJECTED")
-                        .correlationId(correlationId)
-                        .meterReading(manualReadingValue)
-                        .lastConfirmedReading(previousSnapshot.confirmedReading())
-                        .build();
-            }
 
             // Tenant-configured water supply threshold validation (relative to WATER_NORM).
             // For manual submissions, validate the submitted value directly against thresholds, independent of previous-day readings.

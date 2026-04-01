@@ -333,6 +333,7 @@ public class GlificSelectionService {
 
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
             Integer tenantId = operatorWithSchema.operator().tenantId();
+            System.out.println("tenant id " + tenantId);
             if (tenantId == null) {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
@@ -371,9 +372,14 @@ public class GlificSelectionService {
         } catch (Exception e) {
             log.error("Error building item selection message: {}", e.getMessage(), e);
             log.debug("Error building item selection message for contactId {}: {}", request.getContactId(), e.getMessage());
+            String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             return IntroResponse.builder()
                     .success(false)
-                    .message("Item selection could not be prepared.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Item selection could not be prepared.",
+                            languageKey
+                    ))
                     .build();
         }
     }

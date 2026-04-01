@@ -1,22 +1,26 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
+import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
-import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -30,6 +34,8 @@ public class BfmReadingService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final FlowVisionService flowVisionService;
     private final TelemetryEventPublisher telemetryEventPublisher;
+    private final TenantConfigRepository tenantConfigRepository;
+    private final ObjectMapper objectMapper;
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
                                                String schemaName,
@@ -176,45 +182,54 @@ public class BfmReadingService {
                         null
                 );
 
-        // When the meter is replaced, treat the submitted reading as the new baseline.
-        // That means we must not reject lower readings vs the previous meter's last confirmed reading.
-        if (!isMeterReplaced && validationBaselineOpt.isPresent() && confirmedReading != null
-                && confirmedReading.compareTo(validationBaselineOpt.get().confirmedReading()) < 0) {
-            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.get();
-            String submittedReadingText = confirmedReading.stripTrailingZeros().toPlainString();
-            String previousReadingText = previousSnapshot.confirmedReading().stripTrailingZeros().toPlainString();
+        Optional<WaterSupplyThreshold> thresholdOpt = !isMeterReplaced ? loadWaterSupplyThreshold(tenantId) : Optional.empty();
+        Optional<BigDecimal> waterNormOpt = !isMeterReplaced ? loadWaterNorm(tenantId) : Optional.empty();
+        BigDecimal minAllowed = null;
+        if (thresholdOpt.isPresent() && waterNormOpt.isPresent()) {
+            WaterSupplyThreshold threshold = thresholdOpt.get();
+            minAllowed = waterNormOpt.get()
+                    .multiply(BigDecimal.valueOf(100.0d - threshold.undersupplyThresholdPercent()))
+                    .divide(BigDecimal.valueOf(100.0d), 6, RoundingMode.HALF_UP);
+        }
+
+        if (!isMeterReplaced && confirmedReading != null && minAllowed != null
+                && confirmedReading.compareTo(minAllowed) < 0) {
+            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.orElse(null);
+            BigDecimal previousConfirmed = previousSnapshot != null ? previousSnapshot.confirmedReading() : null;
+            LocalDateTime previousConfirmedAt = previousSnapshot != null ? previousSnapshot.createdAt() : null;
+            String reason = "Submitted reading is below allowed minimum (" + toPlain(minAllowed) + ").";
             telemetryTenantRepository.createTenantAnomalyRecord(
                     schemaName,
                     operatorInRequest.id(),
                     request.getSchemeId(),
-                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                    "Submitted reading is less than previous confirmed reading.",
+                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+                    reason,
                     AnomalyConstants.STATUS_OPEN
             );
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
-                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
                     operatorInRequest.id(),
                     request.getSchemeId(),
                     extractedReading,
                     confidenceLevel,
                     confirmedReading,
                     0,
-                    previousSnapshot.confirmedReading(),
-                    previousSnapshot.createdAt(),
+                    previousConfirmed,
+                    previousConfirmedAt,
                     0,
-                    "Submitted reading is less than previous confirmed reading.",
+                    reason,
                     AnomalyConstants.STATUS_OPEN,
                     null
             );
             return CreateReadingResponse.builder()
                     .success(false)
-                    .message("Reading cannot be less than previous reading. Submitted reading: "
-                            + submittedReadingText + ". Previous reading: " + previousReadingText + ".")
-                    .correlationId(UUID.randomUUID().toString())
+                    .message("Reading rejected because it is below the allowed minimum. Submitted: "
+                            + toPlain(confirmedReading) + ". Minimum allowed: " + toPlain(minAllowed) + ".")
+                    .correlationId(correlationId)
                     .meterReading(confirmedReading)
                     .qualityStatus("REJECTED")
-                    .lastConfirmedReading(previousSnapshot.confirmedReading())
+                    .lastConfirmedReading(previousConfirmed)
                     .build();
         }
 
@@ -367,5 +382,78 @@ public class BfmReadingService {
             return fallbackMessage;
         }
         return fallbackMessage;
+    }
+
+    private Optional<BigDecimal> loadWaterNorm(Integer tenantId) {
+        if (tenantId == null) {
+            return Optional.empty();
+        }
+        return safeFindConfigValue(tenantId, "WATER_NORM")
+                .flatMap(raw -> {
+                    try {
+                        JsonNode root = objectMapper.readTree(raw);
+                        String value = root != null ? root.path("value").asText(null) : null;
+                        if (value == null || value.isBlank()) {
+                            return Optional.empty();
+                        }
+                        String normalized = value.trim().replace(",", "");
+                        if (!normalized.matches("^\\d+(\\.\\d+)?$")) {
+                            return Optional.empty();
+                        }
+                        BigDecimal norm = new BigDecimal(normalized);
+                        return norm.compareTo(BigDecimal.ZERO) > 0 ? Optional.of(norm) : Optional.empty();
+                    } catch (Exception e) {
+                        log.warn("Invalid WATER_NORM config for tenantId {}: {}", tenantId, e.getMessage());
+                        return Optional.empty();
+                    }
+                });
+    }
+
+    private Optional<String> safeFindConfigValue(Integer tenantId, String key) {
+        Optional<String> opt = tenantConfigRepository.findConfigValue(tenantId, key);
+        return opt == null ? Optional.empty() : opt;
+    }
+
+    private Optional<WaterSupplyThreshold> loadWaterSupplyThreshold(Integer tenantId) {
+        if (tenantId == null) {
+            return Optional.empty();
+        }
+        Optional<String> rawOpt = safeFindConfigValue(tenantId, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD")
+                .or(() -> safeFindConfigValue(tenantId, "WATER_QUANTITY_SUPPLY_THRESHOLD"))
+                .or(() -> safeFindConfigValue(0, "WATER_QUANTITY_SUPPLY_THRESHOLD"));
+        if (rawOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(rawOpt.get());
+            if (root == null || root.isNull() || !root.isObject()) {
+                return Optional.empty();
+            }
+            double under = root.path("undersupplyThresholdPercent").asDouble(Double.NaN);
+            double over = root.path("oversupplyThresholdPercent").asDouble(Double.NaN);
+            if (!Double.isFinite(under) || !Double.isFinite(over)) {
+                return Optional.empty();
+            }
+            if (under < 0.0d || under > 100.0d) {
+                return Optional.empty();
+            }
+            if (over < 0.0d || over > 1000.0d) {
+                return Optional.empty();
+            }
+            return Optional.of(new WaterSupplyThreshold(under, over));
+        } catch (Exception e) {
+            log.warn("Invalid water supply threshold config for tenantId {}: {}", tenantId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private static String toPlain(BigDecimal value) {
+        if (value == null) {
+            return "";
+        }
+        return value.stripTrailingZeros().toPlainString();
+    }
+
+    private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {
     }
 }

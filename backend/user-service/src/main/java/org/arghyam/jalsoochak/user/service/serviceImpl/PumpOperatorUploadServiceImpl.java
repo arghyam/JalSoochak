@@ -23,6 +23,7 @@ import org.arghyam.jalsoochak.user.service.GlificPreferredLanguageService;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadService;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadChunkProcessor;
 import org.arghyam.jalsoochak.user.util.LongHashSet;
+import org.arghyam.jalsoochak.user.util.PhoneNumberUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -408,8 +409,8 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             errors.add(err(row.rowNumber(), "phone_number", "Phone number must not start with '+'"));
             return;
         }
-        if (!row.phone().matches("^9\\d{9}$")) {
-            errors.add(err(row.rowNumber(), "phone_number", "Phone number must be a valid 10-digit Indian number starting with 9"));
+        if (!PhoneNumberUtil.isValidIndianMobile(row.phone())) {
+            errors.add(err(row.rowNumber(), "phone_number", "Phone number must be a valid 10-digit Indian number (no country code)"));
             return;
         }
         try {
@@ -423,11 +424,12 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             return;
         }
 
-        Boolean exists = phoneExistsCache.get(row.phone());
+        String normalizedPhone = PhoneNumberUtil.normalizeIndianMobileForDb(row.phone());
+        Boolean exists = phoneExistsCache.get(normalizedPhone);
         if (exists == null) {
-            Integer userId = userUploadRepository.findUserIdByEmailOrPhone(schemaName, null, row.phone());
+            Integer userId = userUploadRepository.findUserIdByEmailOrPhone(schemaName, null, normalizedPhone);
             exists = userId != null;
-            phoneExistsCache.put(row.phone(), exists);
+            phoneExistsCache.put(normalizedPhone, exists);
         }
         if (Boolean.TRUE.equals(exists)) {
             errors.add(err(row.rowNumber(), "phone_number", "Duplicate phone_number already exists"));

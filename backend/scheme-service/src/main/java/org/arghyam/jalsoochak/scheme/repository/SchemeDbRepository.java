@@ -735,10 +735,10 @@ public class SchemeDbRepository {
         String key = sortBy == null ? "" : sortBy.trim().toLowerCase(Locale.ROOT);
         String col = switch (key) {
             case "id" -> "slm.id";
-            case "scheme_name", "name" -> "sm.scheme_name";
+            case "scheme_name", "name", "alphabetical" -> "LOWER(sm.scheme_name)";
             case "state_scheme_id" -> "sm.state_scheme_id";
             case "village_lgd_code" -> "lgd.lgd_code";
-            case "sub_division_name" -> hasDept ? "dept.title" : "slm.id";
+            case "sub_division_name" -> hasDept ? "LOWER(dept.title)" : "slm.id";
             default -> "slm.id";
         };
         return "ORDER BY " + col + " " + dir;
