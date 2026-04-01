@@ -100,9 +100,12 @@ public class TelemetryEventPublisher {
                                        String reason,
                                        Integer status,
                                        String correlationId) {
+        String eventUuid = (correlationId != null && !correlationId.isBlank())
+                ? correlationId
+                : UUID.randomUUID().toString();
         AnomalyEvent event = AnomalyEvent.builder()
                 .eventType(EVENT_ANOMALY_RECORDED)
-                .uuid(UUID.randomUUID().toString())
+                .uuid(eventUuid)
                 .tenantId(tenantId)
                 .type(type)
                 .userId(toInt(userId))
