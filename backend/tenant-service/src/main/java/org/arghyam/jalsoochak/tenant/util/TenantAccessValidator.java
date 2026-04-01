@@ -17,7 +17,7 @@ import org.arghyam.jalsoochak.tenant.exception.ForbiddenAccessException;
  * <ul>
  *   <li>ONBOARDED: Only System Users (Super User, State Admin) can access</li>
  *   <li>CONFIGURED: Only System Users (Super User, State Admin) can access</li>
- *   <li>ACTIVE: All users can access (System Users, Staff, Public APIs)</li>
+ *   <li>ACTIVE: All users can access (System Users, Staff)</li>
  *   <li>INACTIVE: Only System Users can access; data retained for compliance</li>
  *   <li>DEGRADED: All users can access (with known issues)</li>
  *   <li>SUSPENDED: Only System Users can access; access blocked for business users</li>
@@ -35,6 +35,19 @@ import org.arghyam.jalsoochak.tenant.exception.ForbiddenAccessException;
 public class TenantAccessValidator {
 
     /**
+     * Checks if the given tenant status is a known/allowed status.
+     *
+     * @param tenantStatus The tenant status to validate
+     * @return true if the status is one of the allowed values, false otherwise
+     */
+    private static boolean isKnownTenantStatus(TenantStatusEnum tenantStatus) {
+        return tenantStatus == TenantStatusEnum.INACTIVE || tenantStatus == TenantStatusEnum.ONBOARDED
+                || tenantStatus == TenantStatusEnum.CONFIGURED || tenantStatus == TenantStatusEnum.ACTIVE
+                || tenantStatus == TenantStatusEnum.SUSPENDED || tenantStatus == TenantStatusEnum.DEGRADED
+                || tenantStatus == TenantStatusEnum.ARCHIVED;
+    }
+
+    /**
      * Validates if a system user (SUPER_USER or STATE_ADMIN) can access a tenant.
      * System users can access all statuses except ARCHIVED, which is restricted to SUPER_USER.
      *
@@ -49,10 +62,7 @@ public class TenantAccessValidator {
         if (tenantStatus == TenantStatusEnum.ARCHIVED && role == TenantAccessRole.STATE_ADMIN) {
             throw new ForbiddenAccessException("Tenant is archived and no longer accessible.");
         }
-        if (tenantStatus != TenantStatusEnum.INACTIVE && tenantStatus != TenantStatusEnum.ONBOARDED
-                && tenantStatus != TenantStatusEnum.CONFIGURED && tenantStatus != TenantStatusEnum.ACTIVE
-                && tenantStatus != TenantStatusEnum.SUSPENDED && tenantStatus != TenantStatusEnum.DEGRADED
-                && tenantStatus != TenantStatusEnum.ARCHIVED) {
+        if (!isKnownTenantStatus(tenantStatus)) {
             throw new ForbiddenAccessException("Tenant is not accessible.");
         }
     }
@@ -65,7 +75,7 @@ public class TenantAccessValidator {
      * @throws ForbiddenAccessException if tenantStatus is null or if the tenant status does not permit staff user access
      */
     public static void validateStaffUserAccess(TenantStatusEnum tenantStatus) {
-        if (tenantStatus == null) {
+        if (tenantStatus == null || !isKnownTenantStatus(tenantStatus)) {
             throw new ForbiddenAccessException("Tenant is not accessible.");
         }
         switch (tenantStatus) {

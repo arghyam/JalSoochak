@@ -19,7 +19,7 @@ import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
  * <ul>
  *   <li>ONBOARDED (1): Only System Users (SUPER_USER, STATE_ADMIN) can access</li>
  *   <li>CONFIGURED (2): Only System Users (SUPER_USER, STATE_ADMIN) can access</li>
- *   <li>ACTIVE (3): All users can access (System Users, Staff, Public APIs)</li>
+ *   <li>ACTIVE (3): All users can access (System Users, Staff)</li>
  *   <li>INACTIVE (0): Only System Users can access; data retained for compliance</li>
  *   <li>DEGRADED (5): All users can access (with known issues)</li>
  *   <li>SUSPENDED (4): Only System Users can access; access blocked for business users</li>
@@ -39,6 +39,18 @@ public class TenantAccessValidator {
     private static final int ARCHIVED   = TenantStatusConstants.ARCHIVED;
 
     /**
+     * Checks if the given tenant status is a known/allowed status.
+     *
+     * @param tenantStatus The tenant status code to validate
+     * @return true if the status is one of the allowed values, false otherwise
+     */
+    private static boolean isKnownTenantStatus(int tenantStatus) {
+        return tenantStatus == INACTIVE || tenantStatus == ONBOARDED || tenantStatus == CONFIGURED
+                || tenantStatus == ACTIVE || tenantStatus == SUSPENDED || tenantStatus == DEGRADED
+                || tenantStatus == ARCHIVED;
+    }
+
+    /**
      * Validates if a system user (SUPER_USER or STATE_ADMIN) can access a tenant.
      * System users can access all statuses except ARCHIVED, which is restricted to SUPER_USER.
      *
@@ -53,9 +65,7 @@ public class TenantAccessValidator {
         if (tenantStatus == ARCHIVED && role == TenantAccessRole.STATE_ADMIN) {
             throw new ForbiddenAccessException("Tenant is archived and no longer accessible.");
         }
-        if (tenantStatus != INACTIVE && tenantStatus != ONBOARDED && tenantStatus != CONFIGURED
-                && tenantStatus != ACTIVE && tenantStatus != SUSPENDED && tenantStatus != DEGRADED
-                && tenantStatus != ARCHIVED) {
+        if (!isKnownTenantStatus(tenantStatus)) {
             throw new ForbiddenAccessException("Tenant is not accessible.");
         }
     }
@@ -69,9 +79,7 @@ public class TenantAccessValidator {
      */
     public static void validateStaffUserAccess(int tenantStatus) {
         // Validate status is one of the allowed values
-        if (tenantStatus != INACTIVE && tenantStatus != ONBOARDED && tenantStatus != CONFIGURED
-                && tenantStatus != ACTIVE && tenantStatus != SUSPENDED && tenantStatus != DEGRADED
-                && tenantStatus != ARCHIVED) {
+        if (!isKnownTenantStatus(tenantStatus)) {
             throw new ForbiddenAccessException("Tenant is not accessible.");
         }
         switch (tenantStatus) {
