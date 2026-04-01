@@ -789,40 +789,46 @@ public class GlificMeterWorkflowService {
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
-            String correlationId = "issue-report-" + UUID.randomUUID();
+            String correlationId = telemetryTenantRepository.upsertPendingIssueReportRecord(
+                    operatorWithSchema.schemaName(),
+                    schemeId,
+                    operatorWithSchema.operator().id(),
+                    LocalDateTime.now(),
+                    resolvedIssueReason
+            );
             int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
             String anomalyReason = "No Water Supply";
-                telemetryTenantRepository.createTenantAnomalyRecord(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        anomalyType,
-                        resolvedIssueReason,
-                        AnomalyConstants.STATUS_OPEN
-                );
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        anomalyType,
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        null,
-                        null,
-                        null,
-                        0,
-                        null,
-                        null,
-                        0,
-                        anomalyReason,
-                        AnomalyConstants.STATUS_OPEN,
-                        correlationId
-                );
-                telemetryEventPublisher.publishOutageOrNonSubmissionReason(
-                        tenantId,
-                        schemeId,
-                        operatorWithSchema.operator().id(),
-                        LocalDate.now(),
-                        anomalyType
-                );
+            telemetryTenantRepository.createTenantAnomalyRecord(
+                    operatorWithSchema.schemaName(),
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    anomalyType,
+                    resolvedIssueReason,
+                    AnomalyConstants.STATUS_OPEN
+            );
+            telemetryEventPublisher.publishAnomalyRecorded(
+                    tenantId,
+                    anomalyType,
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    null,
+                    0,
+                    anomalyReason,
+                    AnomalyConstants.STATUS_OPEN,
+                    correlationId
+            );
+            telemetryEventPublisher.publishOutageOrNonSubmissionReason(
+                    tenantId,
+                    schemeId,
+                    operatorWithSchema.operator().id(),
+                    LocalDate.now(),
+                    anomalyType
+            );
 
             String fallbackMessage = "Issue reported. Thank you.";
             if ("hindi".equals(languageKey)) {
