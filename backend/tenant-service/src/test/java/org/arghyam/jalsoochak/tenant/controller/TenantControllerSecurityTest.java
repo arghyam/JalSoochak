@@ -212,24 +212,24 @@ class TenantControllerSecurityTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // PUT /api/v1/tenants/{id}/deactivate — SUPER_USER only
+    // POST /api/v1/tenants/{id}/deactivate — SUPER_USER only
     // ──────────────────────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("PUT /api/v1/tenants/{tenantId}/deactivate")
+    @DisplayName("POST /api/v1/tenants/{tenantId}/deactivate")
     class DeactivateTenantSecurity {
 
         @Test
         @DisplayName("Unauthenticated request returns 401")
         void deactivateTenant_NoToken_Returns401() throws Exception {
-            mockMvc.perform(put("/api/v1/tenants/1/deactivate"))
+            mockMvc.perform(post("/api/v1/tenants/1/deactivate"))
                     .andExpect(status().isUnauthorized());
         }
 
         @Test
         @DisplayName("STATE_ADMIN role is forbidden")
         void deactivateTenant_StateAdmin_Returns403() throws Exception {
-            mockMvc.perform(put("/api/v1/tenants/1/deactivate")
+            mockMvc.perform(post("/api/v1/tenants/1/deactivate")
                     .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
                     .andExpect(status().isForbidden());
         }
@@ -237,7 +237,7 @@ class TenantControllerSecurityTest {
         @Test
         @DisplayName("SUPER_USER role reaches the service layer")
         void deactivateTenant_SuperUser_Proceeds() throws Exception {
-            mockMvc.perform(put("/api/v1/tenants/1/deactivate")
+            mockMvc.perform(post("/api/v1/tenants/1/deactivate")
                     .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SUPER_USER"))))
                     .andExpect(status().isOk());
         }
