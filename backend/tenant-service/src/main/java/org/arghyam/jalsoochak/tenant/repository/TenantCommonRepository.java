@@ -254,9 +254,10 @@ public class TenantCommonRepository {
 
     /**
      * Finds the status code of a tenant by its ID.
+     * Excludes soft-deleted tenants.
      */
     public Optional<Integer> findTenantStatusByTenantId(Integer tenantId) {
-        String sql = "SELECT status FROM common_schema.tenant_master_table WHERE id = ?";
+        String sql = "SELECT status FROM common_schema.tenant_master_table WHERE id = ? AND deleted_at IS NULL";
         List<Integer> results = jdbcTemplate.queryForList(sql, Integer.class, tenantId);
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }

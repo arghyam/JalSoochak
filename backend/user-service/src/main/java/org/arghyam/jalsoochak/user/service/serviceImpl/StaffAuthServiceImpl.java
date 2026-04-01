@@ -150,6 +150,13 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         String managedPassword;
         KeycloakTokenResponse token;
         try {
+            // Re-validate tenant status post-OTP consumption to prevent concurrent tenant suspend/archive
+            int freshTenantStatus = userCommonRepository.findTenantStatusByTenantId(tenantId)
+                    .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
+            if (!TenantAccessValidator.isAccessibleToStaff(freshTenantStatus)) {
+                throw new BadRequestException("Invalid or expired OTP");
+            }
+            
             managedPassword = staffKeycloakService.ensureKeycloakAccount(freshUser, tenantCode, schema);
             token = keycloakClient.obtainToken(freshUser.phoneNumber(), managedPassword);
         } catch (RuntimeException e) {

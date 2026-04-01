@@ -546,6 +546,29 @@ class AuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("Throws BadRequestException when invite token role does not match admin level")
+        void activateAccount_roleMismatch_throwsBadRequest() {
+            String hash = "mismatch-hash";
+            when(tokenService.hash("mismatch-token")).thenReturn(hash);
+            when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
+                    activeTokenRow("mismatch@example.com", hash, "INVITE",
+                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
+            // Pending user has adminLevel=1 (SUPER_USER), but token says STATE_ADMIN
+            AdminUserRow pendingUser = new AdminUserRow(25L, "pending-mismatch-uuid", "mismatch@example.com", "", 0, 1, AdminUserStatus.PENDING, 0, null);
+            when(userCommonRepository.findAdminUserByEmail("mismatch@example.com")).thenReturn(Optional.of(pendingUser));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+
+            ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
+            req.setInviteToken("mismatch-token");
+            req.setFirstName("Mismatch");
+            req.setLastName("User");
+            req.setPassword("Pass@123");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            assertThrows(BadRequestException.class, () -> authService.activateAccount(req));
+        }
+
+        @Test
         @DisplayName("STATE_ADMIN: throws ForbiddenAccessException when tenant is archived")
         void activateAccount_stateAdmin_archivedTenant_throwsForbiddenAccess() {
             String hash = "sa-hash";

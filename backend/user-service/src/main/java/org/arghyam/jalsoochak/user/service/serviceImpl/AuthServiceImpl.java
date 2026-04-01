@@ -178,8 +178,20 @@ public class AuthServiceImpl implements AuthService {
         Integer tenantId = "SUPER_USER".equals(role) ? 0
                 : userCommonRepository.findTenantIdByStateCode(tenantCode)
                         .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for code: " + tenantCode));
+        
+        // Derive role from token and validate consistency with pendingUser.adminLevel()
+        TenantAccessRole tokenRole = "SUPER_USER".equals(role) ? TenantAccessRole.SUPER_USER
+                : "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN
+                : TenantAccessRole.STAFF;
+        TenantAccessRole adminLevelRole = TenantAccessRole.fromAdminLevel(pendingUser.adminLevel());
+        
+        // Validate role consistency: token role must match admin level role
+        if (tokenRole != adminLevelRole) {
+            throw new BadRequestException("Invite token role does not match user's assigned role");
+        }
+        
         if (!"SUPER_USER".equals(role)) {
-            validateTenantStatus(tenantId, TenantAccessRole.fromAdminLevel(pendingUser.adminLevel()));
+            validateTenantStatus(tenantId, tokenRole);
         }
 
         String keycloakUuid = null;
@@ -350,27 +362,25 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * Validates tenant status for user access based on their role.
+     * Validates tenant status for access control.
      * 
-     * <p>System Users (SUPER_USER, STATE_ADMIN):
-     * <ul>
-     *   <li>Can access: ONBOARDED (1), CONFIGURED (2), ACTIVE (3), INACTIVE (0), DEGRADED (5), SUSPENDED (4)</li>
-     *   <li>SUPER_USER only: ARCHIVED (6)</li>
-     * </ul>
-     * 
-     * <p>Staff Users (adminLevel=null):
-     * <ul>
-     *   <li>Can access: ACTIVE (3), DEGRADED (5)</li>
-     * </ul>
-     * 
-     * <p>tenantId == 0 is the system tenant (SUPER_USER) — always allowed.
+     * <p>tenantId == 0 is the system tenant (SUPER_USER only) — skips validation.
+     * For all other tenantIds, validates the tenant status against the user's role.
      * 
      * @param tenantId The tenant ID
      * @param role     The caller's access role
+     * @throws AccountDeactivatedException if tenant not found
      * @throws ForbiddenAccessException if the tenant status does not permit access
      */
     private void validateTenantStatus(Integer tenantId, TenantAccessRole role) {
-        if (tenantId == null || tenantId == 0) return;
+        // System tenant (tenantId == 0) is only accessible to SUPER_USER
+        if (tenantId == null || (tenantId == 0 && role == TenantAccessRole.SUPER_USER)) {
+            return;
+        }
+        // For tenantId == 0 with non-SUPER_USER role, treat as invalid
+        if (tenantId == 0) {
+            throw new AccountDeactivatedException("Tenant not found or no longer exists.");
+        }
         Optional<Integer> statusOpt = userCommonRepository.findTenantStatusByTenantId(tenantId);
         if (statusOpt.isEmpty()) {
             throw new AccountDeactivatedException("Tenant not found or no longer exists.");

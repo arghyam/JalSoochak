@@ -16,6 +16,16 @@ class TenantAccessValidatorTest {
     class SystemUserAccessTests {
 
         @Test
+        @DisplayName("Null role throws ForbiddenAccessException")
+        void nullRoleThrowsForbiddenAccess() {
+            ForbiddenAccessException exception = assertThrows(
+                    ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateSystemUserAccess(3, null)
+            );
+            assertTrue(exception.getMessage().contains("invalid user role"));
+        }
+
+        @Test
         @DisplayName("SUPER_USER can access ONBOARDED tenant")
         void superUserCanAccessOnboarded() {
             assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(1, TenantAccessRole.SUPER_USER));
@@ -194,6 +204,16 @@ class TenantAccessValidatorTest {
     class TenantAccessTests {
 
         @Test
+        @DisplayName("Null role throws ForbiddenAccessException")
+        void nullRoleThrowsForbiddenAccess() {
+            ForbiddenAccessException exception = assertThrows(
+                    ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateTenantAccess(3, null)
+            );
+            assertTrue(exception.getMessage().contains("invalid user role"));
+        }
+
+        @Test
         @DisplayName("STATE_ADMIN can access ACTIVE tenant")
         void stateAdminCanAccessActive() {
             assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(3, TenantAccessRole.STATE_ADMIN));
@@ -322,6 +342,12 @@ class TenantAccessValidatorTest {
         @DisplayName("isAccessibleToStaff returns false for ARCHIVED")
         void isAccessibleToStaffArchived() {
             assertFalse(TenantAccessValidator.isAccessibleToStaff(6));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns false when role is null")
+        void isAccessibleToSystemUserNullRole() {
+            assertFalse(TenantAccessValidator.isAccessibleToSystemUser(3, null));
         }
 
         @Test

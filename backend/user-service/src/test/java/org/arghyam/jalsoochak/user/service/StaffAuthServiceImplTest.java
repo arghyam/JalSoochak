@@ -305,6 +305,25 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("throws BadRequestException when tenant is suspended concurrently after OTP verify")
+        void throwsWhenTenantSuspendedConcurrentlyAfterOtpVerify() {
+            // Initial lookup (inside transaction) returns ACTIVE; re-fetch after OTP verify returns SUSPENDED
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
+                    .thenReturn(Optional.of(ACTIVE_USER));
+            when(userCommonRepository.findTenantStatusByTenantId(1))
+                    .thenReturn(Optional.of(3))  // first call — inside transaction (ACTIVE)
+                    .thenReturn(Optional.of(4)); // second call — post-OTP re-validation (SUSPENDED)
+            when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
+
+            assertThatThrownBy(() -> service.verifyOtp(request))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("Invalid or expired OTP");
+
+            verify(otpService).revertOtpConsumption(99L);
+        }
+
+        @Test
         @DisplayName("OTP failure takes precedence over deactivation check (regression: verify ordering)")
         void otpFailureTakesPrecedenceOverDeactivationCheck() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));

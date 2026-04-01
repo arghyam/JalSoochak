@@ -18,16 +18,23 @@ public enum TenantAccessRole {
     /**
      * Derives the access role from a DB {@code admin_level} value.
      *
+     * <p>Mapping:
+     * <ul>
+     *   <li>{@code 1}    → {@link #SUPER_USER}</li>
+     *   <li>{@code 2}    → {@link #STATE_ADMIN}</li>
+     *   <li>{@code null} → {@link #STAFF}</li>
+     *   <li>any other non-null value → {@link #STAFF} (fail-safe default)</li>
+     * </ul>
+     *
      * @param adminLevel the {@code admin_level} column value from {@code admin_user_master_table}
      * @return the corresponding {@code TenantAccessRole}
-     * @throws IllegalArgumentException if adminLevel is non-null and not a recognised system-user level
      */
     public static TenantAccessRole fromAdminLevel(Integer adminLevel) {
         if (adminLevel == null) return STAFF;
         return switch (adminLevel) {
             case 1 -> SUPER_USER;
             case 2 -> STATE_ADMIN;
-            default -> throw new IllegalArgumentException("Unrecognised admin_level: " + adminLevel);
+            default -> STAFF;
         };
     }
 }

@@ -35,9 +35,12 @@ public class TenantAccessValidator {
      *
      * @param tenantStatus The tenant status
      * @param role         The caller's access role
-     * @throws ForbiddenAccessException if the tenant status does not permit access
+     * @throws ForbiddenAccessException if role is null or if the tenant status does not permit access
      */
     public static void validateSystemUserAccess(TenantStatusEnum tenantStatus, TenantAccessRole role) {
+        if (role == null) {
+            throw new ForbiddenAccessException("Access denied: invalid user role.");
+        }
         if (tenantStatus == TenantStatusEnum.ARCHIVED && role == TenantAccessRole.STATE_ADMIN) {
             throw new ForbiddenAccessException("Tenant is archived and no longer accessible.");
         }
@@ -77,9 +80,12 @@ public class TenantAccessValidator {
      *
      * @param tenantStatus The tenant status
      * @param role         The caller's access role
-     * @throws ForbiddenAccessException if the tenant status does not permit access
+     * @throws ForbiddenAccessException if role is null or if the tenant status does not permit access
      */
     public static void validateTenantAccess(TenantStatusEnum tenantStatus, TenantAccessRole role) {
+        if (role == null) {
+            throw new ForbiddenAccessException("Access denied: invalid user role.");
+        }
         if (role == TenantAccessRole.STAFF) {
             validateStaffUserAccess(tenantStatus);
         } else {
@@ -105,6 +111,9 @@ public class TenantAccessValidator {
      * @return true if the system user can access this tenant, false otherwise
      */
     public static boolean isAccessibleToSystemUser(TenantStatusEnum tenantStatus, TenantAccessRole role) {
+        if (role == null) {
+            return false;
+        }
         if (tenantStatus == TenantStatusEnum.ARCHIVED) {
             return role == TenantAccessRole.SUPER_USER;
         }
