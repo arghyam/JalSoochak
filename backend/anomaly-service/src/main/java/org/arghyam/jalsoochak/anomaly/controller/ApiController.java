@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/v1")
 @RequiredArgsConstructor
 @Slf4j
 public class ApiController {
@@ -25,13 +25,13 @@ public class ApiController {
 
     @GetMapping("/anomalies")
     public ResponseEntity<List<SampleDTO>> getAllAnomalies() {
-        log.info("GET /api/anomalies called");
+        log.info("GET /api/v1/anomalies called");
         return ResponseEntity.ok(businessService.getAllAnomalies());
     }
 
     @PostMapping("/publish")
     public ResponseEntity<String> publishMessage(@RequestBody String message) {
-        log.info("POST /api/publish called with message: {}", message);
+        log.info("POST /api/v1/publish called with message: {}", message);
         kafkaProducer.sendMessage(message);
         return ResponseEntity.ok("Message published to anomaly-service-topic");
     }
