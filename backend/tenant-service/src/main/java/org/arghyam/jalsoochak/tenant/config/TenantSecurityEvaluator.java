@@ -3,7 +3,9 @@ package org.arghyam.jalsoochak.tenant.config;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.arghyam.jalsoochak.tenant.enums.TenantAccessRole;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
+import org.arghyam.jalsoochak.tenant.exception.ForbiddenAccessException;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantAccessValidator;
@@ -78,13 +80,16 @@ public class TenantSecurityEvaluator {
 
                         // Check if tenant status permits STATE_ADMIN access
                         try {
-                            // Parse status string to code
-                            int statusCode = TenantStatusEnum.valueOf(tenant.getStatus()).getCode();
-                            TenantAccessValidator.validateSystemUserAccess(statusCode, true);
+                            TenantStatusEnum status = TenantStatusEnum.valueOf(tenant.getStatus());
+                            TenantAccessValidator.validateSystemUserAccess(status, TenantAccessRole.STATE_ADMIN);
                             return true;
-                        } catch (Exception e) {
-                            log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {} due to status: {}",
+                        } catch (IllegalArgumentException e) {
+                            log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {}: unrecognised status value '{}'",
                                     callerStateCode, tenantId, tenant.getStatus());
+                            return false;
+                        } catch (ForbiddenAccessException e) {
+                            log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant {} due to status '{}': {}",
+                                    callerStateCode, tenantId, tenant.getStatus(), e.getMessage());
                             return false;
                         }
                     })
