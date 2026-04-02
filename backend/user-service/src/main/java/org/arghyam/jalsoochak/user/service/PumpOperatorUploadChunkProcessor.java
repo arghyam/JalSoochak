@@ -40,7 +40,7 @@ public class PumpOperatorUploadChunkProcessor {
             String stateSchemeId
     ) {}
 
-    public record ChunkResult(int uploadedRows, int skippedRows) {}
+    public record ChunkResult(int uploadedRows, int skippedRows, int unchangedRows) {}
 
     @Transactional
     public ChunkResult processChunk(
@@ -63,6 +63,7 @@ public class PumpOperatorUploadChunkProcessor {
         Set<Long> userIdsToReplace = new LinkedHashSet<>();
         int uploaded = 0;
         int skipped = 0;
+        int unchanged = 0;
 
         for (UploadRow row : rows) {
             try {
@@ -107,6 +108,10 @@ public class PumpOperatorUploadChunkProcessor {
                         continue;
                     }
                     userId = user.id();
+                    if (isUnchangedMapping(schemaName, user, userId, normalizedPhone, title, schemeId)) {
+                        unchanged++;
+                        continue;
+                    }
                     userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
                     userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
                 }
@@ -155,7 +160,7 @@ public class PumpOperatorUploadChunkProcessor {
         log.info("[pump-operator-upload] chunk_processed rows={} uploaded={} skipped={} mappings_inserted={}",
                 rows.size(), uploaded, skipped, inserted);
 
-        return new ChunkResult(uploaded, skipped);
+        return new ChunkResult(uploaded, skipped, unchanged);
     }
 
     private Integer resolveSchemeId(
@@ -219,6 +224,33 @@ public class PumpOperatorUploadChunkProcessor {
             title = defaultTitle(typeKey) + " " + normalizedPhone;
         }
         return title;
+    }
+
+    private boolean isUnchangedMapping(
+            String schemaName,
+            TenantUserRecord user,
+            Long userId,
+            String normalizedPhone,
+            String title,
+            Integer schemeId
+    ) {
+        if (user == null || userId == null || schemeId == null) {
+            return false;
+        }
+
+        String existingPhone = PhoneNumberUtil.normalizeIndianMobileForDb(user.phoneNumber());
+        if (existingPhone == null || !existingPhone.equals(normalizedPhone)) {
+            return false;
+        }
+
+        String existingTitle = user.title() == null ? "" : user.title().trim();
+        String incomingTitle = title == null ? "" : title.trim();
+        if (!existingTitle.equals(incomingTitle)) {
+            return false;
+        }
+
+        List<Integer> schemeIds = userUploadRepository.findActiveSchemeIdsForUser(schemaName, userId);
+        return schemeIds.size() == 1 && schemeIds.get(0).equals(schemeId);
     }
 
     private String emailPrefix(String typeKey) {
