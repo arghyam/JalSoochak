@@ -26,6 +26,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -454,10 +455,15 @@ public class NotificationEventRouter {
 
     private void handleSendLoginOtp(JsonNode root) {
         String otp = root.path("OTP").asText("");
-        String deliveryChannel = root.path("deliveryChannel").asText("WHATSAPP").toUpperCase();
+        String deliveryChannel = root.path("deliveryChannel").asText("").trim().toUpperCase(Locale.ROOT);
 
         if (otp.isBlank()) {
             log.warn("[Router/SEND_LOGIN_OTP] OTP is missing, skipping");
+            return;
+        }
+
+        if (deliveryChannel.isBlank()) {
+            log.error("[Router/SEND_LOGIN_OTP] deliveryChannel is missing or blank, skipping");
             return;
         }
 
@@ -476,7 +482,7 @@ public class NotificationEventRouter {
             }
             log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
             log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
-        } else {
+        } else if ("WHATSAPP".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
             JsonNode glificIdNode = root.path("glific_id");
             long contactId = glificIdNode.asLong(0);
@@ -500,6 +506,8 @@ public class NotificationEventRouter {
                 throw new IllegalStateException("[Router/SEND_LOGIN_OTP/WHATSAPP] WhatsApp login OTP delivery failed");
             }
             log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] → SENT contactId={}", contactId);
+        } else {
+            log.error("[Router/SEND_LOGIN_OTP] Unsupported deliveryChannel '{}', must be 'SMS' or 'WHATSAPP', skipping", deliveryChannel);
         }
     }
 
