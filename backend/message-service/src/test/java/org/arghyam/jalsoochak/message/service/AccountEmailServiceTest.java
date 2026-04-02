@@ -138,14 +138,23 @@ class AccountEmailServiceTest {
     }
 
     @Test
-    void sendStateAdminInviteEmail_fallsBackEmptyString_whenStateNameIsNull() {
-        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
+    void sendStateAdminInviteEmail_throwsIllegalArgumentException_whenStateNameIsNull() {
+        assertThatThrownBy(() -> accountEmailService.sendStateAdminInviteEmail(
+                "sa@mp.gov.in", "Admin", null, "https://activate", 24))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("stateName must not be null or blank");
 
-        accountEmailService.sendStateAdminInviteEmail(
-                "sa@mp.gov.in", "Admin", null, "https://activate", 24);
+        verify(mailSender, never()).send(any());
+    }
 
-        verify(mailSender).send(captor.capture());
-        assertThat(captor.getValue().templateVariables()).containsEntry("state_name", "");
+    @Test
+    void sendStateAdminInviteEmail_throwsIllegalArgumentException_whenStateNameIsBlank() {
+        assertThatThrownBy(() -> accountEmailService.sendStateAdminInviteEmail(
+                "sa@mp.gov.in", "Admin", "   ", "https://activate", 24))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("stateName must not be null or blank");
+
+        verify(mailSender, never()).send(any());
     }
 
     // ─────────────────────────── sendReinviteEmail ─────────────────────────────

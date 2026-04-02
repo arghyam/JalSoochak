@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.message.config;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
@@ -21,8 +22,8 @@ public record MailProperties(
         String fromAddress,
         String fromName,
         String logoImageUrl,
-        SendGrid sendgrid,
-        Smtp smtp
+        @Valid SendGrid sendgrid,
+        @Valid Smtp smtp
 ) {
 
     // ── SendGrid ─────────────────────────────────────────────────────────────────

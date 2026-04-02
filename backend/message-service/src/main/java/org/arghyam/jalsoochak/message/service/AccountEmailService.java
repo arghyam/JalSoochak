@@ -42,9 +42,12 @@ public class AccountEmailService {
 
     public void sendStateAdminInviteEmail(String to, String name, String stateName,
                                           String inviteLink, int expiryHours) {
+        if (stateName == null || stateName.isBlank()) {
+            throw new IllegalArgumentException("stateName must not be null or blank for STATE_ADMIN invitations");
+        }
         Map<String, Object> vars = new HashMap<>();
         vars.put("name", name != null ? name : "User");
-        vars.put("state_name", stateName != null ? stateName : "");
+        vars.put("state_name", stateName);
         vars.put("activation_link", inviteLink);
         vars.put("expiry_hours", expiryHours);
         mailSender.send(new MailRequest(to, MailTemplate.STATE_ADMIN_INVITATION, vars));

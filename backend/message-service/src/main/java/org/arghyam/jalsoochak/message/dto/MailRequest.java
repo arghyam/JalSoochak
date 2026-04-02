@@ -1,7 +1,9 @@
 package org.arghyam.jalsoochak.message.dto;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Immutable input to the {@link org.arghyam.jalsoochak.message.channel.EmailSender} port.
@@ -29,6 +31,9 @@ public record MailRequest(
      * to ensure immutability and prevent external mutation after construction.
      */
     public MailRequest {
-        templateVariables = Collections.unmodifiableMap(new java.util.HashMap<>(templateVariables));
+        Objects.requireNonNull(to, "to must not be null");
+        Objects.requireNonNull(template, "template must not be null");
+        templateVariables = Collections.unmodifiableMap(new HashMap<>(
+                Objects.requireNonNull(templateVariables, "templateVariables must not be null")));
     }
 }

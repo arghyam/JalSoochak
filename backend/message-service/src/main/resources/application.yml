@@ -99,7 +99,7 @@ notification:
     logo-image-url: ${MAIL_LOGO_URL:https://lh3.googleusercontent.com/d/1WUwmfNG_wyWF_G31MaWCtWIsZCxHy5g2}
     sendgrid:
       api-url: https://api.sendgrid.com
-      api-key: ${SENDGRID_API_KEY:}
+      api-key: ${SENDGRID_API_KEY}
       templates:
         password-reset: ${SENDGRID_TEMPLATE_PASSWORD_RESET:d-9d83de3639254c18b86fa2834f4a5db1}
         reinvitation: ${SENDGRID_TEMPLATE_REINVITATION:d-3710ff4d9d874cf1950c589c6f71d752}
