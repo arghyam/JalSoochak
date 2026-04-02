@@ -864,18 +864,20 @@ public class SchemeServiceImpl implements SchemeService {
             List<SchemeLgdMappingCreateRecord> lgdRows,
             List<SchemeSubdivisionMappingCreateRecord> deptRows
     ) {
-        if (lgdRows != null && !lgdRows.isEmpty()) {
-            for (int i = 0; i < lgdRows.size(); i += CHUNK_SIZE) {
-                int end = Math.min(i + CHUNK_SIZE, lgdRows.size());
-                List<SchemeLgdMappingCreateRecord> chunk = lgdRows.subList(i, end);
-                chunkProcessor.insertMappingsChunk(schemaName, chunk, List.of());
-            }
+        if ((lgdRows == null || lgdRows.isEmpty()) && (deptRows == null || deptRows.isEmpty())) {
+            return;
         }
-        if (deptRows != null && !deptRows.isEmpty()) {
-            for (int i = 0; i < deptRows.size(); i += CHUNK_SIZE) {
-                int end = Math.min(i + CHUNK_SIZE, deptRows.size());
-                List<SchemeSubdivisionMappingCreateRecord> chunk = deptRows.subList(i, end);
-                chunkProcessor.insertMappingsChunk(schemaName, List.of(), chunk);
+
+        int max = Math.max(lgdRows == null ? 0 : lgdRows.size(), deptRows == null ? 0 : deptRows.size());
+        for (int i = 0; i < max; i += CHUNK_SIZE) {
+            int lgdEnd = lgdRows == null ? 0 : Math.min(i + CHUNK_SIZE, lgdRows.size());
+            int deptEnd = deptRows == null ? 0 : Math.min(i + CHUNK_SIZE, deptRows.size());
+            List<SchemeLgdMappingCreateRecord> lgdChunk =
+                    lgdRows == null ? List.of() : lgdRows.subList(i, lgdEnd);
+            List<SchemeSubdivisionMappingCreateRecord> deptChunk =
+                    deptRows == null ? List.of() : deptRows.subList(i, deptEnd);
+            if (!lgdChunk.isEmpty() || !deptChunk.isEmpty()) {
+                chunkProcessor.insertMappingsChunk(schemaName, lgdChunk, deptChunk);
             }
         }
     }

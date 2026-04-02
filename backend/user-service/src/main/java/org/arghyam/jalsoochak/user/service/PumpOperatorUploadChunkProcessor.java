@@ -54,7 +54,7 @@ public class PumpOperatorUploadChunkProcessor {
             Map<String, Integer> schemeIdCache
     ) {
         if (rows == null || rows.isEmpty()) {
-            return new ChunkResult(0, 0);
+            return new ChunkResult(0, 0, 0);
         }
 
         List<UserSchemeMappingCreateRow> insertRows = new ArrayList<>(rows.size());
