@@ -67,10 +67,6 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-mail</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
         </dependency>
         <dependency>
@@ -127,6 +123,11 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
             <version>8.5.9</version>
+        </dependency>
+        <!-- SMTP support — required when notification.mail.provider=smtp -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
     </dependencies>
 
