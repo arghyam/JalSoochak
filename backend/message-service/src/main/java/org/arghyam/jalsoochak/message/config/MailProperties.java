@@ -1,6 +1,5 @@
 package org.arghyam.jalsoochak.message.config;
 
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
@@ -14,6 +13,10 @@ import org.springframework.validation.annotation.Validated;
  *   <li>{@code sendgrid} — uses SendGrid dynamic templates (default)</li>
  *   <li>{@code smtp}     — uses SMTP with plain-text fallback (requires spring.mail.* config)</li>
  * </ul>
+ *
+ * <p>Both {@code sendgrid} and {@code smtp} fields may be null depending on the active provider.
+ * The respective sender implementations validate that their required configuration is present
+ * at construction time via {@code @ConditionalOnProperty}.
  */
 @ConfigurationProperties(prefix = "notification.mail")
 @Validated
@@ -22,8 +25,8 @@ public record MailProperties(
         String fromAddress,
         String fromName,
         String logoImageUrl,
-        @Valid SendGrid sendgrid,
-        @Valid Smtp smtp
+        SendGrid sendgrid,
+        Smtp smtp
 ) {
 
     // ── SendGrid ─────────────────────────────────────────────────────────────────
@@ -61,5 +64,10 @@ public record MailProperties(
             SmtpTemplate stateAdminInvitation
     ) {}
 
-    public record SmtpTemplate(String subject, String body) {}
+    public record SmtpTemplate(
+            @NotBlank(message = "SMTP template subject must not be blank")
+            String subject,
+            @NotBlank(message = "SMTP template body must not be blank")
+            String body
+    ) {}
 }

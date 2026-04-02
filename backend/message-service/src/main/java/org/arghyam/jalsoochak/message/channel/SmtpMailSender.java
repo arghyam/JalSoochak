@@ -79,7 +79,17 @@ public class SmtpMailSender implements EmailSender {
     }
 
     private MailProperties.SmtpTemplate resolveTemplate(MailTemplate template) {
+        if (mailProperties.smtp() == null) {
+            throw new IllegalStateException(
+                    "Missing SMTP configuration: notification.mail.smtp must be configured when provider=smtp");
+        }
+        
         MailProperties.SmtpTemplates templates = mailProperties.smtp().templates();
+        if (templates == null) {
+            throw new IllegalStateException(
+                    "Missing SMTP configuration: notification.mail.smtp.templates must be configured when provider=smtp");
+        }
+        
         return switch (template) {
             case PASSWORD_RESET         -> templates.passwordReset();
             case REINVITATION           -> templates.reinvitation();

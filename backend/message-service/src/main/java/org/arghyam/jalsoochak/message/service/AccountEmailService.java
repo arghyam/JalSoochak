@@ -7,7 +7,6 @@ import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -32,10 +31,11 @@ public class AccountEmailService {
             throw new IllegalArgumentException(
                     "STATE_ADMIN invitations require a stateName; use sendStateAdminInviteEmail() instead");
         }
-        Map<String, Object> vars = new HashMap<>();
-        vars.put("name", name != null ? name : "User");
-        vars.put("activation_link", inviteLink);
-        vars.put("expiry_hours", expiryHours);
+        Map<String, Object> vars = Map.of(
+                "name",            name != null ? name : "User",
+                "activation_link", inviteLink,
+                "expiry_hours",    expiryHours
+        );
         mailSender.send(new MailRequest(to, template, vars));
         log.info("[AccountEmailService] invite dispatched template={} role={}", template, role);
     }
@@ -45,11 +45,12 @@ public class AccountEmailService {
         if (stateName == null || stateName.isBlank()) {
             throw new IllegalArgumentException("stateName must not be null or blank for STATE_ADMIN invitations");
         }
-        Map<String, Object> vars = new HashMap<>();
-        vars.put("name", name != null ? name : "User");
-        vars.put("state_name", stateName);
-        vars.put("activation_link", inviteLink);
-        vars.put("expiry_hours", expiryHours);
+        Map<String, Object> vars = Map.of(
+                "name",            name != null ? name : "User",
+                "state_name",      stateName,
+                "activation_link", inviteLink,
+                "expiry_hours",    expiryHours
+        );
         mailSender.send(new MailRequest(to, MailTemplate.STATE_ADMIN_INVITATION, vars));
         log.info("[AccountEmailService] state-admin invite dispatched");
     }

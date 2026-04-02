@@ -50,7 +50,8 @@ class SmtpMailSenderTest {
         MailProperties.SmtpTemplates smtpTemplates = new MailProperties.SmtpTemplates(
                 pwReset, reinvite, defaultInvite, superUser, stateAdmin);
         MailProperties mailProperties = new MailProperties(
-                "smtp", "noreply@test.com", "Test", null, null,
+                "smtp", "noreply@test.com", "Test", null,
+                null,
                 new MailProperties.Smtp(smtpTemplates));
 
         smtpMailSender = new SmtpMailSender(mailProperties, javaMailSender);

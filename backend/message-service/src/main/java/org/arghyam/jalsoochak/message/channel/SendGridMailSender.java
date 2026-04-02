@@ -40,6 +40,20 @@ public class SendGridMailSender implements EmailSender {
     private String apiUrl;
 
     public SendGridMailSender(MailProperties mailProperties, WebClient.Builder webClientBuilder) {
+        if (mailProperties.sendgrid() == null) {
+            throw new IllegalStateException(
+                    "Missing SendGrid configuration: notification.mail.sendgrid must be configured when provider=sendgrid");
+        }
+        
+        MailProperties.SendGrid sendgrid = mailProperties.sendgrid();
+        if (sendgrid.apiKey() == null || sendgrid.apiKey().isBlank()) {
+            throw new IllegalStateException(
+                    "Missing SendGrid API key: set SENDGRID_API_KEY environment variable when provider=sendgrid");
+        }
+        if (sendgrid.templates() == null) {
+            throw new IllegalStateException(
+                    "Missing SendGrid templates: notification.mail.sendgrid.templates must be configured when provider=sendgrid");
+        }
         this.mailProperties = mailProperties;
         this.webClient = webClientBuilder.build();
     }
