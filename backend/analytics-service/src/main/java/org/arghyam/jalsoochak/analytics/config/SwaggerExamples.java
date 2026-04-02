@@ -182,20 +182,6 @@ public final class SwaggerExamples {
             }
             """;
 
-    public static final String ESCALATIONS_SUCCESS = """
-            {
-              "success": true,
-              "data": [
-                {
-                  "escalationId": 1,
-                  "tenantId": 10,
-                  "schemeId": 1,
-                  "resolutionStatus": 1
-                }
-              ]
-            }
-            """;
-
     public static final String SCHEME_PERFORMANCE_SUCCESS = """
             {
               "success": true,

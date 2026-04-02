@@ -3,13 +3,16 @@ package org.arghyam.jalsoochak.analytics.controller;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.EscalationPaginatedResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
-import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
+import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
+import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.arghyam.jalsoochak.analytics.entity.Anomaly;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -17,6 +20,9 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -40,10 +46,13 @@ import java.util.Objects;
 public class AnalyticsSchemeReportingController {
 
     private static final String CSV_OUTPUT_FORMAT = "csv";
+    private static final int DEFAULT_ESCALATIONS_PAGE_NUMBER = 1;
+    private static final int DEFAULT_ESCALATIONS_LIMIT = 10;
 
-    private final FactEscalationRepository escalationRepository;
     private final FactSchemePerformanceRepository schemePerformanceRepository;
     private final SchemeRegularityService schemeRegularityService;
+    private final EscalationQueryService escalationQueryService;
+    private final AnomalyQueryService anomalyQueryService;
 
     @GetMapping("/schemes/status-count")
     @Operation(
@@ -264,15 +273,22 @@ public class AnalyticsSchemeReportingController {
 
     @GetMapping("/escalations")
     @Operation(
-            summary = "Query escalation data by tenant or scheme",
+            summary = "Get paginated escalations list with filters",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",
                             description = "Escalations fetched successfully",
                             content = @Content(
                                     mediaType = "application/json",
-                                    schema = @Schema(implementation = ApiResponse.class),
-                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.ESCALATIONS_SUCCESS)
+                                    schema = @Schema(implementation = EscalationPaginatedResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = EscalationPaginatedResponse.class)
                             )
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -280,34 +296,88 @@ public class AnalyticsSchemeReportingController {
                             description = "Unexpected error",
                             content = @Content(
                                     mediaType = "application/json",
-                                    schema = @Schema(implementation = ApiResponse.class),
-                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                                    schema = @Schema(implementation = EscalationPaginatedResponse.class)
                             )
                     )
             }
     )
-    public ResponseEntity<ApiResponse<List<FactEscalation>>> getEscalations(
-            @RequestParam(required = false) Integer tenantId,
-            @RequestParam(required = false) Integer schemeId,
-            @RequestParam(required = false) Integer resolutionStatus) {
+    public ResponseEntity<EscalationPaginatedResponse> getEscalationsPaginated(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "user_id") Integer userId,
+            @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
+            @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
+            @RequestParam(name = "escalation_type", required = false) Integer escalationType,
+            @RequestParam(name = "scheme_id", required = false) Integer schemeId,
+            @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    ) {
         try {
-            List<FactEscalation> data;
-            if (tenantId != null && resolutionStatus != null) {
-                data = escalationRepository.findByTenantIdAndResolutionStatus(tenantId, resolutionStatus);
-            } else if (schemeId != null) {
-                data = escalationRepository.findBySchemeId(schemeId);
-            } else if (tenantId != null) {
-                data = escalationRepository.findByTenantId(tenantId);
-            } else {
-                data = escalationRepository.findAll();
+            if (pageNumber < 1) {
+                throw new IllegalArgumentException("page_number must be >= 1");
+            }
+            if (limit < 1) {
+                throw new IllegalArgumentException("limit must be >= 1");
             }
 
-            return ResponseEntity.ok(ApiResponse.<List<FactEscalation>>builder()
+            PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
+            Page<FactEscalation> page = escalationQueryService.getEscalations(
+                    tenantId,
+                    userId,
+                    escalationType,
+                    schemeId,
+                    startDate,
+                    endDate,
+                    pageable
+            );
+
+            return ResponseEntity.ok(EscalationPaginatedResponse.builder()
+                    .success(true)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(page.getTotalElements())
+                    .escalations(page.getContent())
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(EscalationPaginatedResponse.builder()
+                    .success(false)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(0)
+                    .escalations(List.of())
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(EscalationPaginatedResponse.builder()
+                    .success(false)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(0)
+                    .escalations(List.of())
+                    .build());
+        }
+    }
+
+    @GetMapping("/anomalies")
+    @Operation(summary = "Get anomalies for schemes mapped to a user (via dim_user_scheme_mapping_table)")
+    public ResponseEntity<ApiResponse<List<Anomaly>>> getAnomalies(
+            @RequestParam(name = "user_id") Integer mappedUserId,
+            @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(name = "anomaly_type", required = false) Integer anomalyType
+    ) {
+        try {
+            List<Anomaly> data = anomalyQueryService.getAnomaliesForUserSchemes(
+                    mappedUserId,
+                    startDate,
+                    endDate,
+                    anomalyType
+            );
+
+            return ResponseEntity.ok(ApiResponse.<List<Anomaly>>builder()
                     .success(true)
                     .data(data)
                     .build());
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<FactEscalation>>builder()
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<Anomaly>>builder()
                     .success(false)
                     .data(null)
                     .build());

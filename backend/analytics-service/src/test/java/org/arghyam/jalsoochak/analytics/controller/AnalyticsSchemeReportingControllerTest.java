@@ -3,9 +3,12 @@ package org.arghyam.jalsoochak.analytics.controller;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
-import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
+import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
+import org.arghyam.jalsoochak.analytics.entity.Anomaly;
+import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -15,10 +18,17 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -27,6 +37,8 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -50,11 +62,13 @@ class AnalyticsSchemeReportingControllerTest {
     private MockMvc mockMvc;
 
     @MockBean
-    private FactEscalationRepository escalationRepository;
-    @MockBean
     private FactSchemePerformanceRepository schemePerformanceRepository;
     @MockBean
     private SchemeRegularityService schemeRegularityService;
+    @MockBean
+    private EscalationQueryService escalationQueryService;
+    @MockBean
+    private AnomalyQueryService anomalyQueryService;
 
     @ParameterizedTest
     @MethodSource("schemeStatusValidRoutes")
@@ -363,57 +377,6 @@ class AnalyticsSchemeReportingControllerTest {
     }
 
     @Test
-    void getEscalations_tenantAndResolution_routesToTenantResolutionBranch() throws Exception {
-        when(escalationRepository.findByTenantIdAndResolutionStatus(10, 1)).thenReturn(List.of());
-
-        mockMvc.perform(get(BASE + "/escalations")
-                        .param("tenantId", "10")
-                        .param("resolutionStatus", "1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(escalationRepository, times(1)).findByTenantIdAndResolutionStatus(10, 1);
-        verify(escalationRepository, never()).findBySchemeId(any());
-    }
-
-    @Test
-    void getEscalations_schemeProvided_routesToSchemeBranch() throws Exception {
-        when(escalationRepository.findBySchemeId(200)).thenReturn(List.of());
-
-        mockMvc.perform(get(BASE + "/escalations").param("schemeId", "200"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(escalationRepository, times(1)).findBySchemeId(200);
-    }
-
-    @Test
-    void getEscalations_tenantOnly_routesToTenantBranch() throws Exception {
-        when(escalationRepository.findByTenantId(10)).thenReturn(List.of());
-
-        mockMvc.perform(get(BASE + "/escalations").param("tenantId", "10"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(escalationRepository, times(1)).findByTenantId(10);
-    }
-
-    @Test
-    void getEscalations_noFilters_returnsAll() throws Exception {
-        when(escalationRepository.findAll()).thenReturn(List.of());
-
-        mockMvc.perform(get(BASE + "/escalations"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(escalationRepository, times(1)).findAll();
-    }
-
-    @Test
     void getSchemePerformance_schemePreferredOverTenant() throws Exception {
         when(schemePerformanceRepository.findBySchemeId(300)).thenReturn(List.of());
 
@@ -450,6 +413,133 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data").isArray());
 
         verify(schemePerformanceRepository, times(1)).findAll();
+    }
+
+    @Test
+    void getEscalationsPaginated_returnsExpectedShape() throws Exception {
+        LocalDate start = LocalDate.of(2026, 2, 1);
+        LocalDate end = LocalDate.of(2026, 3, 1);
+
+        FactEscalation e1 = FactEscalation.builder()
+                .id(1L)
+                .tenantId(10)
+                .schemeId(101)
+                .userId(9001)
+                .escalationType(2)
+                .message("test")
+                .createdAt(LocalDateTime.of(2026, 2, 15, 10, 0))
+                .build();
+
+        Page<FactEscalation> page = new PageImpl<>(List.of(e1), PageRequest.of(0, 5), 12);
+        when(escalationQueryService.getEscalations(
+                eq(10),
+                eq(9001),
+                eq(2),
+                eq(101),
+                eq(start),
+                eq(end),
+                any(Pageable.class)
+        )).thenReturn(page);
+
+        mockMvc.perform(get(BASE + "/escalations")
+                        .param("tenant_id", "10")
+                        .param("user_id", "9001")
+                        .param("page_number", "1")
+                        .param("limit", "5")
+                        .param("escalation_type", "2")
+                        .param("scheme_id", "101")
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.limit").value(5))
+                .andExpect(jsonPath("$.total_count").value(12))
+                .andExpect(jsonPath("$.escalations").isArray())
+                .andExpect(jsonPath("$.escalations[0].id").value(1))
+                .andExpect(jsonPath("$.escalations[0].tenantId").value(10))
+                .andExpect(jsonPath("$.escalations[0].userId").value(9001))
+                .andExpect(jsonPath("$.escalations[0].schemeId").value(101))
+                .andExpect(jsonPath("$.escalations[0].escalationType").value(2));
+    }
+
+    @Test
+    void getEscalationsPaginated_withoutPageAndLimit_defaultsApplied() throws Exception {
+        LocalDate start = LocalDate.of(2026, 2, 1);
+        LocalDate end = LocalDate.of(2026, 3, 1);
+
+        Page<FactEscalation> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        when(escalationQueryService.getEscalations(
+                eq(10),
+                eq(9001),
+                eq(2),
+                eq(101),
+                eq(start),
+                eq(end),
+                any(Pageable.class)
+        )).thenReturn(page);
+
+        mockMvc.perform(get(BASE + "/escalations")
+                        .param("tenant_id", "10")
+                        .param("user_id", "9001")
+                        .param("escalation_type", "2")
+                        .param("scheme_id", "101")
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.limit").value(10))
+                .andExpect(jsonPath("$.total_count").value(0))
+                .andExpect(jsonPath("$.escalations").isArray());
+    }
+
+    @Test
+    void getAnomalies_withExplicitDatesAndType_returnsExpectedShape() throws Exception {
+        LocalDate start = LocalDate.of(2026, 3, 1);
+        LocalDate end = LocalDate.of(2026, 3, 31);
+
+        Anomaly a1 = Anomaly.builder()
+                .id(11L)
+                .uuid("uuid-1")
+                .type(2)
+                .userId(999) // note: not the same as input mapped user id
+                .schemeId(101)
+                .tenantId(10)
+                .status(1)
+                .createdAt(OffsetDateTime.of(2026, 3, 15, 10, 0, 0, 0, ZoneOffset.UTC))
+                .build();
+
+        when(anomalyQueryService.getAnomaliesForUserSchemes(eq(9001), eq(start), eq(end), eq(2)))
+                .thenReturn(List.of(a1));
+
+        mockMvc.perform(get(BASE + "/anomalies")
+                        .param("user_id", "9001")
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString())
+                        .param("anomaly_type", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data[0].id").value(11))
+                .andExpect(jsonPath("$.data[0].schemeId").value(101))
+                .andExpect(jsonPath("$.data[0].type").value(2));
+
+        verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(eq(9001), eq(start), eq(end), eq(2));
+    }
+
+    @Test
+    void getAnomalies_withoutDates_defaultsHandledInService() throws Exception {
+        when(anomalyQueryService.getAnomaliesForUserSchemes(eq(9001), isNull(), isNull(), isNull()))
+                .thenReturn(List.of());
+
+        mockMvc.perform(get(BASE + "/anomalies")
+                        .param("user_id", "9001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray());
+
+        verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(eq(9001), isNull(), isNull(), isNull());
     }
 
     private static Stream<Arguments> schemeStatusValidRoutes() {
