@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.message.config;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
@@ -25,8 +26,8 @@ public record MailProperties(
         String fromAddress,
         String fromName,
         String logoImageUrl,
-        SendGrid sendgrid,
-        Smtp smtp
+        @Valid SendGrid sendgrid,
+        @Valid Smtp smtp
 ) {
 
     // ── SendGrid ─────────────────────────────────────────────────────────────────
@@ -34,14 +35,19 @@ public record MailProperties(
     public record SendGrid(
             @NotBlank(message = "SendGrid API key must not be blank; set SENDGRID_API_KEY environment variable")
             String apiKey,
-            Templates templates
+            @Valid Templates templates
     ) {}
 
     public record Templates(
+            @NotBlank(message = "SendGrid template ID for password-reset must not be blank")
             String passwordReset,
+            @NotBlank(message = "SendGrid template ID for reinvitation must not be blank")
             String reinvitation,
+            @NotBlank(message = "SendGrid template ID for default-invitation must not be blank")
             String defaultInvitation,
+            @NotBlank(message = "SendGrid template ID for super-user-invitation must not be blank")
             String superUserInvitation,
+            @NotBlank(message = "SendGrid template ID for state-admin-invitation must not be blank")
             String stateAdminInvitation
     ) {}
 

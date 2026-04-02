@@ -10,9 +10,6 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
 
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
-
 import java.util.HashMap;
 import java.util.Map;
 
@@ -58,16 +55,13 @@ public class SmtpMailSender implements EmailSender {
         message.setSubject(subject);
         message.setText(body);
 
-        Mono.fromCallable(() -> {
-            try {
-                javaMailSender.send(message);
-                log.info("[SmtpMailSender] sent template={}", request.template());
-            } catch (MailException e) {
-                log.error("[SmtpMailSender] failure template={}: {}", request.template(), e.getMessage(), e);
-                throw new RuntimeException("SmtpMailSender failure for " + request.template(), e);
-            }
-            return null;
-        }).subscribeOn(Schedulers.boundedElastic()).block();
+        try {
+            javaMailSender.send(message);
+            log.info("[SmtpMailSender] sent template={}", request.template());
+        } catch (MailException e) {
+            log.error("[SmtpMailSender] failure template={}: {}", request.template(), e.getMessage(), e);
+            throw new RuntimeException("SmtpMailSender failure for " + request.template(), e);
+        }
     }
 
     private String interpolate(String template, Map<String, Object> vars) {

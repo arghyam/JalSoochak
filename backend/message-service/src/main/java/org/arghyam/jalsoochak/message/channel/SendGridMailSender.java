@@ -10,7 +10,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.core.scheduler.Schedulers;
 
 import java.util.HashMap;
 import java.util.List;
@@ -27,7 +26,7 @@ import java.util.Map;
  * <p>Activated when {@code notification.mail.provider=sendgrid} (default).
  */
 @Component
-@ConditionalOnProperty(name = "notification.mail.provider", havingValue = "sendgrid")
+@ConditionalOnProperty(name = "notification.mail.provider", havingValue = "sendgrid", matchIfMissing = true)
 @Slf4j
 public class SendGridMailSender implements EmailSender {
 
@@ -81,7 +80,6 @@ public class SendGridMailSender implements EmailSender {
                     .bodyValue(payload)
                     .retrieve()
                     .toBodilessEntity()
-                    .subscribeOn(Schedulers.boundedElastic())
                     .block();
 
             log.info("[SendGridMailSender] sent template={}", request.template());
