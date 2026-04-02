@@ -301,9 +301,24 @@ public class GlificWhatsAppService {
      * @throws RuntimeException if Glific returns GraphQL errors or {@code success=false}
      */
     public void startWelcomeFlow(Long contactId) {
+        startWelcomeFlow(contactId, welcomeFlowId);
+    }
+
+    /**
+     * Initiates the Glific welcome flow using an explicit flow ID override.
+     *
+     * @param contactId Glific contact ID obtained from {@link #optIn}
+     * @param flowId    Glific flow ID to use for welcome flow
+     * @throws IllegalStateException if {@code flowId} is blank
+     * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
+     */
+    public void startWelcomeFlow(Long contactId, String flowId) {
         if (isDryRun("startWelcomeFlow")) return;
+        if (flowId == null || flowId.isBlank()) {
+            throw new IllegalStateException("glific.flow.welcome-id is not configured");
+        }
         JsonNode response = client.execute(START_CONTACT_FLOW_MUTATION, Map.of(
-                "flowId", welcomeFlowId,
+                "flowId", flowId,
                 "contactId", contactId,
                 "defaultResults", "{}"));
         checkErrors(response, "startContactFlow");

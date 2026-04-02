@@ -296,6 +296,7 @@ public class NotificationEventRouter {
     private void handleSendWelcomeMessage(JsonNode root) {
         String tenantCode = root.path("tenantCode").asText("").toLowerCase();
         JsonNode phonesNode = root.path("pumpOperatorPhones");
+        int tenantId = root.path("tenantId").asInt(0);
 
         if (tenantCode.isBlank() || !tenantCode.matches("[a-z0-9_]+")) {
             log.warn("[Router/WELCOME] Invalid or missing tenantCode, skipping");
@@ -307,6 +308,11 @@ public class NotificationEventRouter {
         }
 
         String tenantSchema = "tenant_" + tenantCode;
+        String welcomeFlowId = resolveWelcomeFlowId(tenantId);
+        if (welcomeFlowId.isBlank()) {
+            log.warn("[Router/WELCOME] No tenant-specific welcome flow ID found; using default config (tenantCode={}, tenantId={})",
+                    tenantCode, tenantId);
+        }
         int success = 0, failed = 0;
         for (JsonNode phoneNode : phonesNode) {
             String phone = phoneNode.asText("");
@@ -325,7 +331,11 @@ public class NotificationEventRouter {
                     failed++;
                     continue;
                 }
-                glificWhatsAppService.startWelcomeFlow(contactId);
+                if (welcomeFlowId.isBlank()) {
+                    glificWhatsAppService.startWelcomeFlow(contactId);
+                } else {
+                    glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId);
+                }
                 success++;
             } catch (Exception e) {
                 log.error("[Router/WELCOME] Failed to send welcome message: {}", e.getMessage(), e);
@@ -339,6 +349,7 @@ public class NotificationEventRouter {
     private void handleSendWelcomeMessageAdmin(JsonNode root) {
         String tenantCode = root.path("tenantCode").asText("");
         JsonNode phonesNode = root.path("pumpOperatorPhones");
+        int tenantId = root.path("tenantId").asInt(0);
 
         if (tenantCode.isBlank() || !tenantCode.matches("[A-Za-z0-9_]+")) {
             log.warn("[Router/WELCOME_ADMIN] Invalid or missing tenantCode, skipping");
@@ -350,6 +361,11 @@ public class NotificationEventRouter {
         }
 
         String tenantSchema = "tenant_" + tenantCode.toLowerCase();
+        String welcomeFlowId = resolveWelcomeFlowId(tenantId);
+        if (welcomeFlowId.isBlank()) {
+            log.warn("[Router/WELCOME_ADMIN] No tenant-specific welcome flow ID found; using default config (tenantCode={}, tenantId={})",
+                    tenantCode, tenantId);
+        }
         int success = 0, failed = 0;
         for (JsonNode phoneNode : phonesNode) {
             String phone = phoneNode.asText("");
@@ -373,7 +389,11 @@ public class NotificationEventRouter {
                         continue;
                     }
                 }
-                glificWhatsAppService.startWelcomeFlow(contactId);
+                if (welcomeFlowId.isBlank()) {
+                    glificWhatsAppService.startWelcomeFlow(contactId);
+                } else {
+                    glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId);
+                }
                 success++;
             } catch (Exception e) {
                 log.error("[Router/WELCOME_ADMIN] Failed to send welcome message: {}", e.getMessage(), e);
@@ -399,6 +419,13 @@ public class NotificationEventRouter {
             return "91" + trimmed;
         }
         return trimmed;
+    }
+
+    private String resolveWelcomeFlowId(int tenantId) {
+        if (tenantId <= 0) {
+            return "";
+        }
+        return messageTemplateService.findWelcomeFlowId(tenantId).orElse("");
     }
 
     private void publishWelcomeDlt(String tenantSchema, String phone, String errorMessage) {
