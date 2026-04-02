@@ -196,6 +196,22 @@ public class UserUploadRepository {
         return jdbcTemplate.update(sql, args.toArray());
     }
 
+    public List<Integer> findActiveSchemeIdsForUser(String schemaName, Long userId) {
+        validateSchemaName(schemaName);
+        if (userId == null) {
+            return List.of();
+        }
+
+        String sql = String.format("""
+                SELECT scheme_id
+                FROM %s.user_scheme_mapping_table
+                WHERE deleted_at IS NULL
+                  AND user_id = ?
+                """, schemaName);
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> rs.getInt("scheme_id"), userId);
+    }
+
     private void validateSchemaName(String schemaName) {
         if (schemaName == null || schemaName.isBlank() || !SAFE_SCHEMA.matcher(schemaName).matches()) {
             throw new IllegalArgumentException("Invalid schema name: " + schemaName);

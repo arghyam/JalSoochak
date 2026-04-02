@@ -41,6 +41,20 @@ public class SchemeDbRepository {
             3, "Partially Operative"
     );
 
+    public record SchemeSnapshot(
+            Integer id,
+            String stateSchemeId,
+            String centreSchemeId,
+            String schemeName,
+            Integer fhtcCount,
+            Integer plannedFhtc,
+            Integer houseHoldCount,
+            Double latitude,
+            Double longitude,
+            Integer workStatus,
+            Integer operatingStatus
+    ) {}
+
     public List<SchemeDTO> findAllSchemes(String schemaName) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -495,6 +509,60 @@ public class SchemeDbRepository {
     }
 
     /**
+     * Batch lookup of scheme details keyed by lower(state_scheme_id).
+     */
+    public Map<String, SchemeSnapshot> findSchemeSnapshotsByStateSchemeIds(String schemaName, List<String> stateSchemeIds) {
+        validateSchemaName(schemaName);
+        if (stateSchemeIds == null || stateSchemeIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Set<String> uniq = new HashSet<>(Math.max(16, stateSchemeIds.size()));
+        for (String value : stateSchemeIds) {
+            if (value != null && !value.isBlank()) {
+                uniq.add(value.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        if (uniq.isEmpty()) {
+            return Map.of();
+        }
+
+        String placeholders = String.join(",", java.util.Collections.nCopies(uniq.size(), "?"));
+        String sql = String.format("""
+                SELECT id, state_scheme_id, centre_scheme_id, scheme_name,
+                       fhtc_count, planned_fhtc, house_hold_count,
+                       latitude, longitude, work_status, operating_status
+                FROM %s.scheme_master_table
+                WHERE deleted_at IS NULL
+                  AND lower(state_scheme_id) IN (%s)
+                """, schemaName, placeholders);
+
+        List<Object> args = new ArrayList<>(uniq);
+        Map<String, SchemeSnapshot> out = new LinkedHashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            String key = rs.getString("state_scheme_id");
+            if (key == null) {
+                return;
+            }
+            String normalized = key.trim().toLowerCase(Locale.ROOT);
+            out.put(normalized, new SchemeSnapshot(
+                    rs.getInt("id"),
+                    rs.getString("state_scheme_id"),
+                    rs.getString("centre_scheme_id"),
+                    rs.getString("scheme_name"),
+                    (Integer) rs.getObject("fhtc_count"),
+                    (Integer) rs.getObject("planned_fhtc"),
+                    (Integer) rs.getObject("house_hold_count"),
+                    (Double) rs.getObject("latitude"),
+                    (Double) rs.getObject("longitude"),
+                    (Integer) rs.getObject("work_status"),
+                    (Integer) rs.getObject("operating_status")
+            ));
+        }, args.toArray());
+        return out;
+    }
+
+    /**
      * Batch lookup of LGD location IDs by lgd_code (case-insensitive).
      * Returns a map keyed by lower(lgd_code).
      */
@@ -508,6 +576,14 @@ public class SchemeDbRepository {
      */
     public Map<String, Integer> findDepartmentIdsByTitles(String schemaName, List<String> titles) {
         return findIdsByLowerTextKey(schemaName, "department_location_master_table", "title", titles);
+    }
+
+    public Map<Integer, Set<Integer>> findSchemeLgdMappingsBySchemeIds(String schemaName, List<Integer> schemeIds) {
+        return findMappingIdsByScheme(schemaName, "scheme_lgd_mapping_table", "parent_lgd_id", schemeIds);
+    }
+
+    public Map<Integer, Set<Integer>> findSchemeDepartmentMappingsBySchemeIds(String schemaName, List<Integer> schemeIds) {
+        return findMappingIdsByScheme(schemaName, "scheme_department_mapping_table", "parent_department_id", schemeIds);
     }
 
     public Integer findUserIdByEmail(String schemaName, String email) {
@@ -926,6 +1002,46 @@ public class SchemeDbRepository {
             int l = rs.getInt("l");
             int r = rs.getInt("r");
             out.add(l + "|" + r);
+        }, args.toArray());
+        return out;
+    }
+
+    private Map<Integer, Set<Integer>> findMappingIdsByScheme(
+            String schemaName,
+            String table,
+            String childColumn,
+            List<Integer> schemeIds
+    ) {
+        validateSchemaName(schemaName);
+        if (schemeIds == null || schemeIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Set<Integer> uniq = new HashSet<>();
+        for (Integer id : schemeIds) {
+            if (id != null) {
+                uniq.add(id);
+            }
+        }
+        if (uniq.isEmpty()) {
+            return Map.of();
+        }
+
+        String placeholders = String.join(",", java.util.Collections.nCopies(uniq.size(), "?"));
+        String sql = String.format(
+                "SELECT scheme_id, %s AS child_id FROM %s.%s WHERE deleted_at IS NULL AND scheme_id IN (%s)",
+                childColumn,
+                schemaName,
+                table,
+                placeholders
+        );
+
+        List<Object> args = new ArrayList<>(uniq);
+        Map<Integer, Set<Integer>> out = new LinkedHashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            int schemeId = rs.getInt("scheme_id");
+            int childId = rs.getInt("child_id");
+            out.computeIfAbsent(schemeId, k -> new HashSet<>()).add(childId);
         }, args.toArray());
         return out;
     }

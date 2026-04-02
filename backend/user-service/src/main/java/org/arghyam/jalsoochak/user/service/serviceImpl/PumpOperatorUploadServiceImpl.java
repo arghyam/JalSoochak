@@ -100,6 +100,11 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
 
         int totalRows = validateUpload(schemaName, file, extension, schemeIdCache);
         ProcessResult processed = processUpload(schemaName, tenantCode, actor, actorUserId, userTypeIds, preferredLanguageId, file, extension, schemeIdCache);
+        if (processed.uploadedRows() == 0 && processed.unchangedRows() == totalRows) {
+            throw new BadRequestException("Duplicate upload", List.of(
+                    err(0, "file", "No changes detected; uploaded file matches existing records")
+            ));
+        }
 
         return PumpOperatorUploadResponseDTO.builder()
                 .message("Pump operator upload processed successfully")
@@ -281,7 +286,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
 
             var it = parser.iterator();
             if (!it.hasNext()) {
-                return new ProcessResult(0, 0);
+                return new ProcessResult(0, 0, 0);
             }
 
             List<String> rawHeaders = new ArrayList<>();
@@ -291,6 +296,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
 
             int uploaded = 0;
             int skipped = 0;
+            int unchanged = 0;
             List<PumpOperatorUploadChunkProcessor.UploadRow> chunk = new ArrayList<>(CHUNK_SIZE);
             while (it.hasNext()) {
                 CSVRecord record = it.next();
@@ -303,6 +309,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                     var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache);
                     uploaded += res.uploadedRows();
                     skipped += res.skippedRows();
+                    unchanged += res.unchangedRows();
                     chunk = new ArrayList<>(CHUNK_SIZE);
                 }
             }
@@ -311,9 +318,10 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache);
                 uploaded += res.uploadedRows();
                 skipped += res.skippedRows();
+                unchanged += res.unchangedRows();
             }
 
-            return new ProcessResult(uploaded, skipped);
+            return new ProcessResult(uploaded, skipped, unchanged);
         } catch (BadRequestException ex) {
             throw ex;
         } catch (IOException ex) {
@@ -336,13 +344,13 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getNumberOfSheets() > 0 ? workbook.getSheetAt(0) : null;
             if (sheet == null) {
-                return new ProcessResult(0, 0);
+                return new ProcessResult(0, 0, 0);
             }
 
             int firstRowIndex = sheet.getFirstRowNum();
             Row headerRow = sheet.getRow(firstRowIndex);
             if (headerRow == null) {
-                return new ProcessResult(0, 0);
+                return new ProcessResult(0, 0, 0);
             }
 
             List<String> rawHeaders = new ArrayList<>();
@@ -354,6 +362,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
 
             int uploaded = 0;
             int skipped = 0;
+            int unchanged = 0;
             List<PumpOperatorUploadChunkProcessor.UploadRow> chunk = new ArrayList<>(CHUNK_SIZE);
             for (int i = firstRowIndex + 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
@@ -366,6 +375,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                     var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache);
                     uploaded += res.uploadedRows();
                     skipped += res.skippedRows();
+                    unchanged += res.unchangedRows();
                     chunk = new ArrayList<>(CHUNK_SIZE);
                 }
             }
@@ -373,9 +383,10 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache);
                 uploaded += res.uploadedRows();
                 skipped += res.skippedRows();
+                unchanged += res.unchangedRows();
             }
 
-            return new ProcessResult(uploaded, skipped);
+            return new ProcessResult(uploaded, skipped, unchanged);
         } catch (BadRequestException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -476,7 +487,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
         );
     }
 
-    private record ProcessResult(int uploadedRows, int skippedRows) {}
+    private record ProcessResult(int uploadedRows, int skippedRows, int unchangedRows) {}
 
     private String toTenantCode(String schemaName) {
         if (schemaName == null) {

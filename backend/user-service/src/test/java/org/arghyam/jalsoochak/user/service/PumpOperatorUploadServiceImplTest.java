@@ -102,7 +102,7 @@ class PumpOperatorUploadServiceImplTest {
         // Service validation passes; actual skipping happens in the chunk processor.
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
         when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
-                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(0, 1));
+                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(0, 1, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
         assertThat(res.totalRows()).isEqualTo(1);
@@ -137,7 +137,7 @@ class PumpOperatorUploadServiceImplTest {
                 .thenReturn(55L);
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
         when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
-                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0));
+                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
 
@@ -170,7 +170,7 @@ class PumpOperatorUploadServiceImplTest {
 
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
         when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
-                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0));
+                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
 

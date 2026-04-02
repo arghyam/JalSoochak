@@ -138,6 +138,7 @@ public class NotificationEventRouter {
                 case "STAFF_SYNC_COMPLETED" -> handleStaffSyncCompleted(root);
                 case "UPDATE_USER_LANGUAGE" -> handleUpdateUserLanguage(root);
                 case "SEND_WELCOME_MESSAGE" -> handleSendWelcomeMessage(root);
+                case "SEND_WELCOME_MESSAGE_ADMIN" -> handleSendWelcomeMessageAdmin(root);
                 case "SEND_LOGIN_OTP" -> handleSendLoginOtp(root);
                 case "SEND_INVITE_EMAIL" -> handleInviteEmail(root);
                 case "SEND_REINVITE_EMAIL" -> handleReinviteEmail(root);
@@ -333,6 +334,65 @@ public class NotificationEventRouter {
             }
         }
         log.info("[Router/WELCOME] complete — success={} failed={} schema={}", success, failed, tenantSchema);
+    }
+
+    private void handleSendWelcomeMessageAdmin(JsonNode root) {
+        String tenantCode = root.path("tenantCode").asText("");
+        JsonNode phonesNode = root.path("pumpOperatorPhones");
+
+        if (tenantCode.isBlank() || !tenantCode.matches("[A-Za-z0-9_]+")) {
+            log.warn("[Router/WELCOME_ADMIN] Invalid or missing tenantCode, skipping");
+            return;
+        }
+        if (!phonesNode.isArray() || phonesNode.isEmpty()) {
+            log.warn("[Router/WELCOME_ADMIN] pumpOperatorPhones is empty, skipping");
+            return;
+        }
+
+        String tenantSchema = "tenant_" + tenantCode.toLowerCase();
+        int success = 0, failed = 0;
+        for (JsonNode phoneNode : phonesNode) {
+            String phone = phoneNode.asText("");
+            String normalized = normalizeIndianPhone(phone);
+            if (normalized.isBlank()) {
+                log.warn("[Router/WELCOME_ADMIN] Blank or invalid phone entry in pumpOperatorPhones (node={}), skipping", phoneNode);
+                publishWelcomeDlt(tenantSchema, phoneNode.toString(), "blank_phone");
+                failed++;
+                continue;
+            }
+            try {
+                Long contactId = glificWhatsAppService.optIn(normalized);
+                if (contactId == null || contactId <= 0) {
+                    publishWelcomeDlt(tenantSchema, normalized, "optin_failed");
+                    failed++;
+                    continue;
+                }
+                glificWhatsAppService.startWelcomeFlow(contactId);
+                success++;
+            } catch (Exception e) {
+                log.error("[Router/WELCOME_ADMIN] Failed to send welcome message: {}", e.getMessage(), e);
+                publishWelcomeDlt(tenantSchema, normalized, e.getMessage());
+                failed++;
+            }
+        }
+        log.info("[Router/WELCOME_ADMIN] complete — success={} failed={} schema={}", success, failed, tenantSchema);
+    }
+
+    private String normalizeIndianPhone(String phone) {
+        if (phone == null) {
+            return "";
+        }
+        String trimmed = phone.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        if (trimmed.startsWith("91") && trimmed.length() == 12) {
+            return trimmed;
+        }
+        if (trimmed.length() == 10 && trimmed.chars().allMatch(Character::isDigit)) {
+            return "91" + trimmed;
+        }
+        return trimmed;
     }
 
     private void publishWelcomeDlt(String tenantSchema, String phone, String errorMessage) {
