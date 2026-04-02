@@ -150,6 +150,19 @@ glific:
     escalation-thumbnail: ${GLIFIC_ESCALATION_THUMBNAIL:}
 
 # ──────────────────────────────────────────────────────────────
+# SMSCountry REST API (SMS OTP delivery)
+# ──────────────────────────────────────────────────────────────
+
+smscountry:
+  base-url:                ${SMSCOUNTRY_BASE_URL:https://restapi.smscountry.com/v0.1}
+  auth-key:                ${SMSCOUNTRY_AUTH_KEY:tR6zV18N8MC3JGgHVwuL}
+  auth-token:              ${SMSCOUNTRY_AUTH_TOKEN:hCQOULPTfCozwIzy0TeWsv7WWgdV1CwLY5ajIl8w}
+  sender-id:               ${SMSCOUNTRY_SENDER_ID:ARGHYM}
+  dlt-principal-entity-id: ${SMSCOUNTRY_DLT_PE_ID:1701177400802435652}
+  dlt-template-id:         ${SMSCOUNTRY_DLT_TEMPLATE_ID:1707177451874727981}
+  dlt-header-id:           ${SMSCOUNTRY_DLT_HEADER_ID:1705177444898758356}
+
+# ──────────────────────────────────────────────────────────────
 # MinIO Object Storage (escalation PDF hosting)
 # ──────────────────────────────────────────────────────────────
 

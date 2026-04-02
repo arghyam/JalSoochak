@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.SmsCountryService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
@@ -94,6 +95,7 @@ public class NotificationEventRouter {
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
     private final GlificWhatsAppService glificWhatsAppService;
+    private final SmsCountryService smsCountryService;
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
     private final MinioStorageService minioStorageService;
@@ -140,6 +142,7 @@ public class NotificationEventRouter {
                 case "SEND_WELCOME_MESSAGE" -> handleSendWelcomeMessage(root);
                 case "SEND_WELCOME_MESSAGE_ADMIN" -> handleSendWelcomeMessageAdmin(root);
                 case "SEND_LOGIN_OTP" -> handleSendLoginOtp(root);
+                case "SEND_LOGIN_SMS_OTP" -> handleSendLoginSmsOtp(root);
                 case "SEND_INVITE_EMAIL" -> handleInviteEmail(root);
                 case "SEND_REINVITE_EMAIL" -> handleReinviteEmail(root);
                 case "SEND_PASSWORD_RESET_EMAIL" -> handlePasswordResetEmail(root);
@@ -490,6 +493,28 @@ public class NotificationEventRouter {
             throw new IllegalStateException("[Router/SEND_LOGIN_OTP] WhatsApp login OTP delivery failed");
         }
         log.info("[Router/SEND_LOGIN_OTP] → SENT contactId={}", contactId);
+    }
+
+    private void handleSendLoginSmsOtp(JsonNode root) {
+        String phone = root.path("phoneNumber").asText("").strip();
+        String otp = root.path("OTP").asText("");
+        int expiryMinutes = root.path("expiryMinutes").asInt(5);
+
+        if (otp.isBlank()) {
+            log.warn("[Router/SEND_LOGIN_SMS_OTP] OTP is missing, skipping");
+            return;
+        }
+        if (phone.isBlank()) {
+            log.warn("[Router/SEND_LOGIN_SMS_OTP] phoneNumber is missing, skipping");
+            return;
+        }
+
+        boolean sent = smsCountryService.sendOtp(phone, otp, expiryMinutes);
+        if (!sent) {
+            throw new IllegalStateException("[Router/SEND_LOGIN_SMS_OTP] SMS OTP delivery failed");
+        }
+        log.info("[Router/SEND_LOGIN_SMS_OTP] → SENT");
+        log.debug("[Router/SEND_LOGIN_SMS_OTP] phone={} → SENT", phone);
     }
 
     private void handleInviteEmail(JsonNode root) {
