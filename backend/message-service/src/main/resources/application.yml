@@ -143,8 +143,7 @@ glific:
     login-otp-id: ${GLIFIC_LOGIN_OTP_TEMPLATE_ID:}
   flow:
     nudge-id: ${GLIFIC_NUDGE_FLOW_ID:}
-    welcome-id: ${GLIFIC_WELCOME_FLOW_ID:11b80e3e-4d0b-489f-bbf6-f6bb555cb623}
-#    welcome-id: ${GLIFIC_WELCOME_FLOW_ID:37684}
+    welcome-id: ${GLIFIC_WELCOME_FLOW_ID:37684}
   media:
     escalation-caption: ${GLIFIC_ESCALATION_CAPTION:Escalations}
     escalation-thumbnail: ${GLIFIC_ESCALATION_THUMBNAIL:}
