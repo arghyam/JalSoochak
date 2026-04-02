@@ -540,6 +540,43 @@ class UserManagementServiceImplTest {
         }
 
         @Test
+        @DisplayName("STATE_ADMIN invite should include stateName in Kafka event")
+        void inviteUser_stateAdminRole_stateNamePopulatedInEvent() {
+            Authentication auth = superUserAuth("kc-super");
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+
+            when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
+            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
+            when(userCommonRepository.findAdminUserByEmail("sa@mp.com")).thenReturn(Optional.empty());
+            when(userCommonRepository.existsTenantByStateCode("MP")).thenReturn(true);
+            when(userCommonRepository.findUserTypeIdByName("STATE_ADMIN")).thenReturn(Optional.of(2));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.createAdminUserPending(eq("sa@mp.com"), anyString(), eq(1), eq(2), eq(1))).thenReturn(10L);
+            when(userCommonRepository.findTenantTitleByStateCode("MP")).thenReturn(Optional.of("Madhya Pradesh"));
+            when(tokenService.generateRawToken()).thenReturn("raw-token");
+            when(tokenService.hash("raw-token")).thenReturn("hashed-token");
+            when(inviteProperties.expiryHours()).thenReturn(24);
+            doNothing().when(userCommonRepository).insertToken(
+                    eq("sa@mp.com"), eq("hashed-token"), eq("INVITE"), anyString(), any(), eq(1));
+            when(frontendProperties.baseUrl()).thenReturn("http://localhost:3000");
+            when(frontendProperties.invitePath()).thenReturn("/invite");
+
+            InviteRequestDTO req = new InviteRequestDTO();
+            req.setEmail("sa@mp.com");
+            req.setRole("STATE_ADMIN");
+            req.setTenantCode("MP");
+            req.setFirstName("State");
+            req.setLastName("Admin");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            userManagementService.inviteUser(req, auth);
+
+            ArgumentCaptor<InviteEmailEvent> captor = ArgumentCaptor.forClass(InviteEmailEvent.class);
+            verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
+            assertEquals("Madhya Pradesh", captor.getValue().getStateName());
+        }
+
+        @Test
         @DisplayName("Should throw BadRequestException when concurrent insert hits duplicate key for pending user")
         void inviteUser_concurrentDuplicate_pendingUser_throwsBadRequest() {
             Authentication auth = superUserAuth("kc-super");
@@ -871,6 +908,40 @@ class UserManagementServiceImplTest {
             assertTrue(storedMetadata.contains("\"firstName\""), "metadata should contain firstName key");
             assertTrue(storedMetadata.contains("\"lastName\""), "metadata should contain lastName key");
             assertTrue(storedMetadata.contains("\"nameHash\""), "metadata should contain nameHash key for name search");
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN reinvite should include stateName in Kafka event")
+        void reinviteUser_stateAdminTarget_stateNamePopulatedInEvent() {
+            Authentication auth = superUserAuth("kc-super");
+            // tenantId=1 → state code MP → title "Madhya Pradesh"
+            AdminUserRow target = userRow(7L, "pending-uuid", "sa@mp.com", 1, 2, AdminUserStatus.PENDING);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+
+            AdminUserTokenRow existingToken = new AdminUserTokenRow(1L, "sa@mp.com", "old-hash",
+                    "INVITE", "{\"role\":\"STATE_ADMIN\",\"firstName\":\"U3RhdGU=\",\"lastName\":\"QWRtaW4=\"}",
+                    Instant.now().plus(24, ChronoUnit.HOURS), null, null, Instant.now());
+
+            when(userCommonRepository.findAdminUserById(7L)).thenReturn(Optional.of(target));
+            when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
+            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
+            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+            when(userCommonRepository.findTenantTitleByStateCode("MP")).thenReturn(Optional.of("Madhya Pradesh"));
+            when(userCommonRepository.findInviteTokenByEmail("sa@mp.com")).thenReturn(Optional.of(existingToken));
+            when(tokenService.generateRawToken()).thenReturn("new-raw-token");
+            when(tokenService.hash("new-raw-token")).thenReturn("new-hash");
+            when(inviteProperties.expiryHours()).thenReturn(24);
+            doNothing().when(userCommonRepository).insertToken(
+                    eq("sa@mp.com"), eq("new-hash"), eq("INVITE"), anyString(), any(), eq(1));
+            when(frontendProperties.baseUrl()).thenReturn("http://localhost:3000");
+            when(frontendProperties.invitePath()).thenReturn("/invite");
+
+            userManagementService.reinviteUser(7L, auth);
+
+            ArgumentCaptor<InviteEmailEvent> captor = ArgumentCaptor.forClass(InviteEmailEvent.class);
+            verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
+            assertEquals("Madhya Pradesh", captor.getValue().getStateName());
         }
 
         @Test
