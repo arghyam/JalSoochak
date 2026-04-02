@@ -214,7 +214,7 @@ public class AnalyticsTenantSchemeController {
 
     @GetMapping("/meter-readings")
     @Operation(
-            summary = "Query meter readings by tenant or scheme and date range",
+            summary = "Query meter readings by tenant + scheme and optional date range",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",
@@ -237,27 +237,34 @@ public class AnalyticsTenantSchemeController {
             }
     )
     public ResponseEntity<ApiResponse<List<FactMeterReading>>> getMeterReadings(
-            @RequestParam(required = false) Integer tenantId,
-            @RequestParam(required = false) Integer schemeId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+            @RequestParam(name = "tenant_id", required = true) Integer tenantId,
+            @RequestParam(name = "scheme_id", required = true) Integer schemeId,
+            @RequestParam(name = "start_date", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         try {
-            List<FactMeterReading> data;
-            if (schemeId != null && startDate != null && endDate != null) {
-                data = meterReadingRepository.findBySchemeIdAndReadingDateBetween(schemeId, startDate, endDate);
-            } else if (tenantId != null && startDate != null && endDate != null) {
-                data = meterReadingRepository.findByTenantIdAndReadingDateBetween(tenantId, startDate, endDate);
-            } else if (schemeId != null) {
-                data = meterReadingRepository.findBySchemeId(schemeId);
-            } else if (tenantId != null) {
-                data = meterReadingRepository.findByTenantId(tenantId);
-            } else {
-                data = meterReadingRepository.findAll();
+            if (startDate == null && endDate == null) {
+                startDate = LocalDate.now();
+                endDate = startDate.minusDays(30);
+            } else if (startDate == null || endDate == null) {
+                throw new IllegalArgumentException("Provide both start_date and end_date together");
             }
+            if (!startDate.isAfter(endDate)) {
+                throw new IllegalArgumentException("start_date must be after end_date");
+            }
+
+            List<FactMeterReading> data = meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(
+                    tenantId, schemeId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<List<FactMeterReading>>builder()
                     .success(true)
                     .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<List<FactMeterReading>>builder()
+                    .success(false)
+                    .data(null)
                     .build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<FactMeterReading>>builder()

@@ -215,69 +215,68 @@ class AnalyticsTenantSchemeControllerTest {
     }
 
     @Test
-    void getMeterReadings_schemeAndDates_routesToSchemeDateBranch() throws Exception {
-        when(meterReadingRepository.findBySchemeIdAndReadingDateBetween(11, START, END)).thenReturn(List.of());
+    void getMeterReadings_withTenantAndScheme_andDates_routesToTenantSchemeDateBranch() throws Exception {
+        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, END, START))
+                .thenReturn(List.of());
 
         mockMvc.perform(get(BASE + "/meter-readings")
-                        .param("schemeId", "11")
-                        .param("startDate", START.toString())
-                        .param("endDate", END.toString()))
+                        .param("tenant_id", "10")
+                        .param("scheme_id", "11")
+                        .param("start_date", END.toString())
+                        .param("end_date", START.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray());
 
-        verify(meterReadingRepository, times(1)).findBySchemeIdAndReadingDateBetween(11, START, END);
+        verify(meterReadingRepository, times(1))
+                .findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, END, START);
     }
 
     @Test
-    void getMeterReadings_tenantAndDates_routesToTenantDateBranch() throws Exception {
-        when(meterReadingRepository.findByTenantIdAndReadingDateBetween(12, START, END)).thenReturn(List.of());
+    void getMeterReadings_withTenantAndScheme_withoutDates_defaultsToTodayAndTodayMinus30Days() throws Exception {
+        LocalDate now = LocalDate.now();
+        LocalDate defaultEnd = now.minusDays(30);
+        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, now, defaultEnd))
+                .thenReturn(List.of());
 
         mockMvc.perform(get(BASE + "/meter-readings")
-                        .param("tenantId", "12")
-                        .param("startDate", START.toString())
-                        .param("endDate", END.toString()))
+                        .param("tenant_id", "10")
+                        .param("scheme_id", "11"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray());
 
-        verify(meterReadingRepository, times(1)).findByTenantIdAndReadingDateBetween(12, START, END);
+        verify(meterReadingRepository, times(1))
+                .findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, now, defaultEnd);
     }
 
     @Test
-    void getMeterReadings_schemeOnly_routesToSchemeBranch() throws Exception {
-        when(meterReadingRepository.findBySchemeId(13)).thenReturn(List.of());
+    void getMeterReadings_missingTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/meter-readings").param("scheme_id", "11"))
+                .andExpect(status().isBadRequest());
 
-        mockMvc.perform(get(BASE + "/meter-readings").param("schemeId", "13"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(meterReadingRepository, times(1)).findBySchemeId(13);
+        verifyNoInteractions(meterReadingRepository);
     }
 
     @Test
-    void getMeterReadings_tenantOnly_routesToTenantBranch() throws Exception {
-        when(meterReadingRepository.findByTenantId(14)).thenReturn(List.of());
+    void getMeterReadings_missingSchemeId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/meter-readings").param("tenant_id", "10"))
+                .andExpect(status().isBadRequest());
 
-        mockMvc.perform(get(BASE + "/meter-readings").param("tenantId", "14"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(meterReadingRepository, times(1)).findByTenantId(14);
+        verifyNoInteractions(meterReadingRepository);
     }
 
     @Test
-    void getMeterReadings_noFilters_returnsAll() throws Exception {
-        when(meterReadingRepository.findAll()).thenReturn(List.of());
+    void getMeterReadings_onlyOneDateProvided_returnsBadRequestWrapper() throws Exception {
+        mockMvc.perform(get(BASE + "/meter-readings")
+                        .param("tenant_id", "10")
+                        .param("scheme_id", "11")
+                        .param("start_date", START.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
 
-        mockMvc.perform(get(BASE + "/meter-readings"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(meterReadingRepository, times(1)).findAll();
+        verifyNoInteractions(meterReadingRepository);
     }
 }
 
