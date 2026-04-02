@@ -1,8 +1,8 @@
 package org.arghyam.jalsoochak.message.service;
 
-import org.arghyam.jalsoochak.message.channel.SmtpMailChannel;
-import org.arghyam.jalsoochak.message.dto.NotificationRequest;
-import org.junit.jupiter.api.BeforeEach;
+import org.arghyam.jalsoochak.message.channel.EmailSender;
+import org.arghyam.jalsoochak.message.dto.MailRequest;
+import org.arghyam.jalsoochak.message.dto.MailTemplate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -18,254 +18,197 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link AccountEmailService}.
  *
- * <p>Verifies that each public send-method delegates to {@link SmtpMailChannel}
- * with the correct recipient, subject, and HTML body, and that a failed SMTP
- * send (channel returns {@code false}) surfaces as a {@link RuntimeException}
- * so callers can trigger Kafka retry.</p>
+ * <p>Verifies that each public send-method delegates to {@link EmailSender} with
+ * the correct {@link MailTemplate} and template variables, and that exceptions
+ * thrown by the sender propagate to the caller (enabling Kafka DLT routing).</p>
  */
 @ExtendWith(MockitoExtension.class)
 class AccountEmailServiceTest {
 
     @Mock
-    private SmtpMailChannel smtpMailChannel;
+    private EmailSender mailSender;
 
     @InjectMocks
     private AccountEmailService accountEmailService;
 
-    @BeforeEach
-    void setUp() {
-        when(smtpMailChannel.send(any())).thenReturn(true);
-    }
-
     // ─────────────────────────── sendInviteEmail ───────────────────────────────
 
     @Test
-    void sendInviteEmail_usesStateAdminSubject_forStateAdminRole() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendInviteEmail_selectsStateAdminTemplate_forStateAdminRole() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendInviteEmail(
                 "admin@state.gov", "Ravi Kumar", "STATE_ADMIN",
-                "https://app.jalsoochak.in/activate?token=abc", 24);
+                "https://activate?token=abc", 24);
 
-        verify(smtpMailChannel).send(captor.capture());
-        NotificationRequest req = captor.getValue();
-        assertThat(req.getRecipient()).isEqualTo("admin@state.gov");
-        assertThat(req.getSubject()).contains("State System Admin");
-        assertThat(req.getBody()).contains("Activate Account");
-        assertThat(req.getBody()).contains("https://app.jalsoochak.in/activate?token=abc");
-        assertThat(req.getBody()).contains("24");
-        assertThat(req.getBody()).contains("Ravi Kumar");
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().template()).isEqualTo(MailTemplate.STATE_ADMIN_INVITATION);
     }
 
     @Test
-    void sendInviteEmail_usesSuperUserSubject_forSuperUserRole() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendInviteEmail_selectsSuperUserTemplate_forSuperUserRole() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendInviteEmail(
                 "su@arghyam.in", "Priya", "SUPER_USER",
-                "https://app.jalsoochak.in/activate?token=xyz", 48);
+                "https://activate?token=xyz", 48);
 
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getSubject()).contains("Super User");
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().template()).isEqualTo(MailTemplate.SUPER_USER_INVITATION);
     }
 
     @Test
-    void sendInviteEmail_usesDefaultSubject_forUnknownRole() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendInviteEmail_selectsDefaultTemplate_forUnknownRole() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendInviteEmail(
                 "op@tenant.in", "Mohan", "FIELD_OFFICER",
-                "https://app.jalsoochak.in/activate?token=def", 12);
+                "https://activate?token=def", 12);
 
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getSubject()).isEqualTo("You are invited to join JalSoochak");
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().template()).isEqualTo(MailTemplate.DEFAULT_INVITATION);
     }
 
     @Test
-    void sendInviteEmail_usesDefaultSubject_whenRoleIsNull() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendInviteEmail_selectsDefaultTemplate_whenRoleIsNull() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendInviteEmail(
                 "op@tenant.in", "Mohan", null,
-                "https://app.jalsoochak.in/activate?token=def", 12);
+                "https://activate?token=def", 12);
 
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getSubject()).isEqualTo("You are invited to join JalSoochak");
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().template()).isEqualTo(MailTemplate.DEFAULT_INVITATION);
     }
 
     @Test
-    void sendInviteEmail_substitutesUserGreeting_whenNameIsNull() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendInviteEmail_populatesAllTemplateVariables() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
+
+        accountEmailService.sendInviteEmail(
+                "op@tenant.in", "Sunita", "SUPER_USER",
+                "https://activate?token=tok1", 48);
+
+        verify(mailSender).send(captor.capture());
+        MailRequest req = captor.getValue();
+        assertThat(req.to()).isEqualTo("op@tenant.in");
+        assertThat(req.templateVariables()).containsEntry("name", "Sunita");
+        assertThat(req.templateVariables()).containsEntry("activation_link", "https://activate?token=tok1");
+        assertThat(req.templateVariables()).containsEntry("expiry_hours", 48);
+    }
+
+    @Test
+    void sendInviteEmail_fallsBackToUser_whenNameIsNull() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendInviteEmail(
                 "op@tenant.in", null, "STATE_ADMIN",
-                "https://app.jalsoochak.in/activate?token=def", 24);
+                "https://activate?token=def", 24);
 
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getBody()).contains("Dear User,");
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().templateVariables()).containsEntry("name", "User");
     }
 
     @Test
-    void sendInviteEmail_substitutesUserGreeting_whenNameIsBlank() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
-
-        accountEmailService.sendInviteEmail(
-                "op@tenant.in", "   ", "STATE_ADMIN",
-                "https://app.jalsoochak.in/activate?token=def", 24);
-
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getBody()).contains("Dear User,");
-    }
-
-    @Test
-    void sendInviteEmail_setsChannelToSmtpEmail() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
-
-        accountEmailService.sendInviteEmail(
-                "op@tenant.in", "Dev", "STATE_ADMIN",
-                "https://link", 24);
-
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getChannel()).isEqualTo(SmtpMailChannel.CHANNEL_TYPE);
-    }
-
-    @Test
-    void sendInviteEmail_throwsRuntimeException_whenSmtpChannelReturnsFalse() {
-        when(smtpMailChannel.send(any())).thenReturn(false);
+    void sendInviteEmail_propagatesException_whenMailSenderThrows() {
+        doThrow(new RuntimeException("delivery failed")).when(mailSender).send(any());
 
         assertThatThrownBy(() -> accountEmailService.sendInviteEmail(
                 "op@tenant.in", "Dev", "STATE_ADMIN", "https://link", 24))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Failed to send email");
+                .hasMessageContaining("delivery failed");
+    }
+
+    // ─────────────────────── sendStateAdminInviteEmail ─────────────────────────
+
+    @Test
+    void sendStateAdminInviteEmail_includesStateName_inTemplateVariables() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
+
+        accountEmailService.sendStateAdminInviteEmail(
+                "sa@mp.gov.in", "Nitish Kumar", "Madhya Pradesh",
+                "https://activate?token=sa1", 24);
+
+        verify(mailSender).send(captor.capture());
+        MailRequest req = captor.getValue();
+        assertThat(req.template()).isEqualTo(MailTemplate.STATE_ADMIN_INVITATION);
+        assertThat(req.templateVariables()).containsEntry("state_name", "Madhya Pradesh");
+        assertThat(req.templateVariables()).containsEntry("name", "Nitish Kumar");
+        assertThat(req.templateVariables()).containsEntry("activation_link", "https://activate?token=sa1");
+        assertThat(req.templateVariables()).containsEntry("expiry_hours", 24);
     }
 
     @Test
-    void sendInviteEmail_escapesHtmlInName() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendStateAdminInviteEmail_fallsBackEmptyString_whenStateNameIsNull() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendInviteEmail(
-                "admin@state.gov", "<script>alert('xss')</script>", "STATE_ADMIN",
-                "https://app.jalsoochak.in/activate?token=abc", 24);
+        accountEmailService.sendStateAdminInviteEmail(
+                "sa@mp.gov.in", "Admin", null, "https://activate", 24);
 
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getBody()).doesNotContain("<script>");
-        assertThat(captor.getValue().getBody()).contains("&lt;script&gt;");
-    }
-
-    @Test
-    void sendInviteEmail_escapesHtmlInInviteLink() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
-
-        accountEmailService.sendInviteEmail(
-                "admin@state.gov", "Ravi", "STATE_ADMIN",
-                "https://app.jalsoochak.in/activate?token=abc&next=<evil>", 24);
-
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getBody()).doesNotContain("<evil>");
-        assertThat(captor.getValue().getBody()).contains("&amp;next=&lt;evil&gt;");
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().templateVariables()).containsEntry("state_name", "");
     }
 
     // ─────────────────────────── sendReinviteEmail ─────────────────────────────
 
     @Test
-    void sendReinviteEmail_setsReminderSubjectAndContainsLink() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendReinviteEmail_selectsReinvitationTemplate() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendReinviteEmail(
-                "op@tenant.in", "Sunita", "https://app.jalsoochak.in/activate?token=re1", 72);
+                "op@tenant.in", "Sunita", "https://activate?token=re1", 72);
 
-        verify(smtpMailChannel).send(captor.capture());
-        NotificationRequest req = captor.getValue();
-        assertThat(req.getSubject()).isEqualTo("Reminder: Your JalSoochak Invitation");
-        assertThat(req.getRecipient()).isEqualTo("op@tenant.in");
-        assertThat(req.getBody()).contains("Sunita");
-        assertThat(req.getBody()).contains("https://app.jalsoochak.in/activate?token=re1");
-        assertThat(req.getBody()).contains("72");
-        assertThat(req.getBody()).contains("Activate Account");
+        verify(mailSender).send(captor.capture());
+        MailRequest req = captor.getValue();
+        assertThat(req.template()).isEqualTo(MailTemplate.REINVITATION);
+        assertThat(req.to()).isEqualTo("op@tenant.in");
+        assertThat(req.templateVariables()).containsEntry("name", "Sunita");
+        assertThat(req.templateVariables()).containsEntry("activation_link", "https://activate?token=re1");
+        assertThat(req.templateVariables()).containsEntry("expiry_hours", 72);
     }
 
     @Test
-    void sendReinviteEmail_substitutesUserGreeting_whenNameIsNull() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendReinviteEmail_fallsBackToUser_whenNameIsNull() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendReinviteEmail("op@tenant.in", null, "https://link", 48);
 
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getBody()).contains("Dear User,");
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().templateVariables()).containsEntry("name", "User");
     }
 
     @Test
-    void sendReinviteEmail_throwsRuntimeException_whenSmtpChannelReturnsFalse() {
-        when(smtpMailChannel.send(any())).thenReturn(false);
+    void sendReinviteEmail_propagatesException_whenMailSenderThrows() {
+        doThrow(new RuntimeException("delivery failed")).when(mailSender).send(any());
 
         assertThatThrownBy(() -> accountEmailService.sendReinviteEmail(
                 "op@tenant.in", "Dev", "https://link", 24))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Failed to send email");
-    }
-
-    @Test
-    void sendReinviteEmail_escapesHtmlInNameAndLink() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
-
-        accountEmailService.sendReinviteEmail(
-                "op@tenant.in", "<b>User</b>",
-                "https://app.jalsoochak.in/activate?token=re&next=<evil>", 48);
-
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getBody()).doesNotContain("<b>User</b>").doesNotContain("<evil>");
-        assertThat(captor.getValue().getBody()).contains("&lt;b&gt;User&lt;/b&gt;");
-        assertThat(captor.getValue().getBody()).contains("&amp;next=&lt;evil&gt;");
+                .isInstanceOf(RuntimeException.class);
     }
 
     // ──────────────────────── sendPasswordResetEmail ───────────────────────────
 
     @Test
-    void sendPasswordResetEmail_setsCorrectSubjectAndContainsLink() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+    void sendPasswordResetEmail_selectsPasswordResetTemplate() {
+        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendPasswordResetEmail(
-                "user@example.com", "https://app.jalsoochak.in/reset?token=r1", 30);
+                "user@example.com", "https://reset?token=r1", 30);
 
-        verify(smtpMailChannel).send(captor.capture());
-        NotificationRequest req = captor.getValue();
-        assertThat(req.getSubject()).isEqualTo("Reset Your JalSoochak Password");
-        assertThat(req.getRecipient()).isEqualTo("user@example.com");
-        assertThat(req.getBody()).contains("https://app.jalsoochak.in/reset?token=r1");
-        assertThat(req.getBody()).contains("30");
-        assertThat(req.getBody()).contains("Reset Password");
+        verify(mailSender).send(captor.capture());
+        MailRequest req = captor.getValue();
+        assertThat(req.template()).isEqualTo(MailTemplate.PASSWORD_RESET);
+        assertThat(req.to()).isEqualTo("user@example.com");
+        assertThat(req.templateVariables()).containsEntry("reset_link", "https://reset?token=r1");
+        assertThat(req.templateVariables()).containsEntry("expiry_minutes", 30);
     }
 
     @Test
-    void sendPasswordResetEmail_alwaysUsesDearUserGreeting() {
-        // Password reset does not take a name parameter — greeting is always "Dear User"
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
-
-        accountEmailService.sendPasswordResetEmail("user@example.com", "https://link", 15);
-
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getBody()).contains("Dear User,");
-    }
-
-    @Test
-    void sendPasswordResetEmail_throwsRuntimeException_whenSmtpChannelReturnsFalse() {
-        when(smtpMailChannel.send(any())).thenReturn(false);
+    void sendPasswordResetEmail_propagatesException_whenMailSenderThrows() {
+        doThrow(new RuntimeException("delivery failed")).when(mailSender).send(any());
 
         assertThatThrownBy(() -> accountEmailService.sendPasswordResetEmail(
                 "user@example.com", "https://link", 30))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Failed to send email");
-    }
-
-    @Test
-    void sendPasswordResetEmail_escapesHtmlInResetLink() {
-        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
-
-        accountEmailService.sendPasswordResetEmail(
-                "user@example.com", "https://app.jalsoochak.in/reset?token=r1&next=<evil>", 30);
-
-        verify(smtpMailChannel).send(captor.capture());
-        assertThat(captor.getValue().getBody()).doesNotContain("<evil>");
-        assertThat(captor.getValue().getBody()).contains("&amp;next=&lt;evil&gt;");
+                .isInstanceOf(RuntimeException.class);
     }
 }
