@@ -85,6 +85,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("generates and publishes OTP for active user")
         void generatesOtpForActiveUser() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(ACTIVE_USER));
             when(otpService.requestOtp(10L, 1, OtpType.LOGIN)).thenReturn("123456");
@@ -110,6 +111,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("returns silently when phone not registered (anti-enumeration)")
         void silentWhenPhoneNotFound() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.empty());
 
@@ -122,6 +124,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("returns silently when user is inactive (anti-enumeration)")
         void silentWhenUserInactive() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(INACTIVE_USER));
 
@@ -134,6 +137,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("returns silently on OTP cooldown (anti-enumeration)")
         void silentOnCooldown() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(ACTIVE_USER));
             doThrow(new BadRequestException("Please wait 50 second(s)"))
@@ -141,6 +145,18 @@ class StaffAuthServiceImplTest {
 
             service.requestOtp(request); // must not throw
 
+            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any());
+        }
+
+        @Test
+        @DisplayName("returns silently when tenant is not accessible (anti-enumeration)")
+        void silentWhenTenantNotAccessible() {
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(4)); // SUSPENDED
+
+            service.requestOtp(request);
+
+            verify(otpService, never()).requestOtp(any(), any(), any());
             verify(eventPublisher, never()).publishLoginOtpAfterCommit(any());
         }
 
@@ -177,6 +193,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("returns AuthResult with token on valid OTP")
         void returnsAuthResultOnSuccess() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(ACTIVE_USER));
             when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
@@ -194,6 +211,17 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("throws BadRequestException when tenant is not accessible")
+        void throwsWhenTenantNotAccessible() {
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(4)); // SUSPENDED
+
+            assertThatThrownBy(() -> service.verifyOtp(request))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("Invalid or expired OTP");
+        }
+
+        @Test
         @DisplayName("throws BadRequestException when tenant not found")
         void throwsWhenTenantNotFound() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.empty());
@@ -207,6 +235,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("throws BadRequestException when user not found")
         void throwsWhenUserNotFound() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.empty());
 
@@ -219,6 +248,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("throws AccountDeactivatedException when user is inactive")
         void throwsWhenUserInactive() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(INACTIVE_USER));
             when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
@@ -231,6 +261,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("reverts OTP consumption when Keycloak provisioning fails")
         void revertsOtpOnKeycloakFailure() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(ACTIVE_USER));
             when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
@@ -248,6 +279,7 @@ class StaffAuthServiceImplTest {
         @DisplayName("propagates BadRequestException from OtpService on wrong OTP")
         void propagatesOtpServiceException() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(ACTIVE_USER));
             doThrow(new BadRequestException("Invalid or expired OTP"))
@@ -262,6 +294,7 @@ class StaffAuthServiceImplTest {
         void throwsWhenUserDeactivatedConcurrentlyAfterOtpVerify() {
             // Initial lookup (inside transaction) returns active; re-fetch after OTP verify returns inactive
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(ACTIVE_USER))   // first call — inside transaction
                     .thenReturn(Optional.of(INACTIVE_USER)); // second call — re-fetch after OTP verify
@@ -272,9 +305,29 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("throws BadRequestException when tenant is suspended concurrently after OTP verify")
+        void throwsWhenTenantSuspendedConcurrentlyAfterOtpVerify() {
+            // Initial lookup (inside transaction) returns ACTIVE; re-fetch after OTP verify returns SUSPENDED
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
+                    .thenReturn(Optional.of(ACTIVE_USER));
+            when(userCommonRepository.findTenantStatusByTenantId(1))
+                    .thenReturn(Optional.of(3))  // first call — inside transaction (ACTIVE)
+                    .thenReturn(Optional.of(4)); // second call — post-OTP re-validation (SUSPENDED)
+            when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
+
+            assertThatThrownBy(() -> service.verifyOtp(request))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("Invalid or expired OTP");
+
+            verify(otpService).revertOtpConsumption(99L);
+        }
+
+        @Test
         @DisplayName("OTP failure takes precedence over deactivation check (regression: verify ordering)")
         void otpFailureTakesPrecedenceOverDeactivationCheck() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(INACTIVE_USER));
             doThrow(new BadRequestException("Invalid or expired OTP"))

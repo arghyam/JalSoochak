@@ -32,6 +32,7 @@ import org.arghyam.jalsoochak.user.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
+import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
@@ -320,18 +321,18 @@ class AuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should throw AccountDeactivatedException when tenant is suspended")
-        void getInviteInfo_suspendedTenant_throwsAccountDeactivated() {
-            String hash = "suspended-hash";
-            String metadata = "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\",\"tenantName\":\"Madhya Pradesh\"}";
-            when(tokenService.hash("suspended-token")).thenReturn(hash);
+        @DisplayName("STATE_ADMIN: throws ForbiddenAccessException when tenant is archived")
+        void getInviteInfo_archivedTenant_throwsForbiddenAccess() {
+            String hash = "invite-hash";
+            when(tokenService.hash("raw")).thenReturn(hash);
             when(userCommonRepository.findActiveTokenByHash(hash)).thenReturn(Optional.of(
-                    activeTokenRow("invited@example.com", hash, "INVITE", metadata)));
+                    activeTokenRow("invited@example.com", hash, "INVITE",
+                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
             when(userCommonRepository.existsActiveAdminUserByEmail("invited@example.com")).thenReturn(false);
-            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(5));
-            when(userCommonRepository.findTenantStatusByTenantId(5)).thenReturn(Optional.of(4)); // SUSPENDED
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(6)); // ARCHIVED
 
-            assertThrows(AccountDeactivatedException.class, () -> authService.getInviteInfo("suspended-token"));
+            assertThrows(ForbiddenAccessException.class, () -> authService.getInviteInfo("raw"));
         }
 
         @Test
@@ -545,28 +546,49 @@ class AuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN: should throw AccountDeactivatedException when tenant is suspended")
-        void activateAccount_stateAdmin_suspendedTenant_throwsAccountDeactivated() {
-            String hash = "sa-suspended-hash";
-            when(tokenService.hash("sa-suspended-token")).thenReturn(hash);
+        @DisplayName("Throws BadRequestException when invite token role does not match admin level")
+        void activateAccount_roleMismatch_throwsBadRequest() {
+            String hash = "mismatch-hash";
+            when(tokenService.hash("mismatch-token")).thenReturn(hash);
+            when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
+                    activeTokenRow("mismatch@example.com", hash, "INVITE",
+                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
+            // Pending user has adminLevel=1 (SUPER_USER), but token says STATE_ADMIN
+            AdminUserRow pendingUser = new AdminUserRow(25L, "pending-mismatch-uuid", "mismatch@example.com", "", 0, 1, AdminUserStatus.PENDING, 0, null);
+            when(userCommonRepository.findAdminUserByEmail("mismatch@example.com")).thenReturn(Optional.of(pendingUser));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+
+            ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
+            req.setInviteToken("mismatch-token");
+            req.setFirstName("Mismatch");
+            req.setLastName("User");
+            req.setPassword("Pass@123");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            assertThrows(BadRequestException.class, () -> authService.activateAccount(req));
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN: throws ForbiddenAccessException when tenant is archived")
+        void activateAccount_stateAdmin_archivedTenant_throwsForbiddenAccess() {
+            String hash = "sa-hash";
+            when(tokenService.hash("sa-token")).thenReturn(hash);
             when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
                     activeTokenRow("newsa@example.com", hash, "INVITE",
                             "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
-
             AdminUserRow pendingUser = new AdminUserRow(20L, "pending-sa-uuid", "newsa@example.com", "", 1, 2, AdminUserStatus.PENDING, 0, null);
             when(userCommonRepository.findAdminUserByEmail("newsa@example.com")).thenReturn(Optional.of(pendingUser));
-            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(5));
-            when(userCommonRepository.findTenantStatusByTenantId(5)).thenReturn(Optional.of(4)); // SUSPENDED
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(6)); // ARCHIVED
 
             ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
-            req.setInviteToken("sa-suspended-token");
+            req.setInviteToken("sa-token");
             req.setFirstName("State");
             req.setLastName("Admin");
             req.setPassword("Pass@123");
             req.setPhoneNumber("91XXXXXXXXXX");
 
-            assertThrows(AccountDeactivatedException.class, () -> authService.activateAccount(req));
-            verify(keycloakProvider, never()).getAdminInstance();
+            assertThrows(ForbiddenAccessException.class, () -> authService.activateAccount(req));
         }
 
         @Test

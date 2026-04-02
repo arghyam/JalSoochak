@@ -54,7 +54,7 @@ class TenantSecurityEvaluatorTest {
     void isOwnTenant_matchingStateCode_returnsTrue() {
         setUpJwtContext("mp");
         when(tenantCommonRepository.findById(1))
-                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").build()));
+                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("ACTIVE").build()));
 
         assertTrue(tenantSecurityEvaluator.isOwnTenant(1));
     }
@@ -64,7 +64,7 @@ class TenantSecurityEvaluatorTest {
     void isOwnTenant_caseInsensitiveMatch_returnsTrue() {
         setUpJwtContext("MP");
         when(tenantCommonRepository.findById(1))
-                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").build()));
+                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("ACTIVE").build()));
 
         assertTrue(tenantSecurityEvaluator.isOwnTenant(1));
     }
@@ -120,5 +120,47 @@ class TenantSecurityEvaluatorTest {
         // SecurityContextHolder is cleared by @AfterEach; no auth set up here
         assertFalse(tenantSecurityEvaluator.isOwnTenant(1));
         verify(tenantCommonRepository, never()).findById(1);
+    }
+
+    // ── isOwnTenant: status-based access ─────────────────────────────────────
+
+    @Test
+    @DisplayName("Returns false when tenant is ARCHIVED — STATE_ADMIN cannot access archived tenants")
+    void isOwnTenant_archivedTenant_returnsFalse() {
+        setUpJwtContext("mp");
+        when(tenantCommonRepository.findById(1))
+                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("ARCHIVED").build()));
+
+        assertFalse(tenantSecurityEvaluator.isOwnTenant(1));
+    }
+
+    @Test
+    @DisplayName("Returns true when tenant is SUSPENDED — STATE_ADMIN can access suspended tenants")
+    void isOwnTenant_suspendedTenant_returnsTrue() {
+        setUpJwtContext("mp");
+        when(tenantCommonRepository.findById(1))
+                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("SUSPENDED").build()));
+
+        assertTrue(tenantSecurityEvaluator.isOwnTenant(1));
+    }
+
+    @Test
+    @DisplayName("Returns true when tenant is INACTIVE — STATE_ADMIN can access inactive tenants")
+    void isOwnTenant_inactiveTenant_returnsTrue() {
+        setUpJwtContext("mp");
+        when(tenantCommonRepository.findById(1))
+                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("INACTIVE").build()));
+
+        assertTrue(tenantSecurityEvaluator.isOwnTenant(1));
+    }
+
+    @Test
+    @DisplayName("Returns false when tenant has unrecognised status value — data integrity guard")
+    void isOwnTenant_invalidStatusValue_returnsFalse() {
+        setUpJwtContext("mp");
+        when(tenantCommonRepository.findById(1))
+                .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("UNKNOWN_STATUS").build()));
+
+        assertFalse(tenantSecurityEvaluator.isOwnTenant(1));
     }
 }

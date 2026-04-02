@@ -21,6 +21,7 @@ import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.service.OtpService;
 import org.arghyam.jalsoochak.user.service.StaffAuthService;
 import org.arghyam.jalsoochak.user.service.StaffKeycloakService;
+import org.arghyam.jalsoochak.user.util.TenantAccessValidator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -55,6 +56,12 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         }
         int tenantId = tenantIdOpt.get();
         String schema = "tenant_" + tenantCode.toLowerCase();
+
+        // Validate tenant status for staff user access (ACTIVE or DEGRADED only)
+        Optional<Integer> tenantStatusOpt = userCommonRepository.findTenantStatusByTenantId(tenantId);
+        if (tenantStatusOpt.isEmpty() || !TenantAccessValidator.isAccessibleToStaff(tenantStatusOpt.get())) {
+            return; // Anti-enumeration: don't reveal whether tenant is accessible
+        }
 
         Optional<TenantUserRecord> userOpt =
                 userTenantRepository.findUserByPhone(schema, request.getPhoneNumber().trim());
@@ -109,6 +116,14 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         UserResolution resolution = Objects.requireNonNull(transactionTemplate.execute(status -> {
             int tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
                     .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
+            
+            // Validate tenant status for staff user access (ACTIVE or DEGRADED only)
+            int tenantStatus = userCommonRepository.findTenantStatusByTenantId(tenantId)
+                    .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
+            if (!TenantAccessValidator.isAccessibleToStaff(tenantStatus)) {
+                throw new BadRequestException("Invalid or expired OTP");
+            }
+            
             TenantUserRecord u = userTenantRepository.findUserByPhone(schema, request.getPhoneNumber().trim())
                     .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
             return new UserResolution(u, tenantId);
@@ -135,6 +150,13 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         String managedPassword;
         KeycloakTokenResponse token;
         try {
+            // Re-validate tenant status post-OTP consumption to prevent concurrent tenant suspend/archive
+            int freshTenantStatus = userCommonRepository.findTenantStatusByTenantId(tenantId)
+                    .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
+            if (!TenantAccessValidator.isAccessibleToStaff(freshTenantStatus)) {
+                throw new BadRequestException("Invalid or expired OTP");
+            }
+            
             managedPassword = staffKeycloakService.ensureKeycloakAccount(freshUser, tenantCode, schema);
             token = keycloakClient.obtainToken(freshUser.phoneNumber(), managedPassword);
         } catch (RuntimeException e) {

@@ -293,8 +293,8 @@ class AuthControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("Login with ONBOARDED tenant → 403 (not accessible for any user)")
-        void login_onboardedTenant_returns403() throws Exception {
+        @DisplayName("Login with ONBOARDED tenant → 200 (accessible for system users)")
+        void login_onboardedTenant_returns200() throws Exception {
             jdbcTemplate.update("UPDATE common_schema.tenant_master_table SET status = ? WHERE id = 1", TENANT_STATUS_ONBOARDED);
             jdbcTemplate.update("""
                     INSERT INTO common_schema.tenant_admin_user_master_table
@@ -303,11 +303,12 @@ class AuthControllerIntegrationTest {
                     """,
                     piiEncryptionService.encrypt("91XXXXXXXXXX"),
                     piiEncryptionService.hmac("91XXXXXXXXXX"));
+            stubKeycloakToken(200, KEYCLOAK_TOKEN_RESPONSE);
 
             mockMvc.perform(post("/api/v1/auth/login")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"email\":\"onboarded@example.com\",\"password\":\"Pass@123\"}"))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isOk());
         }
 
         @Test

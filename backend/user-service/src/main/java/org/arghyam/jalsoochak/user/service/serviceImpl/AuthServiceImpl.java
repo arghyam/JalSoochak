@@ -37,7 +37,9 @@ import org.arghyam.jalsoochak.user.service.AuthService;
 import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
 import org.arghyam.jalsoochak.user.service.MetadataDecryptionHelper;
 import org.arghyam.jalsoochak.user.service.TokenService;
+import org.arghyam.jalsoochak.user.enums.TenantAccessRole;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
+import org.arghyam.jalsoochak.user.util.TenantAccessValidator;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -82,7 +84,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Account is deactivated");
         }
 
-        validateTenantStatus(user.tenantId(), user.adminLevel());
+        validateTenantStatus(user.tenantId(), TenantAccessRole.fromAdminLevel(user.adminLevel()));
 
         KeycloakTokenResponse token = keycloakClient.obtainToken(request.getEmail(), request.getPassword());
         return buildEnrichedAuthResult(token, user);
@@ -106,7 +108,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Account is deactivated");
         }
 
-        validateTenantStatus(user.tenantId(), user.adminLevel());
+        validateTenantStatus(user.tenantId(), TenantAccessRole.fromAdminLevel(user.adminLevel()));
 
         return buildEnrichedAuthResult(token, user);
     }
@@ -141,8 +143,8 @@ public class AuthServiceImpl implements AuthService {
             String tenantCode = parseMetadata(tokenRow.metadata(), "tenantCode");
             Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
                     .orElseThrow(() -> new AccountDeactivatedException("Tenant not found or no longer exists."));
-            Integer adminLevel = "STATE_ADMIN".equals(role) ? 2 : null;
-            validateTenantStatus(tenantId, adminLevel);
+            TenantAccessRole accessRole = "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN : TenantAccessRole.STAFF;
+            validateTenantStatus(tenantId, accessRole);
         }
 
         String phoneNumber = userCommonRepository.findAdminUserByEmail(email)
@@ -176,8 +178,20 @@ public class AuthServiceImpl implements AuthService {
         Integer tenantId = "SUPER_USER".equals(role) ? 0
                 : userCommonRepository.findTenantIdByStateCode(tenantCode)
                         .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for code: " + tenantCode));
+        
+        // Derive role from token and validate consistency with pendingUser.adminLevel()
+        TenantAccessRole tokenRole = "SUPER_USER".equals(role) ? TenantAccessRole.SUPER_USER
+                : "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN
+                : TenantAccessRole.STAFF;
+        TenantAccessRole adminLevelRole = TenantAccessRole.fromAdminLevel(pendingUser.adminLevel());
+        
+        // Validate role consistency: token role must match admin level role
+        if (tokenRole != adminLevelRole) {
+            throw new BadRequestException("Invite token role does not match user's assigned role");
+        }
+        
         if (!"SUPER_USER".equals(role)) {
-            validateTenantStatus(tenantId, pendingUser.adminLevel());
+            validateTenantStatus(tenantId, tokenRole);
         }
 
         String keycloakUuid = null;
@@ -348,29 +362,31 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * Blocks login for tenants that do not allow user access.
-     * Only ACTIVE (3) and DEGRADED (5) tenants permit login.
-     * tenantId == 0 is the system tenant (SUPER_USER) — always allowed.
+     * Validates tenant status for access control.
+     * 
+     * <p>tenantId == 0 is the system tenant (SUPER_USER only) — skips validation.
+     * For all other tenantIds, validates the tenant status against the user's role.
+     * 
+     * @param tenantId The tenant ID
+     * @param role     The caller's access role
+     * @throws AccountDeactivatedException if tenant not found
+     * @throws ForbiddenAccessException if the tenant status does not permit access
      */
-    private void validateTenantStatus(Integer tenantId, Integer adminLevel) {
-        if (tenantId == null || tenantId == 0) return;
+    private void validateTenantStatus(Integer tenantId, TenantAccessRole role) {
+        // System tenant (tenantId == 0) is only accessible to SUPER_USER
+        if (tenantId == null || (tenantId == 0 && role == TenantAccessRole.SUPER_USER)) {
+            return;
+        }
+        // For tenantId == 0 with non-SUPER_USER role, treat as invalid
+        if (tenantId == 0) {
+            throw new AccountDeactivatedException("Tenant not found or no longer exists.");
+        }
         Optional<Integer> statusOpt = userCommonRepository.findTenantStatusByTenantId(tenantId);
         if (statusOpt.isEmpty()) {
             throw new AccountDeactivatedException("Tenant not found or no longer exists.");
         }
         int status = statusOpt.get();
-        boolean isStateAdmin = adminLevel != null && adminLevel == 2;
-        if (status == 3 || status == 5) return; // ACTIVE or DEGRADED — always allowed
-        if (isStateAdmin && status == 2) return; // CONFIGURED — allowed for STATE_ADMIN only
-        String message = switch (status) {
-            case 1 -> "Tenant setup is not yet complete.";
-            case 2 -> "Tenant is not yet operational.";
-            case 0 -> "Tenant access has been deactivated.";
-            case 4 -> "Tenant has been suspended.";
-            case 6 -> "Tenant is archived and no longer accessible.";
-            default -> "Tenant is not accessible.";
-        };
-        throw new AccountDeactivatedException(message);
+        TenantAccessValidator.validateTenantAccess(status, role);
     }
 
     private String parseMetadata(String json, String key) {

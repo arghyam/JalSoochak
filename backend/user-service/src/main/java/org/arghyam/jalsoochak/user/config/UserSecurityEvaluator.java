@@ -3,9 +3,11 @@ package org.arghyam.jalsoochak.user.config;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
+import org.arghyam.jalsoochak.user.enums.TenantAccessRole;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
+import org.arghyam.jalsoochak.user.util.TenantAccessValidator;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 
@@ -73,11 +75,19 @@ public class UserSecurityEvaluator {
                 return true;
             }
 
-            // STATE_ADMIN must have matching tenant
+            // STATE_ADMIN must have matching tenant in a lifecycle state that permits access
             if (callerRole.map("STATE_ADMIN"::equals).orElse(false)) {
                 String callerTenantCode = SecurityUtils.extractTenantCode(authentication);
                 if (callerTenantCode == null || callerTenantCode.isBlank()) {
                     log.warn("STATE_ADMIN request to user {} denied: tenant_state_code claim absent from JWT", userId);
+                    return false;
+                }
+
+                Integer callerTenantId = caller.get().tenantId();
+                Optional<Integer> tenantStatusOpt = userCommonRepository.findTenantStatusByTenantId(callerTenantId);
+                if (tenantStatusOpt.isEmpty() || !TenantAccessValidator.isAccessibleToSystemUser(tenantStatusOpt.get(), TenantAccessRole.STATE_ADMIN)) {
+                    log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to user {}: tenant status does not permit access",
+                            callerTenantCode, userId);
                     return false;
                 }
 
