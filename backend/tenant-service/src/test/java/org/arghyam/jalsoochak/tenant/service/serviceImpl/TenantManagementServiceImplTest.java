@@ -720,7 +720,8 @@ class TenantManagementServiceImplTest {
         void testSetTenantConfigs_Success() throws Exception {
             // Arrange
             Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
             Map<TenantConfigKeyEnum, JsonNode> newConfigs = new HashMap<>();
             // Input should be JSON that matches SimpleConfigValueDTO structure with "value" field
             newConfigs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON, objectMapper.readTree("{\"value\": \"{\\\"welcome\\\": \\\"...\\\"}\"}"));
@@ -801,7 +802,7 @@ class TenantManagementServiceImplTest {
             // Arrange
             Integer tenantId = 1;
             TenantResponseDTO tenant = TenantResponseDTO.builder()
-                    .id(tenantId).stateCode("MP").build();
+                    .id(tenantId).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
             Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
             configs.put(TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME,
                     objectMapper.readTree("{\"nudge\":{\"schedule\":{\"hour\":8,\"minute\":0}}}"));
@@ -855,7 +856,8 @@ class TenantManagementServiceImplTest {
         void setTenantConfigs_ValidChannels_SavesSuccessfully() throws Exception {
             // Arrange
             Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
 
             Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
             configs.put(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS,
@@ -938,7 +940,8 @@ class TenantManagementServiceImplTest {
         void setTenantConfigs_TransientChannelFieldsStripped_BeforePersisting() throws Exception {
             // Arrange: client sends degraded + removedChannels in request — both must be stripped before DB write
             Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
 
             Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
             configs.put(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS,
@@ -968,6 +971,107 @@ class TenantManagementServiceImplTest {
             String persisted = serializedCaptor.getValue();
             assertFalse(persisted.contains("degraded"), "degraded must not be persisted");
             assertFalse(persisted.contains("removedChannels"), "removedChannels must not be persisted");
+        }
+
+        @Test
+        @DisplayName("Should auto-transition ONBOARDED tenant to CONFIGURED when all mandatory keys are set")
+        void setTenantConfigs_allMandatoryKeysPresent_transitionsToConfigured() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ONBOARDED.name()).build();
+
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON,
+                    objectMapper.readTree("{\"value\":\"template\"}"));
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"template\"}")
+                    .build();
+
+            // All GENERIC mandatory keys already in DB
+            List<ConfigDTO> allGenericConfigs = Arrays.stream(TenantConfigKeyEnum.values())
+                    .filter(k -> k.getType() == TenantConfigKeyEnum.ConfigType.GENERIC && k.isMandatory())
+                    .map(k -> ConfigDTO.builder().configKey(k.name()).build())
+                    .toList();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+            when(tenantCommonRepository.findConfigsByTenantId(tenantId)).thenReturn(allGenericConfigs);
+            when(tenantSchemaRepository.getSupportedLanguages("tenant_tn"))
+                    .thenReturn(List.of(LanguageConfigDTO.builder().language("english").preference(1).build()));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(tenantCommonRepository).updateTenantStatus(tenantId, TenantStatusEnum.CONFIGURED, 100);
+        }
+
+        @Test
+        @DisplayName("Should not auto-transition when tenant is ONBOARDED but some mandatory keys are missing")
+        void setTenantConfigs_someMandatoryKeysMissing_doesNotTransition() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ONBOARDED.name()).build();
+
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON,
+                    objectMapper.readTree("{\"value\":\"template\"}"));
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"template\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+            // Only one key configured — not all mandatory
+            when(tenantCommonRepository.findConfigsByTenantId(tenantId))
+                    .thenReturn(List.of(ConfigDTO.builder().configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()).build()));
+            when(tenantSchemaRepository.getSupportedLanguages("tenant_tn")).thenReturn(Collections.emptyList());
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(tenantCommonRepository, never()).updateTenantStatus(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should not transition when all mandatory keys are set but tenant status is not ONBOARDED")
+        void setTenantConfigs_allMandatoryKeysPresent_nonOnboardedStatus_doesNotTransition() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON,
+                    objectMapper.readTree("{\"value\":\"template\"}"));
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"template\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(tenantCommonRepository, never()).updateTenantStatus(any(), any(), any());
+        }
+
+        private SetTenantConfigRequestDTO request(Map<TenantConfigKeyEnum, JsonNode> configs) {
+            return SetTenantConfigRequestDTO.builder().configs(configs).build();
         }
     }
 
@@ -1032,6 +1136,9 @@ class TenantManagementServiceImplTest {
             assertEquals(1, result.getSummary().getConfigured());
             assertEquals(total - 1, result.getSummary().getPending());
             assertEquals(ConfigStatusEnum.CONFIGURED, result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).getStatus());
+            assertTrue(result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).isMandatory());
+            assertTrue(result.getConfigs().values().stream().allMatch(e -> e.isMandatory()),
+                    "All keys are currently mandatory");
             verify(tenantCommonRepository).findById(tenantId);
             verify(tenantCommonRepository).findConfigsByTenantId(tenantId);
         }

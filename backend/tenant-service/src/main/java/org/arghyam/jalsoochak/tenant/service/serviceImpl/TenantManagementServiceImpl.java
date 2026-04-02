@@ -346,6 +346,17 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         }
 
+        // Auto-transition ONBOARDED → CONFIGURED once all mandatory keys are present
+        TenantStatusEnum currentStatus = TenantStatusEnum.valueOf(tenant.getStatus());
+        if (currentStatus == TenantStatusEnum.ONBOARDED) {
+            EnumSet<TenantConfigKeyEnum> mandatoryKeys = TenantConfigKeyEnum.getMandatoryKeys();
+            Set<TenantConfigKeyEnum> configuredKeys = fetchConfiguredKeys(tenantId, tenant.getStateCode());
+            if (configuredKeys.containsAll(mandatoryKeys)) {
+                tenantCommonRepository.updateTenantStatus(tenantId, TenantStatusEnum.CONFIGURED, currentUserId);
+                log.info("Tenant [id={}] auto-transitioned to CONFIGURED status", tenantId);
+            }
+        }
+
         return TenantConfigResponseDTO.builder()
                 .tenantId(tenantId)
                 .configs(results)
@@ -361,29 +372,17 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Tenant with tenantId " + tenantId + " does not exist"));
 
-        // Collect configured GENERIC keys from DB
-        Set<String> configuredKeys = tenantCommonRepository.findConfigsByTenantId(tenantId)
-                .stream()
-                .map(ConfigDTO::getConfigKey)
-                .collect(Collectors.toSet());
-
-        // Check SPECIALIZED key: SUPPORTED_LANGUAGES
-        String schemaName = "tenant_" + tenant.getStateCode().toLowerCase();
-        List<LanguageConfigDTO> langs = tenantSchemaRepository.getSupportedLanguages(schemaName);
-        boolean languagesConfigured = langs != null && !langs.isEmpty();
+        Set<TenantConfigKeyEnum> configuredKeys = fetchConfiguredKeys(tenantId, tenant.getStateCode());
 
         Map<TenantConfigKeyEnum, TenantConfigStatusResponseDTO.ConfigEntry> configs = new LinkedHashMap<>();
         int configuredCount = 0;
 
         for (TenantConfigKeyEnum key : TenantConfigKeyEnum.values()) {
-            boolean configured = key.getType() == TenantConfigKeyEnum.ConfigType.SPECIALIZED
-                    ? languagesConfigured
-                    : configuredKeys.contains(key.name());
-
+            boolean configured = configuredKeys.contains(key);
             configs.put(key, TenantConfigStatusResponseDTO.ConfigEntry.builder()
                     .status(configured ? ConfigStatusEnum.CONFIGURED : ConfigStatusEnum.PENDING)
+                    .mandatory(key.isMandatory())
                     .build());
-
             if (configured) configuredCount++;
         }
 
@@ -397,6 +396,30 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                         .build())
                 .configs(configs)
                 .build();
+    }
+
+    /**
+     * Returns the set of {@link TenantConfigKeyEnum} values that have been configured
+     * for the given tenant, covering both GENERIC (KV store) and SPECIALIZED keys.
+     */
+    private Set<TenantConfigKeyEnum> fetchConfiguredKeys(Integer tenantId, String stateCode) {
+        Set<String> genericConfiguredKeyNames = tenantCommonRepository.findConfigsByTenantId(tenantId)
+                .stream()
+                .map(ConfigDTO::getConfigKey)
+                .collect(Collectors.toSet());
+
+        String schemaName = "tenant_" + stateCode.toLowerCase();
+        List<LanguageConfigDTO> langs = tenantSchemaRepository.getSupportedLanguages(schemaName);
+        boolean languagesConfigured = langs != null && !langs.isEmpty();
+
+        Set<TenantConfigKeyEnum> configured = EnumSet.noneOf(TenantConfigKeyEnum.class);
+        for (TenantConfigKeyEnum key : TenantConfigKeyEnum.values()) {
+            boolean isConfigured = key.getType() == ConfigType.SPECIALIZED
+                    ? languagesConfigured
+                    : genericConfiguredKeyNames.contains(key.name());
+            if (isConfigured) configured.add(key);
+        }
+        return configured;
     }
 
     private void handleSpecializedConfig(String schemaName, TenantConfigKeyEnum key, ConfigValueDTO dto,

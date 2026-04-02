@@ -296,6 +296,18 @@ public class TenantCommonRepository {
     }
 
     /**
+     * Updates the status of a tenant without touching any other fields.
+     */
+    public void updateTenantStatus(Integer tenantId, TenantStatusEnum status, Integer updatedBy) {
+        String sql = """
+                UPDATE common_schema.tenant_master_table
+                SET status = ?, updated_at = NOW(), updated_by = ?
+                WHERE id = ?
+                """;
+        jdbcTemplate.update(sql, status.getCode(), updatedBy, tenantId);
+    }
+
+    /**
      * Deactivates a tenant by setting status to INACTIVE and recording updated_at and updated_by.
      */
     public void deactivateTenant(Integer tenantId, Integer currentUserId) {

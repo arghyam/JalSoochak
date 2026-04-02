@@ -54,5 +54,9 @@ public class TenantConfigStatusResponseDTO {
         @Schema(description = "CONFIGURED if a value has been set, PENDING otherwise",
                 example = "CONFIGURED", allowableValues = {"CONFIGURED", "PENDING"})
         private ConfigStatusEnum status;
+
+        @Schema(description = "Whether this key must be configured before the tenant can auto-transition to CONFIGURED status",
+                example = "true")
+        private boolean mandatory;
     }
 }
