@@ -34,15 +34,14 @@ class AccountEmailServiceTest {
     // ─────────────────────────── sendInviteEmail ───────────────────────────────
 
     @Test
-    void sendInviteEmail_selectsStateAdminTemplate_forStateAdminRole() {
-        ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
-
-        accountEmailService.sendInviteEmail(
+    void sendInviteEmail_throwsIllegalArgumentException_forStateAdminRole() {
+        assertThatThrownBy(() -> accountEmailService.sendInviteEmail(
                 "admin@state.gov", "Ravi Kumar", "STATE_ADMIN",
-                "https://activate?token=abc", 24);
-
-        verify(mailSender).send(captor.capture());
-        assertThat(captor.getValue().template()).isEqualTo(MailTemplate.STATE_ADMIN_INVITATION);
+                "https://activate?token=abc", 24))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("STATE_ADMIN invitations require a stateName");
+        
+        verify(mailSender, never()).send(any());
     }
 
     @Test
@@ -102,7 +101,7 @@ class AccountEmailServiceTest {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
         accountEmailService.sendInviteEmail(
-                "op@tenant.in", null, "STATE_ADMIN",
+                "op@tenant.in", null, "SUPER_USER",
                 "https://activate?token=def", 24);
 
         verify(mailSender).send(captor.capture());
@@ -114,7 +113,7 @@ class AccountEmailServiceTest {
         doThrow(new RuntimeException("delivery failed")).when(mailSender).send(any());
 
         assertThatThrownBy(() -> accountEmailService.sendInviteEmail(
-                "op@tenant.in", "Dev", "STATE_ADMIN", "https://link", 24))
+                "op@tenant.in", "Dev", "SUPER_USER", "https://link", 24))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("delivery failed");
     }

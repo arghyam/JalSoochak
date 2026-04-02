@@ -432,7 +432,7 @@ public class NotificationEventRouter {
             log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={}", event.getRole());
         } catch (Exception e) {
             log.error("[Router/INVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "smtp_error");
+            publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 
@@ -460,7 +460,7 @@ public class NotificationEventRouter {
             log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={}", event.getRole());
         } catch (Exception e) {
             log.error("[Router/REINVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "smtp_error");
+            publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 
@@ -488,7 +488,7 @@ public class NotificationEventRouter {
             log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched");
         } catch (Exception e) {
             log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "smtp_error");
+            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 

@@ -21,8 +21,7 @@ import java.util.Map;
  *   notification.channel.email.from-address=noreply@yourdomain.com
  *   notification.channel.email.from-name=Water Management Platform
  * </pre>
- */
-/**
+ *
  * @deprecated Superseded by {@link org.arghyam.jalsoochak.message.channel.SendGridMailSender}.
  * Kept for reference; excluded from the Spring context by default.
  * Activate with {@code notification.mail.provider=legacy-email} only for temporary rollback.

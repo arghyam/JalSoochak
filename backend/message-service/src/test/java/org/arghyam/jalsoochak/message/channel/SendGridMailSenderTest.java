@@ -2,14 +2,13 @@ package org.arghyam.jalsoochak.message.channel;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.tomakehurst.wiremock.WireMockServer;
-import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -30,7 +29,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class SendGridMailSenderTest {
 
-    private WireMockServer wireMockServer;
+    @RegisterExtension
+    static WireMockExtension wireMockServer = WireMockExtension.newInstance().build();
+
     private SendGridMailSender sender;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -48,9 +49,6 @@ class SendGridMailSenderTest {
 
     @BeforeEach
     void setUp() {
-        wireMockServer = new WireMockServer(WireMockConfiguration.options().dynamicPort());
-        wireMockServer.start();
-
         MailProperties.Templates templates = new MailProperties.Templates(
                 T_PASSWORD_RESET, T_REINVITATION, T_DEFAULT_INVITATION,
                 T_SUPER_USER_INVITATION, T_STATE_ADMIN_INVITATION
@@ -62,11 +60,6 @@ class SendGridMailSenderTest {
         );
         sender = new SendGridMailSender(props, WebClient.builder());
         ReflectionTestUtils.setField(sender, "apiUrl", wireMockServer.baseUrl());
-    }
-
-    @AfterEach
-    void tearDown() {
-        wireMockServer.stop();
     }
 
     // ─────────────────────── Template ID resolution ────────────────────────────

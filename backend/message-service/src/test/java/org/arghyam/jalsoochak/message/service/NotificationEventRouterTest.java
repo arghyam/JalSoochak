@@ -399,13 +399,13 @@ class NotificationEventRouterTest {
     @Test
     void route_dispatchesInviteEmail_forValidEvent() {
         router.route("""
-                {"eventType":"SEND_INVITE_EMAIL","to":"admin@state.gov",
-                 "name":"Ravi Kumar","role":"STATE_ADMIN",
+                {"eventType":"SEND_INVITE_EMAIL","to":"op@tenant.in",
+                 "name":"Mohan","role":"NEW_ROLE",
                  "inviteLink":"https://app.jalsoochak.in/activate?token=abc","expiryHours":24}
                 """);
 
         verify(accountEmailService).sendInviteEmail(
-                "admin@state.gov", "Ravi Kumar", "STATE_ADMIN",
+                "op@tenant.in", "Mohan", "NEW_ROLE",
                 "https://app.jalsoochak.in/activate?token=abc", 24);
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
@@ -454,13 +454,13 @@ class NotificationEventRouterTest {
                 .when(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
 
         router.route("""
-                {"eventType":"SEND_INVITE_EMAIL","to":"admin@state.gov","name":"Dev",
-                 "role":"STATE_ADMIN","inviteLink":"https://link","expiryHours":24}
+                {"eventType":"SEND_INVITE_EMAIL","to":"op@tenant.in","name":"Dev",
+                 "role":"NEW_ROLE","inviteLink":"https://link","expiryHours":24}
                 """);
 
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
-            return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("smtp_error");
+            return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("email_delivery_error");
         }));
     }
 
@@ -519,7 +519,7 @@ class NotificationEventRouterTest {
 
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
-            return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("smtp_error");
+            return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("email_delivery_error");
         }));
     }
 
@@ -586,7 +586,7 @@ class NotificationEventRouterTest {
 
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
-            return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("smtp_error");
+            return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("email_delivery_error");
         }));
     }
 

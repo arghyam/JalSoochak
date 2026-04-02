@@ -26,13 +26,16 @@ public class AccountEmailService {
 
     public void sendInviteEmail(String to, String name, String role, String inviteLink, int expiryHours) {
         MailTemplate template = resolveInviteTemplate(role);
+        if (template == MailTemplate.STATE_ADMIN_INVITATION) {
+            log.warn("[AccountEmailService] sendInviteEmail called with role=STATE_ADMIN but no stateName provided; "
+                    + "use sendStateAdminInviteEmail(to, name, stateName, inviteLink, expiryHours) instead");
+            throw new IllegalArgumentException(
+                    "STATE_ADMIN invitations require a stateName; use sendStateAdminInviteEmail() instead");
+        }
         Map<String, Object> vars = new HashMap<>();
         vars.put("name", name != null ? name : "User");
         vars.put("activation_link", inviteLink);
         vars.put("expiry_hours", expiryHours);
-        if (template == MailTemplate.STATE_ADMIN_INVITATION) {
-            vars.put("state_name", "");  // fallback until event carries stateName
-        }
         mailSender.send(new MailRequest(to, template, vars));
         log.info("[AccountEmailService] invite dispatched template={} role={}", template, role);
     }

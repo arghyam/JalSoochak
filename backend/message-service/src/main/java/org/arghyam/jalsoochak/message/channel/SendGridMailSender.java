@@ -10,6 +10,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.HashMap;
 import java.util.List;
@@ -48,7 +49,7 @@ public class SendGridMailSender implements EmailSender {
         String templateId = resolveTemplateId(request.template());
 
         Map<String, Object> dynamicData = new HashMap<>(request.templateVariables());
-        dynamicData.put("logo_image", mailProperties.logoImageUrl());
+        dynamicData.put("logo_image", mailProperties.logoImageUrl() != null ? mailProperties.logoImageUrl() : "");
 
         Map<String, Object> payload = Map.of(
                 "from", Map.of("email", mailProperties.fromAddress(), "name", mailProperties.fromName()),
@@ -66,6 +67,7 @@ public class SendGridMailSender implements EmailSender {
                     .bodyValue(payload)
                     .retrieve()
                     .toBodilessEntity()
+                    .subscribeOn(Schedulers.boundedElastic())
                     .block();
 
             log.info("[SendGridMailSender] sent template={}", request.template());

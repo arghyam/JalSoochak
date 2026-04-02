@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.message.dto;
 
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -22,4 +23,12 @@ public record MailRequest(
         String to,
         MailTemplate template,
         Map<String, Object> templateVariables
-) {}
+) {
+    /**
+     * Canonical constructor that defensively copies the templateVariables map
+     * to ensure immutability and prevent external mutation after construction.
+     */
+    public MailRequest {
+        templateVariables = Collections.unmodifiableMap(new java.util.HashMap<>(templateVariables));
+    }
+}

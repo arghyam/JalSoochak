@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.message.config;
 
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * Unified configuration for the transactional email abstraction.
@@ -13,6 +15,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * </ul>
  */
 @ConfigurationProperties(prefix = "notification.mail")
+@Validated
 public record MailProperties(
         String provider,
         String fromAddress,
@@ -25,6 +28,7 @@ public record MailProperties(
     // ── SendGrid ─────────────────────────────────────────────────────────────────
 
     public record SendGrid(
+            @NotBlank(message = "SendGrid API key must not be blank; set SENDGRID_API_KEY environment variable")
             String apiKey,
             Templates templates
     ) {}
