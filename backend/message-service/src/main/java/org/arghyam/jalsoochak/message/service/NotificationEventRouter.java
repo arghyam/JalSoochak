@@ -361,11 +361,17 @@ public class NotificationEventRouter {
                 continue;
             }
             try {
-                Long contactId = glificWhatsAppService.optIn(normalized);
+                Long contactId = fetchWhatsappConnectionId(tenantSchema, phone);
+                if ((contactId == null || contactId <= 0) && !normalized.equals(phone)) {
+                    contactId = fetchWhatsappConnectionId(tenantSchema, normalized);
+                }
                 if (contactId == null || contactId <= 0) {
-                    publishWelcomeDlt(tenantSchema, normalized, "optin_failed");
-                    failed++;
-                    continue;
+                    contactId = glificWhatsAppService.optIn(normalized);
+                    if (contactId == null || contactId <= 0) {
+                        publishWelcomeDlt(tenantSchema, normalized, "optin_failed");
+                        failed++;
+                        continue;
+                    }
                 }
                 glificWhatsAppService.startWelcomeFlow(contactId);
                 success++;
