@@ -347,7 +347,7 @@ class TenantControllerTest {
             Integer tenantId = 1;
             doNothing().when(tenantManagementService).deactivateTenant(tenantId);
 
-            mockMvc.perform(put("/api/v1/tenants/" + tenantId + "/deactivate")
+            mockMvc.perform(post("/api/v1/tenants/" + tenantId + "/deactivate")
                     .contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200))
@@ -362,7 +362,7 @@ class TenantControllerTest {
             doThrow(new ResourceNotFoundException("Tenant not found"))
                     .when(tenantManagementService).deactivateTenant(tenantId);
 
-            mockMvc.perform(put("/api/v1/tenants/" + tenantId + "/deactivate"))
+            mockMvc.perform(post("/api/v1/tenants/" + tenantId + "/deactivate"))
                     .andExpect(status().isNotFound());
         }
     }
@@ -769,7 +769,7 @@ class TenantControllerTest {
 
             when(tenantManagementService.getTenantConfigs(eq(tenantId), any())).thenReturn(response);
 
-            mockMvc.perform(get("/api/v1/tenants/{tenantId}/public-config", tenantId))
+            mockMvc.perform(get("/api/v1/tenants/{tenantId}/config/public", tenantId))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200))
                     .andExpect(jsonPath("$.message").value("Public tenant configurations retrieved successfully"))
@@ -786,7 +786,7 @@ class TenantControllerTest {
 
             when(tenantManagementService.getTenantConfigs(eq(tenantId), any())).thenReturn(response);
 
-            mockMvc.perform(get("/api/v1/tenants/{tenantId}/public-config", tenantId))
+            mockMvc.perform(get("/api/v1/tenants/{tenantId}/config/public", tenantId))
                     .andExpect(status().isOk());
 
             verify(tenantManagementService).getTenantConfigs(eq(tenantId), argThat(keys -> {
@@ -810,7 +810,7 @@ class TenantControllerTest {
             when(tenantManagementService.getTenantConfigs(eq(tenantId), any()))
                     .thenThrow(new ResourceNotFoundException("Tenant not found"));
 
-            mockMvc.perform(get("/api/v1/tenants/{tenantId}/public-config", tenantId))
+            mockMvc.perform(get("/api/v1/tenants/{tenantId}/config/public", tenantId))
                     .andExpect(status().isNotFound());
         }
 
@@ -820,7 +820,7 @@ class TenantControllerTest {
             when(tenantManagementService.getTenantConfigs(eq(tenantId), any()))
                     .thenThrow(new RuntimeException("DB error"));
 
-            mockMvc.perform(get("/api/v1/tenants/{tenantId}/public-config", tenantId))
+            mockMvc.perform(get("/api/v1/tenants/{tenantId}/config/public", tenantId))
                     .andExpect(status().isInternalServerError());
         }
     }
@@ -959,7 +959,6 @@ class TenantControllerTest {
         void getLocationChildren_Success() throws Exception {
             Integer tenantId = 1;
             String hierarchyType = "LGD";
-            Integer parentId = 0;
 
             List<LocationResponseDTO> children = List.of(
                     LocationResponseDTO.builder().id(1).uuid("uuid-1").title("Madhya Pradesh").status(StatusEnum.ACTIVE.getCode()).build(),
@@ -968,7 +967,7 @@ class TenantControllerTest {
 
             when(tenantManagementService.getLocationChildren(tenantId, hierarchyType, null)).thenReturn(children);
 
-            mockMvc.perform(get("/api/v1/tenants/{tenantId}/locations/{hierarchyType}/children/{parentId}", tenantId, hierarchyType, parentId))
+            mockMvc.perform(get("/api/v1/tenants/{tenantId}/locations/{hierarchyType}", tenantId, hierarchyType))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200))
                     .andExpect(jsonPath("$.data", hasSize(2)))
@@ -991,7 +990,8 @@ class TenantControllerTest {
 
             when(tenantManagementService.getLocationChildren(tenantId, hierarchyType, parentId)).thenReturn(children);
 
-            mockMvc.perform(get("/api/v1/tenants/{tenantId}/locations/{hierarchyType}/children/{parentId}", tenantId, hierarchyType, parentId))
+            mockMvc.perform(get("/api/v1/tenants/{tenantId}/locations/{hierarchyType}", tenantId, hierarchyType)
+                            .param("parentId", parentId.toString()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200))
                     .andExpect(jsonPath("$.data", hasSize(2)))
@@ -1009,7 +1009,8 @@ class TenantControllerTest {
 
             when(tenantManagementService.getLocationChildren(tenantId, hierarchyType, parentId)).thenReturn(new ArrayList<>());
 
-            mockMvc.perform(get("/api/v1/tenants/{tenantId}/locations/{hierarchyType}/children/{parentId}", tenantId, hierarchyType, parentId))
+            mockMvc.perform(get("/api/v1/tenants/{tenantId}/locations/{hierarchyType}", tenantId, hierarchyType)
+                            .param("parentId", parentId.toString()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200))
                     .andExpect(jsonPath("$.data", hasSize(0)));
@@ -1021,12 +1022,11 @@ class TenantControllerTest {
         void getLocationChildren_InvalidHierarchyType() throws Exception {
             Integer tenantId = 1;
             String hierarchyType = "INVALID";
-            Integer parentId = 0;
 
             when(tenantManagementService.getLocationChildren(tenantId, hierarchyType, null))
                     .thenThrow(new IllegalArgumentException("Invalid hierarchy type: " + hierarchyType));
 
-            mockMvc.perform(get("/api/v1/tenants/{tenantId}/locations/{hierarchyType}/children/{parentId}", tenantId, hierarchyType, parentId))
+            mockMvc.perform(get("/api/v1/tenants/{tenantId}/locations/{hierarchyType}", tenantId, hierarchyType))
                     .andExpect(status().isBadRequest());
 
             verify(tenantManagementService).getLocationChildren(tenantId, hierarchyType, null);

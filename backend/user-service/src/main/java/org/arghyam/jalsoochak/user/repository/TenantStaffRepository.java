@@ -69,20 +69,6 @@ public class TenantStaffRepository {
         return Boolean.TRUE.equals(exists);
     }
 
-    /**
-     * Rejects a name filter by throwing {@link IllegalArgumentException}.
-     * Name filtering is not supported because the {@code title} field is encrypted;
-     * in-memory decrypt-and-scan is unbounded. This guard is applied consistently in
-     * {@link #listStaff}, {@link #countStaff}, {@link #countByRole}, and {@link #listStaffPage}.
-     */
-    private void rejectNameFilter(String name) {
-        if (name != null && !name.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Name filtering is not supported because the title field is encrypted. " +
-                    "Remove the name parameter or leave it blank.");
-        }
-    }
-
     public List<TenantStaffResponseDTO> listStaff(
             String schemaName,
             List<String> roles,
@@ -94,11 +80,8 @@ public class TenantStaffRepository {
             int limit
     ) {
         validateSchemaName(schemaName);
-        // Name filtering is not supported: title is encrypted and in-memory decrypt-and-scan
-        // is unbounded. Reject until a searchable name sidecar/index is available.
-        rejectNameFilter(name);
 
-        SqlAndArgs where = buildWhere(roles, status);
+        SqlAndArgs where = buildWhere(roles, status, name);
         String orderBy = orderBy(sortBy, sortDir);
 
         String sql = String.format("""
@@ -156,9 +139,8 @@ public class TenantStaffRepository {
 
     public long countStaff(String schemaName, List<String> roles, Integer status, String name) {
         validateSchemaName(schemaName);
-        rejectNameFilter(name);
 
-        SqlAndArgs where = buildWhere(roles, status);
+        SqlAndArgs where = buildWhere(roles, status, name);
         String sql = String.format("""
                 SELECT COUNT(1)
                 FROM %s.user_table u
@@ -174,8 +156,7 @@ public class TenantStaffRepository {
 
     public List<RoleCountDTO> countByRole(String schemaName, Integer status, String name) {
         validateSchemaName(schemaName);
-        rejectNameFilter(name);
-        SqlAndArgs where = buildWhere(List.of(), status);
+        SqlAndArgs where = buildWhere(List.of(), status, name);
 
         String sql = String.format("""
                 SELECT COALESCE(ut.c_name, 'UNKNOWN') AS role,
@@ -205,10 +186,9 @@ public class TenantStaffRepository {
     /**
      * Returns a page of staff and the total count in one call.
      * <p>
-     * Name filters are <em>not</em> supported: the {@code title} field is encrypted and
-     * cannot be searched at the database level. Passing a non-blank {@code name} will
-     * cause an {@link IllegalArgumentException} to be thrown — consistent with
-     * {@link #listStaff} and {@link #countStaff}.
+     * When {@code name} is non-blank, filters by an exact-match HMAC-SHA256 hash of the
+     * trimmed name against {@code title_hash}. The {@code title} column is AES-GCM encrypted
+     * and cannot be searched directly; the hash provides an exact-match blind index.
      */
     public StaffPage listStaffPage(
             String schemaName,
@@ -221,8 +201,7 @@ public class TenantStaffRepository {
             int limit
     ) {
         validateSchemaName(schemaName);
-        rejectNameFilter(name);
-        SqlAndArgs where = buildWhere(roles, status);
+        SqlAndArgs where = buildWhere(roles, status, name);
         String orderBy = orderBy(sortBy, sortDir);
 
         String baseSql = String.format("""
@@ -263,10 +242,19 @@ public class TenantStaffRepository {
 
     private record SqlAndArgs(String sql, List<Object> args) {}
 
-    // name is excluded from SQL filtering because title is encrypted
-    private SqlAndArgs buildWhere(List<String> roles, Integer status) {
+    /**
+     * Builds the WHERE clause for staff list/count queries.
+     * Name filtering uses {@code title_hash} (HMAC-SHA256 of the trimmed name) for an
+     * exact-match blind index — the encrypted {@code title} column cannot be searched directly.
+     */
+    private SqlAndArgs buildWhere(List<String> roles, Integer status, String name) {
         List<String> clauses = new ArrayList<>();
         List<Object> args = new ArrayList<>();
+
+        if (name != null && !name.isBlank()) {
+            clauses.add("u.title_hash = ?");
+            args.add(pii.hmac(name.trim().toLowerCase(Locale.ROOT)));
+        }
 
         if (roles != null && !roles.isEmpty()) {
             List<String> cleaned = roles.stream()

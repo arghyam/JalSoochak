@@ -4,8 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.anomaly.dto.event.AnomalyEvent;
-import org.arghyam.jalsoochak.anomaly.service.AnomalyIngestService;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +13,6 @@ import org.springframework.stereotype.Component;
 public class KafkaConsumer {
 
     private final ObjectMapper objectMapper;
-    private final AnomalyIngestService anomalyIngestService;
 
     @KafkaListener(topics = "common-topic", groupId = "${spring.kafka.consumer.group-id}")
     public void consume(String message) {
@@ -29,16 +26,10 @@ public class KafkaConsumer {
         try {
             String eventType = extractEventType(message);
             if ("ANOMALY_RECORDED".equals(eventType)) {
-                AnomalyEvent event = objectMapper.readValue(message, AnomalyEvent.class);
-                System.out.println("[anomaly-service] ANOMALY_RECORDED uuid=" + event.getUuid()
-                        + " type=" + event.getType()
-                        + " tenantId=" + event.getTenantId()
-                        + " schemeId=" + event.getSchemeId()
-                        + " userId=" + event.getUserId());
-                anomalyIngestService.ingest(event);
-            } else {
-                log.debug("[anomaly-service] Ignoring telemetry event type: {}", eventType);
+                log.debug("[anomaly-service] Ignoring ANOMALY_RECORDED to avoid duplicate analytics rows.");
+                return;
             }
+            log.debug("[anomaly-service] Ignoring telemetry event type: {}", eventType);
         } catch (Exception e) {
             log.error("Failed to process telemetry event: {}", e.getMessage(), e);
             throw new RuntimeException(e.getMessage(), e);

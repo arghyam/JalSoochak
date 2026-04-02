@@ -14,13 +14,16 @@ public class GlificOperatorContextService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     private final TenantConfigRepository tenantConfigRepository;
+    private final PiiEncryptionService piiEncryptionService;
 
     public GlificOperatorContextService(TelemetryTenantRepository telemetryTenantRepository,
                                         UserLanguagePreferenceRepository userLanguagePreferenceRepository,
-                                        TenantConfigRepository tenantConfigRepository) {
+                                        TenantConfigRepository tenantConfigRepository,
+                                        PiiEncryptionService piiEncryptionService) {
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
         this.tenantConfigRepository = tenantConfigRepository;
+        this.piiEncryptionService = piiEncryptionService;
     }
 
     public TelemetryOperatorWithSchema resolveOperatorWithSchema(String contactId) {
@@ -28,13 +31,74 @@ public class GlificOperatorContextService {
                 .findPreferredTenantIdByContactId(contactId)
                 .orElse(null);
 
+        System.out.println("prefered lang " + preferredTenantId);
+
         return resolveOperatorWithSchema(contactId, preferredTenantId);
     }
 
     public TelemetryOperatorWithSchema resolveOperatorWithSchema(String contactId, Integer preferredTenantId) {
+        if (contactId == null || contactId.isBlank()) {
+            throw new IllegalStateException("contactId is required");
+        }
+
+        String trimmed = contactId.trim();
+
+        if (looksLikePhoneHash(trimmed)) {
+            return telemetryTenantRepository
+                    .findOperatorByPhoneHashAcrossTenants(trimmed, preferredTenantId)
+                    .orElseThrow(() -> new IllegalStateException("No operator found for contactId " + contactId));
+        }
+
+        if (looksLikeEncryptedValue(trimmed)) {
+            String decrypted = tryDecrypt(trimmed);
+            if (decrypted != null && !decrypted.isBlank() && !decrypted.equals(trimmed)) {
+                TelemetryOperatorWithSchema decryptedMatch = telemetryTenantRepository
+                        .findOperatorByPhoneAcrossTenants(decrypted, preferredTenantId)
+                        .orElse(null);
+                if (decryptedMatch != null) {
+                    return decryptedMatch;
+                }
+            }
+        }
+
         return telemetryTenantRepository
-                .findOperatorByPhoneAcrossTenants(contactId, preferredTenantId)
+                .findOperatorByPhoneAcrossTenants(trimmed, preferredTenantId)
                 .orElseThrow(() -> new IllegalStateException("No operator found for contactId " + contactId));
+    }
+
+    private boolean looksLikePhoneHash(String value) {
+        if (value == null) {
+            return false;
+        }
+        return value.matches("^[A-Fa-f0-9]{64}$");
+    }
+
+    private boolean looksLikeEncryptedValue(String value) {
+        if (value == null) {
+            return false;
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() < 24 || (trimmed.length() % 4) != 0) {
+            return false;
+        }
+        if (!trimmed.matches("^[A-Za-z0-9+/=]+$")) {
+            return false;
+        }
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '+' || c == '/') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String tryDecrypt(String value) {
+        try {
+            return piiEncryptionService.decrypt(value);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     public String resolveOperatorLanguage(TelemetryOperatorWithSchema operatorWithSchema, Integer tenantId) {

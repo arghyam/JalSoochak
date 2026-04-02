@@ -195,6 +195,9 @@ public class GlificLocalizationService {
         if (normalized.contains("issue reason can only contain letters, numbers, and spaces")) {
             return "समस्या का विवरण केवल अक्षर, अंक और स्पेस में ही दें।";
         }
+        if (normalized.contains("successfully selected")) {
+            return "सफलतापूर्वक चयनित।";
+        }
         if (normalized.contains("image could not be processed")) {
             return "इमेज प्रोसेस नहीं हो सकी। कृपया दोबारा प्रयास करें।";
         }

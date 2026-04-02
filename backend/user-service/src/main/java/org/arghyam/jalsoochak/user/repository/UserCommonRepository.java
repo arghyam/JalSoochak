@@ -1,9 +1,15 @@
 package org.arghyam.jalsoochak.user.repository;
 
-import lombok.RequiredArgsConstructor;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
-import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserTokenRow;
 import org.arghyam.jalsoochak.user.service.PiiEncryptionService;
@@ -11,10 +17,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
+import lombok.RequiredArgsConstructor;
 
 @Repository
 @RequiredArgsConstructor
@@ -68,6 +71,66 @@ public class UserCommonRepository {
                 """;
         List<String> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getString("state_code"), tenantId);
         return rows.stream().findFirst();
+    }
+
+    /**
+     * Returns {@code true} if the user with the given ID exists and belongs to the tenant
+     * identified by {@code tenantStateCode} (case-insensitive), and that tenant is not
+     * deactivated, suspended, or archived (i.e. status is not INACTIVE=0, SUSPENDED=4,
+     * or ARCHIVED=6). Returns {@code false} if the user does not exist, has no tenant
+     * (tenant_id = 0), belongs to a different tenant, or belongs to a tenant in a
+     * blocked status.
+     *
+     * <p>Used by {@code UserSecurityEvaluator} to enforce tenant-scoped access in a single
+     * round-trip instead of two separate lookups.
+     */
+    public boolean userBelongsToTenant(Long userId, String tenantStateCode) {
+        String sql = """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM common_schema.tenant_admin_user_master_table u
+                    JOIN common_schema.tenant_master_table t ON t.id = u.tenant_id
+                    WHERE u.id = ?
+                    AND UPPER(t.state_code) = UPPER(?)
+                    AND t.status NOT IN (0, 4, 6)
+                )
+                """;
+        Boolean result = jdbcTemplate.queryForObject(sql, Boolean.class, userId, tenantStateCode);
+        return Boolean.TRUE.equals(result);
+    }
+
+    /**
+     * Returns UUIDs of PENDING state-admin users whose invite token metadata contains
+     * a {@code nameHash} matching the given HMAC-SHA256 value.
+     * Scoped to {@code tenantId} when non-null, or all tenants when null.
+     */
+    public Set<String> findPendingAdminUuidsByNameHash(String nameHash, Integer tenantId) {
+        List<Object> args = new java.util.ArrayList<>();
+        StringBuilder sql = new StringBuilder("""
+                SELECT t.uuid
+                FROM common_schema.tenant_admin_user_master_table t
+                JOIN common_schema.admin_user_token_table tok ON tok.email = t.email
+                WHERE t.status = ?
+                  AND tok.token_type = 'INVITE'
+                  AND tok.used_at IS NULL
+                  AND tok.deleted_at IS NULL
+                  AND tok.metadata->>'nameHash' = ?
+                """);
+        args.add(AdminUserStatus.PENDING.code);
+        args.add(nameHash);
+        if (tenantId != null) {
+            sql.append(" AND t.tenant_id = ?");
+            args.add(tenantId);
+        } else {
+            sql.append(" AND t.tenant_id != 0");
+        }
+        return new HashSet<>(jdbcTemplate.queryForList(sql.toString(), String.class, args.toArray()));
+    }
+
+    public List<String> findAllTenantStateCodes() {
+        return jdbcTemplate.queryForList(
+                "SELECT state_code FROM common_schema.tenant_master_table WHERE id != 0 ORDER BY state_code",
+                String.class);
     }
 
     public Optional<String> findTenantTitleByStateCode(String stateCode) {
@@ -305,7 +368,8 @@ public class UserCommonRepository {
         }
     }
 
-    public List<AdminUserRow> listStateAdminsByTenant(Integer tenantId, AdminUserStatus status, long offset, int limit) {
+    public List<AdminUserRow> listStateAdminsByTenant(Integer tenantId, AdminUserStatus status,
+            Set<String> nameFilterUuids, long offset, int limit) {
         if (limit <= 0) {
             throw new BadRequestException("limit must be greater than 0");
         }
@@ -328,13 +392,18 @@ public class UserCommonRepository {
             sql.append(" AND status = ?");
             args.add(status.code);
         }
+        if (nameFilterUuids != null && !nameFilterUuids.isEmpty()) {
+            String placeholders = String.join(",", Collections.nCopies(nameFilterUuids.size(), "?"));
+            sql.append(" AND uuid IN (").append(placeholders).append(")");
+            args.addAll(nameFilterUuids);
+        }
         sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
         args.add(limit);
         args.add(offset);
         return jdbcTemplate.query(sql.toString(), (rs, n) -> mapAdminUserRow(rs), args.toArray());
     }
 
-    public long countStateAdminsByTenant(Integer tenantId, AdminUserStatus status) {
+    public long countStateAdminsByTenant(Integer tenantId, AdminUserStatus status, Set<String> nameFilterUuids) {
         List<Object> args = new java.util.ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT COUNT(*)
@@ -350,6 +419,11 @@ public class UserCommonRepository {
         if (status != null) {
             sql.append(" AND status = ?");
             args.add(status.code);
+        }
+        if (nameFilterUuids != null && !nameFilterUuids.isEmpty()) {
+            String placeholders = String.join(",", Collections.nCopies(nameFilterUuids.size(), "?"));
+            sql.append(" AND uuid IN (").append(placeholders).append(")");
+            args.addAll(nameFilterUuids);
         }
         Long count = jdbcTemplate.queryForObject(sql.toString(), Long.class, args.toArray());
         return count != null ? count : 0L;

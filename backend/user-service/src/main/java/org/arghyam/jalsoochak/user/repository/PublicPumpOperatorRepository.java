@@ -88,6 +88,18 @@ public class PublicPumpOperatorRepository {
         return columnExists(schemaName, "flow_reading_table", "observation_time") ? "observation_time" : "reading_at";
     }
 
+    private String resolveConfirmedReadingExpression(String schemaName, String tableAlias) {
+        if (columnExists(schemaName, "flow_reading_table", "payload_json")) {
+            return String.format(
+                    "COALESCE(NULLIF(%s.confirmed_reading, 0), (%s.payload_json ->> 'confirmed_reading')::numeric, %s.confirmed_reading)",
+                    tableAlias,
+                    tableAlias,
+                    tableAlias
+            );
+        }
+        return tableAlias + ".confirmed_reading";
+    }
+
     public PumpOperatorDetailsDTO findPumpOperatorById(String schemaName, long pumpOperatorId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
@@ -526,6 +538,7 @@ public class PublicPumpOperatorRepository {
     public PumpOperatorReadingComplianceDTO getReadingCompliance(String schemaName, long pumpOperatorId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String confirmedExpr = resolveConfirmedReadingExpression(schemaName, "fr");
 
         // If the operator has no readings, lastSubmissionAt/confirmedReading will be null.
         String sql = String.format("""
@@ -536,7 +549,8 @@ public class PublicPumpOperatorRepository {
                 LEFT JOIN common_schema.user_type_master_table ut
                   ON ut.id = u.user_type
                 LEFT JOIN LATERAL (
-                    SELECT %s AS last_submission_at, confirmed_reading
+                    SELECT %s AS last_submission_at,
+                           %s AS confirmed_reading
                     FROM %s.flow_reading_table
                     WHERE deleted_at IS NULL
                       AND created_by = u.id
@@ -547,7 +561,7 @@ public class PublicPumpOperatorRepository {
                   AND u.id = ?
                   AND upper(COALESCE(ut.c_name, '')) = 'PUMP_OPERATOR'
                 LIMIT 1
-                """, schemaName, timeColumn, schemaName, timeColumn);
+                """, schemaName, timeColumn, confirmedExpr, schemaName, timeColumn);
 
         try {
             return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
@@ -568,6 +582,7 @@ public class PublicPumpOperatorRepository {
     public List<PumpOperatorReadingComplianceRowDTO> listReadingCompliance(String schemaName, int offset, int limit) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String confirmedExpr = resolveConfirmedReadingExpression(schemaName, "fr");
 
         String sql = String.format("""
                 SELECT u.id,
@@ -579,7 +594,8 @@ public class PublicPumpOperatorRepository {
                 LEFT JOIN common_schema.user_type_master_table ut
                   ON ut.id = u.user_type
                 LEFT JOIN LATERAL (
-                    SELECT %s AS last_submission_at, confirmed_reading
+                    SELECT %s AS last_submission_at,
+                           %s AS confirmed_reading
                     FROM %s.flow_reading_table
                     WHERE deleted_at IS NULL
                       AND created_by = u.id
@@ -590,7 +606,7 @@ public class PublicPumpOperatorRepository {
                   AND upper(COALESCE(ut.c_name, '')) = 'PUMP_OPERATOR'
                 ORDER BY u.id DESC
                 LIMIT ? OFFSET ?
-                """, schemaName, timeColumn, schemaName, timeColumn);
+                """, schemaName, timeColumn, confirmedExpr, schemaName, timeColumn);
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             Timestamp ts = (Timestamp) rs.getObject("last_submission_at");
@@ -631,6 +647,7 @@ public class PublicPumpOperatorRepository {
             return List.of();
         }
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String confirmedExpr = resolveConfirmedReadingExpression(schemaName, "fr");
 
         String sql = String.format("""
                 WITH latest_mapping AS (
@@ -664,7 +681,7 @@ public class PublicPumpOperatorRepository {
                            fr.created_by,
                            fr.reading_date,
                            fr.%s AS reading_at,
-                           fr.confirmed_reading
+                           %s AS confirmed_reading
                     FROM %s.flow_reading_table fr
                     JOIN latest_mapping l
                       ON l.id = fr.created_by
@@ -742,7 +759,7 @@ public class PublicPumpOperatorRepository {
                 LEFT JOIN stats
                   ON stats.created_by = l.id
                 ORDER BY paged.reading_date DESC, paged.reading_id DESC
-                """, schemaName, schemaName, schemaName, timeColumn, schemaName, timeColumn, schemaName);
+                """, schemaName, schemaName, schemaName, timeColumn, confirmedExpr, schemaName, timeColumn, schemaName);
 
         record RowData(
                 Long id,

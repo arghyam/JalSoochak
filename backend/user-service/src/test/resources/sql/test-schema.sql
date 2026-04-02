@@ -109,6 +109,7 @@ CREATE TABLE tenant_mp.user_table (
     email                     VARCHAR(255) UNIQUE,
     phone_number              TEXT,
     phone_number_hash         TEXT,
+    title_hash                TEXT,
     password                  TEXT,
     status                    INTEGER      NOT NULL,
     email_verification_status BOOLEAN,

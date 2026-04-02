@@ -53,6 +53,19 @@ public class MessageTemplateService {
                 .orElse("Please find the escalation report attached.");
     }
 
+    /**
+     * Returns the tenant-specific Glific welcome flow ID if configured.
+     *
+     * <p>Looks up the config keys in order:
+     * {@code glific_welcome_flow_id} → {@code welcome_flow_id}.</p>
+     */
+    public Optional<String> findWelcomeFlowId(int tenantId) {
+        return findConfigValue(tenantId, "glific_welcome_flow_id")
+                .or(() -> findConfigValue(tenantId, "welcome_flow_id"))
+                .map(String::trim)
+                .filter(value -> !value.isBlank());
+    }
+
     private String resolveLanguageKey(int tenantId, int languageId) {
         if (languageId <= 0) return "english";
         String name = findConfigValue(tenantId, "language_" + languageId).orElse("English");

@@ -32,6 +32,7 @@ import org.arghyam.jalsoochak.user.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
+import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
@@ -287,14 +288,15 @@ class AuthServiceImplTest {
         void getInviteInfo_validToken_returnsInfo() {
             String rawToken = "raw-invite-token";
             String hash = "invite-hash";
-            String metadata = "{\"role\":\"STATE_ADMIN\",\"tenantName\":\"Madhya Pradesh\",\"firstName\":\"<enc-john>\",\"lastName\":\"<enc-doe>\"}";
+            String metadata = "{\"role\":\"STATE_ADMIN\",\"tenantName\":\"Madhya Pradesh\",\"tenantCode\":\"MP\",\"firstName\":\"<enc-john>\",\"lastName\":\"<enc-doe>\"}";
             when(tokenService.hash(rawToken)).thenReturn(hash);
             when(userCommonRepository.findActiveTokenByHash(hash)).thenReturn(Optional.of(
                     activeTokenRow("invited@example.com", hash, "INVITE", metadata)));
             when(metadataDecryptionHelper.parseAndDecrypt(metadata, "firstName")).thenReturn("John");
             when(metadataDecryptionHelper.parseAndDecrypt(metadata, "lastName")).thenReturn("Doe");
-            // getInviteInfo checks existsActiveAdminUserByEmail (not existsAdminUserByEmail)
             when(userCommonRepository.existsActiveAdminUserByEmail("invited@example.com")).thenReturn(false);
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             // phoneNumber is fetched from the PENDING user record
             AdminUserRow pendingUser = new AdminUserRow(5L, "placeholder-uuid", "invited@example.com", "9112345678", 1, 2, AdminUserStatus.PENDING, 0, null);
             when(userCommonRepository.findAdminUserByEmail("invited@example.com")).thenReturn(Optional.of(pendingUser));
@@ -316,6 +318,21 @@ class AuthServiceImplTest {
             when(userCommonRepository.findActiveTokenByHash("unknown-hash")).thenReturn(Optional.empty());
 
             assertThrows(BadRequestException.class, () -> authService.getInviteInfo("unknown-token"));
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN: throws ForbiddenAccessException when tenant is archived")
+        void getInviteInfo_archivedTenant_throwsForbiddenAccess() {
+            String hash = "invite-hash";
+            when(tokenService.hash("raw")).thenReturn(hash);
+            when(userCommonRepository.findActiveTokenByHash(hash)).thenReturn(Optional.of(
+                    activeTokenRow("invited@example.com", hash, "INVITE",
+                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
+            when(userCommonRepository.existsActiveAdminUserByEmail("invited@example.com")).thenReturn(false);
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(6)); // ARCHIVED
+
+            assertThrows(ForbiddenAccessException.class, () -> authService.getInviteInfo("raw"));
         }
 
         @Test
@@ -529,6 +546,52 @@ class AuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("Throws BadRequestException when invite token role does not match admin level")
+        void activateAccount_roleMismatch_throwsBadRequest() {
+            String hash = "mismatch-hash";
+            when(tokenService.hash("mismatch-token")).thenReturn(hash);
+            when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
+                    activeTokenRow("mismatch@example.com", hash, "INVITE",
+                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
+            // Pending user has adminLevel=1 (SUPER_USER), but token says STATE_ADMIN
+            AdminUserRow pendingUser = new AdminUserRow(25L, "pending-mismatch-uuid", "mismatch@example.com", "", 0, 1, AdminUserStatus.PENDING, 0, null);
+            when(userCommonRepository.findAdminUserByEmail("mismatch@example.com")).thenReturn(Optional.of(pendingUser));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+
+            ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
+            req.setInviteToken("mismatch-token");
+            req.setFirstName("Mismatch");
+            req.setLastName("User");
+            req.setPassword("Pass@123");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            assertThrows(BadRequestException.class, () -> authService.activateAccount(req));
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN: throws ForbiddenAccessException when tenant is archived")
+        void activateAccount_stateAdmin_archivedTenant_throwsForbiddenAccess() {
+            String hash = "sa-hash";
+            when(tokenService.hash("sa-token")).thenReturn(hash);
+            when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
+                    activeTokenRow("newsa@example.com", hash, "INVITE",
+                            "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
+            AdminUserRow pendingUser = new AdminUserRow(20L, "pending-sa-uuid", "newsa@example.com", "", 1, 2, AdminUserStatus.PENDING, 0, null);
+            when(userCommonRepository.findAdminUserByEmail("newsa@example.com")).thenReturn(Optional.of(pendingUser));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(6)); // ARCHIVED
+
+            ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
+            req.setInviteToken("sa-token");
+            req.setFirstName("State");
+            req.setLastName("Admin");
+            req.setPassword("Pass@123");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            assertThrows(ForbiddenAccessException.class, () -> authService.activateAccount(req));
+        }
+
+        @Test
         @DisplayName("STATE_ADMIN: creates dual DB rows, name populated in response")
         void activateAccount_stateAdmin_returnsAuthResult() {
             String hash = "sa-hash";
@@ -548,6 +611,7 @@ class AuthServiceImplTest {
                     .thenReturn(createResp);
             doNothing().when(keycloakAdminHelper).assignRoleToUser(anyString(), anyString());
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             doNothing().when(userCommonRepository).activatePendingAdminUser(eq(20L), anyString(), anyString());
             when(userTenantRepository.createUser(anyString(), anyString(), any(), anyString(),
                     anyString(), any(), anyString(), anyString(), any())).thenReturn(1L);

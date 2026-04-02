@@ -85,7 +85,7 @@ public class WelcomeMessageServiceImpl implements org.arghyam.jalsoochak.user.se
                 phone -> {
                     batch.add(phone);
                     if (batch.size() >= DEFAULT_BATCH_SIZE) {
-                        userEventPublisher.publishWelcomeMessages(tenantCode, tenantId, batch);
+                        userEventPublisher.publishAdminWelcomeMessages(tenantCode, tenantId, batch);
                         totalPhones[0] += batch.size();
                         batches[0]++;
                         batch.clear();
@@ -94,7 +94,7 @@ public class WelcomeMessageServiceImpl implements org.arghyam.jalsoochak.user.se
         );
 
         if (!batch.isEmpty()) {
-            userEventPublisher.publishWelcomeMessages(tenantCode, tenantId, batch);
+            userEventPublisher.publishAdminWelcomeMessages(tenantCode, tenantId, batch);
             totalPhones[0] += batch.size();
             batches[0]++;
             batch.clear();

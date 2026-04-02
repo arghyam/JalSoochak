@@ -6,15 +6,19 @@ spring:
     name: analytics-service
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL}
-    username: ${SPRING_DATASOURCE_USERNAME}
-    password: ${SPRING_DATASOURCE_PASSWORD}
+    # url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://192.1 
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/jalsoochak_analytics_db}?stringtype=unspecified
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:Zaqwsx@1123}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
       connection-timeout: 30000
       initialization-fail-timeout: -1
+      # PostGIS may live in analytics_schema (extension SCHEMA) or public; geom columns follow the same type.
+      # Without this, JDBC default search_path can miss ST_* overloads for analytics_schema.geometry.
+      connection-init-sql: SET search_path TO analytics_schema, public
 
   flyway:
     enabled: true
@@ -86,8 +90,17 @@ logging:
   file:
     name: ${LOG_FILE_PATH:../logger/logs/backend-services.log}
 
+  # Plain console: key=value pairs from SLF4J 2 (see logback-spring.xml). JSON lines: add profile "json-logs".
   pattern:
     level: "service=${spring.application.name} %5p"
+
+---
+# One JSON object per line (ELK/Loki-friendly). Example: SPRING_PROFILES_ACTIVE=json-logs
+spring:
+  config:
+    activate:
+      on-profile: json-logs
+# logback-spring.xml picks up profile "json-logs" automatically; no extra properties required here.
 
 analytics:
   scheduler:

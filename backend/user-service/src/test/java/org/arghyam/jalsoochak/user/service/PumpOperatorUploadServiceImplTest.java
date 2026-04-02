@@ -27,6 +27,7 @@ import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
 import org.arghyam.jalsoochak.user.service.serviceImpl.PumpOperatorUploadServiceImpl;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -74,6 +75,11 @@ class PumpOperatorUploadServiceImplTest {
         TenantContext.clear();
     }
 
+    @BeforeEach
+    void defaultUploadRepoStubs() {
+        when(userUploadRepository.findUserIdByEmailOrPhone(anyString(), any(), any())).thenReturn(null);
+    }
+
     @Test
     void upload_shouldSkipRow_whenPhoneBelongsToNonPumpOperator() {
         TenantContext.setSchema("tenant_ka");
@@ -96,7 +102,7 @@ class PumpOperatorUploadServiceImplTest {
         // Service validation passes; actual skipping happens in the chunk processor.
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
         when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
-                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(0, 1));
+                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(0, 1, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
         assertThat(res.totalRows()).isEqualTo(1);
@@ -131,7 +137,7 @@ class PumpOperatorUploadServiceImplTest {
                 .thenReturn(55L);
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
         when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
-                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0));
+                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
 
@@ -164,7 +170,7 @@ class PumpOperatorUploadServiceImplTest {
 
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
         when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
-                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0));
+                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
 

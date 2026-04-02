@@ -293,8 +293,8 @@ class AuthControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("Login with ONBOARDED tenant → 403 (not accessible for any user)")
-        void login_onboardedTenant_returns403() throws Exception {
+        @DisplayName("Login with ONBOARDED tenant → 200 (accessible for system users)")
+        void login_onboardedTenant_returns200() throws Exception {
             jdbcTemplate.update("UPDATE common_schema.tenant_master_table SET status = ? WHERE id = 1", TENANT_STATUS_ONBOARDED);
             jdbcTemplate.update("""
                     INSERT INTO common_schema.tenant_admin_user_master_table
@@ -303,11 +303,12 @@ class AuthControllerIntegrationTest {
                     """,
                     piiEncryptionService.encrypt("91XXXXXXXXXX"),
                     piiEncryptionService.hmac("91XXXXXXXXXX"));
+            stubKeycloakToken(200, KEYCLOAK_TOKEN_RESPONSE);
 
             mockMvc.perform(post("/api/v1/auth/login")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"email\":\"onboarded@example.com\",\"password\":\"Pass@123\"}"))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isOk());
         }
 
         @Test
@@ -407,11 +408,11 @@ class AuthControllerIntegrationTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // GET /api/v1/auth/invite/info
+    // GET /api/v1/auth/invites
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("GET /api/v1/auth/invite/info")
+    @DisplayName("GET /api/v1/auth/invites")
     class InviteInfoTests {
 
         @Test
@@ -427,10 +428,10 @@ class AuthControllerIntegrationTest {
                     piiEncryptionService.hmac("9112345678"));
             String rawToken = "raw-invite-token-info";
             seedToken("new@example.com", rawToken, "INVITE",
-                    "{\"role\":\"STATE_ADMIN\",\"tenantName\":\"Madhya Pradesh\",\"firstName\":\"John\",\"lastName\":\"Doe\"}",
+                    "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\",\"tenantName\":\"Madhya Pradesh\",\"firstName\":\"John\",\"lastName\":\"Doe\"}",
                     LocalDateTime.now().plusHours(24));
 
-            mockMvc.perform(get("/api/v1/auth/invite/info").param("token", rawToken))
+            mockMvc.perform(get("/api/v1/auth/invites").param("token", rawToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.email").value("new@example.com"))
                     .andExpect(jsonPath("$.data.role").value("STATE_ADMIN"))
@@ -448,7 +449,7 @@ class AuthControllerIntegrationTest {
                     "{\"role\":\"SUPER_USER\"}",
                     LocalDateTime.now().minusHours(1));
 
-            mockMvc.perform(get("/api/v1/auth/invite/info").param("token", rawToken))
+            mockMvc.perform(get("/api/v1/auth/invites").param("token", rawToken))
                     .andExpect(status().isBadRequest());
         }
 
@@ -461,24 +462,24 @@ class AuthControllerIntegrationTest {
                     "{\"role\":\"SUPER_USER\"}",
                     LocalDateTime.now().plusHours(24));
 
-            mockMvc.perform(get("/api/v1/auth/invite/info").param("token", rawToken))
+            mockMvc.perform(get("/api/v1/auth/invites").param("token", rawToken))
                     .andExpect(status().isConflict());
         }
 
         @Test
         @DisplayName("Invalid token (no DB row) → 400")
         void inviteInfo_invalidToken_returns400() throws Exception {
-            mockMvc.perform(get("/api/v1/auth/invite/info").param("token", "no-such-token"))
+            mockMvc.perform(get("/api/v1/auth/invites").param("token", "no-such-token"))
                     .andExpect(status().isBadRequest());
         }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // POST /api/v1/auth/activate-account
+    // POST /api/v1/auth/invites/activate
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("POST /api/v1/auth/activate-account")
+    @DisplayName("POST /api/v1/auth/invites/activate")
     class ActivateAccountTests {
 
         @Test
@@ -499,7 +500,7 @@ class AuthControllerIntegrationTest {
                      "firstName":"New","lastName":"Super","phoneNumber":"9112345678"}
                     """, rawToken);
 
-            mockMvc.perform(post("/api/v1/auth/activate-account")
+            mockMvc.perform(post("/api/v1/auth/invites/activate")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(payload))
                     .andExpect(status().isOk())
@@ -536,7 +537,7 @@ class AuthControllerIntegrationTest {
                      "firstName":"State","lastName":"Admin","phoneNumber":"9198765432"}
                     """, rawToken);
 
-            mockMvc.perform(post("/api/v1/auth/activate-account")
+            mockMvc.perform(post("/api/v1/auth/invites/activate")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(payload))
                     .andExpect(status().isOk())
@@ -568,7 +569,7 @@ class AuthControllerIntegrationTest {
                      "firstName":"New","lastName":"User","phoneNumber":"9112345678"}
                     """, rawToken);
 
-            mockMvc.perform(post("/api/v1/auth/activate-account")
+            mockMvc.perform(post("/api/v1/auth/invites/activate")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(payload))
                     .andExpect(status().isBadRequest());
@@ -588,7 +589,7 @@ class AuthControllerIntegrationTest {
                      "firstName":"Dup","lastName":"User","phoneNumber":"9112345678"}
                     """, rawToken);
 
-            mockMvc.perform(post("/api/v1/auth/activate-account")
+            mockMvc.perform(post("/api/v1/auth/invites/activate")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(payload))
                     .andExpect(status().isConflict());

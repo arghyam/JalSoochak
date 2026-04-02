@@ -45,9 +45,12 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -140,6 +143,13 @@ public class UserManagementServiceImpl implements UserManagementService {
         // Store names encrypted to avoid persisting PII in plaintext in the token table
         metaMap.put("firstName", pii.encrypt(request.getFirstName()));
         metaMap.put("lastName", pii.encrypt(request.getLastName()));
+        // Store HMAC of the full name for exact-match search without decrypting PII
+        String fullName = Stream.of(request.getFirstName(), request.getLastName())
+                .filter(s -> s != null && !s.isBlank())
+                .collect(Collectors.joining(" "));
+        if (!fullName.isBlank()) {
+            metaMap.put("nameHash", pii.hmac(fullName.trim().toLowerCase(Locale.ROOT)));
+        }
 
         String metadataJson;
         try {
@@ -232,6 +242,13 @@ public class UserManagementServiceImpl implements UserManagementService {
                 metaMap.put("firstName", pii.encrypt(firstName));
             if (lastName != null)
                 metaMap.put("lastName", pii.encrypt(lastName));
+            // Recompute nameHash for exact-match search
+            String first = firstName != null ? firstName : "";
+            String last = lastName != null ? lastName : "";
+            String fullName = (first + " " + last).trim();
+            if (!fullName.isBlank()) {
+                metaMap.put("nameHash", pii.hmac(fullName.toLowerCase(Locale.ROOT)));
+            }
         });
 
         String metadataJson;
@@ -340,8 +357,9 @@ public class UserManagementServiceImpl implements UserManagementService {
 
     @Override
     public PageResponseDTO<AdminUserResponseDTO> listStateAdmins(String tenantCode, AdminUserStatus status,
-            Authentication caller, int page, int limit) {
+            String name, Authentication caller, int page, int limit) {
         Integer tenantId = null;
+        String resolvedStateCode = null;
         Optional<String> callerRole = SecurityUtils.extractRole(caller);
 
         if (callerRole.map("STATE_ADMIN"::equals).orElse(false)) {
@@ -349,19 +367,50 @@ public class UserManagementServiceImpl implements UserManagementService {
             if (callerTenantCode == null) {
                 throw new ForbiddenAccessException("Unable to determine caller's tenant");
             }
+            // STATE_ADMIN can only list admins from their own tenant
             if (tenantCode != null && !tenantCode.equalsIgnoreCase(callerTenantCode)) {
                 throw new ForbiddenAccessException("State admin can only list admins within their own state");
             }
             tenantId = userCommonRepository.findTenantIdByStateCode(callerTenantCode)
                     .orElseThrow(() -> new ForbiddenAccessException("Caller's tenant not found"));
+            resolvedStateCode = callerTenantCode.toUpperCase(Locale.ROOT);
         } else if (tenantCode != null && !tenantCode.isBlank()) {
+            // SUPER_USER can optionally filter by tenantCode
             tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
                     .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for state code: " + tenantCode));
+            resolvedStateCode = tenantCode.toUpperCase(Locale.ROOT);
+        }
+
+        Set<String> nameFilterUuids = null;
+        if (name != null && !name.isBlank()) {
+            String nameHash = pii.hmac(name.trim().toLowerCase(Locale.ROOT));
+            nameFilterUuids = new HashSet<>();
+
+            // ACTIVE/INACTIVE: query each tenant's user_table by title_hash
+            List<String> schemas = resolvedStateCode != null
+                    ? List.of("tenant_" + resolvedStateCode.toLowerCase(Locale.ROOT))
+                    : userCommonRepository.findAllTenantStateCodes().stream()
+                            .map(c -> "tenant_" + c.toLowerCase(Locale.ROOT))
+                            .toList();
+            if (resolvedStateCode == null) {
+                log.warn("Cross-tenant name search executing sequentially across {} tenant schemas [nameHash={}]; this may be slow at scale",
+                        schemas.size(), nameHash);
+            }
+            for (String schema : schemas) {
+                nameFilterUuids.addAll(userTenantRepository.findUuidsByTitleHash(schema, nameHash));
+            }
+
+            // PENDING: no tenant user_table row yet — query invite token metadata nameHash
+            nameFilterUuids.addAll(userCommonRepository.findPendingAdminUuidsByNameHash(nameHash, tenantId));
+
+            if (nameFilterUuids.isEmpty()) {
+                return PageResponseDTO.of(List.of(), 0L, page, limit);
+            }
         }
 
         long offset = (long) page * limit;
-        List<AdminUserRow> rows = userCommonRepository.listStateAdminsByTenant(tenantId, status, offset, limit);
-        long total = userCommonRepository.countStateAdminsByTenant(tenantId, status);
+        List<AdminUserRow> rows = userCommonRepository.listStateAdminsByTenant(tenantId, status, nameFilterUuids, offset, limit);
+        long total = userCommonRepository.countStateAdminsByTenant(tenantId, status, nameFilterUuids);
         List<AdminUserResponseDTO> users = rows.stream()
                 .map(keycloakAdminHelper::buildAdminUserResponse)
                 .collect(Collectors.toList());
@@ -530,7 +579,7 @@ public class UserManagementServiceImpl implements UserManagementService {
                     ? userCommonRepository.findTenantStateCodeById(target.tenantId()).orElse(null)
                     : null;
             if (callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(targetTenantCode)) {
-                throw new UnauthorizedAccessException("Cannot activate user from another state");
+                throw new ForbiddenAccessException("Cannot activate user from another state");
             }
         }
 

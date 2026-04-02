@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </ul>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 class MessageTemplateServiceIntegrationTest {
 
     @Container

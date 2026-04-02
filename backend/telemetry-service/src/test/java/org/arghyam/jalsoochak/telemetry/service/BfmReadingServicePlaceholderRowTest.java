@@ -1,14 +1,18 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -33,6 +37,15 @@ class BfmReadingServicePlaceholderRowTest {
 
     @Mock
     private FlowVisionService flowVisionService;
+
+    @Mock
+    private TelemetryEventPublisher telemetryEventPublisher;
+
+    @Mock
+    private TenantConfigRepository tenantConfigRepository;
+
+    @Spy
+    private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
     private BfmReadingService service;

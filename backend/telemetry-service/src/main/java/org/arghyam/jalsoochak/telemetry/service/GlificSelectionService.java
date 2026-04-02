@@ -215,16 +215,9 @@ public class GlificSelectionService {
 
             List<GlificMessageTemplatesService.TemplateOption> channelTemplateOptions =
                     templatesService.resolveScreenOptions(tenantId, "CHANNEL_SELECTION");
-            List<String> channelOptions;
-            if (!channelTemplateOptions.isEmpty()) {
-                channelOptions = channelTemplateOptions.stream()
-                        .map(opt -> opt.labelForLanguageKey(languageKey))
-                        .toList();
-            } else {
-                channelOptions = tenantConfigRepository.findChannelOptions(tenantId, languageKey);
-            }
+            List<String> channelOptions = resolveSupportedChannelOptions(tenantId, languageKey, channelTemplateOptions);
             if (channelOptions.isEmpty()) {
-                throw new IllegalStateException("No channel options configured. Add channel_1/channel_2 or language-specific keys.");
+                throw new IllegalStateException("No channel options configured. Configure TENANT_SUPPORTED_CHANNELS or channel_1/channel_2.");
             }
 
             StringBuilder message = new StringBuilder(prompt.trim());
@@ -275,22 +268,27 @@ public class GlificSelectionService {
 
             List<GlificMessageTemplatesService.TemplateOption> channelTemplateOptions =
                     templatesService.resolveScreenOptions(tenantId, "CHANNEL_SELECTION");
+            List<String> channelOptions = resolveSupportedChannelOptions(tenantId, languageKey, channelTemplateOptions);
             String selectedChannel;
             int selectedChannelId;
-            if (!channelTemplateOptions.isEmpty()) {
+            if (!channelOptions.isEmpty()) {
+                selectedChannel = resolveSelection(request.getChannel(), channelOptions)
+                        .orElseThrow(() -> new IllegalStateException("Invalid channel selection"));
+                selectedChannelId = channelOptions.indexOf(selectedChannel) + 1;
+            } else if (!channelTemplateOptions.isEmpty()) {
                 int selectedIndex = resolveTemplateSelectionIndex(request.getChannel(), channelTemplateOptions, languageKey)
                         .orElseThrow(() -> new IllegalStateException("Invalid channel selection"));
                 GlificMessageTemplatesService.TemplateOption selectedOpt = channelTemplateOptions.get(selectedIndex);
                 selectedChannel = selectedOpt.labelForLanguageKey(languageKey);
                 selectedChannelId = selectedOpt.order() > 0 ? selectedOpt.order() : (selectedIndex + 1);
             } else {
-                List<String> channelOptions = tenantConfigRepository.findChannelOptions(tenantId, languageKey);
-                if (channelOptions.isEmpty()) {
+                List<String> legacyChannelOptions = tenantConfigRepository.findChannelOptions(tenantId, languageKey);
+                if (legacyChannelOptions.isEmpty()) {
                     throw new IllegalStateException("No channel options configured for tenant");
                 }
-                selectedChannel = resolveSelection(request.getChannel(), channelOptions)
+                selectedChannel = resolveSelection(request.getChannel(), legacyChannelOptions)
                         .orElseThrow(() -> new IllegalStateException("Invalid channel selection"));
-                selectedChannelId = channelOptions.indexOf(selectedChannel) + 1;
+                selectedChannelId = legacyChannelOptions.indexOf(selectedChannel) + 1;
             }
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
@@ -333,6 +331,7 @@ public class GlificSelectionService {
 
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
             Integer tenantId = operatorWithSchema.operator().tenantId();
+            System.out.println("tenant id " + tenantId);
             if (tenantId == null) {
                 throw new IllegalStateException("Operator tenant could not be resolved");
             }
@@ -371,9 +370,14 @@ public class GlificSelectionService {
         } catch (Exception e) {
             log.error("Error building item selection message: {}", e.getMessage(), e);
             log.debug("Error building item selection message for contactId {}: {}", request.getContactId(), e.getMessage());
+            String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
             return IntroResponse.builder()
                     .success(false)
-                    .message("Item selection could not be prepared.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Item selection could not be prepared.",
+                            languageKey
+                    ))
                     .build();
         }
     }
@@ -645,14 +649,74 @@ public class GlificSelectionService {
         return Optional.empty();
     }
 
+    private List<String> resolveSupportedChannelOptions(Integer tenantId,
+                                                        String languageKey,
+                                                        List<GlificMessageTemplatesService.TemplateOption> channelTemplateOptions) {
+        List<String> supportedChannels = resolveTenantSupportedChannels(tenantId);
+        if (!supportedChannels.isEmpty()) {
+            return supportedChannels;
+        }
+        if (!channelTemplateOptions.isEmpty()) {
+            return channelTemplateOptions.stream()
+                    .map(opt -> opt.labelForLanguageKey(languageKey))
+                    .toList();
+        }
+        return tenantConfigRepository.findChannelOptions(tenantId, languageKey);
+    }
+
+    private List<String> resolveTenantSupportedChannels(Integer tenantId) {
+        Optional<String> rawOpt = tenantConfigRepository.findConfigValue(tenantId, "TENANT_SUPPORTED_CHANNELS");
+        if (rawOpt.isEmpty()) {
+            return List.of();
+        }
+        String raw = rawOpt.get();
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(raw);
+            if (node == null || node.isNull()) {
+                return List.of();
+            }
+            JsonNode channelsNode = node;
+            if (node.has("channels")) {
+                channelsNode = node.get("channels");
+            }
+            if (channelsNode != null && channelsNode.isArray()) {
+                List<String> channels = new ArrayList<>();
+                for (JsonNode child : channelsNode) {
+                    if (child != null && child.isTextual()) {
+                        String value = child.asText();
+                        if (value != null && !value.isBlank()) {
+                            channels.add(value.trim());
+                        }
+                    }
+                }
+                return channels;
+            }
+            if (channelsNode != null && channelsNode.isTextual()) {
+                String value = channelsNode.asText();
+                if (value != null && !value.isBlank()) {
+                    return List.of(value.trim());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Invalid TENANT_SUPPORTED_CHANNELS JSON for tenantId {}: {}", tenantId, e.getMessage());
+        }
+        return List.of();
+    }
+
     private List<VisibleItemOption> buildVisibleItemOptionsFromTemplates(Integer tenantId,
                                                                          String languageKey,
                                                                          List<GlificMessageTemplatesService.TemplateOption> itemOptions) {
-        List<GlificMessageTemplatesService.TemplateOption> channelOptions =
+        List<GlificMessageTemplatesService.TemplateOption> channelTemplateOptions =
                 templatesService.resolveScreenOptions(tenantId, "CHANNEL_SELECTION");
-        int channelCount = !channelOptions.isEmpty()
-                ? channelOptions.size()
-                : tenantConfigRepository.findChannelOptions(tenantId, languageKey).size();
+        int channelCount = resolveSupportedChannelOptions(tenantId, languageKey, channelTemplateOptions).size();
+        if (channelCount == 0) {
+            channelCount = !channelTemplateOptions.isEmpty()
+                    ? channelTemplateOptions.size()
+                    : tenantConfigRepository.findChannelOptions(tenantId, languageKey).size();
+        }
         boolean showChannelChange = channelCount > 1;
 
         List<GlificMessageTemplatesService.TemplateOption> languageOptions =
@@ -724,7 +788,10 @@ public class GlificSelectionService {
     private List<VisibleItemOption> buildVisibleItemOptions(Integer tenantId,
                                                             String languageKey,
                                                             List<String> itemOptions) {
-        List<String> channelOptions = tenantConfigRepository.findChannelOptions(tenantId, languageKey);
+        List<String> channelOptions = resolveSupportedChannelOptions(tenantId, languageKey, List.of());
+        if (channelOptions.isEmpty()) {
+            channelOptions = tenantConfigRepository.findChannelOptions(tenantId, languageKey);
+        }
         boolean showChannelChange = channelOptions.size() > 1;
 
         List<String> languageOptions = tenantConfigRepository.findLanguageOptions(tenantId);

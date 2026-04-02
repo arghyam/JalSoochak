@@ -20,6 +20,7 @@ import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -27,7 +28,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v2/webhook")
+@RequestMapping("/api/v1/telemetry")
 public class GlificWebhookController {
     private static final Logger log = LoggerFactory.getLogger(GlificWebhookController.class);
     private final GlificWebhookService glificWebhookService;
@@ -37,7 +38,7 @@ public class GlificWebhookController {
     }
 
     @PostMapping(
-            value = "/glific",
+            value = "/readings",
             consumes = "application/json",
             produces = "application/json"
     )
@@ -202,7 +203,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/meterChange")
+    @PostMapping("/meter-change")
     public ResponseEntity<IntroResponse> meterChange(@RequestBody @Valid MeterChangeRequest request) {
         try {
             IntroResponse response = glificWebhookService.meterChangeMessage(request);
@@ -219,7 +220,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/issueReport")
+    @PostMapping("/issue-report")
     public ResponseEntity<IntroResponse> issueReportPrompt(@RequestBody @Valid IntroRequest request) {
         try {
             IntroResponse response = glificWebhookService.issueReportPromptMessage(request);
@@ -236,7 +237,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/issueReport/submit")
+    @PostMapping("/issue-report/submit")
     public ResponseEntity<IntroResponse> issueReportSubmit(@RequestBody @Valid IssueReportRequest request) {
         try {
             IntroResponse response = glificWebhookService.issueReportSubmitMessage(request);
@@ -253,7 +254,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/issueReport/telemetry")
+    @PostMapping("/issue-report/telemetry")
     public ResponseEntity<IntroResponse> issueReportTelemetryPrompt(@RequestBody @Valid IntroRequest request) {
         try {
             IntroResponse response = glificWebhookService.issueReportTelemetryPromptMessage(request);
@@ -270,7 +271,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/issueReport/telemetry/submit")
+    @PostMapping("/issue-report/telemetry/submit")
     public ResponseEntity<IntroResponse> issueReportTelemetrySubmit(@RequestBody @Valid IssueReportRequest request) {
         try {
             IntroResponse response = glificWebhookService.issueReportTelemetrySubmitMessage(request);
@@ -282,6 +283,63 @@ public class GlificWebhookController {
                     IntroResponse.builder()
                             .success(false)
                             .message("Issue report could not be saved.")
+                            .build()
+            );
+        }
+    }
+
+    @PostMapping(
+            value = "/meter/issue-report",
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<String> issueReportTelemetryReasons(@RequestBody @Valid IntroRequest request) {
+        try {
+            String response = glificWebhookService.issueReportTelemetryReasons(request);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(response);
+        } catch (Exception e) {
+            log.error("Error fetching telemetry issue report reasons: {}", e.getMessage(), e);
+            log.debug("Error fetching telemetry issue report reasons for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"success\":false,\"message\":\"Supply outage reasons could not be fetched.\"}");
+        }
+    }
+
+    @PostMapping(
+            value = "/meter/meter-change",
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<String> meterChangeReasons(@RequestBody @Valid IntroRequest request) {
+        try {
+            String response = glificWebhookService.meterChangeReasons(request);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(response);
+        } catch (Exception e) {
+            log.error("Error fetching meter change reasons: {}", e.getMessage(), e);
+            log.debug("Error fetching meter change reasons for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"success\":false,\"message\":\"Meter change reasons could not be fetched.\"}");
+        }
+    }
+
+    @PostMapping("/meter/meter-change/submit")
+    public ResponseEntity<IntroResponse> meterChangeSubmit(@RequestBody @Valid MeterChangeRequest request) {
+        try {
+            IntroResponse response = glificWebhookService.meterChangeSubmitMessage(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error saving meter change reason: {}", e.getMessage(), e);
+            log.debug("Error saving meter change reason for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    IntroResponse.builder()
+                            .success(false)
+                            .message("Meter change reason could not be saved.")
                             .build()
             );
         }
@@ -321,7 +379,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/takemeterreading")
+    @PostMapping("/take-meter-reading")
     public ResponseEntity<IntroResponse> takeMeterReading(@RequestBody @Valid MeterChangeRequest request) {
         try {
             IntroResponse response = glificWebhookService.takeMeterReadingMessage(request);
@@ -338,7 +396,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/manualReading")
+    @PostMapping("/manual-reading")
     public ResponseEntity<CreateReadingResponse> manualReading(@RequestBody @Valid ManualReadingRequest request) {
         try {
             CreateReadingResponse response = glificWebhookService.manualReadingMessage(request);
@@ -377,7 +435,7 @@ public class GlificWebhookController {
         }
     }
 
-    @PostMapping("/updatedPreviousReading")
+    @PostMapping("/update-previous-reading")
     public ResponseEntity<CreateReadingResponse> updatedPreviousReading(@RequestBody @Valid UpdatedPreviousReadingRequest request) {
         try {
             CreateReadingResponse response = glificWebhookService.updatePreviousReadingMessage(request);

@@ -49,6 +49,8 @@ public class GlificMeterWorkflowService {
             "Please type your issue in a few words.";
     private static final String LEGACY_ISSUE_PROMPT_HINDI =
             "कृपया अपनी समस्या संक्षेप में लिखें।";
+    private static final String DEFAULT_METER_CHANGE_PROMPT_ENGLISH =
+            "Please select the no submission reasons by typing any of the number";
 
     private static final List<String> DEFAULT_ISSUE_REASONS = List.of(
             "Meter Replaced",
@@ -100,6 +102,8 @@ public class GlificMeterWorkflowService {
             "meterNotWorking",
             "meterDamage",
             "meterDamaged",
+            "noReadingSubmission",
+            "noWaterSupply",
             "noWaterSupplied",
             "others"
     );
@@ -294,6 +298,212 @@ public class GlificMeterWorkflowService {
         }
     }
 
+    public String issueReportTelemetryReasons(IntroRequest request) {
+        if (request.getContactId() == null || request.getContactId().isBlank()) {
+            throw new IllegalStateException("contactId is required");
+        }
+
+        TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
+        Integer tenantId = operatorWithSchema.operator().tenantId();
+        if (tenantId == null) {
+            throw new IllegalStateException("Operator tenant could not be resolved");
+        }
+
+        String configValue = tenantConfigRepository.findConfigValue(tenantId, "SUPPLY_OUTAGE_REASONS")
+                .orElseThrow(() -> new IllegalStateException("SUPPLY_OUTAGE_REASONS config is not configured"));
+
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(configValue);
+        } catch (Exception e) {
+            throw new IllegalStateException("SUPPLY_OUTAGE_REASONS config is not valid JSON", e);
+        }
+
+        JsonNode reasonsNode = root.path("reasons");
+        if (!reasonsNode.isArray() || reasonsNode.isEmpty()) {
+            throw new IllegalStateException("SUPPLY_OUTAGE_REASONS config has no reasons");
+        }
+
+        List<JsonNode> reasons = new java.util.ArrayList<>();
+        reasonsNode.forEach(reasons::add);
+        reasons.sort((a, b) -> Integer.compare(
+                a.path("sequenceOrder").asInt(Integer.MAX_VALUE),
+                b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
+        ));
+
+        StringBuilder message = new StringBuilder(LEGACY_ISSUE_PROMPT_ENGLISH);
+        for (int i = 0; i < reasons.size(); i++) {
+            String name = reasons.get(i).path("name").asText();
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            message.append("\n")
+                    .append(i + 1)
+                    .append(". ")
+                    .append(name.trim());
+        }
+
+        try {
+            return objectMapper.writeValueAsString(java.util.Map.of(
+                    "success", true,
+                    "message", message.toString()
+            ));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to serialize issue report reasons message", e);
+        }
+    }
+
+    public String meterChangeReasons(IntroRequest request) {
+        if (request.getContactId() == null || request.getContactId().isBlank()) {
+            throw new IllegalStateException("contactId is required");
+        }
+
+        TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
+        Integer tenantId = operatorWithSchema.operator().tenantId();
+        if (tenantId == null) {
+            throw new IllegalStateException("Operator tenant could not be resolved");
+        }
+
+        String configValue = tenantConfigRepository.findConfigValue(tenantId, "METER_CHANGE_REASONS")
+                .orElseThrow(() -> new IllegalStateException("METER_CHANGE_REASONS config is not configured"));
+
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(configValue);
+        } catch (Exception e) {
+            throw new IllegalStateException("METER_CHANGE_REASONS config is not valid JSON", e);
+        }
+
+        JsonNode reasonsNode = root.path("reasons");
+        if (!reasonsNode.isArray() || reasonsNode.isEmpty()) {
+            throw new IllegalStateException("METER_CHANGE_REASONS config has no reasons");
+        }
+
+        List<JsonNode> reasons = new java.util.ArrayList<>();
+        reasonsNode.forEach(reasons::add);
+        reasons.sort((a, b) -> Integer.compare(
+                a.path("sequenceOrder").asInt(Integer.MAX_VALUE),
+                b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
+        ));
+
+        StringBuilder message = new StringBuilder(DEFAULT_METER_CHANGE_PROMPT_ENGLISH);
+        for (int i = 0; i < reasons.size(); i++) {
+            String name = reasons.get(i).path("name").asText();
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            message.append("\n")
+                    .append(i + 1)
+                    .append(". ")
+                    .append(name.trim());
+        }
+
+        try {
+            return objectMapper.writeValueAsString(java.util.Map.of(
+                    "success", true,
+                    "message", message.toString()
+            ));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to serialize meter change reasons message", e);
+        }
+    }
+
+    public IntroResponse meterChangeSubmitMessage(MeterChangeRequest request) {
+        try {
+            if (request.getContactId() == null || request.getContactId().isBlank()) {
+                throw new IllegalStateException("contactId is required");
+            }
+            if (request.getReason() == null || request.getReason().isBlank()) {
+                throw new IllegalStateException("meter change reason selection is required");
+            }
+
+            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
+            Integer tenantId = operatorWithSchema.operator().tenantId();
+            if (tenantId == null) {
+                throw new IllegalStateException("Operator tenant could not be resolved");
+            }
+
+            String languageKey = localizationService.normalizeLanguageKey(
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
+            );
+
+            String configValue = tenantConfigRepository.findConfigValue(tenantId, "METER_CHANGE_REASONS")
+                    .orElseThrow(() -> new IllegalStateException("METER_CHANGE_REASONS config is not configured"));
+
+            JsonNode root;
+            try {
+                root = objectMapper.readTree(configValue);
+            } catch (Exception e) {
+                throw new IllegalStateException("METER_CHANGE_REASONS config is not valid JSON", e);
+            }
+
+            JsonNode reasonsNode = root.path("reasons");
+            if (!reasonsNode.isArray() || reasonsNode.isEmpty()) {
+                throw new IllegalStateException("METER_CHANGE_REASONS config has no reasons");
+            }
+
+            List<JsonNode> reasons = new java.util.ArrayList<>();
+            reasonsNode.forEach(reasons::add);
+            reasons.sort((a, b) -> Integer.compare(
+                    a.path("sequenceOrder").asInt(Integer.MAX_VALUE),
+                    b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
+            ));
+
+            String rawSelection = request.getReason().trim();
+            Integer selectedIndex = rawSelection.matches("^\\d+$") ? Integer.parseInt(rawSelection) : null;
+            if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
+                return IntroResponse.builder()
+                        .success(false)
+                        .message("Please choose a number between 1 and " + reasons.size() + ".")
+                        .build();
+            }
+
+            JsonNode selectedReasonNode = reasons.get(selectedIndex - 1);
+            String selectedReason = selectedReasonNode.path("name").asText().trim();
+            String selectedKey = selectedReasonNode.path("id").asText().trim();
+
+            Long schemeId = telemetryTenantRepository
+                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
+                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+
+            String correlationId = telemetryTenantRepository.upsertPendingMeterChangeRecord(
+                    operatorWithSchema.schemaName(),
+                    schemeId,
+                    operatorWithSchema.operator().id(),
+                    LocalDateTime.now(),
+                    selectedReason
+            );
+
+            telemetryEventPublisher.publishMeterChangeReason(
+                    tenantId,
+                    schemeId,
+                    operatorWithSchema.operator().id(),
+                    LocalDate.now(),
+                    selectedReason
+            );
+
+            String fallbackMessage = "Successfully selected.";
+            String confirmationMessage = templatesService
+                    .resolveScreenConfirmationTemplate(tenantId, "METER_CHANGE", languageKey)
+                    .or(() -> tenantConfigRepository.findMeterChangeConfirmationTemplate(tenantId, languageKey))
+                    .orElse(localizationService.localizeMessage(fallbackMessage, languageKey));
+
+            return IntroResponse.builder()
+                    .success(true)
+                    .message(confirmationMessage)
+                    .correlationId(correlationId)
+                    .selected(selectedKey)
+                    .notOthers("OTHERS".equalsIgnoreCase(selectedKey))
+                    .build();
+        } catch (Exception e) {
+            log.error("Error saving meter change reason for contactId {}: {}", request.getContactId(), e.getMessage(), e);
+            return IntroResponse.builder()
+                    .success(false)
+                    .message("Meter change reason could not be saved.")
+                    .build();
+        }
+    }
+
     public IntroResponse issueReportSubmitMessage(IssueReportRequest request) {
         try {
             if (request.getContactId() == null || request.getContactId().isBlank()) {
@@ -313,28 +523,63 @@ public class GlificMeterWorkflowService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
+            String rawIssueReason = request.getIssueReason().trim();
+
             List<GlificMessageTemplatesService.TemplateOption> templateReasons =
                     templatesService.resolveScreenReasons(tenantId, "ISSUE_REPORT");
             List<String> reasons;
+            List<String> selectionKeys;
             if (!templateReasons.isEmpty()) {
                 reasons = templateReasons.stream().map(r -> r.labelForLanguageKey(languageKey)).toList();
+                selectionKeys = templateReasons.stream().map(GlificMessageTemplatesService.TemplateOption::key).toList();
             } else {
                 reasons = tenantConfigRepository.findIssueReportReasons(tenantId, languageKey);
                 if (reasons.isEmpty()) {
                     reasons = "hindi".equals(languageKey) ? DEFAULT_ISSUE_REASONS_HINDI : DEFAULT_ISSUE_REASONS;
                 }
+                selectionKeys = DEFAULT_ISSUE_REASON_SELECTION_KEYS;
             }
-            String rawIssueReason = request.getIssueReason().trim();
-            String resolvedIssueReason = resolveSelection(rawIssueReason, reasons).orElse(rawIssueReason);
-            String selectedKey = resolveIssueSelectionKey(rawIssueReason, resolvedIssueReason, reasons, DEFAULT_ISSUE_REASON_SELECTION_KEYS);
+            if (rawIssueReason.matches("^\\d+$") && parseSelectionIndex(rawIssueReason, reasons.size()) == null) {
+                return IntroResponse.builder()
+                        .success(false)
+                        .message("Please choose a number between 1 and " + reasons.size() + ".")
+                        .build();
+            }
+            String resolvedIssueReason = rawIssueReason;
+            String selectedKey = null;
+            if (!templateReasons.isEmpty()) {
+                Integer index = parseSelectionIndex(rawIssueReason, templateReasons.size());
+                GlificMessageTemplatesService.TemplateOption matched = null;
+                if (index != null) {
+                    matched = templateReasons.get(index);
+                } else {
+                    for (GlificMessageTemplatesService.TemplateOption option : templateReasons) {
+                        if (option.matchesAnyLabel(rawIssueReason)) {
+                            matched = option;
+                            break;
+                        }
+                    }
+                }
+                if (matched != null) {
+                    String label = matched.labelForLanguageKey(languageKey);
+                    resolvedIssueReason = (label == null || label.isBlank()) ? matched.canonicalLabel() : label;
+                    selectedKey = matched.key();
+                }
+            }
+            if (selectedKey == null) {
+                resolvedIssueReason = resolveSelection(rawIssueReason, reasons).orElse(rawIssueReason);
+                selectedKey = resolveIssueSelectionKey(rawIssueReason, resolvedIssueReason, reasons, selectionKeys);
+            }
+            String responseSelectedKey = normalizeIssueReportSelectedKey(selectedKey);
+            String anomalySelectedKey = isReasonKey(selectedKey) ? responseSelectedKey : selectedKey;
 
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             String correlationId = "issue-report-" + UUID.randomUUID();
-            if (shouldStoreIssueAsAnomaly(selectedKey, rawIssueReason, ISSUE_REPORT_ANOMALY_SELECTION_KEYS)) {
-                int anomalyType = "noWaterSupplied".equals(selectedKey)
+            if (shouldStoreIssueAsAnomaly(anomalySelectedKey, rawIssueReason, ISSUE_REPORT_ANOMALY_SELECTION_KEYS)) {
+                int anomalyType = ("noWaterSupply".equals(anomalySelectedKey) || "noWaterSupplied".equals(anomalySelectedKey))
                         ? AnomalyConstants.TYPE_NO_WATER_SUPPLY
                         : AnomalyConstants.TYPE_NO_SUBMISSION;
                 telemetryTenantRepository.createTenantAnomalyRecord(
@@ -359,7 +604,7 @@ public class GlificMeterWorkflowService {
                         0,
                         resolvedIssueReason,
                         AnomalyConstants.STATUS_OPEN,
-                        null
+                        correlationId
                 );
                 telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                         tenantId,
@@ -393,13 +638,17 @@ public class GlificMeterWorkflowService {
                     .success(true)
                     .message(message)
                     .correlationId(correlationId)
-                    .selected(selectedKey)
+                    .selected(responseSelectedKey)
                     .build();
         } catch (Exception e) {
             log.error("Error saving issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report could not be saved.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Issue report could not be saved.",
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())
+                    ))
                     .build();
         }
     }
@@ -492,66 +741,94 @@ public class GlificMeterWorkflowService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
 
-            List<String> reasons = "hindi".equals(languageKey) ? TELEMETRY_ISSUE_REASONS_HINDI : TELEMETRY_ISSUE_REASONS;
             String rawIssueReason = request.getIssueReason().trim();
-            String resolvedIssueReason = resolveSelection(rawIssueReason, reasons).orElse(rawIssueReason);
-            String selectedKey = resolveIssueSelectionKey(
-                    rawIssueReason,
-                    resolvedIssueReason,
-                    reasons,
-                    TELEMETRY_ISSUE_REASON_SELECTION_KEYS
-            );
+            Optional<String> configValue = tenantConfigRepository.findConfigValue(tenantId, "SUPPLY_OUTAGE_REASONS");
+            String resolvedIssueReason;
+            String selectedKey;
+
+            if (configValue.isPresent()) {
+                JsonNode root = objectMapper.readTree(configValue.get());
+                JsonNode reasonsNode = root.path("reasons");
+                if (!reasonsNode.isArray() || reasonsNode.isEmpty()) {
+                    throw new IllegalStateException("SUPPLY_OUTAGE_REASONS config has no reasons");
+                }
+                List<JsonNode> reasons = new java.util.ArrayList<>();
+                reasonsNode.forEach(reasons::add);
+                reasons.sort((a, b) -> Integer.compare(
+                        a.path("sequenceOrder").asInt(Integer.MAX_VALUE),
+                        b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
+                ));
+
+                Integer selectedIndex = null;
+                if (rawIssueReason.matches("^\\d+$")) {
+                    selectedIndex = Integer.parseInt(rawIssueReason);
+                }
+
+                if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
+                    return IntroResponse.builder()
+                            .success(false)
+                            .message("Please choose a number between 1 and " + reasons.size() + ".")
+                            .build();
+                }
+
+                JsonNode selectedReasonNode = reasons.get(selectedIndex - 1);
+                resolvedIssueReason = selectedReasonNode.path("name").asText().trim();
+                selectedKey = selectedReasonNode.path("id").asText().trim();
+            } else {
+                List<String> reasons = "hindi".equals(languageKey) ? TELEMETRY_ISSUE_REASONS_HINDI : TELEMETRY_ISSUE_REASONS;
+                resolvedIssueReason = resolveSelection(rawIssueReason, reasons).orElse(rawIssueReason);
+                selectedKey = resolveIssueSelectionKey(
+                        rawIssueReason,
+                        resolvedIssueReason,
+                        reasons,
+                        TELEMETRY_ISSUE_REASON_SELECTION_KEYS
+                );
+            }
 
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
-            String correlationId = "issue-report-" + UUID.randomUUID();
-            if (shouldStoreIssueAsAnomaly(selectedKey, rawIssueReason, ISSUE_REPORT_ANOMALY_SELECTION_KEYS)) {
-                int anomalyType = "noWaterSupplied".equals(selectedKey)
-                        ? AnomalyConstants.TYPE_NO_WATER_SUPPLY
-                        : AnomalyConstants.TYPE_NO_SUBMISSION;
-                telemetryTenantRepository.createTenantAnomalyRecord(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        anomalyType,
-                        resolvedIssueReason,
-                        AnomalyConstants.STATUS_OPEN
-                );
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        anomalyType,
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        null,
-                        null,
-                        null,
-                        0,
-                        null,
-                        null,
-                        0,
-                        resolvedIssueReason,
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
-                telemetryEventPublisher.publishOutageOrNonSubmissionReason(
-                        tenantId,
-                        schemeId,
-                        operatorWithSchema.operator().id(),
-                        LocalDate.now(),
-                        anomalyType
-                );
-            } else {
-                telemetryTenantRepository.createIssueReportRecord(
-                        operatorWithSchema.schemaName(),
-                        schemeId,
-                        operatorWithSchema.operator().id(),
-                        LocalDateTime.now(),
-                        correlationId,
-                        resolvedIssueReason
-                );
-            }
+            String correlationId = telemetryTenantRepository.upsertPendingIssueReportRecord(
+                    operatorWithSchema.schemaName(),
+                    schemeId,
+                    operatorWithSchema.operator().id(),
+                    LocalDateTime.now(),
+                    resolvedIssueReason
+            );
+            int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
+            String anomalyReason = "No Water Supply";
+            telemetryTenantRepository.createTenantAnomalyRecord(
+                    operatorWithSchema.schemaName(),
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    anomalyType,
+                    resolvedIssueReason,
+                    AnomalyConstants.STATUS_OPEN
+            );
+            telemetryEventPublisher.publishAnomalyRecorded(
+                    tenantId,
+                    anomalyType,
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    null,
+                    0,
+                    anomalyReason,
+                    AnomalyConstants.STATUS_OPEN,
+                    correlationId
+            );
+            telemetryEventPublisher.publishOutageOrNonSubmissionReason(
+                    tenantId,
+                    schemeId,
+                    operatorWithSchema.operator().id(),
+                    LocalDate.now(),
+                    anomalyType
+            );
 
             String fallbackMessage = "Issue reported. Thank you.";
             if ("hindi".equals(languageKey)) {
@@ -566,12 +843,17 @@ public class GlificMeterWorkflowService {
                     .message(message)
                     .correlationId(correlationId)
                     .selected(selectedKey)
+                    .notOthers("OTHERS".equalsIgnoreCase(selectedKey) || "others".equalsIgnoreCase(selectedKey))
                     .build();
         } catch (Exception e) {
             log.error("Error saving telemetry issue report for contactId {}: {}", request.getContactId(), e.getMessage(), e);
             return IntroResponse.builder()
                     .success(false)
-                    .message("Issue report could not be saved.")
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Issue report could not be saved.",
+                            localizationService.resolveLanguageKeyForContact(request.getContactId())
+                    ))
                     .build();
         }
     }
@@ -720,51 +1002,6 @@ public class GlificMeterWorkflowService {
                             yesterday,
                             null
                     );
-
-            // When the meter is replaced, treat the submitted reading as the new baseline.
-            // That means we must not reject lower readings vs the previous meter's last confirmed reading.
-            if (!isMeterReplaced && previousSnapshotOpt.isPresent()
-                    && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
-                TelemetryConfirmedReadingSnapshot previousSnapshot = previousSnapshotOpt.get();
-                String submittedReadingText = manualReadingValue.stripTrailingZeros().toPlainString();
-                String previousReadingText = previousSnapshot.confirmedReading().stripTrailingZeros().toPlainString();
-                telemetryTenantRepository.createTenantAnomalyRecord(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                        "Manual reading is less than previous confirmed reading.",
-                        AnomalyConstants.STATUS_OPEN
-                );
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                        null,
-                        manualReadingValue,
-                        0,
-                        previousSnapshot.confirmedReading(),
-                        previousSnapshot.createdAt(),
-                        0,
-                        "Manual reading is less than previous confirmed reading.",
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
-                return CreateReadingResponse.builder()
-                        .success(false)
-                        .message(localizationService.localizeMessage(
-                                "Reading cannot be less than previous reading. Submitted reading: "
-                                        + submittedReadingText + ". Previous reading: " + previousReadingText + ".",
-                                languageKey
-                        ))
-                        .qualityStatus("REJECTED")
-                        .correlationId(correlationId)
-                        .meterReading(manualReadingValue)
-                        .lastConfirmedReading(previousSnapshot.confirmedReading())
-                        .build();
-            }
 
             // Tenant-configured water supply threshold validation (relative to WATER_NORM).
             // For manual submissions, validate the submitted value directly against thresholds, independent of previous-day readings.
@@ -1357,6 +1594,9 @@ public class GlificMeterWorkflowService {
             if (anomalySelectionKeys.contains(normalizedKey)) {
                 return true;
             }
+            if (isReasonKey(normalizedKey)) {
+                return false;
+            }
         }
         // Fallback: raw numeric selection (legacy clients can send only the number).
         if (rawIssueReason == null) {
@@ -1364,6 +1604,28 @@ public class GlificMeterWorkflowService {
         }
         String trimmed = rawIssueReason.trim();
         return "2".equals(trimmed) || "3".equals(trimmed) || "5".equals(trimmed);
+    }
+
+    private boolean isReasonKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        String normalized = key.trim().toUpperCase(Locale.ROOT);
+        return normalized.startsWith("REASON_");
+    }
+
+    private String normalizeIssueReportSelectedKey(String selectedKey) {
+        if (selectedKey == null || selectedKey.isBlank()) {
+            return selectedKey;
+        }
+        String key = selectedKey.trim().toUpperCase(Locale.ROOT);
+        return switch (key) {
+            case "REASON_1" -> "meterReplace";
+            case "REASON_2" -> "incorrectReadingEnteredPreviously";
+            case "REASON_3" -> "noReadingSubmission";
+            case "REASON_4" -> "noWaterSupply";
+            default -> selectedKey;
+        };
     }
 
     private String resolveIssueSelectionKey(String rawIssueReason,

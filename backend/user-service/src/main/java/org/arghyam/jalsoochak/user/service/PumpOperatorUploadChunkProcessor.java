@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserSchemeMappingCreateRow;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
+import org.arghyam.jalsoochak.user.util.PhoneNumberUtil;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,7 +40,7 @@ public class PumpOperatorUploadChunkProcessor {
             String stateSchemeId
     ) {}
 
-    public record ChunkResult(int uploadedRows, int skippedRows) {}
+    public record ChunkResult(int uploadedRows, int skippedRows, int unchangedRows) {}
 
     @Transactional
     public ChunkResult processChunk(
@@ -53,14 +54,16 @@ public class PumpOperatorUploadChunkProcessor {
             Map<String, Integer> schemeIdCache
     ) {
         if (rows == null || rows.isEmpty()) {
-            return new ChunkResult(0, 0);
+            return new ChunkResult(0, 0, 0);
         }
 
         List<UserSchemeMappingCreateRow> insertRows = new ArrayList<>(rows.size());
         List<String> phonesForInsertRows = new ArrayList<>(rows.size());
         List<String> typesForInsertRows = new ArrayList<>(rows.size());
+        Set<Long> userIdsToReplace = new LinkedHashSet<>();
         int uploaded = 0;
         int skipped = 0;
+        int unchanged = 0;
 
         for (UploadRow row : rows) {
             try {
@@ -77,24 +80,19 @@ public class PumpOperatorUploadChunkProcessor {
                     continue;
                 }
 
-                TenantUserRecord user = userTenantRepository.findUserByPhone(schemaName, row.phone()).orElse(null);
+                String normalizedPhone = PhoneNumberUtil.normalizeIndianMobileForDb(row.phone());
+                TenantUserRecord user = userTenantRepository.findUserByPhone(schemaName, normalizedPhone).orElse(null);
                 Long userId;
+                String title = resolveTitle(row, typeKey, normalizedPhone);
                 if (user == null) {
-                    String title = !row.fullName().isBlank()
-                            ? row.fullName()
-                            : (row.firstName() + " " + row.lastName()).trim();
-                    if (title.isBlank()) {
-                        title = defaultTitle(typeKey) + " " + row.phone();
-                    }
-
                     userId = userTenantRepository.createUser(
                             schemaName,
                             java.util.UUID.randomUUID().toString(),
                             actor.tenantId(),
                             title,
-                            uniqueEmail(schemaName, row.phone(), typeKey),
+                            uniqueEmail(schemaName, normalizedPhone, typeKey),
                             userTypeId,
-                            row.phone(),
+                            normalizedPhone,
                             "CSV_ONBOARDED",
                             actor.id()
                     );
@@ -110,12 +108,18 @@ public class PumpOperatorUploadChunkProcessor {
                         continue;
                     }
                     userId = user.id();
+                    if (isUnchangedMapping(schemaName, user, userId, normalizedPhone, title, schemeId)) {
+                        unchanged++;
+                        continue;
+                    }
+                    userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
                     userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
                 }
 
-                // Idempotent insert (ON CONFLICT DO NOTHING) will safely handle re-uploads + concurrent chunks.
+                // Replace existing mappings so the upload overwrites prior assignments.
+                userIdsToReplace.add(userId);
                 insertRows.add(new UserSchemeMappingCreateRow(userId, schemeId));
-                phonesForInsertRows.add(row.phone());
+                phonesForInsertRows.add(normalizedPhone);
                 typesForInsertRows.add(typeKey);
 
                 uploaded++;
@@ -128,6 +132,9 @@ public class PumpOperatorUploadChunkProcessor {
             }
         }
 
+        if (!userIdsToReplace.isEmpty()) {
+            userUploadRepository.markUserSchemeMappingsDeleted(schemaName, new ArrayList<>(userIdsToReplace), actorUserId);
+        }
         int[] insertCounts = userUploadRepository.insertUserSchemeMappings(schemaName, insertRows, actorUserId);
         Set<String> phonesToNotify = new LinkedHashSet<>();
         int inserted = 0;
@@ -153,7 +160,7 @@ public class PumpOperatorUploadChunkProcessor {
         log.info("[pump-operator-upload] chunk_processed rows={} uploaded={} skipped={} mappings_inserted={}",
                 rows.size(), uploaded, skipped, inserted);
 
-        return new ChunkResult(uploaded, skipped);
+        return new ChunkResult(uploaded, skipped, unchanged);
     }
 
     private Integer resolveSchemeId(
@@ -206,6 +213,44 @@ public class PumpOperatorUploadChunkProcessor {
             case "sub_divisional_officer" -> "Sub Divisional Officer";
             default -> "Pump Operator";
         };
+    }
+
+    private String resolveTitle(UploadRow row, String typeKey, String normalizedPhone) {
+        String title = row.fullName() == null ? "" : row.fullName().trim();
+        if (title.isBlank()) {
+            title = (row.firstName() + " " + row.lastName()).trim();
+        }
+        if (title.isBlank()) {
+            title = defaultTitle(typeKey) + " " + normalizedPhone;
+        }
+        return title;
+    }
+
+    private boolean isUnchangedMapping(
+            String schemaName,
+            TenantUserRecord user,
+            Long userId,
+            String normalizedPhone,
+            String title,
+            Integer schemeId
+    ) {
+        if (user == null || userId == null || schemeId == null) {
+            return false;
+        }
+
+        String existingPhone = PhoneNumberUtil.normalizeIndianMobileForDb(user.phoneNumber());
+        if (existingPhone == null || !existingPhone.equals(normalizedPhone)) {
+            return false;
+        }
+
+        String existingTitle = user.title() == null ? "" : user.title().trim();
+        String incomingTitle = title == null ? "" : title.trim();
+        if (!existingTitle.equals(incomingTitle)) {
+            return false;
+        }
+
+        List<Integer> schemeIds = userUploadRepository.findActiveSchemeIdsForUser(schemaName, userId);
+        return schemeIds.size() == 1 && schemeIds.get(0).equals(schemeId);
     }
 
     private String emailPrefix(String typeKey) {

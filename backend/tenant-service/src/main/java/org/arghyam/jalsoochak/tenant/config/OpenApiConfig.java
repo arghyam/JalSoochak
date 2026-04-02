@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.tenant.config;
 
 import java.util.List;
 
+import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,6 +16,25 @@ import io.swagger.v3.oas.models.servers.Server;
 
 @Configuration
 public class OpenApiConfig {
+
+    /**
+     * springdoc resolves {@code Void} to an empty object schema {@code {}}, but
+     * {@code @JsonInclude(NON_NULL)} suppresses the null field at runtime.
+     * This customizer removes {@code data} from {@code ApiResponseDTOVoid} so the
+     * spec matches the actual serialized output.
+     */
+    @Bean
+    public OpenApiCustomizer voidResponseSchemaCustomizer() {
+        return openApi -> {
+            if (openApi.getComponents() == null) return;
+            var schemas = openApi.getComponents().getSchemas();
+            if (schemas == null) return;
+            var voidSchema = schemas.get("ApiResponseDTOVoid");
+            if (voidSchema != null && voidSchema.getProperties() != null) {
+                voidSchema.getProperties().remove("data");
+            }
+        };
+    }
 
     @Bean
     public OpenAPI tenantServiceOpenAPI() {

@@ -13,135 +13,137 @@ public class TenantBoundaryRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public Map<String, Object> getMergedBoundaryForTenant(String schemaName) {
-        validateSchemaName(schemaName);
-        String sql = String.format("""
+    public Map<String, Object> getMergedBoundaryForTenant(Integer tenantId) {
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalArgumentException("tenant_id must be a positive integer");
+        }
+        // Analytics-source boundary: level-2 regions within tenant.
+        String sql = """
                 SELECT
                     COUNT(*)::int AS boundary_count,
                     ST_AsGeoJSON(
                         ST_UnaryUnion(
                             ST_Collect(l.geom)
-                        )
+                        ),
+                        9,
+                        8
                     ) AS boundary_geojson
-                FROM %1$s.lgd_location_master_table l
-                JOIN %1$s.location_config_master_table c
-                    ON c.id = l.lgd_location_config_id
-                WHERE c.level = 2
+                FROM analytics_schema.dim_lgd_location_table l
+                WHERE l.tenant_id = ?
+                  AND l.lgd_level = 2
                   AND l.geom IS NOT NULL
-                  AND l.deleted_at IS NULL
-                  AND c.deleted_at IS NULL
-                  AND COALESCE(l.status, 1) = 1
-                """, schemaName);
-        return jdbcTemplate.queryForMap(sql);
+                """;
+        return jdbcTemplate.queryForMap(sql, tenantId);
     }
 
-    public Integer getLocationLevel(String schemaName, Integer lgdId) {
-        validateSchemaName(schemaName);
-        String sql = String.format("""
-                SELECT c.level
-                FROM %1$s.lgd_location_master_table l
-                JOIN %1$s.location_config_master_table c
-                    ON c.id = l.lgd_location_config_id
-                WHERE l.id = ?
-                  AND l.deleted_at IS NULL
-                  AND c.deleted_at IS NULL
+    public Integer getLocationLevel(Integer lgdId) {
+        if (lgdId == null || lgdId <= 0) {
+            throw new IllegalArgumentException("lgd_id must be a positive integer");
+        }
+        String sql = """
+                SELECT l.lgd_level
+                FROM analytics_schema.dim_lgd_location_table l
+                WHERE l.lgd_id = ?
                 LIMIT 1
-                """, schemaName);
-        List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> (Integer) rs.getObject("level"), lgdId);
+                """;
+        List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> (Integer) rs.getObject("lgd_level"), lgdId);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    public List<Map<String, Object>> getChildLevelByParent(String schemaName, Integer parentLgdId, Integer tenantId) {
-        validateSchemaName(schemaName);
+    public List<Map<String, Object>> getChildLevelByParent(
+            Integer tenantId,
+            Integer parentLgdId,
+            Integer parentLevel
+    ) {
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalArgumentException("tenant_id must be a positive integer");
+        }
+        if (parentLgdId == null || parentLgdId <= 0) {
+            throw new IllegalArgumentException("parent_lgd_id must be a positive integer");
+        }
+        if (parentLevel == null || parentLevel <= 0) {
+            throw new IllegalArgumentException("parent_lgd_level must be a positive integer");
+        }
+        if (parentLevel >= 6) {
+            throw new IllegalArgumentException("No child LGD level available for parent_lgd_id: " + parentLgdId);
+        }
+
+        int childLevel = parentLevel + 1;
+        String parentColumn = resolveDimLgdParentColumn(parentLevel);
+        String schemeScopeColumn = resolveSchemeLgdColumn(childLevel);
+
         String sql = String.format("""
                 SELECT
-                    l.id AS lgd_id,
-                    l.parent_id AS parent_lgd_id,
-                    c.level AS child_level,
+                    l.lgd_id AS lgd_id,
+                    ?::int AS parent_lgd_id,
+                    l.lgd_level AS child_level,
                     (
-                        SELECT COUNT(*)
+                        SELECT COUNT(*)::int
                         FROM analytics_schema.dim_scheme_table s
                         WHERE s.tenant_id = ?
-                          AND (
-                              (c.level = 1 AND s.level_1_lgd_id = l.id) OR
-                              (c.level = 2 AND s.level_2_lgd_id = l.id) OR
-                              (c.level = 3 AND s.level_3_lgd_id = l.id) OR
-                              (c.level = 4 AND s.level_4_lgd_id = l.id) OR
-                              (c.level = 5 AND s.level_5_lgd_id = l.id) OR
-                              (c.level = 6 AND s.level_6_lgd_id = l.id)
-                          )
-                    )::int AS scheme_count,
+                          AND s.%2$s = l.lgd_id
+                    ) AS scheme_count,
                     l.title,
                     l.lgd_code,
-                    ST_AsGeoJSON(l.geom) AS boundary_geojson
-                FROM %1$s.lgd_location_master_table l
-                JOIN %1$s.location_config_master_table c
-                    ON c.id = l.lgd_location_config_id
-                WHERE l.parent_id = ?
-                  AND l.deleted_at IS NULL
-                  AND c.deleted_at IS NULL
-                  AND COALESCE(l.status, 1) = 1
-                ORDER BY l.id
-                """, schemaName);
-        return jdbcTemplate.queryForList(sql, tenantId, parentLgdId);
+                    ST_AsGeoJSON(l.geom, 9, 8) AS boundary_geojson
+                FROM analytics_schema.dim_lgd_location_table l
+                WHERE l.tenant_id = ?
+                  AND l.lgd_level = ?
+                  AND l.%1$s = ?
+                ORDER BY l.lgd_id
+                """, parentColumn, schemeScopeColumn);
+
+        return jdbcTemplate.queryForList(sql, parentLgdId, tenantId, tenantId, childLevel, parentLgdId);
     }
 
-    public Map<String, Object> getMergedBoundaryByParent(String schemaName, Integer parentLgdId) {
-        validateSchemaName(schemaName);
+    public Map<String, Object> getMergedBoundaryByParent(
+            Integer tenantId,
+            Integer parentLgdId,
+            Integer parentLevel
+    ) {
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalArgumentException("tenant_id must be a positive integer");
+        }
+        if (parentLgdId == null || parentLgdId <= 0) {
+            throw new IllegalArgumentException("parent_lgd_id must be a positive integer");
+        }
+        if (parentLevel == null || parentLevel <= 0) {
+            throw new IllegalArgumentException("parent_lgd_level must be a positive integer");
+        }
+        if (parentLevel >= 6) {
+            throw new IllegalArgumentException("No child LGD level available for parent_lgd_id: " + parentLgdId);
+        }
+
+        int childLevel = parentLevel + 1;
+        String parentColumn = resolveDimLgdParentColumn(parentLevel);
         String sql = String.format("""
                 SELECT
                     COUNT(*)::int AS child_count,
                     ST_AsGeoJSON(
                         ST_UnaryUnion(
                             ST_Collect(l.geom) FILTER (WHERE l.geom IS NOT NULL)
-                        )
+                        ),
+                        9,
+                        8
                     ) AS boundary_geojson
-                FROM %1$s.lgd_location_master_table l
-                JOIN %1$s.location_config_master_table c
-                    ON c.id = l.lgd_location_config_id
-                WHERE l.parent_id = ?
-                  AND l.deleted_at IS NULL
-                  AND c.deleted_at IS NULL
-                  AND COALESCE(l.status, 1) = 1
-                """, schemaName);
-        return jdbcTemplate.queryForMap(sql, parentLgdId);
+                FROM analytics_schema.dim_lgd_location_table l
+                WHERE l.tenant_id = ?
+                  AND l.lgd_level = ?
+                  AND l.%1$s = ?
+                """, parentColumn);
+        return jdbcTemplate.queryForMap(sql, tenantId, childLevel, parentLgdId);
     }
 
-    public boolean tableExists(String schemaName, String tableName) {
-        validateSchemaName(schemaName);
-        validateTableName(tableName);
-        String sql = "SELECT to_regclass(?) IS NOT NULL";
-        String qualifiedTableName = schemaName + "." + tableName;
-        Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, qualifiedTableName);
-        return Boolean.TRUE.equals(exists);
+    private String resolveDimLgdParentColumn(int parentLevel) {
+        // For child selection within dim_lgd_location_table:
+        // children at level (parentLevel + 1) share the same level_{parentLevel}_lgd_id.
+        return "level_" + parentLevel + "_lgd_id";
     }
 
-    public boolean columnExists(String schemaName, String tableName, String columnName) {
-        validateSchemaName(schemaName);
-        validateTableName(tableName);
-        validateTableName(columnName);
-        String sql = """
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_schema = ?
-                      AND table_name = ?
-                      AND column_name = ?
-                )
-                """;
-        Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, schemaName, tableName, columnName);
-        return Boolean.TRUE.equals(exists);
-    }
-
-    private void validateSchemaName(String schemaName) {
-        if (schemaName == null || !schemaName.matches("^[a-z_][a-z0-9_]*$")) {
-            throw new IllegalArgumentException("Invalid schema name: " + schemaName);
+    private String resolveSchemeLgdColumn(int lgdLevel) {
+        if (lgdLevel < 1 || lgdLevel > 6) {
+            throw new IllegalArgumentException("Invalid LGD level: " + lgdLevel);
         }
-    }
-
-    private void validateTableName(String tableName) {
-        if (tableName == null || !tableName.matches("^[a-z_][a-z0-9_]*$")) {
-            throw new IllegalArgumentException("Invalid table name: " + tableName);
-        }
+        return "level_" + lgdLevel + "_lgd_id";
     }
 }

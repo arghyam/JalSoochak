@@ -11,7 +11,6 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -75,7 +74,7 @@ class UserControllerTest {
     // ── /invite ───────────────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("POST /api/v1/users/invite")
+    @DisplayName("POST /api/v1/users/invitations")
     class InviteTests {
 
         @Test
@@ -93,7 +92,7 @@ class UserControllerTest {
                     }
                     """;
 
-            mockMvc.perform(post("/api/v1/users/invite")
+            mockMvc.perform(post("/api/v1/users/invitations")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(payload)
                             .with(mockJwt()))
@@ -104,7 +103,7 @@ class UserControllerTest {
         @Test
         @DisplayName("Missing email and role should return 400")
         void invite_missingFields_returns400() throws Exception {
-            mockMvc.perform(post("/api/v1/users/invite")
+            mockMvc.perform(post("/api/v1/users/invitations")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
                     .andExpect(status().isBadRequest())
@@ -121,7 +120,7 @@ class UserControllerTest {
                     }
                     """;
 
-            mockMvc.perform(post("/api/v1/users/invite")
+            mockMvc.perform(post("/api/v1/users/invitations")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(payload))
                     .andExpect(status().isBadRequest())
@@ -144,9 +143,10 @@ class UserControllerTest {
                     }
                     """;
 
-            mockMvc.perform(post("/api/v1/users/invite")
+            mockMvc.perform(post("/api/v1/users/invitations")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(payload))
+                            .content(payload)
+                            .with(mockJwt()))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.status").value(409));
         }
@@ -167,9 +167,10 @@ class UserControllerTest {
                     }
                     """;
 
-            mockMvc.perform(post("/api/v1/users/invite")
+            mockMvc.perform(post("/api/v1/users/invitations")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(payload))
+                            .content(payload)
+                            .with(mockJwt()))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.status").value(403));
         }
@@ -361,7 +362,7 @@ class UserControllerTest {
                     .id(2L).email("admin@mp.com").role("STATE_ADMIN").tenantCode("MP").status(AdminUserStatus.ACTIVE.name()).build();
             PageResponseDTO<AdminUserResponseDTO> page = PageResponseDTO.of(List.of(dto), 1L, 0, 20);
 
-            when(userManagementService.listStateAdmins(any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
+            when(userManagementService.listStateAdmins(any(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/users/state-admins")
                             .param("tenantCode", "MP")
@@ -378,7 +379,7 @@ class UserControllerTest {
                     .id(2L).email("admin@mp.com").role("STATE_ADMIN").tenantCode("MP").status(AdminUserStatus.INACTIVE.name()).build();
             PageResponseDTO<AdminUserResponseDTO> page = PageResponseDTO.of(List.of(dto), 1L, 0, 20);
 
-            when(userManagementService.listStateAdmins(any(), eq(AdminUserStatus.INACTIVE), any(), anyInt(), anyInt())).thenReturn(page);
+            when(userManagementService.listStateAdmins(any(), eq(AdminUserStatus.INACTIVE), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/users/state-admins")
                             .param("status", "INACTIVE")
@@ -465,7 +466,7 @@ class UserControllerTest {
     // ── /{id}/deactivate ──────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("PUT /api/v1/users/{id}/deactivate")
+    @DisplayName("POST /api/v1/users/{id}/deactivate")
     class DeactivateTests {
 
         @Test
@@ -473,7 +474,7 @@ class UserControllerTest {
         void deactivate_success_returns200() throws Exception {
             doNothing().when(userManagementService).deactivateUser(anyLong(), any());
 
-            mockMvc.perform(put("/api/v1/users/4/deactivate").with(mockJwt()))
+            mockMvc.perform(post("/api/v1/users/4/deactivate").with(mockJwt()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200));
         }
@@ -484,7 +485,7 @@ class UserControllerTest {
             doThrow(new InsufficientActiveUsersException("At least one active super user must remain"))
                     .when(userManagementService).deactivateUser(anyLong(), any());
 
-            mockMvc.perform(put("/api/v1/users/1/deactivate").with(mockJwt()))
+            mockMvc.perform(post("/api/v1/users/1/deactivate").with(mockJwt()))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.status").value(409));
         }
@@ -493,7 +494,7 @@ class UserControllerTest {
     // ── /{id}/activate ────────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("PUT /api/v1/users/{id}/activate")
+    @DisplayName("POST /api/v1/users/{id}/activate")
     class ActivateTests {
 
         @Test
@@ -501,7 +502,7 @@ class UserControllerTest {
         void activate_success_returns200() throws Exception {
             doNothing().when(userManagementService).activateUser(anyLong(), any());
 
-            mockMvc.perform(put("/api/v1/users/5/activate").with(mockJwt()))
+            mockMvc.perform(post("/api/v1/users/5/activate").with(mockJwt()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200));
         }
@@ -510,7 +511,7 @@ class UserControllerTest {
     // ── /{id}/reinvite ────────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("POST /api/v1/users/{id}/reinvite")
+    @DisplayName("POST /api/v1/users/{id}/invitations")
     class ReinviteTests {
 
         @Test
@@ -518,7 +519,7 @@ class UserControllerTest {
         void reinvite_success_returns200() throws Exception {
             doNothing().when(userManagementService).reinviteUser(anyLong(), any());
 
-            mockMvc.perform(post("/api/v1/users/7/reinvite").with(mockJwt()))
+            mockMvc.perform(post("/api/v1/users/7/invitations").with(mockJwt()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value(200))
                     .andExpect(jsonPath("$.message").value("Invitation resent successfully"));
@@ -530,7 +531,7 @@ class UserControllerTest {
             doThrow(new org.arghyam.jalsoochak.user.exceptions.BadRequestException("User has already activated their account"))
                     .when(userManagementService).reinviteUser(anyLong(), any());
 
-            mockMvc.perform(post("/api/v1/users/8/reinvite").with(mockJwt()))
+            mockMvc.perform(post("/api/v1/users/8/invitations").with(mockJwt()))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.status").value(400));
         }
@@ -541,7 +542,7 @@ class UserControllerTest {
             doThrow(new ResourceNotFoundException("User not found"))
                     .when(userManagementService).reinviteUser(anyLong(), any());
 
-            mockMvc.perform(post("/api/v1/users/999/reinvite").with(mockJwt()))
+            mockMvc.perform(post("/api/v1/users/999/invitations").with(mockJwt()))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.status").value(404));
         }
@@ -552,7 +553,7 @@ class UserControllerTest {
             doThrow(new ForbiddenAccessException("State admin can only reinvite within their own state"))
                     .when(userManagementService).reinviteUser(anyLong(), any());
 
-            mockMvc.perform(post("/api/v1/users/10/reinvite").with(mockJwt()))
+            mockMvc.perform(post("/api/v1/users/10/invitations").with(mockJwt()))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.status").value(403));
         }

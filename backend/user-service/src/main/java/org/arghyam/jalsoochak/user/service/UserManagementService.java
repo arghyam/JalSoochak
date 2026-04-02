@@ -20,7 +20,7 @@ public interface UserManagementService {
 
     PageResponseDTO<AdminUserResponseDTO> listSuperUsers(AdminUserStatus status, int page, int limit);
 
-    PageResponseDTO<AdminUserResponseDTO> listStateAdmins(String tenantCode, AdminUserStatus status, Authentication caller, int page, int limit);
+    PageResponseDTO<AdminUserResponseDTO> listStateAdmins(String tenantCode, AdminUserStatus status, String name, Authentication caller, int page, int limit);
 
     AdminUserResponseDTO getUserById(Long id, Authentication caller);
 

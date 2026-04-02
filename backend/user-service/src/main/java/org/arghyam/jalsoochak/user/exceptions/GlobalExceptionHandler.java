@@ -15,7 +15,11 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Arrays;
 import java.util.List;
@@ -74,6 +78,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponseDTO> handleDeactivated(AccountDeactivatedException ex) {
         log.warn("Access denied – account deactivated: {}", ex.getMessage());
         return build(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleAccessDenied(AccessDeniedException ex) {
+        log.warn("Access denied: {}", ex.getMessage());
+        return build(HttpStatus.FORBIDDEN, "Access denied");
     }
 
     @ExceptionHandler(ForbiddenAccessException.class)
@@ -167,6 +177,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiErrorResponseDTO> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
         return build(HttpStatus.METHOD_NOT_ALLOWED, ex.getMessage());
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleNoResourceFound(NoResourceFoundException ex) {
+        return build(HttpStatus.NOT_FOUND, "Resource not found");
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex) {
+        return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Media type not supported: " + ex.getContentType());
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleMediaTypeNotAcceptable(HttpMediaTypeNotAcceptableException ex) {
+        return build(HttpStatus.NOT_ACCEPTABLE, "Requested media type not acceptable");
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

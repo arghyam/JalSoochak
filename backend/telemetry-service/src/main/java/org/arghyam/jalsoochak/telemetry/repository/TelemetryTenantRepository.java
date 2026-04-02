@@ -123,6 +123,50 @@ public class TelemetryTenantRepository {
         return Optional.ofNullable(firstMatch);
     }
 
+    public Optional<TelemetryOperatorWithSchema> findOperatorByPhoneHashAcrossTenants(String phoneHash, Integer preferredTenantId) {
+        if (phoneHash == null || phoneHash.isBlank()) {
+            return Optional.empty();
+        }
+        String normalizedHash = phoneHash.trim().toLowerCase();
+        if (!normalizedHash.matches("^[a-f0-9]{64}$")) {
+            return Optional.empty();
+        }
+
+        if (preferredTenantId != null) {
+            Optional<String> preferredSchema = findSchemaByTenantId(preferredTenantId);
+            if (preferredSchema.isPresent()) {
+                Optional<TelemetryOperator> preferredMatch = findOperatorByPhoneHashValue(preferredSchema.get(), normalizedHash);
+                if (preferredMatch.isPresent()) {
+                    return Optional.of(new TelemetryOperatorWithSchema(preferredSchema.get(), preferredMatch.get()));
+                }
+            }
+        }
+
+        String schemaSql = """
+                SELECT nspname
+                FROM pg_namespace
+                WHERE nspname LIKE 'tenant_%'
+                ORDER BY nspname
+                """;
+        List<String> schemas = jdbcTemplate.query(schemaSql, (rs, n) -> rs.getString("nspname"));
+        TelemetryOperatorWithSchema firstMatch = null;
+        for (String schemaName : schemas) {
+            Optional<TelemetryOperator> operator = findOperatorByPhoneHashValue(schemaName, normalizedHash);
+            if (operator.isEmpty()) {
+                continue;
+            }
+
+            TelemetryOperatorWithSchema match = new TelemetryOperatorWithSchema(schemaName, operator.get());
+            if (preferredTenantId != null && preferredTenantId.equals(match.operator().tenantId())) {
+                return Optional.of(match);
+            }
+            if (firstMatch == null) {
+                firstMatch = match;
+            }
+        }
+        return Optional.ofNullable(firstMatch);
+    }
+
     public Optional<Long> findFirstSchemeForUser(String schemaName, Long userId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -460,6 +504,29 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<TelemetryPendingIssueReportRecord> findLatestPendingIssueReportRecord(String schemaName, Long schemeId, Long operatorId) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND extracted_reading = 0
+                  AND confirmed_reading = 0
+                  AND issue_report_reason IS NOT NULL
+                  AND deleted_at IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+                """, schemaName);
+        List<TelemetryPendingIssueReportRecord> rows = jdbcTemplate.query(sql, (rs, n) ->
+                new TelemetryPendingIssueReportRecord(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by"))
+                ), schemeId, operatorId);
+        return rows.stream().findFirst();
+    }
+
     public Optional<TelemetryPendingMeterChangeRecord> findPendingMeterChangeRecordByCorrelation(String schemaName,
                                                                                                   Long schemeId,
                                                                                                   Long operatorId,
@@ -515,6 +582,34 @@ public class TelemetryTenantRepository {
         return correlationId;
     }
 
+    public String upsertPendingIssueReportRecord(String schemaName,
+                                                 Long schemeId,
+                                                 Long operatorId,
+                                                 LocalDateTime readingAt,
+                                                 String reason) {
+        Optional<TelemetryPendingIssueReportRecord> pending = findLatestPendingIssueReportRecord(schemaName, schemeId, operatorId);
+        if (pending.isPresent()) {
+            String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+            String sql = String.format("""
+                    UPDATE %s.flow_reading_table
+                    SET %s = ?,
+                        reading_date = ?,
+                        issue_report_reason = ?,
+                        updated_by = ?,
+                        updated_at = NOW()
+                    WHERE id = ?
+                    """, schemaName, timeColumn);
+            jdbcTemplate.update(sql, readingAt, LocalDate.from(readingAt), reason, operatorId, pending.get().id());
+            cleanupOtherPendingIssueReportRecords(schemaName, schemeId, operatorId, pending.get().id(), operatorId);
+            return pending.get().correlationId();
+        }
+
+        String correlationId = "issue-report-" + UUID.randomUUID();
+        Long createdId = createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
+        cleanupOtherPendingIssueReportRecords(schemaName, schemeId, operatorId, createdId, operatorId);
+        return correlationId;
+    }
+
     private void cleanupOtherPendingMeterChangeRecords(String schemaName,
                                                        Long schemeId,
                                                        Long operatorId,
@@ -532,6 +627,29 @@ public class TelemetryTenantRepository {
                   AND extracted_reading = 0
                   AND confirmed_reading = 0
                   AND meter_change_reason IS NOT NULL
+                  AND deleted_at IS NULL
+                  AND id <> ?
+                """, schemaName);
+        jdbcTemplate.update(sql, updatedBy, updatedBy, schemeId, operatorId, keepId);
+    }
+
+    private void cleanupOtherPendingIssueReportRecords(String schemaName,
+                                                       Long schemeId,
+                                                       Long operatorId,
+                                                       Long keepId,
+                                                       Long updatedBy) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                UPDATE %s.flow_reading_table
+                SET deleted_at = NOW(),
+                    deleted_by = ?,
+                    updated_by = ?,
+                    updated_at = NOW()
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND extracted_reading = 0
+                  AND confirmed_reading = 0
+                  AND issue_report_reason IS NOT NULL
                   AND deleted_at IS NULL
                   AND id <> ?
                 """, schemaName);
@@ -750,12 +868,32 @@ public class TelemetryTenantRepository {
                                           String reason,
                                           Integer status) {
         validateSchemaName(schemaName);
-        String sql = String.format("""
-                INSERT INTO %s.anomaly_table
-                    (user_id, scheme_id, type, reason, status, created_at)
-                VALUES (?, ?, ?, ?, ?, NOW())
-                """, schemaName);
-        jdbcTemplate.update(sql, userId, schemeId, type, reason, status);
+        boolean hasDetail = columnExists(schemaName, "anomaly_table", "detail");
+        boolean hasReason = columnExists(schemaName, "anomaly_table", "reason");
+
+        String sql;
+        if (hasDetail && hasReason) {
+            sql = String.format("""
+                    INSERT INTO %s.anomaly_table
+                        (user_id, scheme_id, type, reason, detail, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, NOW())
+                    """, schemaName);
+            jdbcTemplate.update(sql, userId, schemeId, type, reason, reason, status);
+        } else if (hasDetail) {
+            sql = String.format("""
+                    INSERT INTO %s.anomaly_table
+                        (user_id, scheme_id, type, detail, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, NOW())
+                    """, schemaName);
+            jdbcTemplate.update(sql, userId, schemeId, type, reason, status);
+        } else {
+            sql = String.format("""
+                    INSERT INTO %s.anomaly_table
+                        (user_id, scheme_id, type, reason, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, NOW())
+                    """, schemaName);
+            jdbcTemplate.update(sql, userId, schemeId, type, reason, status);
+        }
     }
 
     public Optional<TelemetryReadingRecord> findReadingByCorrelationId(String schemaName, String correlationId) {
@@ -1028,6 +1166,18 @@ public class TelemetryTenantRepository {
 
     private Optional<TelemetryOperator> findOperatorByPhone(String schemaName, String rawPhoneNumber, String normalizedPhone) {
         validateSchemaName(schemaName);
+        if (columnExists(schemaName, "user_table", "phone_number_hash")) {
+            Optional<TelemetryOperator> hashMatch = findOperatorByPhoneHash(schemaName, rawPhoneNumber);
+            if (hashMatch.isPresent()) {
+                return hashMatch;
+            }
+            if (normalizedPhone != null && !normalizedPhone.isBlank() && !normalizedPhone.equals(rawPhoneNumber)) {
+                hashMatch = findOperatorByPhoneHash(schemaName, normalizedPhone);
+                if (hashMatch.isPresent()) {
+                    return hashMatch;
+                }
+            }
+        }
         String languageColumn = resolveSelectColumn(schemaName, "user_table", "language_id", "NULL::integer AS language_id");
         String sql = String.format("""
                 SELECT id, tenant_id, title, email, phone_number, language_id
@@ -1049,13 +1199,70 @@ public class TelemetryTenantRepository {
                 """, schemaName);
         scanSql = scanSql.replace("language_id", languageColumn);
         List<TelemetryOperator> allRows = jdbcTemplate.query(scanSql, (rs, n) -> mapOperator(rs));
+        String normalizedLast10 = normalizeToLast10(normalizedPhone);
         for (TelemetryOperator operator : allRows) {
             String candidate = normalizePhone(operator.phoneNumber());
-            if (candidate != null && candidate.equals(normalizedPhone)) {
+            if (candidate == null) {
+                continue;
+            }
+            if (candidate.equals(normalizedPhone)) {
+                return Optional.of(operator);
+            }
+            if (normalizedLast10 != null && normalizedLast10.equals(candidate)) {
+                return Optional.of(operator);
+            }
+            String candidateLast10 = normalizeToLast10(candidate);
+            if (candidateLast10 != null && candidateLast10.equals(normalizedPhone)) {
+                return Optional.of(operator);
+            }
+            if (normalizedLast10 != null && candidateLast10 != null && candidateLast10.equals(normalizedLast10)) {
                 return Optional.of(operator);
             }
         }
         return Optional.empty();
+    }
+
+    private Optional<TelemetryOperator> findOperatorByPhoneHash(String schemaName, String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return Optional.empty();
+        }
+        String languageColumn = resolveSelectColumn(schemaName, "user_table", "language_id", "NULL::integer AS language_id");
+        String sql = String.format("""
+                SELECT id, tenant_id, title, email, phone_number, language_id
+                FROM %s.user_table
+                WHERE phone_number_hash = ?
+                LIMIT 1
+                """, schemaName);
+        sql = sql.replace("language_id", languageColumn);
+        for (String candidate : buildPhoneCandidates(phoneNumber)) {
+            String lookupHash = piiEncryptionService.hmac(candidate);
+            List<TelemetryOperator> rows = jdbcTemplate.query(sql, (rs, n) -> mapOperator(rs), lookupHash);
+            Optional<TelemetryOperator> match = rows.stream().findFirst();
+            if (match.isPresent()) {
+                return match;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<TelemetryOperator> findOperatorByPhoneHashValue(String schemaName, String phoneHash) {
+        validateSchemaName(schemaName);
+        if (phoneHash == null || phoneHash.isBlank()) {
+            return Optional.empty();
+        }
+        if (!columnExists(schemaName, "user_table", "phone_number_hash")) {
+            return Optional.empty();
+        }
+        String languageColumn = resolveSelectColumn(schemaName, "user_table", "language_id", "NULL::integer AS language_id");
+        String sql = String.format("""
+                SELECT id, tenant_id, title, email, phone_number, language_id
+                FROM %s.user_table
+                WHERE phone_number_hash = ?
+                LIMIT 1
+                """, schemaName);
+        sql = sql.replace("language_id", languageColumn);
+        List<TelemetryOperator> rows = jdbcTemplate.query(sql, (rs, n) -> mapOperator(rs), phoneHash);
+        return rows.stream().findFirst();
     }
 
     private TelemetryOperator mapOperator(ResultSet rs) {
@@ -1074,18 +1281,7 @@ public class TelemetryTenantRepository {
     }
 
     private String decryptPhoneIfNeeded(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        if (trimmed.isEmpty()) {
-            return trimmed;
-        }
-        String digits = trimmed.replaceAll("\\\\D", "");
-        if (!digits.isEmpty() && digits.length() >= 8 && digits.length() <= 15) {
-            return trimmed;
-        }
-        return piiEncryptionService.decrypt(trimmed);
+        return piiEncryptionService.safeDecrypt(value);
     }
 
     private String normalizePhone(String value) {
@@ -1093,6 +1289,62 @@ public class TelemetryTenantRepository {
             return null;
         }
         return value.replaceAll("\\D", "");
+    }
+
+    private String normalizeToLast10(String digits) {
+        if (digits == null || digits.isBlank()) {
+            return null;
+        }
+        String normalized = digits.replaceAll("\\D", "");
+        if (normalized.length() <= 10) {
+            return normalized;
+        }
+        return normalized.substring(normalized.length() - 10);
+    }
+
+    private List<String> buildPhoneCandidates(String rawPhone) {
+        if (rawPhone == null) {
+            return List.of();
+        }
+        String trimmed = rawPhone.trim();
+        if (trimmed.isEmpty()) {
+            return List.of();
+        }
+        List<String> candidates = new ArrayList<>();
+        candidates.add(trimmed);
+        if (trimmed.startsWith("+") && trimmed.length() > 1) {
+            candidates.add(trimmed.substring(1));
+        } else if (!trimmed.startsWith("+")) {
+            candidates.add("+" + trimmed);
+        }
+
+        String normalized = normalizePhone(trimmed);
+        if (normalized != null && !normalized.isBlank()) {
+            candidates.add(normalized);
+            String last10 = normalizeToLast10(normalized);
+            if (last10 != null && !last10.equals(normalized)) {
+                candidates.add(last10);
+            }
+            if (normalized.length() == 10) {
+                candidates.add("91" + normalized);
+                candidates.add("+91" + normalized);
+            }
+            if (normalized.length() == 12 && normalized.startsWith("91")) {
+                candidates.add(normalized.substring(2));
+                candidates.add("+91" + normalized.substring(2));
+            }
+        }
+
+        List<String> deduped = new ArrayList<>();
+        for (String candidate : candidates) {
+            if (candidate == null || candidate.isBlank()) {
+                continue;
+            }
+            if (!deduped.contains(candidate)) {
+                deduped.add(candidate);
+            }
+        }
+        return deduped;
     }
 
     private void validateSchemaName(String schemaName) {

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Objects;
 
@@ -155,6 +156,7 @@ public class UserTenantRepository {
                     uuid,
                     tenant_id,
                     title,
+                    title_hash,
                     email,
                     user_type,
                     phone_number,
@@ -168,7 +170,7 @@ public class UserTenantRepository {
                     updated_by,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, %d, true, true, ?, NOW(), ?, NOW())
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, %d, true, true, ?, NOW(), ?, NOW())
                 RETURNING id
                 """, schemaName, TenantUserStatus.ACTIVE.code);
 
@@ -178,6 +180,7 @@ public class UserTenantRepository {
                 uuid,
                 tenantId,
                 pii.encrypt(title),
+                pii.hmac(title == null ? "" : title.trim().toLowerCase(Locale.ROOT)),
                 email,
                 userTypeId,
                 pii.encrypt(phoneNumber),
@@ -193,10 +196,13 @@ public class UserTenantRepository {
         validateSchemaName(schemaName);
         String sql = String.format("""
                 UPDATE %s.user_table
-                SET title = ?, phone_number = ?, phone_number_hash = ?, updated_at = NOW()
+                SET title = ?, title_hash = ?, phone_number = ?, phone_number_hash = ?, updated_at = NOW()
                 WHERE id = ?
                 """, schemaName);
-        jdbcTemplate.update(sql, pii.encrypt(title), pii.encrypt(phoneNumber), pii.hmac(phoneNumber), id);
+        jdbcTemplate.update(sql,
+                pii.encrypt(title), pii.hmac(title == null ? "" : title.trim().toLowerCase(Locale.ROOT)),
+                pii.encrypt(phoneNumber), pii.hmac(phoneNumber),
+                id);
     }
 
     public int updateUserRole(String schemaName, Long userId, Long newUserTypeId) {
@@ -292,6 +298,16 @@ public class UserTenantRepository {
                 WHERE id = ?
                 """, schemaName);
         jdbcTemplate.update(sql, keycloakUuid, encryptedPassword, userId);
+    }
+
+    /**
+     * Returns UUIDs of users in the given tenant schema whose {@code title_hash} matches
+     * the provided HMAC-SHA256 hex value. Used for exact case-insensitive name search.
+     */
+    public List<String> findUuidsByTitleHash(String schemaName, String titleHash) {
+        validateSchemaName(schemaName);
+        String sql = String.format("SELECT uuid FROM %s.user_table WHERE title_hash = ?", schemaName);
+        return jdbcTemplate.queryForList(sql, String.class, titleHash);
     }
 
     /**
