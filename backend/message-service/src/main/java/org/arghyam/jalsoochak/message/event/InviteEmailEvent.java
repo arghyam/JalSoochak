@@ -22,4 +22,7 @@ public class InviteEmailEvent {
     private String inviteLink;
     @ToString.Include
     private int expiryHours;
+
+    /** State name — populated only when role is STATE_ADMIN. Null-safe in routing logic. */
+    private String stateName;
 }
