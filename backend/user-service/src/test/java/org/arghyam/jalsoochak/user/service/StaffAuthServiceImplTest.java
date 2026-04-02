@@ -58,6 +58,18 @@ class StaffAuthServiceImplTest {
             10L, 1, "919876543210", "test@test.com", 3L, "SECTION_OFFICER",
             "Test Officer", "kc-uuid", TenantUserStatus.INACTIVE.code, null);
 
+    private static final TenantUserRecord SUPER_USER = new TenantUserRecord(
+            11L, 1, "919876543211", "super@test.com", 3L, "SUPER_USER",
+            "Super Admin", "kc-uuid-super", TenantUserStatus.ACTIVE.code, 12345L);
+
+    private static final TenantUserRecord STATE_ADMIN = new TenantUserRecord(
+            12L, 1, "919876543212", "admin@test.com", 3L, "STATE_ADMIN",
+            "State Admin", "kc-uuid-admin", TenantUserStatus.ACTIVE.code, 12345L);
+
+    private static final TenantUserRecord PUMP_OPERATOR = new TenantUserRecord(
+            13L, 1, "919876543213", "pump@test.com", 3L, "PUMP_OPERATOR",
+            "Pump Op", "kc-uuid-pump", TenantUserStatus.ACTIVE.code, 12345L);
+
     private static final KeycloakTokenResponse TOKEN_RESPONSE =
             new KeycloakTokenResponse("at", "rt", 300, 1800, "Bearer", null, null, "openid");
 
@@ -169,6 +181,55 @@ class StaffAuthServiceImplTest {
             service.requestOtp(request);
 
             verify(userCommonRepository).findTenantIdByStateCode("MP");
+        }
+
+        @Test
+        @DisplayName("throws BadRequestException when phone belongs to SUPER_USER (intentional anti-enumeration break)")
+        void throwsWhenSuperUser() {
+            request.setPhoneNumber("919876543211");
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543211"))
+                    .thenReturn(Optional.of(SUPER_USER));
+
+            assertThatThrownBy(() -> service.requestOtp(request))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("This login is for staff users")
+                    .hasMessageContaining("email and password");
+
+            verify(otpService, never()).requestOtp(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("throws BadRequestException when phone belongs to STATE_ADMIN (intentional anti-enumeration break)")
+        void throwsWhenStateAdmin() {
+            request.setPhoneNumber("919876543212");
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543212"))
+                    .thenReturn(Optional.of(STATE_ADMIN));
+
+            assertThatThrownBy(() -> service.requestOtp(request))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("This login is for staff users")
+                    .hasMessageContaining("email and password");
+
+            verify(otpService, never()).requestOtp(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("returns silently when phone belongs to PUMP_OPERATOR (anti-enumeration preserved)")
+        void silentWhenPumpOperator() {
+            request.setPhoneNumber("919876543213");
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543213"))
+                    .thenReturn(Optional.of(PUMP_OPERATOR));
+
+            service.requestOtp(request); // must not throw
+
+            verify(otpService, never()).requestOtp(any(), any(), any());
+            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any());
         }
     }
 

@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.user.dto.request.ResetPasswordRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.StaffOtpRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.StaffOtpVerifyDTO;
 import org.arghyam.jalsoochak.user.dto.response.InviteInfoResponseDTO;
+import org.arghyam.jalsoochak.user.dto.response.OtpRequestResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.TokenResponseDTO;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.service.AuthService;
@@ -197,10 +198,9 @@ public class AuthController {
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/staff/otp")
-    public ResponseEntity<ApiResponseDTO<Void>> staffRequestOtp(@Valid @RequestBody StaffOtpRequestDTO request) {
+    public ResponseEntity<ApiResponseDTO<OtpRequestResponseDTO>> staffRequestOtp(@Valid @RequestBody StaffOtpRequestDTO request) {
         log.info("POST /api/v1/auth/staff/otp");
-        staffAuthService.requestOtp(request);
-        return ResponseEntity.ok(ApiResponseDTO.of(200, "OTP sent if this number is registered"));
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "OTP sent if this number is registered", staffAuthService.requestOtp(request)));
     }
 
     @Operation(summary = "Verify staff OTP",

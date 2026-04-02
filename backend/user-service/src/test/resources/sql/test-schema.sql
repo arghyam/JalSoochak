@@ -12,7 +12,7 @@ CREATE TABLE common_schema.user_type_master_table (
 );
 
 INSERT INTO common_schema.user_type_master_table (id, c_name)
-VALUES (1, 'SUPER_USER'), (2, 'STATE_ADMIN');
+VALUES (1, 'SUPER_USER'), (2, 'STATE_ADMIN'), (3, 'SECTION_OFFICER'), (4, 'PUMP_OPERATOR');
 
 -- ── Tenant master ──────────────────────────────────────────────────────────
 
