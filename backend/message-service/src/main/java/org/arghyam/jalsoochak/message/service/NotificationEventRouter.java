@@ -462,11 +462,11 @@ public class NotificationEventRouter {
         }
 
         if ("SMS".equals(deliveryChannel)) {
-            String phone = root.path("phoneNumber").asText("").strip();
-            int expiryMinutes = root.path("expiryMinutes").asInt(5);
+            String phone = root.path("officerPhoneNumber").asText("").strip();
+            int expiryMinutes = 5; // Default OTP TTL; expiryMinutes not provided by SendLoginOtpEvent
 
             if (phone.isBlank()) {
-                log.warn("[Router/SEND_LOGIN_OTP/SMS] phoneNumber is missing, skipping");
+                log.warn("[Router/SEND_LOGIN_OTP/SMS] officerPhoneNumber is missing, skipping");
                 return;
             }
 
@@ -477,21 +477,12 @@ public class NotificationEventRouter {
             log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
             log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
         } else {
-            String glificId = root.path("glific_id").asText("").strip();
-            String phone = root.path("phoneNumber").asText("").strip();
+            String phone = root.path("officerPhoneNumber").asText("").strip();
+            JsonNode glificIdNode = root.path("glific_id");
+            long contactId = glificIdNode.asLong(0);
 
-            long contactId;
-            if (!glificId.isBlank()) {
-                try {
-                    contactId = Long.parseLong(glificId);
-                } catch (NumberFormatException e) {
-                    log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Invalid glific_id '{}', skipping", glificId);
-                    return;
-                }
-                if (contactId <= 0) {
-                    log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id must be > 0, got {}, skipping", contactId);
-                    return;
-                }
+            if (contactId > 0) {
+                // glific_id was provided and valid
             } else if (!phone.isBlank()) {
                 log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id not provided, opting in via phone");
                 contactId = glificWhatsAppService.optIn(phone);
@@ -500,7 +491,7 @@ public class NotificationEventRouter {
                     return;
                 }
             } else {
-                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor phoneNumber provided, skipping");
+                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor officerPhoneNumber provided, skipping");
                 return;
             }
 
