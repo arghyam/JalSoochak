@@ -146,6 +146,19 @@ class SmsCountryServiceTest {
     }
 
     @Test
+    void sendOtp_missingSuccessField_returnsFalse() {
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"ApiId\":\"abc\",\"Message\":\"Some message\"}")));
+
+        boolean result = service.sendOtp("919876543210", "123456", 5);
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
     void sendOtp_messageBodyContainsDltApprovedTemplate() {
         wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
                 .willReturn(aResponse()

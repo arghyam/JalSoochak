@@ -142,7 +142,6 @@ public class NotificationEventRouter {
                 case "SEND_WELCOME_MESSAGE" -> handleSendWelcomeMessage(root);
                 case "SEND_WELCOME_MESSAGE_ADMIN" -> handleSendWelcomeMessageAdmin(root);
                 case "SEND_LOGIN_OTP" -> handleSendLoginOtp(root);
-                case "SEND_LOGIN_SMS_OTP" -> handleSendLoginSmsOtp(root);
                 case "SEND_INVITE_EMAIL" -> handleInviteEmail(root);
                 case "SEND_REINVITE_EMAIL" -> handleReinviteEmail(root);
                 case "SEND_PASSWORD_RESET_EMAIL" -> handlePasswordResetEmail(root);
@@ -454,67 +453,63 @@ public class NotificationEventRouter {
     }
 
     private void handleSendLoginOtp(JsonNode root) {
-        String officerName = root.path("officerName").asText("Officer");
         String otp = root.path("OTP").asText("");
-        String glificId = root.path("glific_id").asText("").strip();
-        String phone = root.path("officerPhoneNumber").asText("").strip();
+        String deliveryChannel = root.path("deliveryChannel").asText("WHATSAPP").toUpperCase();
 
         if (otp.isBlank()) {
             log.warn("[Router/SEND_LOGIN_OTP] OTP is missing, skipping");
             return;
         }
 
-        long contactId;
-        if (!glificId.isBlank()) {
-            try {
-                contactId = Long.parseLong(glificId);
-            } catch (NumberFormatException e) {
-                log.warn("[Router/SEND_LOGIN_OTP] Invalid glific_id '{}', skipping", glificId);
+        if ("SMS".equals(deliveryChannel)) {
+            String phone = root.path("phoneNumber").asText("").strip();
+            int expiryMinutes = root.path("expiryMinutes").asInt(5);
+
+            if (phone.isBlank()) {
+                log.warn("[Router/SEND_LOGIN_OTP/SMS] phoneNumber is missing, skipping");
                 return;
             }
-            if (contactId <= 0) {
-                log.warn("[Router/SEND_LOGIN_OTP] glific_id must be > 0, got {}, skipping", contactId);
-                return;
+
+            boolean sent = smsCountryService.sendOtp(phone, otp, expiryMinutes);
+            if (!sent) {
+                throw new IllegalStateException("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed");
             }
-        } else if (!phone.isBlank()) {
-            log.info("[Router/SEND_LOGIN_OTP] glific_id not provided, opting in via phone");
-            contactId = glificWhatsAppService.optIn(phone);
-            if (contactId <= 0) {
-                log.warn("[Router/SEND_LOGIN_OTP] optIn returned invalid contactId {}, skipping", contactId);
-                return;
-            }
+            log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
+            log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
         } else {
-            log.warn("[Router/SEND_LOGIN_OTP] Neither glific_id nor officerPhoneNumber provided, skipping");
-            return;
-        }
+            String glificId = root.path("glific_id").asText("").strip();
+            String phone = root.path("phoneNumber").asText("").strip();
 
-        boolean sent = whatsAppChannel.sendLoginOtp(contactId, otp);
-        if (!sent) {
-            throw new IllegalStateException("[Router/SEND_LOGIN_OTP] WhatsApp login OTP delivery failed");
-        }
-        log.info("[Router/SEND_LOGIN_OTP] → SENT contactId={}", contactId);
-    }
+            long contactId;
+            if (!glificId.isBlank()) {
+                try {
+                    contactId = Long.parseLong(glificId);
+                } catch (NumberFormatException e) {
+                    log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Invalid glific_id '{}', skipping", glificId);
+                    return;
+                }
+                if (contactId <= 0) {
+                    log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id must be > 0, got {}, skipping", contactId);
+                    return;
+                }
+            } else if (!phone.isBlank()) {
+                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id not provided, opting in via phone");
+                contactId = glificWhatsAppService.optIn(phone);
+                if (contactId <= 0) {
+                    log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] optIn returned invalid contactId {}, skipping", contactId);
+                    return;
+                }
+            } else {
+                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor phoneNumber provided, skipping");
+                return;
+            }
 
-    private void handleSendLoginSmsOtp(JsonNode root) {
-        String phone = root.path("phoneNumber").asText("").strip();
-        String otp = root.path("OTP").asText("");
-        int expiryMinutes = root.path("expiryMinutes").asInt(5);
-
-        if (otp.isBlank()) {
-            log.warn("[Router/SEND_LOGIN_SMS_OTP] OTP is missing, skipping");
-            return;
+            boolean sent = whatsAppChannel.sendLoginOtp(contactId, otp);
+            if (!sent) {
+                throw new IllegalStateException("[Router/SEND_LOGIN_OTP/WHATSAPP] WhatsApp login OTP delivery failed");
+            }
+            log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] → SENT contactId={}", contactId);
         }
-        if (phone.isBlank()) {
-            log.warn("[Router/SEND_LOGIN_SMS_OTP] phoneNumber is missing, skipping");
-            return;
-        }
-
-        boolean sent = smsCountryService.sendOtp(phone, otp, expiryMinutes);
-        if (!sent) {
-            throw new IllegalStateException("[Router/SEND_LOGIN_SMS_OTP] SMS OTP delivery failed");
-        }
-        log.info("[Router/SEND_LOGIN_SMS_OTP] → SENT");
-        log.debug("[Router/SEND_LOGIN_SMS_OTP] phone={} → SENT", phone);
     }
 
     private void handleInviteEmail(JsonNode root) {

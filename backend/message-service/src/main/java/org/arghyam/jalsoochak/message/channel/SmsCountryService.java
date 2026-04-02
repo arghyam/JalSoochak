@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
 
@@ -77,7 +79,7 @@ public class SmsCountryService {
 
         String text = MESSAGE_TEMPLATE.formatted(otp, expiryMinutes);
         String url = baseUrl + "/Accounts/" + authKey + "/SMSes/";
-        String credentials = Base64.getEncoder().encodeToString((authKey + ":" + authToken).getBytes());
+        String credentials = Base64.getEncoder().encodeToString((authKey + ":" + authToken).getBytes(StandardCharsets.UTF_8));
 
         Map<String, String> body = Map.of(
                 "Text", text,
@@ -98,7 +100,7 @@ public class SmsCountryService {
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(JsonNode.class)
-                    .block();
+                    .block(Duration.ofSeconds(30));
 
             if (response == null) {
                 log.error("[SMSCountry] SMS OTP delivery failed: empty response body");
