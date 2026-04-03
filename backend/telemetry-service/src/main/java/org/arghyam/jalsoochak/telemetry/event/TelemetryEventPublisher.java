@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.event;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.telemetry.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.telemetry.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.telemetry.service.AnomalyConstants;
@@ -10,6 +11,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -21,6 +23,7 @@ public class TelemetryEventPublisher {
 
     public static final String TOPIC = "telemetry-service-topic";
     public static final String EVENT_WATER_QUANTITY_RECORDED = "WATER_QUANTITY_RECORDED";
+    public static final String EVENT_METER_READING_RECORDED = "METER_READING_RECORDED";
     public static final String EVENT_ANOMALY_RECORDED = "ANOMALY_RECORDED";
     public static final int NOT_SUBMITTED_STATUS = 0;
 
@@ -129,6 +132,43 @@ public class TelemetryEventPublisher {
         }
     }
 
+    @Async("kafkaPublisherExecutor")
+    public void publishMeterReadingRecorded(Integer tenantId,
+                                            Long schemeId,
+                                            Long userId,
+                                            BigDecimal extractedReading,
+                                            BigDecimal confirmedReading,
+                                            BigDecimal confidence,
+                                            String imageUrl,
+                                            LocalDateTime readingAt,
+                                            Integer channel,
+                                            LocalDate readingDate,
+                                            Integer submissionStatus,
+                                            Integer readingType) {
+        LocalDate effectiveDate = readingDate != null ? readingDate : (readingAt != null ? readingAt.toLocalDate() : null);
+        MeterReadingEvent event = MeterReadingEvent.builder()
+                .eventType(EVENT_METER_READING_RECORDED)
+                .tenantId(tenantId)
+                .schemeId(toInt(schemeId))
+                .userId(toInt(userId))
+                .extractedReading(toInt(extractedReading))
+                .confirmedReading(toInt(confirmedReading))
+                .confidence(toConfidenceInt(confidence))
+                .imageUrl(imageUrl)
+                .readingAt(readingAt != null ? readingAt.toString() : null)
+                .channel(channel)
+                .readingDate(effectiveDate != null ? effectiveDate.toString() : null)
+                .submissionStatus(submissionStatus)
+                .readingType(readingType)
+                .build();
+
+        boolean ok = kafkaProducer.publishJson(TOPIC, event);
+        if (!ok) {
+            log.warn("[telemetry-events] publish_failed meter_reading tenantId={} schemeId={} userId={}",
+                    tenantId, schemeId, userId);
+        }
+    }
+
     private static ReasonPayload mapReason(int anomalyType) {
         if (anomalyType == AnomalyConstants.TYPE_NO_WATER_SUPPLY) {
             return new ReasonPayload("No Water Supply", null);
@@ -144,6 +184,26 @@ public class TelemetryEventPublisher {
 
     private static Integer toInt(Long value) {
         return value == null ? null : value.intValue();
+    }
+
+    private static Integer toInt(BigDecimal value) {
+        if (value == null) {
+            return null;
+        }
+        return value.setScale(0, RoundingMode.HALF_UP).intValue();
+    }
+
+    private static Integer toConfidenceInt(BigDecimal value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.compareTo(BigDecimal.ZERO) < 0) {
+            return null;
+        }
+        if (value.compareTo(BigDecimal.ONE) <= 0) {
+            return value.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.HALF_UP).intValue();
+        }
+        return value.setScale(0, RoundingMode.HALF_UP).intValue();
     }
 
     private record ReasonPayload(String outageReason, String nonSubmissionReason) {
