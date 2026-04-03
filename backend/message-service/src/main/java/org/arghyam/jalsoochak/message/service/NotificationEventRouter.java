@@ -476,12 +476,30 @@ public class NotificationEventRouter {
                 return;
             }
 
-            boolean sent = smsCountryService.sendOtp(phone, otp, expiryMinutes);
-            if (!sent) {
-                throw new IllegalStateException("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed");
-            }
-            log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
-            log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
+            // Use reactive flow to avoid blocking the Kafka listener thread
+            smsCountryService.sendOtpReactive(phone, otp, expiryMinutes)
+                    .doOnNext(sent -> {
+                        if (sent) {
+                            log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
+                            log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
+                        } else {
+                            // Non-retryable failure (4xx API rejection) — log as warning, do not throw
+                            log.warn("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery rejected by provider (non-retryable)");
+                            log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → REJECTED", phone);
+                        }
+                    })
+                    .doOnError(e -> {
+                        // Retryable failure (5xx, network issue) — log error; exception will propagate to Kafka container
+                        log.error("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed (retryable): {}", e.getMessage());
+                        log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → ERROR: {}", phone, e.getMessage());
+                    })
+                    .onErrorResume(e -> {
+                        // Swallow retryable errors to prevent Kafka retries of the entire event
+                        // (OTP sends are time-sensitive; a delayed retry would deliver an expired OTP)
+                        log.warn("[Router/SEND_LOGIN_OTP/SMS] Suppressing retryable error to prevent Kafka retry");
+                        return Mono.empty();
+                    })
+                    .subscribe();
         } else if ("WHATSAPP".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
             JsonNode glificIdNode = root.path("glific_id");
