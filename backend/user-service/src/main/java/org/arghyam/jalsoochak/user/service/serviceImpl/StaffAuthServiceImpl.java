@@ -27,7 +27,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -114,15 +113,13 @@ public class StaffAuthServiceImpl implements StaffAuthService {
             return new OtpRequestResponseDTO(otpProperties.otpLength());
         }
 
+        boolean isWhatsapp = "WHATSAPP".equalsIgnoreCase(otpProperties.deliveryChannel());
         SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                 .eventType("SEND_LOGIN_OTP")
-                .tenantCode(tenantCode)
-                .tenantId(tenantId)
-                .triggeredAt(Instant.now().toString())
-                .glificId(user.whatsappConnectionId())
-                .officerName(user.title())
-                .officerPhoneNumber(user.phoneNumber())
+                .phoneNumber(user.phoneNumber())
+                .glificId(isWhatsapp ? user.whatsappConnectionId() : null)
                 .otp(rawOtp)
+                .expiryMinutes(otpProperties.expiryMinutes())
                 .deliveryChannel(otpProperties.deliveryChannel())
                 .build();
 

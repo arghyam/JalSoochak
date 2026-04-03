@@ -21,5 +21,6 @@ public record OtpProperties(
         if (otpLength < 4)         throw new IllegalArgumentException("otp.otp-length must be >= 4");
         if (deliveryChannel == null || deliveryChannel.isBlank())
             throw new IllegalArgumentException("otp.delivery-channel must not be blank");
+        deliveryChannel = deliveryChannel.toUpperCase();
     }
 }
