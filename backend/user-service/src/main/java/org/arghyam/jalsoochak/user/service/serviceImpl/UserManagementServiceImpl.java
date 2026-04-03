@@ -81,7 +81,7 @@ public class UserManagementServiceImpl implements UserManagementService {
         AdminUserRow callerRow = userCommonRepository.findAdminUserByUuid(callerUuid)
                 .orElseThrow(() -> new UnauthorizedAccessException("Caller is not registered in the system"));
 
-        String callerRole = userCommonRepository.findUserTypeNameById(callerRow.adminLevel()).orElse("");
+        String callerRole = callerRow.userTypeCName() != null ? callerRow.userTypeCName() : "";
 
         if ("STATE_ADMIN".equals(callerRole)) {
             if (!"STATE_ADMIN".equals(request.getRole())) {
@@ -201,8 +201,8 @@ public class UserManagementServiceImpl implements UserManagementService {
         AdminUserRow callerRow = userCommonRepository.findAdminUserByUuid(callerUuid)
                 .orElseThrow(() -> new UnauthorizedAccessException("Caller is not registered in the system"));
 
-        String callerRole = userCommonRepository.findUserTypeNameById(callerRow.adminLevel()).orElse("");
-        String targetRole = userCommonRepository.findUserTypeNameById(target.adminLevel()).orElse("");
+        String callerRole = callerRow.userTypeCName() != null ? callerRow.userTypeCName() : "";
+        String targetRole = target.userTypeCName() != null ? target.userTypeCName() : "";
 
         if ("STATE_ADMIN".equals(callerRole)) {
             if (!"STATE_ADMIN".equals(targetRole)) {
@@ -487,7 +487,7 @@ public class UserManagementServiceImpl implements UserManagementService {
         if (request.getLastName() != null && !request.getLastName().isBlank())
             rep.setLastName(request.getLastName());
 
-        String roleName = userCommonRepository.findUserTypeNameById(user.adminLevel()).orElse(null);
+        String roleName = user.userTypeCName();
         if ("STATE_ADMIN".equals(roleName)
                 && (request.getPhoneNumber() != null || request.getFirstName() != null
                         || request.getLastName() != null)) {
@@ -517,7 +517,7 @@ public class UserManagementServiceImpl implements UserManagementService {
             throw new ForbiddenAccessException("Cannot deactivate your own account");
         }
 
-        String targetRole = userCommonRepository.findUserTypeNameById(target.adminLevel()).orElse("");
+        String targetRole = target.userTypeCName() != null ? target.userTypeCName() : "";
         Optional<String> callerRole = SecurityUtils.extractRole(caller);
 
         if (callerRole.map("STATE_ADMIN"::equals).orElse(false)) {

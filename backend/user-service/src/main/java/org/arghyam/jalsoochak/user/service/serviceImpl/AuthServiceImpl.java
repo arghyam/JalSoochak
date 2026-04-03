@@ -84,7 +84,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Account is deactivated");
         }
 
-        validateTenantStatus(user.tenantId(), TenantAccessRole.fromAdminLevel(user.adminLevel()));
+        validateTenantStatus(user.tenantId(), TenantAccessRole.fromCName(user.userTypeCName()));
 
         KeycloakTokenResponse token = keycloakClient.obtainToken(request.getEmail(), request.getPassword());
         return buildEnrichedAuthResult(token, user);
@@ -108,7 +108,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Account is deactivated");
         }
 
-        validateTenantStatus(user.tenantId(), TenantAccessRole.fromAdminLevel(user.adminLevel()));
+        validateTenantStatus(user.tenantId(), TenantAccessRole.fromCName(user.userTypeCName()));
 
         return buildEnrichedAuthResult(token, user);
     }
@@ -179,11 +179,11 @@ public class AuthServiceImpl implements AuthService {
                 : userCommonRepository.findTenantIdByStateCode(tenantCode)
                         .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for code: " + tenantCode));
         
-        // Derive role from token and validate consistency with pendingUser.adminLevel()
+        // Derive role from token and validate consistency with pendingUser.userTypeCName()
         TenantAccessRole tokenRole = "SUPER_USER".equals(role) ? TenantAccessRole.SUPER_USER
                 : "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN
                 : TenantAccessRole.STAFF;
-        TenantAccessRole adminLevelRole = TenantAccessRole.fromAdminLevel(pendingUser.adminLevel());
+        TenantAccessRole adminLevelRole = TenantAccessRole.fromCName(pendingUser.userTypeCName());
         
         // Validate role consistency: token role must match admin level role
         if (tokenRole != adminLevelRole) {
@@ -324,7 +324,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private AuthResult buildEnrichedAuthResult(KeycloakTokenResponse token, AdminUserRow user) {
-        String roleName = userCommonRepository.findUserTypeNameById(user.adminLevel()).orElse(null);
+        String roleName = user.userTypeCName();
         String tenantCode = user.tenantId() != 0
                 ? userCommonRepository.findTenantStateCodeById(user.tenantId()).orElse(null)
                 : null;

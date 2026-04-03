@@ -112,7 +112,9 @@ class UserManagementServiceImplTest {
     // ── helpers ───────────────────────────────────────────────────────────────────
 
     private AdminUserRow userRow(Long id, String uuid, String email, int tenantId, int adminLevel, AdminUserStatus status) {
-        return new AdminUserRow(id, uuid, email, "91XXXXXXXXXX", tenantId, adminLevel, status, 0, null);
+        // Derive c_name from adminLevel using the test seed data (id=1→SUPER_USER, id=2→STATE_ADMIN)
+        String cName = adminLevel == 2 ? "STATE_ADMIN" : "SUPER_USER";
+        return new AdminUserRow(id, uuid, email, "91XXXXXXXXXX", tenantId, adminLevel, cName, status, 0, null);
     }
 
     private AdminUserResponseDTO responseDTO(Long id, String email, String role) {
@@ -366,7 +368,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             // findAdminUserByEmail returns empty → user does not yet exist (fresh invite)
             when(userCommonRepository.findAdminUserByEmail("new@example.com")).thenReturn(Optional.empty());
             // adminLevelId lookup for the invited role
@@ -413,7 +414,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(2L, "kc-sa", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
 
             InviteRequestDTO req = new InviteRequestDTO();
             req.setEmail("other@example.com");
@@ -430,7 +430,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             AdminUserRow existingUser = userRow(3L, "kc-dup", "dup@example.com", 0, 1, AdminUserStatus.ACTIVE);
             when(userCommonRepository.findAdminUserByEmail("dup@example.com")).thenReturn(Optional.of(existingUser));
 
@@ -448,7 +447,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             AdminUserRow existingUser = userRow(3L, "kc-dup", "dup@example.com", 0, 1, AdminUserStatus.INACTIVE);
             when(userCommonRepository.findAdminUserByEmail("dup@example.com")).thenReturn(Optional.of(existingUser));
 
@@ -466,7 +464,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             AdminUserRow pendingUser = userRow(5L, "placeholder-uuid", "pending@example.com", 0, 1, AdminUserStatus.PENDING);
             when(userCommonRepository.findAdminUserByEmail("pending@example.com")).thenReturn(Optional.of(pendingUser));
 
@@ -487,7 +484,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
 
             InviteRequestDTO req = new InviteRequestDTO();
             req.setEmail("new@example.com");
@@ -504,7 +500,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.existsTenantByStateCode("XX")).thenReturn(false);
 
             InviteRequestDTO req = new InviteRequestDTO();
@@ -522,7 +517,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findUserTypeIdByName("SUPER_USER")).thenReturn(Optional.of(1));
             doThrow(new DuplicateKeyException("duplicate key"))
                     .when(userCommonRepository).createAdminUserPending(eq("race@example.com"), any(), any(), any(), any());
@@ -546,7 +540,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findUserTypeIdByName("SUPER_USER")).thenReturn(Optional.of(1));
             doThrow(new DuplicateKeyException("duplicate key"))
                     .when(userCommonRepository).createAdminUserPending(eq("race@example.com"), any(), any(), any(), any());
@@ -580,7 +573,6 @@ class UserManagementServiceImplTest {
             AdminUserRow target = userRow(1L, "kc-target", "su@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(1L)).thenReturn(Optional.of(target));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.countActiveSuperUsers()).thenReturn(1);
 
             assertThrows(InsufficientActiveUsersException.class,
@@ -594,7 +586,6 @@ class UserManagementServiceImplTest {
             AdminUserRow target = userRow(2L, "kc-target", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(2L)).thenReturn(Optional.of(target));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.countActiveStateAdminsForTenant(1)).thenReturn(1);
 
             assertThrows(InsufficientActiveUsersException.class,
@@ -608,7 +599,6 @@ class UserManagementServiceImplTest {
             AdminUserRow target = userRow(3L, "kc-target", "other@example.com", 2, 2, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(3L)).thenReturn(Optional.of(target));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             // caller is MP, target is in tenant 2 → different state
             when(userCommonRepository.findTenantStateCodeById(2)).thenReturn(Optional.of("GJ"));
 
@@ -624,7 +614,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(4L)).thenReturn(Optional.of(target));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.countActiveSuperUsers()).thenReturn(3);
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
             doNothing().when(userCommonRepository).deactivateAdminUser(4L, 1L);
@@ -752,7 +741,6 @@ class UserManagementServiceImplTest {
             rep.setLastName("Name");
             when(keycloakProvider.getAdminInstance().realm("test-realm").users().get("kc-id").toRepresentation())
                     .thenReturn(rep);
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(keycloakAdminHelper.buildAdminUserResponse(any())).thenReturn(dto);
 
             UpdateProfileRequestDTO req = new UpdateProfileRequestDTO();
@@ -777,7 +765,6 @@ class UserManagementServiceImplTest {
             rep.setLastName("Admin");
             when(keycloakProvider.getAdminInstance().realm("test-realm").users().get("kc-sa").toRepresentation())
                     .thenReturn(rep);
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
             doNothing().when(userTenantRepository).updateUserProfile(anyString(), any(), anyString(), any());
             when(keycloakAdminHelper.buildAdminUserResponse(any())).thenReturn(dto);
@@ -810,7 +797,6 @@ class UserManagementServiceImplTest {
 
             when(userCommonRepository.findAdminUserById(7L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findInviteTokenByEmail("pending@example.com")).thenReturn(Optional.of(existingToken));
             when(tokenService.generateRawToken()).thenReturn("new-raw-token");
             when(tokenService.hash("new-raw-token")).thenReturn("new-hash");
@@ -845,7 +831,6 @@ class UserManagementServiceImplTest {
 
             when(userCommonRepository.findAdminUserById(7L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findInviteTokenByEmail("pending@example.com")).thenReturn(Optional.of(expiredToken));
             when(tokenService.generateRawToken()).thenReturn("new-raw-token");
             when(tokenService.hash("new-raw-token")).thenReturn("new-hash");
@@ -895,7 +880,6 @@ class UserManagementServiceImplTest {
 
             when(userCommonRepository.findAdminUserById(9L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(2)).thenReturn(Optional.of("GJ"));
 
             assertThrows(ForbiddenAccessException.class, () -> userManagementService.reinviteUser(9L, auth));
