@@ -1137,8 +1137,14 @@ class TenantManagementServiceImplTest {
             assertEquals(total - 1, result.getSummary().getPending());
             assertEquals(ConfigStatusEnum.CONFIGURED, result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).getStatus());
             assertTrue(result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).isMandatory());
-            assertTrue(result.getConfigs().values().stream().allMatch(e -> e.isMandatory()),
-                    "All keys are currently mandatory");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES).isMandatory(),
+                    "GLIFIC_MESSAGE_TEMPLATES is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_IT_SYSTEM_CONNECTION).isMandatory(),
+                    "STATE_IT_SYSTEM_CONNECTION is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_DATA_RECONCILIATION_TIME).isMandatory(),
+                    "STATE_DATA_RECONCILIATION_TIME is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON).isMandatory(),
+                    "EMAIL_TEMPLATE_JSON is optional");
             verify(tenantCommonRepository).findById(tenantId);
             verify(tenantCommonRepository).findConfigsByTenantId(tenantId);
         }

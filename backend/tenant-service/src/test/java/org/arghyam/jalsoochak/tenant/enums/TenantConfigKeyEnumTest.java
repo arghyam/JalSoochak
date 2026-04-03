@@ -60,17 +60,39 @@ class TenantConfigKeyEnumTest {
     class MandatoryTests {
 
         @Test
-        @DisplayName("All keys are currently mandatory")
-        void allKeys_areMandatory() {
-            assertThat(Arrays.stream(TenantConfigKeyEnum.values())
-                    .allMatch(TenantConfigKeyEnum::isMandatory)).isTrue();
+        @DisplayName("Mandatory keys are correctly marked")
+        void mandatoryKeys_areCorrectlyMarked() {
+            List<TenantConfigKeyEnum> mandatoryKeys = Arrays.stream(TenantConfigKeyEnum.values())
+                    .filter(TenantConfigKeyEnum::isMandatory)
+                    .toList();
+
+            assertThat(mandatoryKeys).containsExactlyInAnyOrder(
+                    TenantConfigKeyEnum.DATE_FORMAT_SCREEN,
+                    TenantConfigKeyEnum.DATE_FORMAT_TABLE,
+                    TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS,
+                    TenantConfigKeyEnum.TENANT_LOGO,
+                    TenantConfigKeyEnum.METER_CHANGE_REASONS,
+                    TenantConfigKeyEnum.SUPPORTED_LANGUAGES,
+                    TenantConfigKeyEnum.LOCATION_CHECK_REQUIRED,
+                    TenantConfigKeyEnum.MESSAGE_BROKER_CONNECTION_SETTINGS,
+                    TenantConfigKeyEnum.WATER_NORM,
+                    TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD,
+                    TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME,
+                    TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES,
+                    TenantConfigKeyEnum.DATA_CONSOLIDATION_TIME,
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS,
+                    TenantConfigKeyEnum.AVERAGE_MEMBERS_PER_HOUSEHOLD,
+                    TenantConfigKeyEnum.SUPPLY_OUTAGE_REASONS
+            );
         }
 
         @Test
-        @DisplayName("getMandatoryKeys returns all enum values when all are mandatory")
-        void getMandatoryKeys_returnsAllKeys() {
-            EnumSet<TenantConfigKeyEnum> mandatory = TenantConfigKeyEnum.getMandatoryKeys();
-            assertThat(mandatory).containsExactlyInAnyOrder(TenantConfigKeyEnum.values());
+        @DisplayName("Optional keys are correctly marked as non-mandatory")
+        void optionalKeys_areNotMandatory() {
+            assertThat(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES.isMandatory()).isFalse();
+            assertThat(TenantConfigKeyEnum.STATE_IT_SYSTEM_CONNECTION.isMandatory()).isFalse();
+            assertThat(TenantConfigKeyEnum.STATE_DATA_RECONCILIATION_TIME.isMandatory()).isFalse();
+            assertThat(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.isMandatory()).isFalse();
         }
 
         @Test
