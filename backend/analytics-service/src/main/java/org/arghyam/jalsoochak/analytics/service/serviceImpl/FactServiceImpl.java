@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
+import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.arghyam.jalsoochak.analytics.entity.Anomaly;
 import org.arghyam.jalsoochak.analytics.entity.DimDate;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
@@ -63,6 +64,10 @@ public class FactServiceImpl implements FactService {
     public void ingestMeterReading(MeterReadingEvent event) {
         LocalDateTime readingAt = parseTimestamp(event.getReadingAt());
         LocalDate readingDate = parseDate(event.getReadingDate());
+        Integer submissionStatus = event.getSubmissionStatus() != null
+                ? event.getSubmissionStatus()
+                : SubmissionStatus.SUBMITTED.getCode();
+        Integer readingType = event.getReadingType() != null ? event.getReadingType() : 0;
 
         FactMeterReading fact = FactMeterReading.builder()
                 .tenantId(event.getTenantId())
@@ -75,6 +80,8 @@ public class FactServiceImpl implements FactService {
                 .readingAt(readingAt)
                 .channel(event.getChannel())
                 .readingDate(readingDate)
+                .submissionStatus(submissionStatus)
+                .readingType(readingType)
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -289,12 +296,6 @@ public class FactServiceImpl implements FactService {
     @Override
     @Transactional
     public void ingestAnomalyRecorded(AnomalyEvent event) {
-        if (event.getType() != null
-                && event.getType().equals(EscalationType.NO_WATER_SUPPLY.code)
-                && (event.getCorrelationId() == null || event.getCorrelationId().isBlank())) {
-            log.warn("Skipping NO_WATER_SUPPLY anomaly without correlationId (uuid={})", event.getUuid());
-            return;
-        }
         OffsetDateTime now = OffsetDateTime.now();
         String uuid = event.getUuid();
         if (uuid == null || uuid.isBlank()) {
@@ -304,6 +305,11 @@ public class FactServiceImpl implements FactService {
         Integer status = event.getStatus() != null ? event.getStatus() : 1;
         if (event.getStatus() == null) {
             log.warn("Anomaly event missing status; defaulting to status=1 (OPEN) for uuid={}", uuid);
+        }
+        String correlationId = event.getCorrelationId();
+        if (isWaterAnomaly(event.getType()) && (correlationId == null || correlationId.isBlank())) {
+            correlationId = resolveCorrelationId(event);
+            log.warn("Water anomaly missing correlationId, derived correlationId={} (uuid={})", correlationId, uuid);
         }
 
         Anomaly anomaly = Anomaly.builder()
@@ -321,7 +327,7 @@ public class FactServiceImpl implements FactService {
                 .consecutiveDaysMissed(event.getConsecutiveDaysMissed())
                 .reason(event.getReason())
                 .status(status)
-                .correlationId(event.getCorrelationId())
+                .correlationId(correlationId)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -332,6 +338,24 @@ public class FactServiceImpl implements FactService {
                     event.getSchemeId(), event.getTenantId(), event.getUuid());
         } catch (DataIntegrityViolationException e) {
             log.debug("Skipping duplicate anomaly uuid={} (unique constraint)", event.getUuid());
+        }
+
+        if (isWaterAnomaly(event.getType())) {
+            FactEscalation escalation = FactEscalation.builder()
+                    .tenantId(event.getTenantId())
+                    .schemeId(event.getSchemeId())
+                    .escalationType(event.getType())
+                    .message(event.getReason())
+                    .userId(event.getUserId())
+                    .resolutionStatus(event.getStatus())
+                    .remark(null)
+                    .correlationId(correlationId)
+                    .createdAt(LocalDateTime.now())
+                    .updatedAt(LocalDateTime.now())
+                    .build();
+            escalationRepository.save(escalation);
+            log.info("Ingested fact_escalation_table for water anomaly type={} scheme={} tenant={}",
+                    event.getType(), event.getSchemeId(), event.getTenantId());
         }
     }
 
@@ -405,5 +429,28 @@ public class FactServiceImpl implements FactService {
             log.warn("Could not parse date '{}', storing null", value);
             return null;
         }
+    }
+
+    private boolean isWaterAnomaly(Integer type) {
+        if (type == null) {
+            return false;
+        }
+        return EscalationType.WATER_ANOMALIES.stream().anyMatch(t -> t.code == type);
+    }
+
+    private String resolveCorrelationId(AnomalyEvent event) {
+        if (event.getCorrelationId() != null && !event.getCorrelationId().isBlank()) {
+            return event.getCorrelationId();
+        }
+        if (event.getType() != null) {
+            EscalationType type = EscalationType.WATER_ANOMALIES.stream()
+                    .filter(t -> t.code == event.getType())
+                    .findFirst()
+                    .orElse(null);
+            if (type != null) {
+                return buildCorrelationId(type, event.getUserId(), event.getTenantId(), event.getSchemeId());
+            }
+        }
+        return event.getUuid();
     }
 }
