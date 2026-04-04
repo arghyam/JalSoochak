@@ -1270,8 +1270,8 @@ public class TelemetryTenantRepository {
             return new TelemetryOperator(
                     toLong(rs.getObject("id")),
                     toInteger(rs.getObject("tenant_id")),
-                    rs.getString("title"),
-                    rs.getString("email"),
+                    decryptIfNeeded(rs.getString("title")),
+                    decryptIfNeeded(rs.getString("email")),
                     decryptPhoneIfNeeded(rs.getString("phone_number")),
                     toInteger(rs.getObject("language_id"))
             );
@@ -1281,6 +1281,10 @@ public class TelemetryTenantRepository {
     }
 
     private String decryptPhoneIfNeeded(String value) {
+        return piiEncryptionService.safeDecrypt(value);
+    }
+
+    private String decryptIfNeeded(String value) {
         return piiEncryptionService.safeDecrypt(value);
     }
 
