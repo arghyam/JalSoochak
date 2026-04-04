@@ -12,6 +12,9 @@ public class GlificLocalizationService {
     private static final Pattern SUBMITTED_PREVIOUS_PATTERN = Pattern.compile(
             "(?i)submitted\\s+reading:\\s*([^\\.]+)\\.\\s*previous\\s+reading:\\s*([^\\.]+)\\.?"
     );
+    private static final Pattern EXTRACTED_READING_PATTERN = Pattern.compile(
+            "(?i)extracted\\s+reading:\\s*([^\\.]+)"
+    );
 
     private final GlificOperatorContextService operatorContextService;
 
@@ -204,11 +207,36 @@ public class GlificLocalizationService {
         if (normalized.contains("manual reading could not be saved")) {
             return "मैनुअल रीडिंग सेव नहीं हो सकी। कृपया दोबारा प्रयास करें।";
         }
+        if (normalized.contains("reading captured successfully")) {
+            Matcher matcher = EXTRACTED_READING_PATTERN.matcher(message);
+            if (matcher.find()) {
+                String reading = matcher.group(1).trim();
+                return "रीडिंग सफलतापूर्वक दर्ज हुई। प्राप्त रीडिंग: " + reading;
+            }
+            return "रीडिंग सफलतापूर्वक दर्ज हुई।";
+        }
+        if (normalized.contains("low ocr confidence")) {
+            Matcher matcher = EXTRACTED_READING_PATTERN.matcher(message);
+            if (matcher.find()) {
+                String reading = matcher.group(1).trim();
+                return "OCR भरोसा कम है। प्राप्त रीडिंग: " + reading + "। कृपया रीडिंग की पुष्टि करें।";
+            }
+            return "OCR भरोसा कम है। कृपया रीडिंग की पुष्टि करें।";
+        }
+        if (normalized.contains("invalid reading value")) {
+            return "रीडिंग मान्य नहीं है।";
+        }
         if (normalized.contains("could not read meter value from image")) {
             return "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।";
         }
         if (normalized.contains("ocr failed")) {
             return "मीटर रीडिंग पढ़ने में त्रुटि हुई। कृपया स्पष्ट फोटो भेजें।";
+        }
+        if (normalized.contains("location saved successfully")) {
+            return "लोकेशन सफलतापूर्वक सेव हो गई।";
+        }
+        if (normalized.contains("reading updated successfully")) {
+            return "रीडिंग सफलतापूर्वक अपडेट हुई।";
         }
         return message;
     }
