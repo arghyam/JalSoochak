@@ -5,11 +5,13 @@ import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianceDTO;
+import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingDetailDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
 import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
+import org.arghyam.jalsoochak.user.service.PersonSchemeService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +27,7 @@ import java.util.List;
 public class PublicPumpOperatorController {
 
     private final PublicPumpOperatorService publicPumpOperatorService;
+    private final PersonSchemeService personSchemeService;
 
     @GetMapping("/pump-operators/{pumpOperatorId}")
     public ResponseEntity<ApiResponseDTO<PumpOperatorDetailsDTO>> getPumpOperatorDetails(
@@ -111,5 +114,27 @@ public class PublicPumpOperatorController {
                 effectiveSize
         );
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operators retrieved", rows));
+    }
+
+    @GetMapping("/pump-operators/{pumpOperatorId}/readings")
+    public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorReadingDetailDTO>>> listPumpOperatorReadings(
+            @PathVariable long pumpOperatorId,
+            @RequestParam String tenantCode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "readingAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir,
+            @RequestParam(required = false) String schemeName
+    ) {
+        PageResponseDTO<PumpOperatorReadingDetailDTO> rows = personSchemeService.listPumpOperatorReadings(
+                tenantCode,
+                pumpOperatorId,
+                schemeName,
+                sortBy,
+                sortDir,
+                page,
+                size
+        );
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operator readings retrieved", rows));
     }
 }
