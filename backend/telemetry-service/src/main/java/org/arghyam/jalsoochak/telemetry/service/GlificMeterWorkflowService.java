@@ -1296,6 +1296,9 @@ public class GlificMeterWorkflowService {
                     request.getOrganizationId()
             );
             Long operatorId = operatorWithSchema.operator().id();
+            String languageKey = localizationService.normalizeLanguageKey(
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, operatorWithSchema.operator().tenantId())
+            );
 
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId)
@@ -1339,7 +1342,7 @@ public class GlificMeterWorkflowService {
 
             return CreateReadingResponse.builder()
                     .success(true)
-                    .message("Location saved successfully.")
+                    .message(localizationService.localizeMessage("Location saved successfully.", languageKey))
                     .qualityStatus("CONFIRMED")
                     .build();
         } catch (Exception e) {
