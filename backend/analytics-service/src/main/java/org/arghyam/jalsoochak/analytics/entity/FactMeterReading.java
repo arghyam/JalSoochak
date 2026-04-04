@@ -54,6 +54,12 @@ public class FactMeterReading {
     @Column(name = "reading_date", nullable = false)
     private LocalDate readingDate;
 
+    @Column(name = "submission_status")
+    private Integer submissionStatus;
+
+    @Column(name = "reading_type", nullable = false)
+    private Integer readingType;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 }

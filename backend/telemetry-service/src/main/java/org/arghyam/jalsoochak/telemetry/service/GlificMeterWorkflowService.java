@@ -51,6 +51,8 @@ public class GlificMeterWorkflowService {
             "कृपया अपनी समस्या संक्षेप में लिखें।";
     private static final String DEFAULT_METER_CHANGE_PROMPT_ENGLISH =
             "Please select the no submission reasons by typing any of the number";
+    private static final String DEFAULT_METER_CHANGE_PROMPT_HINDI =
+            "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें";
 
     private static final List<String> DEFAULT_ISSUE_REASONS = List.of(
             "Meter Replaced",
@@ -308,6 +310,9 @@ public class GlificMeterWorkflowService {
         if (tenantId == null) {
             throw new IllegalStateException("Operator tenant could not be resolved");
         }
+        String languageKey = localizationService.normalizeLanguageKey(
+                operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
+        );
 
         String configValue = tenantConfigRepository.findConfigValue(tenantId, "SUPPLY_OUTAGE_REASONS")
                 .orElseThrow(() -> new IllegalStateException("SUPPLY_OUTAGE_REASONS config is not configured"));
@@ -331,7 +336,8 @@ public class GlificMeterWorkflowService {
                 b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
         ));
 
-        StringBuilder message = new StringBuilder(LEGACY_ISSUE_PROMPT_ENGLISH);
+        String prompt = "hindi".equals(languageKey) ? LEGACY_ISSUE_PROMPT_HINDI : LEGACY_ISSUE_PROMPT_ENGLISH;
+        StringBuilder message = new StringBuilder(localizationService.localizeMessage(prompt, languageKey));
         for (int i = 0; i < reasons.size(); i++) {
             String name = reasons.get(i).path("name").asText();
             if (name == null || name.isBlank()) {
@@ -340,7 +346,7 @@ public class GlificMeterWorkflowService {
             message.append("\n")
                     .append(i + 1)
                     .append(". ")
-                    .append(name.trim());
+                    .append(localizationService.localizeMessage(name.trim(), languageKey));
         }
 
         try {
@@ -363,6 +369,9 @@ public class GlificMeterWorkflowService {
         if (tenantId == null) {
             throw new IllegalStateException("Operator tenant could not be resolved");
         }
+        String languageKey = localizationService.normalizeLanguageKey(
+                operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
+        );
 
         String configValue = tenantConfigRepository.findConfigValue(tenantId, "METER_CHANGE_REASONS")
                 .orElseThrow(() -> new IllegalStateException("METER_CHANGE_REASONS config is not configured"));
@@ -386,7 +395,8 @@ public class GlificMeterWorkflowService {
                 b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
         ));
 
-        StringBuilder message = new StringBuilder(DEFAULT_METER_CHANGE_PROMPT_ENGLISH);
+        String prompt = "hindi".equals(languageKey) ? DEFAULT_METER_CHANGE_PROMPT_HINDI : DEFAULT_METER_CHANGE_PROMPT_ENGLISH;
+        StringBuilder message = new StringBuilder(localizationService.localizeMessage(prompt, languageKey));
         for (int i = 0; i < reasons.size(); i++) {
             String name = reasons.get(i).path("name").asText();
             if (name == null || name.isBlank()) {
@@ -395,7 +405,7 @@ public class GlificMeterWorkflowService {
             message.append("\n")
                     .append(i + 1)
                     .append(". ")
-                    .append(name.trim());
+                    .append(localizationService.localizeMessage(name.trim(), languageKey));
         }
 
         try {
@@ -1296,6 +1306,9 @@ public class GlificMeterWorkflowService {
                     request.getOrganizationId()
             );
             Long operatorId = operatorWithSchema.operator().id();
+            String languageKey = localizationService.normalizeLanguageKey(
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, operatorWithSchema.operator().tenantId())
+            );
 
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId)
@@ -1339,7 +1352,7 @@ public class GlificMeterWorkflowService {
 
             return CreateReadingResponse.builder()
                     .success(true)
-                    .message("Location saved successfully.")
+                    .message(localizationService.localizeMessage("Location saved successfully.", languageKey))
                     .qualityStatus("CONFIRMED")
                     .build();
         } catch (Exception e) {

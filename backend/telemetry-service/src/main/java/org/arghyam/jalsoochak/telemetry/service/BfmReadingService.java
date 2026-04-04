@@ -315,6 +315,21 @@ public class BfmReadingService {
                     .orElse(null);
         }
 
+        telemetryEventPublisher.publishMeterReadingRecorded(
+                tenantId,
+                request.getSchemeId(),
+                operatorInRequest.id(),
+                extractedReading,
+                confirmedReading,
+                confidenceLevel,
+                request.getReadingUrl(),
+                readingAt,
+                null,
+                LocalDate.from(readingAt),
+                1,
+                0
+        );
+
         String finalMessage;
         String readingText = finalReading != null ? finalReading.stripTrailingZeros().toPlainString() : null;
         if (isValid) {
