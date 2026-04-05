@@ -341,9 +341,15 @@ public class PersonSchemeRepository {
         String sql = String.format("""
                 SELECT COUNT(1)
                 FROM %s.flow_reading_table fr
+                JOIN %s.user_table u
+                  ON u.id = fr.created_by
+                 AND u.deleted_at IS NULL
+                JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type
                 WHERE fr.deleted_at IS NULL
                   AND fr.scheme_id = ?
-                """, schemaName);
+                  AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
+                """, schemaName, schemaName);
         Long total = jdbcTemplate.queryForObject(sql, Long.class, schemeId);
         return total == null ? 0 : total;
     }
