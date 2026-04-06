@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyPaginatedResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -355,29 +356,82 @@ public class AnalyticsSchemeReportingController {
     }
 
     @GetMapping("/anomalies")
-    @Operation(summary = "Get anomalies for schemes mapped to a user (via dim_user_scheme_mapping_table)")
-    public ResponseEntity<ApiResponse<List<AnomalyListItemDto>>> getAnomalies(
+    @Operation(
+            summary = "Get paginated anomalies for schemes mapped to a user (via dim_user_scheme_mapping_table)",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Anomalies fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = AnomalyPaginatedResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = AnomalyPaginatedResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = AnomalyPaginatedResponse.class)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<AnomalyPaginatedResponse> getAnomalies(
             @RequestParam(name = "user_id") Integer mappedUserId,
+            @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
+            @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "anomaly_type", required = false) String anomalyType
     ) {
         try {
-            List<AnomalyListItemDto> data = anomalyQueryService.getAnomaliesForUserSchemes(
+            if (pageNumber < 1) {
+                throw new IllegalArgumentException("page_number must be >= 1");
+            }
+            if (limit < 1) {
+                throw new IllegalArgumentException("limit must be >= 1");
+            }
+
+            PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
+            Page<AnomalyListItemDto> page = anomalyQueryService.getAnomaliesForUserSchemes(
                     mappedUserId,
                     startDate,
                     endDate,
-                    anomalyType
+                    anomalyType,
+                    pageable
             );
 
-            return ResponseEntity.ok(ApiResponse.<List<AnomalyListItemDto>>builder()
+            return ResponseEntity.ok(AnomalyPaginatedResponse.builder()
                     .success(true)
-                    .data(data)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(page.getTotalElements())
+                    .anomalies(page.getContent())
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(AnomalyPaginatedResponse.builder()
+                    .success(false)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(0)
+                    .anomalies(List.of())
                     .build());
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<AnomalyListItemDto>>builder()
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(AnomalyPaginatedResponse.builder()
                     .success(false)
-                    .data(null)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(0)
+                    .anomalies(List.of())
                     .build());
         }
     }
