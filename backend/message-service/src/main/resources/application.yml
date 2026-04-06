@@ -38,9 +38,10 @@ spring:
         max.poll.interval.ms: 600000
         fetch.max.wait.ms: 500
 
+  # SMTP mail config — required when notification.mail.provider=smtp
   mail:
-    host: smtp.office365.com
-    port: 587
+    host: ${SPRING_MAIL_HOST:smtp.office365.com}
+    port: ${SPRING_MAIL_PORT:587}
     username: ${SPRING_MAIL_USERNAME}
     password: ${SPRING_MAIL_PASSWORD}
     protocol: smtp
@@ -86,6 +87,116 @@ notification:
     smtp:
       from-address: ${MAIL_FROM_EMAIL:noreply@example.com}
       from-name: ${MAIL_FROM_NAME:Jalsoochak}
+
+  # ── Transactional account emails (invite, reinvite, password-reset) ────────
+  # Switch providers by changing 'provider'. No code changes required.
+  # provider: smtp    → requires spring.mail.* block to be uncommented
+  # provider: sendgrid → requires SENDGRID_API_KEY env var (default)
+  mail:
+    provider: ${MAIL_PROVIDER:sendgrid}
+    from-address: ${MAIL_FROM_EMAIL:noreply@example.com}
+    from-name: ${MAIL_FROM_NAME:Jalsoochak}
+    logo-image-url: ${MAIL_LOGO_URL:https://lh3.googleusercontent.com/d/1WUwmfNG_wyWF_G31MaWCtWIsZCxHy5g2}
+    sendgrid:
+      api-url: https://api.sendgrid.com
+      api-key: ${SENDGRID_API_KEY}
+      templates:
+        password-reset: ${SENDGRID_TEMPLATE_PASSWORD_RESET:d-9d83de3639254c18b86fa2834f4a5db1}
+        reinvitation: ${SENDGRID_TEMPLATE_REINVITATION:d-3710ff4d9d874cf1950c589c6f71d752}
+        default-invitation: ${SENDGRID_TEMPLATE_DEFAULT_INVITATION:d-7721978b67bf4f0083891657ed584447}
+        super-user-invitation: ${SENDGRID_TEMPLATE_SUPER_USER_INVITATION:d-6ff964820aae4e03866dd39f64976287}
+        state-admin-invitation: ${SENDGRID_TEMPLATE_STATE_ADMIN_INVITATION:d-ec98926fa9ed4046b3bf9b85c7a1a7e3}
+
+    # ── SMTP plain-text templates (used when provider: smtp) ─────────────────
+    # Placeholders: {name}, {activation_link}, {expiry_hours},
+    #               {reset_link}, {expiry_minutes}, {state_name}
+    smtp:
+      templates:
+        password-reset:
+          subject: "Reset Your JalSoochak Password"
+          body: |
+            Dear User,
+
+            We received a request to reset the password associated with your JalSoochak account.
+            If you did not initiate this request, please disregard this email — your account will remain secure.
+
+            To reset your password, click the link below:
+
+            Reset Password: {reset_link}
+
+            This link will expire in {expiry_minutes} minutes.
+
+            ---
+            This is an automated message from the JalSoochak platform.
+            Please do not reply to this email.
+        reinvitation:
+          subject: "Reminder: Your JalSoochak Invitation"
+          body: |
+            Dear {name},
+
+            This is a reminder that you have a pending invitation to join the JalSoochak platform.
+            A new activation link has been generated for you — please use it to set your password.
+
+            Activate Account: {activation_link}
+
+            This link will expire in {expiry_hours} hours.
+
+            ---
+            This is an automated message from the JalSoochak platform.
+            Please do not reply to this email.
+        default-invitation:
+          subject: "You are invited to join JalSoochak"
+          body: |
+            Dear {name},
+
+            You have been officially invited to join the JalSoochak platform — a national initiative
+            for real-time water quality monitoring and reporting.
+
+            To activate your account, please set a password using the link below:
+
+            Activate Account: {activation_link}
+
+            This link will expire in {expiry_hours} hours.
+
+            ---
+            This is an automated message from the JalSoochak platform.
+            Please do not reply to this email.
+
+            Supported by Arghyam Foundation | Ministry of Jal Shakti, Government of India
+        super-user-invitation:
+          subject: "You are assigned as Super User by JalSoochak"
+          body: |
+            Dear {name},
+
+            You have been assigned as a Super User for JalSoochak platform. In this role you will be
+            responsible for managing the JalSoochak at system level.
+
+            To activate your account, please set a password using the link below:
+
+            Activate Account: {activation_link}
+
+            This link will expire in {expiry_hours} hours.
+
+            ---
+            This is an automated message from the JalSoochak platform.
+            Please do not reply to this email.
+        state-admin-invitation:
+          subject: "You are assigned as State System Admin by JalSoochak"
+          body: |
+            Dear {name},
+
+            You have been assigned as State System Administrator for JalSoochak platform. In this role
+            you will be responsible for managing the JalSoochak for the state {state_name}.
+
+            To activate your account, please set a password using the link below:
+
+            Activate Account: {activation_link}
+
+            This link will expire in {expiry_hours} hours from the time of send.
+
+            ---
+            This is an automated message from the JalSoochak platform.
+            Please do not reply to this email.
 
 keycloak:
   realm: jalsoochak-realm

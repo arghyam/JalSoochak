@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.message.channel;
 import org.arghyam.jalsoochak.message.dto.NotificationRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -20,8 +21,13 @@ import java.util.Map;
  *   notification.channel.email.from-address=noreply@yourdomain.com
  *   notification.channel.email.from-name=Water Management Platform
  * </pre>
+ *
+ * @deprecated Superseded by {@link org.arghyam.jalsoochak.message.channel.SendGridMailSender}.
+ * Kept for reference; excluded from the Spring context by default.
+ * Activate with {@code notification.mail.provider=legacy-email} only for temporary rollback.
  */
 @Component
+@ConditionalOnProperty(name = "notification.mail.provider", havingValue = "legacy-email", matchIfMissing = false)
 @Slf4j
 public class EmailChannel implements NotificationChannel {
 
