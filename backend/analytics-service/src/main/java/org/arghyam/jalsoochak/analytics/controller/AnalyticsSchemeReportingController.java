@@ -10,6 +10,8 @@ import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
+import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
+import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
@@ -39,6 +41,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/analytics")
@@ -52,6 +55,7 @@ public class AnalyticsSchemeReportingController {
     private final SchemeRegularityService schemeRegularityService;
     private final EscalationQueryService escalationQueryService;
     private final AnomalyQueryService anomalyQueryService;
+    private final OperatorAttendanceQueryService operatorAttendanceQueryService;
 
     @GetMapping("/schemes/status-count")
     @Operation(
@@ -351,6 +355,64 @@ public class AnalyticsSchemeReportingController {
                     .limit(limit)
                     .totalCount(0)
                     .escalations(List.of())
+                    .build());
+        }
+    }
+
+    @GetMapping("/operator-attendance")
+    @Operation(
+            summary = "operator attendance for a user (by UUID) within an optional date range",
+            description = "Defaults: end_date = today, start_date = end_date minus 30 days. Returns one entry per calendar day in range; days with no rows are attendance 0 (absent). Multiple schemes on the same day use max(attendance). Source: dim_operator_attendance_table, dim_user_table (uuid), dim_date_table.",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Attendance rows returned (may be empty)",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request (e.g. start_date after end_date)",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<List<OperatorAttendanceDayItemDto>>> getOperatorAttendanceDayWise(
+            @RequestParam(name = "uuid") UUID userUuid,
+            @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    ) {
+        try {
+            List<OperatorAttendanceDayItemDto> data = operatorAttendanceQueryService.getDayWiseAttendance(
+                    userUuid, startDate, endDate);
+            return ResponseEntity.ok(ApiResponse.<List<OperatorAttendanceDayItemDto>>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<List<OperatorAttendanceDayItemDto>>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<OperatorAttendanceDayItemDto>>builder()
+                    .success(false)
+                    .data(null)
                     .build());
         }
     }

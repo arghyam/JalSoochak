@@ -9,6 +9,8 @@ import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
+import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
+import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -31,6 +33,7 @@ import java.time.ZoneOffset;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.containsString;
@@ -69,6 +72,8 @@ class AnalyticsSchemeReportingControllerTest {
     private EscalationQueryService escalationQueryService;
     @MockBean
     private AnomalyQueryService anomalyQueryService;
+    @MockBean
+    private OperatorAttendanceQueryService operatorAttendanceQueryService;
 
     @ParameterizedTest
     @MethodSource("schemeStatusValidRoutes")
@@ -538,6 +543,53 @@ class AnalyticsSchemeReportingControllerTest {
 
         verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(
                 eq(9001), eq(start), eq(end), eq("2"), any(Pageable.class));
+    }
+
+    @Test
+    void getOperatorAttendanceDayWise_returnsExpectedShape() throws Exception {
+        UUID uuid = UUID.fromString("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
+        LocalDate start = LocalDate.of(2026, 4, 1);
+        LocalDate end = LocalDate.of(2026, 4, 7);
+
+        OperatorAttendanceDayItemDto row = OperatorAttendanceDayItemDto.builder()
+                .date(LocalDate.of(2026, 4, 2))
+                .attendance(1)
+                .build();
+
+        when(operatorAttendanceQueryService.getDayWiseAttendance(eq(uuid), eq(start), eq(end)))
+                .thenReturn(List.of(row));
+
+        mockMvc.perform(get(BASE + "/operator-attendance")
+                        .param("uuid", uuid.toString())
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data[0].date").value("2026-04-02"))
+                .andExpect(jsonPath("$.data[0].attendance").value(1));
+
+        verify(operatorAttendanceQueryService, times(1)).getDayWiseAttendance(eq(uuid), eq(start), eq(end));
+    }
+
+    @Test
+    void getOperatorAttendanceDayWise_whenServiceRejectsRange_returnsBadRequest() throws Exception {
+        UUID uuid = UUID.fromString("b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a12");
+        LocalDate start = LocalDate.of(2026, 5, 10);
+        LocalDate end = LocalDate.of(2026, 5, 1);
+
+        when(operatorAttendanceQueryService.getDayWiseAttendance(eq(uuid), eq(start), eq(end)))
+                .thenThrow(new IllegalArgumentException("start_date must be on or before end_date"));
+
+        mockMvc.perform(get(BASE + "/operator-attendance")
+                        .param("uuid", uuid.toString())
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(operatorAttendanceQueryService, times(1)).getDayWiseAttendance(eq(uuid), eq(start), eq(end));
     }
 
     @Test

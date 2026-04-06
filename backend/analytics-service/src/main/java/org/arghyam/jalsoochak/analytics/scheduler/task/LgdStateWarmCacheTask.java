@@ -72,11 +72,11 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
                 schemeRegularityService.getSchemeRegionReportByLgd(lgdId, startDate, endDate, 1, null);
 
                 // lgd_id style APIs
-                // Warm-cache: periodic (day-wise) water quantity time series for this state (last 30 days).
+                // Warm-cache: periodic water quantity time series for this state (last 30 days).
                 schemeRegularityService.getPeriodicWaterQuantityByLgdId(lgdId, startDate, endDate, scale);
-                // Warm-cache: periodic (day-wise) scheme regularity time series for this state (last 30 days).
+                // Warm-cache: periodic scheme regularity time series for this state (last 30 days).
                 schemeRegularityService.getPeriodicSchemeRegularityByLgdId(lgdId, startDate, endDate, scale);
-                // Warm-cache: periodic (day-wise) outage reason time series for this state (last 30 days).
+                // Warm-cache: periodic outage reason time series for this state (last 30 days).
                 schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(lgdId, startDate, endDate, scale);
                 // Warm-cache: submission status summary (scheme count + compliant/anomalous submissions) for this state (last 30 days).
                 schemeRegularityService.getSubmissionStatusSummaryByLgd(lgdId, startDate, endDate);
