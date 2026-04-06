@@ -5,8 +5,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
-
 import java.util.List;
 
 @Data
@@ -19,6 +17,6 @@ public class EscalationPaginatedResponse {
     private int limit;
     @JsonProperty("total_count")
     private long totalCount;
-    private List<FactEscalation> escalations;
+    private List<EscalationListItemDto> escalations;
 }
 

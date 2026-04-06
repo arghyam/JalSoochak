@@ -6,8 +6,8 @@ import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
-import org.arghyam.jalsoochak.analytics.entity.Anomaly;
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
+import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -420,21 +420,22 @@ class AnalyticsSchemeReportingControllerTest {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
 
-        FactEscalation e1 = FactEscalation.builder()
+        EscalationListItemDto e1 = EscalationListItemDto.builder()
                 .id(1L)
                 .tenantId(10)
                 .schemeId(101)
                 .userId(9001)
-                .escalationType(2)
+                .escalationType("2")
                 .message("test")
                 .createdAt(LocalDateTime.of(2026, 2, 15, 10, 0))
+                .schemeName("Test Scheme")
                 .build();
 
-        Page<FactEscalation> page = new PageImpl<>(List.of(e1), PageRequest.of(0, 5), 12);
+        Page<EscalationListItemDto> page = new PageImpl<>(List.of(e1), PageRequest.of(0, 5), 12);
         when(escalationQueryService.getEscalations(
                 eq(10),
                 eq(9001),
-                eq(2),
+                eq("2"),
                 eq(101),
                 eq(start),
                 eq(end),
@@ -460,7 +461,8 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.escalations[0].tenantId").value(10))
                 .andExpect(jsonPath("$.escalations[0].userId").value(9001))
                 .andExpect(jsonPath("$.escalations[0].schemeId").value(101))
-                .andExpect(jsonPath("$.escalations[0].escalationType").value(2));
+                .andExpect(jsonPath("$.escalations[0].escalationType").value("2"))
+                .andExpect(jsonPath("$.escalations[0].scheme_name").value("Test Scheme"));
     }
 
     @Test
@@ -468,11 +470,11 @@ class AnalyticsSchemeReportingControllerTest {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
 
-        Page<FactEscalation> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        Page<EscalationListItemDto> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
         when(escalationQueryService.getEscalations(
                 eq(10),
                 eq(9001),
-                eq(2),
+                eq("2"),
                 eq(101),
                 eq(start),
                 eq(end),
@@ -499,18 +501,19 @@ class AnalyticsSchemeReportingControllerTest {
         LocalDate start = LocalDate.of(2026, 3, 1);
         LocalDate end = LocalDate.of(2026, 3, 31);
 
-        Anomaly a1 = Anomaly.builder()
+        AnomalyListItemDto a1 = AnomalyListItemDto.builder()
                 .id(11L)
                 .uuid("uuid-1")
-                .type(2)
+                .type("2")
                 .userId(999) // note: not the same as input mapped user id
                 .schemeId(101)
                 .tenantId(10)
                 .status(1)
                 .createdAt(OffsetDateTime.of(2026, 3, 15, 10, 0, 0, 0, ZoneOffset.UTC))
+                .schemeName("Mapped Scheme")
                 .build();
 
-        when(anomalyQueryService.getAnomaliesForUserSchemes(eq(9001), eq(start), eq(end), eq(2)))
+        when(anomalyQueryService.getAnomaliesForUserSchemes(eq(9001), eq(start), eq(end), eq("2")))
                 .thenReturn(List.of(a1));
 
         mockMvc.perform(get(BASE + "/anomalies")
@@ -523,9 +526,10 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data").isArray())
                 .andExpect(jsonPath("$.data[0].id").value(11))
                 .andExpect(jsonPath("$.data[0].schemeId").value(101))
-                .andExpect(jsonPath("$.data[0].type").value(2));
+                .andExpect(jsonPath("$.data[0].type").value("2"))
+                .andExpect(jsonPath("$.data[0].scheme_name").value("Mapped Scheme"));
 
-        verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(eq(9001), eq(start), eq(end), eq(2));
+        verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(eq(9001), eq(start), eq(end), eq("2"));
     }
 
     @Test

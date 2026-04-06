@@ -3,16 +3,16 @@ package org.arghyam.jalsoochak.analytics.controller;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationPaginatedResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
-import org.arghyam.jalsoochak.analytics.entity.Anomaly;
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -46,8 +46,6 @@ import java.util.Objects;
 public class AnalyticsSchemeReportingController {
 
     private static final String CSV_OUTPUT_FORMAT = "csv";
-    private static final int DEFAULT_ESCALATIONS_PAGE_NUMBER = 1;
-    private static final int DEFAULT_ESCALATIONS_LIMIT = 10;
 
     private final FactSchemePerformanceRepository schemePerformanceRepository;
     private final SchemeRegularityService schemeRegularityService;
@@ -320,7 +318,7 @@ public class AnalyticsSchemeReportingController {
             }
 
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
-            Page<FactEscalation> page = escalationQueryService.getEscalations(
+            Page<EscalationListItemDto> page = escalationQueryService.getEscalations(
                     tenantId,
                     userId,
                     escalationType,
@@ -358,26 +356,26 @@ public class AnalyticsSchemeReportingController {
 
     @GetMapping("/anomalies")
     @Operation(summary = "Get anomalies for schemes mapped to a user (via dim_user_scheme_mapping_table)")
-    public ResponseEntity<ApiResponse<List<Anomaly>>> getAnomalies(
+    public ResponseEntity<ApiResponse<List<AnomalyListItemDto>>> getAnomalies(
             @RequestParam(name = "user_id") Integer mappedUserId,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "anomaly_type", required = false) String anomalyType
     ) {
         try {
-            List<Anomaly> data = anomalyQueryService.getAnomaliesForUserSchemes(
+            List<AnomalyListItemDto> data = anomalyQueryService.getAnomaliesForUserSchemes(
                     mappedUserId,
                     startDate,
                     endDate,
                     anomalyType
             );
 
-            return ResponseEntity.ok(ApiResponse.<List<Anomaly>>builder()
+            return ResponseEntity.ok(ApiResponse.<List<AnomalyListItemDto>>builder()
                     .success(true)
                     .data(data)
                     .build());
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<Anomaly>>builder()
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<AnomalyListItemDto>>builder()
                     .success(false)
                     .data(null)
                     .build());

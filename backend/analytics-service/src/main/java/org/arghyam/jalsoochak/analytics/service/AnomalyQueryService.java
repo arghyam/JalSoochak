@@ -1,8 +1,12 @@
 package org.arghyam.jalsoochak.analytics.service;
 
 import lombok.RequiredArgsConstructor;
+<<<<<<< HEAD
 import org.arghyam.jalsoochak.analytics.constant.EscalationType;
 import org.arghyam.jalsoochak.analytics.entity.Anomaly;
+=======
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.springframework.stereotype.Service;
 
@@ -17,7 +21,7 @@ public class AnomalyQueryService {
 
     private final AnomalyRepository anomalyRepository;
 
-    public List<Anomaly> getAnomaliesForUserSchemes(
+    public List<AnomalyListItemDto> getAnomaliesForUserSchemes(
             Integer mappedUserId,
             LocalDate startDate,
             LocalDate endDate,
@@ -29,13 +33,21 @@ public class AnomalyQueryService {
         OffsetDateTime from = safeStartDate.atStartOfDay().atOffset(ZoneOffset.UTC);
         OffsetDateTime to = safeEndDate.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC); // exclusive upper bound
 
+<<<<<<< HEAD
         String normalizedType = normalizeTypeFilter(anomalyType);
+=======
+        String typeFilter = (anomalyType == null || anomalyType.isBlank()) ? null : anomalyType.trim();
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
 
         return anomalyRepository.findAnomaliesForMappedUserSchemesInRange(
                 mappedUserId,
                 from,
                 to,
+<<<<<<< HEAD
                 normalizedType
+=======
+                typeFilter
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
         );
     }
 

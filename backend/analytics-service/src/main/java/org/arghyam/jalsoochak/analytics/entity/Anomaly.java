@@ -30,7 +30,11 @@ public class Anomaly {
     @Column(name = "uuid", nullable = false, unique = true)
     private String uuid;
 
+<<<<<<< HEAD
     @Column(name = "type", nullable = false)
+=======
+    @Column(name = "type", nullable = false, length = 128)
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
     private String type;
 
     @Column(name = "user_id")

@@ -123,7 +123,11 @@ public class FactServiceImpl implements FactService {
         FactEscalation fact = FactEscalation.builder()
                 .tenantId(event.getTenantId())
                 .schemeId(event.getSchemeId())
+<<<<<<< HEAD
                 .escalationType(dbTypeOrUnknown(event.getEscalationType()))
+=======
+                .escalationType(intCodeToVarchar(event.getEscalationType()))
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
                 .message(event.getMessage())
                 .userId(event.getUserId())
                 .resolutionStatus(event.getResolutionStatus())
@@ -240,7 +244,11 @@ public class FactServiceImpl implements FactService {
                     FactEscalation escalationFact = FactEscalation.builder()
                             .tenantId(event.getTenantId())
                             .schemeId(schemeId)
+<<<<<<< HEAD
                             .escalationType(EscalationType.NO_SUBMISSION.dbType())
+=======
+                            .escalationType(intCodeToVarchar(EscalationType.NO_SUBMISSION.code))
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
                             .message(escalationMessage)
                             .correlationId(correlationId)
                             .userId(event.getOfficerId().intValue())
@@ -270,7 +278,11 @@ public class FactServiceImpl implements FactService {
             try {
                 Anomaly anomaly = Anomaly.builder()
                         .uuid(UUID.randomUUID().toString())
+<<<<<<< HEAD
                         .type(EscalationType.NO_SUBMISSION.dbType())
+=======
+                        .type(intCodeToVarchar(EscalationType.NO_SUBMISSION.code))
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
                         .userId(op.getUserId())
                         .schemeId(schemeId)
                         .tenantId(event.getTenantId())
@@ -314,7 +326,11 @@ public class FactServiceImpl implements FactService {
 
         Anomaly anomaly = Anomaly.builder()
                 .uuid(uuid)
+<<<<<<< HEAD
                 .type(dbTypeOrUnknown(event.getType()))
+=======
+                .type(intCodeToVarchar(event.getType()))
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
                 .userId(event.getUserId())
                 .schemeId(event.getSchemeId())
                 .tenantId(event.getTenantId())
@@ -344,7 +360,11 @@ public class FactServiceImpl implements FactService {
             FactEscalation escalation = FactEscalation.builder()
                     .tenantId(event.getTenantId())
                     .schemeId(event.getSchemeId())
+<<<<<<< HEAD
                     .escalationType(dbTypeOrUnknown(event.getType()))
+=======
+                    .escalationType(intCodeToVarchar(event.getType()))
+>>>>>>> 7c2c33b (analytics -service escalation table and anomaly tables update)
                     .message(event.getReason())
                     .userId(event.getUserId())
                     .resolutionStatus(event.getStatus())
@@ -429,6 +449,10 @@ public class FactServiceImpl implements FactService {
             log.warn("Could not parse date '{}', storing null", value);
             return null;
         }
+    }
+
+    private static String intCodeToVarchar(Integer code) {
+        return code == null ? null : String.valueOf(code);
     }
 
     private boolean isWaterAnomaly(Integer type) {
