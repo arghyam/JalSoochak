@@ -4,7 +4,9 @@ import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
@@ -22,10 +24,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -150,5 +154,62 @@ class DimensionServiceImplTest {
         verify(dimDepartmentLocationRepository, times(1)).save(captor.capture());
         assertThat(captor.getValue().getDepartmentLevel()).isEqualTo(2);
         assertThat(captor.getValue().getLevel2DeptId()).isEqualTo(201);
+    }
+
+    @Test
+    void updateWaterNorm_setsRequiredLpcdAndSaves() {
+        WaterNormUpdatedEvent event = new WaterNormUpdatedEvent("WATER_NORM_UPDATED", 1, "MP", 70);
+        DimTenant existing = DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build();
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(existing));
+
+        service.updateWaterNorm(event);
+
+        ArgumentCaptor<DimTenant> captor = ArgumentCaptor.forClass(DimTenant.class);
+        verify(dimTenantRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getRequiredLpcd()).isEqualTo(70);
+    }
+
+    @Test
+    void updateWaterNorm_tenantNotFound_throwsIllegalStateException() {
+        WaterNormUpdatedEvent event = new WaterNormUpdatedEvent("WATER_NORM_UPDATED", 99, "XX", 55);
+        when(dimTenantRepository.findById(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updateWaterNorm(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("99");
+    }
+
+    @Test
+    void updateLocationHierarchyNames_lgd_updatesLgdCNameAndSavesAll() {
+        TenantLocationHierarchyUpdatedEvent.LevelEntry entry =
+                new TenantLocationHierarchyUpdatedEvent.LevelEntry(2, "District");
+        TenantLocationHierarchyUpdatedEvent event = new TenantLocationHierarchyUpdatedEvent(
+                "TENANT_LOCATION_HIERARCHY_UPDATED", 1, "MP", "LGD", List.of(entry));
+
+        DimLgdLocation loc = DimLgdLocation.builder().lgdId(101).tenantId(1).lgdLevel(2)
+                .lgdCName("OldName").build();
+        when(dimLgdLocationRepository.findByTenantIdAndLgdLevel(1, 2)).thenReturn(List.of(loc));
+
+        service.updateLocationHierarchyNames(event);
+
+        verify(dimLgdLocationRepository, times(1)).saveAll(List.of(loc));
+        assertThat(loc.getLgdCName()).isEqualTo("District");
+    }
+
+    @Test
+    void updateLocationHierarchyNames_department_updatesDepartmentCNameAndSavesAll() {
+        TenantLocationHierarchyUpdatedEvent.LevelEntry entry =
+                new TenantLocationHierarchyUpdatedEvent.LevelEntry(1, "Zone");
+        TenantLocationHierarchyUpdatedEvent event = new TenantLocationHierarchyUpdatedEvent(
+                "TENANT_LOCATION_HIERARCHY_UPDATED", 1, "MP", "DEPARTMENT", List.of(entry));
+
+        DimDepartmentLocation dept = DimDepartmentLocation.builder().departmentId(201).tenantId(1)
+                .departmentLevel(1).departmentCName("OldZone").build();
+        when(dimDepartmentLocationRepository.findByTenantIdAndDepartmentLevel(1, 1)).thenReturn(List.of(dept));
+
+        service.updateLocationHierarchyNames(event);
+
+        verify(dimDepartmentLocationRepository, times(1)).saveAll(List.of(dept));
+        assertThat(dept.getDepartmentCName()).isEqualTo("Zone");
     }
 }
