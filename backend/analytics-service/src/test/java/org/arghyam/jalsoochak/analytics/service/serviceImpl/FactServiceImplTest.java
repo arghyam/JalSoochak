@@ -127,7 +127,7 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getEscalationType()).isEqualTo("3");
+        assertThat(captor.getValue().getEscalationType()).isEqualTo("consecutive_override_5_days");
         assertThat(captor.getValue().getResolutionStatus()).isEqualTo(0);
     }
 
@@ -148,7 +148,7 @@ class FactServiceImplTest {
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
         FactEscalation saved = captor.getValue();
-        assertThat(saved.getEscalationType()).isEqualTo(String.valueOf(EscalationType.NO_WATER_SUPPLY.code));
+        assertThat(saved.getEscalationType()).isEqualTo("no_supply");
         assertThat(saved.getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_WATER_SUPPLY, 21, 1, 11));
     }

@@ -432,7 +432,19 @@ public class FactServiceImpl implements FactService {
     }
 
     private static String intCodeToVarchar(Integer code) {
-        return code == null ? null : String.valueOf(code);
+        if (code == null) {
+            return null;
+        }
+        EscalationType type = EscalationType.fromCode(code);
+        if (type == null) {
+            return String.valueOf(code);
+        }
+        return switch (type) {
+            case NO_WATER_SUPPLY -> "no_supply";
+            case LOW_WATER_SUPPLY -> "under_supply";
+            case OVER_WATER_SUPPLY -> "over_supply";
+            default -> type.label.toLowerCase(Locale.ROOT);
+        };
     }
 
     private boolean isWaterAnomaly(Integer type) {
