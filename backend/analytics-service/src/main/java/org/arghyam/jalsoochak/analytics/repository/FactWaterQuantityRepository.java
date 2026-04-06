@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface FactWaterQuantityRepository extends JpaRepository<FactWaterQuantity, Long> {
@@ -17,4 +18,10 @@ public interface FactWaterQuantityRepository extends JpaRepository<FactWaterQuan
     List<FactWaterQuantity> findByTenantIdAndDateBetween(Integer tenantId, LocalDate startDate, LocalDate endDate);
 
     List<FactWaterQuantity> findBySchemeIdAndDateBetween(Integer schemeId, LocalDate startDate, LocalDate endDate);
+
+    Optional<FactWaterQuantity> findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+            Integer tenantId,
+            Integer schemeId,
+            LocalDate date
+    );
 }
