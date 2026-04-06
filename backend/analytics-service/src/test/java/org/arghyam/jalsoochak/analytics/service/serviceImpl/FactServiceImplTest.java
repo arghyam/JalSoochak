@@ -235,6 +235,24 @@ class FactServiceImplTest {
     }
 
     @Test
+    void ingestTenantEscalation_whitespaceOnlyAnomalyType_fallsBackToNoSubmission() {
+        TenantEscalationEvent event = buildEscalationEvent(buildOp(21, 5, "corr-ws", "11"));
+        // Set anomalyType to whitespace-only string to exercise isBlank() branch
+        event.setAnomalyType("   \t   ");
+        when(dimTenantRepository.existsById(1)).thenReturn(true);
+
+        service.ingestTenantEscalation(event);
+
+        ArgumentCaptor<FactEscalation> escCaptor = ArgumentCaptor.forClass(FactEscalation.class);
+        verify(escalationRepository, times(1)).save(escCaptor.capture());
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+
+        ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+    }
+
+    @Test
     void ingestTenantEscalation_nullUserId_skipsRow() {
         TenantEscalationEvent event = buildEscalationEvent(buildOp(null, 5, "corr-2", "11"));
         when(dimTenantRepository.existsById(1)).thenReturn(true);

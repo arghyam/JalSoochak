@@ -53,6 +53,11 @@ public class FactServiceImpl implements FactService {
      */
     public static final String LAST_RECORDED_BFM_DATE_NEVER = "Never";
 
+    /**
+     * Maximum length for anomaly type strings before persisting to database.
+     */
+    private static final int MAX_ANOMALY_TYPE_LENGTH = 50;
+
     private final FactMeterReadingRepository meterReadingRepository;
     private final FactWaterQuantityRepository waterQuantityRepository;
     private final FactEscalationRepository escalationRepository;
@@ -292,9 +297,18 @@ public class FactServiceImpl implements FactService {
         int escalationRowsCreated = 0;
         int anomalyRowsCreated = 0;
 
-        String resolvedAnomalyType = (event.getAnomalyType() != null && !event.getAnomalyType().isBlank())
-                ? event.getAnomalyType()
-                : intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
+        String resolvedAnomalyType;
+        if (event.getAnomalyType() != null && !event.getAnomalyType().isBlank()) {
+            // Normalize: trim whitespace and convert to lowercase
+            String normalized = event.getAnomalyType().trim().toLowerCase(Locale.ROOT);
+            // Truncate to maximum allowed length
+            resolvedAnomalyType = normalized.length() > MAX_ANOMALY_TYPE_LENGTH
+                    ? normalized.substring(0, MAX_ANOMALY_TYPE_LENGTH)
+                    : normalized;
+        } else {
+            // Fall back to NO_SUBMISSION when null or blank
+            resolvedAnomalyType = intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
+        }
 
         // One fact_escalation_table row + one anomaly_table row per operator
         if (event.getOperators() == null) return;
