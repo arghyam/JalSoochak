@@ -31,6 +31,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -41,7 +44,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/analytics")
@@ -361,8 +363,8 @@ public class AnalyticsSchemeReportingController {
 
     @GetMapping("/operator-attendance")
     @Operation(
-            summary = "operator attendance for a user (by UUID) within an optional date range",
-            description = "Defaults: end_date = today, start_date = end_date minus 30 days. Returns one entry per calendar day in range; days with no rows are attendance 0 (absent). Multiple schemes on the same day use max(attendance). Source: dim_operator_attendance_table, dim_user_table (uuid), dim_date_table.",
+            summary = "operator attendance for the authenticated user within an optional date range",
+            description = "User UUID is taken from the JWT subject. Defaults: end_date = today, start_date = end_date minus 30 days. Returns one entry per calendar day in range; days with no rows are attendance 0 (absent). Multiple schemes on the same day use max(attendance). Source: dim_operator_attendance_table, dim_user_table (uuid), dim_date_table.",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",
@@ -393,11 +395,13 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<List<OperatorAttendanceDayItemDto>>> getOperatorAttendanceDayWise(
-            @RequestParam(name = "uuid") UUID userUuid,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
         try {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            JwtAuthenticationToken jwtAuth = (authentication instanceof JwtAuthenticationToken jat) ? jat : null;
+            var userUuid = AnalyticsControllerHelper.extractAuthenticatedUserUuid(jwtAuth);
             List<OperatorAttendanceDayItemDto> data = operatorAttendanceQueryService.getDayWiseAttendance(
                     userUuid, startDate, endDate);
             return ResponseEntity.ok(ApiResponse.<List<OperatorAttendanceDayItemDto>>builder()
