@@ -68,6 +68,7 @@ class EscalationSchedulerServiceTest {
         EscalationEvent event = captor.getValue();
         assertThat(event.getEventType()).isEqualTo("ESCALATION");
         assertThat(event.getEscalationLevel()).isEqualTo(1);
+        assertThat(event.getAnomalyType()).isEqualTo("no_submission");
         assertThat(event.getOfficerPhone()).isEqualTo("919001001001");
         assertThat(event.getOperators()).hasSize(1);
         assertThat(event.getOperators().get(0).getName()).isEqualTo("Op Level1");

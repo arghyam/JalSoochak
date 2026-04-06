@@ -7,6 +7,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
+
 @Builder
 public record PumpOperatorDetailsDTO(
         Long id,
@@ -14,7 +16,7 @@ public record PumpOperatorDetailsDTO(
         String name,
         String email,
         String phoneNumber,
-        Integer status,
+        TenantUserStatus status,
         Integer schemeId,
         String schemeName,
         Double schemeLatitude,

@@ -20,4 +20,6 @@ public class MeterReadingEvent {
     private String readingAt;
     private Integer channel;
     private String readingDate;
+    private Integer submissionStatus;
+    private Integer readingType;
 }

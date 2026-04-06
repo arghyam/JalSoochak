@@ -173,6 +173,7 @@ public class EscalationSchedulerService {
             EscalationEvent event = EscalationEvent.builder()
                     .eventType("ESCALATION")
                     .escalationLevel(group.level)
+                    .anomalyType("no_submission")
                     .officerPhone(group.officerPhone)
                     .officerName(group.officerName)
                     .operators(group.details)

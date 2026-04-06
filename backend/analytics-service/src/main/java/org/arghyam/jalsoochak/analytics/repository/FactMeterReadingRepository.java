@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface FactMeterReadingRepository extends JpaRepository<FactMeterReading, Long> {
@@ -15,5 +16,11 @@ public interface FactMeterReadingRepository extends JpaRepository<FactMeterReadi
             Integer schemeId,
             LocalDate startDate,
             LocalDate endDate
+    );
+
+    Optional<FactMeterReading> findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(
+            Integer tenantId,
+            Integer schemeId,
+            LocalDate readingDate
     );
 }

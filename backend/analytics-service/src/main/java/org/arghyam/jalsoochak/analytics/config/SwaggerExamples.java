@@ -61,6 +61,46 @@ public final class SwaggerExamples {
             }
             """;
 
+    public static final String ANOMALY_STATUSES_SUCCESS = """
+            {
+              "success": true,
+              "data": [
+                {
+                  "code": 0,
+                  "label": "Unresolved"
+                },
+                {
+                  "code": 1,
+                  "label": "In-Progress"
+                },
+                {
+                  "code": 2,
+                  "label": "Resolved"
+                }
+              ]
+            }
+            """;
+
+    public static final String ESCALATION_STATUSES_SUCCESS = """
+            {
+              "success": true,
+              "data": [
+                {
+                  "code": 0,
+                  "label": "Unresolved"
+                },
+                {
+                  "code": 1,
+                  "label": "In-Progress"
+                },
+                {
+                  "code": 2,
+                  "label": "Resolved"
+                }
+              ]
+            }
+            """;
+
     public static final String METER_READINGS_SUCCESS = """
             {
               "success": true,
@@ -439,4 +479,3 @@ public final class SwaggerExamples {
             }
             """;
 }
-

@@ -31,4 +31,16 @@ public enum EscalationType {
     public static final Set<EscalationType> USER_ANOMALIES = EnumSet.of(
             UNREADABLE_IMAGE, MANUAL_OVERRIDE, CONSECUTIVE_OVERRIDE_5_DAYS,
             DUPLICATE_IMAGE_SUBMISSION, READING_LESS_THAN_PREVIOUS, NO_SUBMISSION);
+
+    public static EscalationType fromCode(Integer code) {
+        if (code == null) {
+            return null;
+        }
+        for (EscalationType type : values()) {
+            if (type.code == code) {
+                return type;
+            }
+        }
+        return null;
+    }
 }

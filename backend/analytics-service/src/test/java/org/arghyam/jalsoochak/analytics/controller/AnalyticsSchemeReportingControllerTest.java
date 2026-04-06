@@ -6,9 +6,11 @@ import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
-import org.arghyam.jalsoochak.analytics.entity.Anomaly;
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
+import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
+import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
+import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -31,6 +33,7 @@ import java.time.ZoneOffset;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.containsString;
@@ -69,6 +72,8 @@ class AnalyticsSchemeReportingControllerTest {
     private EscalationQueryService escalationQueryService;
     @MockBean
     private AnomalyQueryService anomalyQueryService;
+    @MockBean
+    private OperatorAttendanceQueryService operatorAttendanceQueryService;
 
     @ParameterizedTest
     @MethodSource("schemeStatusValidRoutes")
@@ -420,22 +425,25 @@ class AnalyticsSchemeReportingControllerTest {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
 
-        FactEscalation e1 = FactEscalation.builder()
+        EscalationListItemDto e1 = EscalationListItemDto.builder()
                 .id(1L)
                 .tenantId(10)
                 .schemeId(101)
                 .userId(9001)
-                .escalationType(2)
+                .escalationType("2")
                 .message("test")
+                .resolutionStatusCode(0)
                 .createdAt(LocalDateTime.of(2026, 2, 15, 10, 0))
+                .schemeName("Test Scheme")
                 .build();
 
-        Page<FactEscalation> page = new PageImpl<>(List.of(e1), PageRequest.of(0, 5), 12);
+        Page<EscalationListItemDto> page = new PageImpl<>(List.of(e1), PageRequest.of(0, 5), 12);
         when(escalationQueryService.getEscalations(
                 eq(10),
                 eq(9001),
-                eq(2),
+                eq("2"),
                 eq(101),
+                eq("Test"),
                 eq(start),
                 eq(end),
                 any(Pageable.class)
@@ -448,6 +456,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("limit", "5")
                         .param("escalation_type", "2")
                         .param("scheme_id", "101")
+                        .param("scheme_name", "Test")
                         .param("start_date", start.toString())
                         .param("end_date", end.toString()))
                 .andExpect(status().isOk())
@@ -460,7 +469,9 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.escalations[0].tenantId").value(10))
                 .andExpect(jsonPath("$.escalations[0].userId").value(9001))
                 .andExpect(jsonPath("$.escalations[0].schemeId").value(101))
-                .andExpect(jsonPath("$.escalations[0].escalationType").value(2));
+                .andExpect(jsonPath("$.escalations[0].escalationType").value("2"))
+                .andExpect(jsonPath("$.escalations[0].resolution_status").value("Unresolved"))
+                .andExpect(jsonPath("$.escalations[0].scheme_name").value("Test Scheme"));
     }
 
     @Test
@@ -468,12 +479,13 @@ class AnalyticsSchemeReportingControllerTest {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
 
-        Page<FactEscalation> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        Page<EscalationListItemDto> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
         when(escalationQueryService.getEscalations(
                 eq(10),
                 eq(9001),
-                eq(2),
+                eq("2"),
                 eq(101),
+                eq("Test"),
                 eq(start),
                 eq(end),
                 any(Pageable.class)
@@ -484,6 +496,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("user_id", "9001")
                         .param("escalation_type", "2")
                         .param("scheme_id", "101")
+                        .param("scheme_name", "Test")
                         .param("start_date", start.toString())
                         .param("end_date", end.toString()))
                 .andExpect(status().isOk())
@@ -499,47 +512,114 @@ class AnalyticsSchemeReportingControllerTest {
         LocalDate start = LocalDate.of(2026, 3, 1);
         LocalDate end = LocalDate.of(2026, 3, 31);
 
-        Anomaly a1 = Anomaly.builder()
+        AnomalyListItemDto a1 = AnomalyListItemDto.builder()
                 .id(11L)
                 .uuid("uuid-1")
-                .type(2)
+                .type("2")
                 .userId(999) // note: not the same as input mapped user id
                 .schemeId(101)
                 .tenantId(10)
-                .status(1)
+                .statusCode(1)
                 .createdAt(OffsetDateTime.of(2026, 3, 15, 10, 0, 0, 0, ZoneOffset.UTC))
+                .schemeName("Mapped Scheme")
                 .build();
 
-        when(anomalyQueryService.getAnomaliesForUserSchemes(eq(9001), eq(start), eq(end), eq(2)))
-                .thenReturn(List.of(a1));
+        Page<AnomalyListItemDto> anomalyPage = new PageImpl<>(List.of(a1), PageRequest.of(0, 10), 25);
+        when(anomalyQueryService.getAnomaliesForUserSchemes(
+                eq(10), eq(9001), eq(start), eq(end), eq("2"), eq("Mapped"), any(Pageable.class)))
+                .thenReturn(anomalyPage);
 
         mockMvc.perform(get(BASE + "/anomalies")
+                        .param("tenant_id", "10")
                         .param("user_id", "9001")
                         .param("start_date", start.toString())
                         .param("end_date", end.toString())
-                        .param("anomaly_type", "2"))
+                        .param("anomaly_type", "2")
+                        .param("scheme_name", "Mapped")
+                        .param("page_number", "1")
+                        .param("limit", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.limit").value(10))
+                .andExpect(jsonPath("$.total_count").value(25))
+                .andExpect(jsonPath("$.anomalies").isArray())
+                .andExpect(jsonPath("$.anomalies[0].id").value(11))
+                .andExpect(jsonPath("$.anomalies[0].schemeId").value(101))
+                .andExpect(jsonPath("$.anomalies[0].type").value("2"))
+                .andExpect(jsonPath("$.anomalies[0].status").value("In-Progress"))
+                .andExpect(jsonPath("$.anomalies[0].scheme_name").value("Mapped Scheme"));
+
+        verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(
+                eq(10), eq(9001), eq(start), eq(end), eq("2"), eq("Mapped"), any(Pageable.class));
+    }
+
+    @Test
+    void getOperatorAttendanceDayWise_returnsExpectedShape() throws Exception {
+        UUID uuid = UUID.fromString("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
+        LocalDate start = LocalDate.of(2026, 4, 1);
+        LocalDate end = LocalDate.of(2026, 4, 7);
+
+        OperatorAttendanceDayItemDto row = OperatorAttendanceDayItemDto.builder()
+                .date(LocalDate.of(2026, 4, 2))
+                .attendance(1)
+                .build();
+
+        when(operatorAttendanceQueryService.getDayWiseAttendance(eq(uuid), eq(start), eq(end)))
+                .thenReturn(List.of(row));
+
+        mockMvc.perform(get(BASE + "/operator-attendance")
+                        .param("uuid", uuid.toString())
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray())
-                .andExpect(jsonPath("$.data[0].id").value(11))
-                .andExpect(jsonPath("$.data[0].schemeId").value(101))
-                .andExpect(jsonPath("$.data[0].type").value(2));
+                .andExpect(jsonPath("$.data[0].date").value("2026-04-02"))
+                .andExpect(jsonPath("$.data[0].attendance").value(1));
 
-        verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(eq(9001), eq(start), eq(end), eq(2));
+        verify(operatorAttendanceQueryService, times(1)).getDayWiseAttendance(eq(uuid), eq(start), eq(end));
+    }
+
+    @Test
+    void getOperatorAttendanceDayWise_whenServiceRejectsRange_returnsBadRequest() throws Exception {
+        UUID uuid = UUID.fromString("b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a12");
+        LocalDate start = LocalDate.of(2026, 5, 10);
+        LocalDate end = LocalDate.of(2026, 5, 1);
+
+        when(operatorAttendanceQueryService.getDayWiseAttendance(eq(uuid), eq(start), eq(end)))
+                .thenThrow(new IllegalArgumentException("start_date must be on or before end_date"));
+
+        mockMvc.perform(get(BASE + "/operator-attendance")
+                        .param("uuid", uuid.toString())
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(operatorAttendanceQueryService, times(1)).getDayWiseAttendance(eq(uuid), eq(start), eq(end));
     }
 
     @Test
     void getAnomalies_withoutDates_defaultsHandledInService() throws Exception {
-        when(anomalyQueryService.getAnomaliesForUserSchemes(eq(9001), isNull(), isNull(), isNull()))
-                .thenReturn(List.of());
+        Page<AnomalyListItemDto> empty = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        when(anomalyQueryService.getAnomaliesForUserSchemes(
+                eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
+                .thenReturn(empty);
 
         mockMvc.perform(get(BASE + "/anomalies")
+                        .param("tenant_id", "10")
                         .param("user_id", "9001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.limit").value(10))
+                .andExpect(jsonPath("$.total_count").value(0))
+                .andExpect(jsonPath("$.anomalies").isArray());
 
-        verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(eq(9001), isNull(), isNull(), isNull());
+        verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(
+                eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), any(Pageable.class));
     }
 
     private static Stream<Arguments> schemeStatusValidRoutes() {

@@ -550,11 +550,20 @@ public class NotificationEventRouter {
             return;
         }
         try {
-            accountEmailService.sendInviteEmail(event.getTo(), event.getName(), event.getRole(), event.getInviteLink(), event.getExpiryHours());
+            if ("STATE_ADMIN".equalsIgnoreCase(event.getRole())
+                    && event.getStateName() != null && !event.getStateName().isBlank()) {
+                accountEmailService.sendStateAdminInviteEmail(
+                        event.getTo(), event.getName(), event.getStateName(),
+                        event.getInviteLink(), event.getExpiryHours());
+            } else {
+                accountEmailService.sendInviteEmail(
+                        event.getTo(), event.getName(), event.getRole(),
+                        event.getInviteLink(), event.getExpiryHours());
+            }
             log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={}", event.getRole());
         } catch (Exception e) {
-            log.error("[Router/INVITE_EMAIL] SMTP failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "smtp_error: " + e.getMessage());
+            log.error("[Router/INVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 
@@ -581,8 +590,8 @@ public class NotificationEventRouter {
             accountEmailService.sendReinviteEmail(event.getTo(), event.getName(), event.getInviteLink(), event.getExpiryHours());
             log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={}", event.getRole());
         } catch (Exception e) {
-            log.error("[Router/REINVITE_EMAIL] SMTP failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "smtp_error: " + e.getMessage());
+            log.error("[Router/REINVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 
@@ -609,8 +618,8 @@ public class NotificationEventRouter {
             accountEmailService.sendPasswordResetEmail(event.getTo(), event.getResetLink(), event.getExpiryMinutes());
             log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched");
         } catch (Exception e) {
-            log.error("[Router/PASSWORD_RESET_EMAIL] SMTP failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "smtp_error: " + e.getMessage());
+            log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 
@@ -656,6 +665,7 @@ public class NotificationEventRouter {
         String tenantSchema = root.path("tenantSchema").asText("");
         long officerId = root.path("officerId").asLong(0);
         long storedId = root.path("officerWhatsappConnectionId").asLong(0);
+        String correlationId = root.path("correlationId").asText("");
 
         if (storedId <= 0 && officerPhone.isBlank()) {
             log.warn("[Router/ESCALATION] officerPhone and officerWhatsappConnectionId are both missing, skipping");
@@ -675,18 +685,21 @@ public class NotificationEventRouter {
             return;
         }
 
-        String filename = escalationPdfService.generate(operators, level, officerName, officerUserType);
+        String filename = escalationPdfService.generate(operators, level, officerName, officerUserType, correlationId);
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
         String minioUrl;
         try {
             minioUrl = minioStorageService.upload(localPath);
-        } finally {
-            try {
-                Files.deleteIfExists(localPath);
-            } catch (Exception cleanupEx) {
-                log.warn("[Router/ESCALATION] Could not delete local PDF {}: {}",
-                                localPath, cleanupEx.getMessage());
-            }
+        } catch (Exception uploadEx) {
+            log.error("[Router/ESCALATION] MinIO upload failed, retaining local PDF for recovery: {} — {}",
+                    localPath, uploadEx.getMessage());
+            throw uploadEx;
+        }
+        try {
+            Files.deleteIfExists(localPath);
+        } catch (Exception cleanupEx) {
+            log.warn("[Router/ESCALATION] Could not delete local PDF {}: {}",
+                    localPath, cleanupEx.getMessage());
         }
 
         long contactId;

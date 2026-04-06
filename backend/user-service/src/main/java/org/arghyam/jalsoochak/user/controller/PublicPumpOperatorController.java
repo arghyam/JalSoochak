@@ -3,19 +3,28 @@ package org.arghyam.jalsoochak.user.controller;
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
+import org.arghyam.jalsoochak.user.dto.response.PersonSchemeDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianceDTO;
+import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingDetailDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeCountDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
 import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
+import org.arghyam.jalsoochak.user.service.PersonSchemeService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -25,6 +34,7 @@ import java.util.List;
 public class PublicPumpOperatorController {
 
     private final PublicPumpOperatorService publicPumpOperatorService;
+    private final PersonSchemeService personSchemeService;
 
     @GetMapping("/pump-operators/{pumpOperatorId}")
     public ResponseEntity<ApiResponseDTO<PumpOperatorDetailsDTO>> getPumpOperatorDetails(
@@ -111,5 +121,117 @@ public class PublicPumpOperatorController {
                 effectiveSize
         );
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operators retrieved", rows));
+    }
+
+    @GetMapping("/pump-operators/{pumpOperatorId}/readings")
+    public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorReadingDetailDTO>>> listPumpOperatorReadings(
+            @PathVariable long pumpOperatorId,
+            @RequestParam String tenantCode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "readingAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir,
+            @RequestParam(required = false) String schemeName
+    ) {
+        PageResponseDTO<PumpOperatorReadingDetailDTO> rows = personSchemeService.listPumpOperatorReadings(
+                tenantCode,
+                pumpOperatorId,
+                schemeName,
+                sortBy,
+                sortDir,
+                page,
+                size
+        );
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operator readings retrieved", rows));
+    }
+
+    @GetMapping("/person/{personId}/schemes/count")
+    public ResponseEntity<ApiResponseDTO<SchemeCountDTO>> countSchemesByPerson(
+            @PathVariable long personId,
+            @RequestParam String tenantCode,
+            @RequestParam(required = false) String schemeName
+    ) {
+        long total = personSchemeService.countSchemesByPerson(tenantCode, personId, schemeName);
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Schemes count retrieved", SchemeCountDTO.builder()
+                .schemeCount(total)
+                .build()));
+    }
+
+    @GetMapping("/person/{personId}/schemes")
+    public ResponseEntity<ApiResponseDTO<PageResponseDTO<PersonSchemeDetailsDTO>>> listSchemesByPerson(
+            @PathVariable long personId,
+            @RequestParam String tenantCode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "schemeName") String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
+            @RequestParam(required = false) String schemeName
+    ) {
+        PageResponseDTO<PersonSchemeDetailsDTO> rows = personSchemeService.listSchemesByPerson(
+                tenantCode,
+                personId,
+                schemeName,
+                sortBy,
+                sortDir,
+                page,
+                size
+        );
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Schemes retrieved", rows));
+    }
+
+    @GetMapping("/person/{personId}/pump-operators")
+    public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorSummaryWithMetricsDTO>>> listPumpOperatorsByPerson(
+            @PathVariable long personId,
+            @RequestParam String tenantCode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "id") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Integer durationDays,
+            @RequestParam(required = false) Integer duration
+    ) {
+        Integer effectiveDurationDays = duration != null ? duration : durationDays;
+        PageResponseDTO<PumpOperatorSummaryWithMetricsDTO> rows = personSchemeService.listPumpOperatorsByPerson(
+                tenantCode,
+                personId,
+                name,
+                status,
+                effectiveDurationDays,
+                sortBy,
+                sortDir,
+                page,
+                size
+        );
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operators retrieved", rows));
+    }
+
+    @GetMapping("/schemes/{schemeId}/details")
+    public ResponseEntity<ApiResponseDTO<SchemeDetailsWithReportingDTO>> getSchemeDetails(
+            @PathVariable long schemeId,
+            @RequestParam String tenantCode
+    ) {
+        SchemeDetailsWithReportingDTO dto = personSchemeService.getSchemeDetails(tenantCode, schemeId);
+        if (dto == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
+        }
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Scheme details retrieved", dto));
+    }
+
+    @GetMapping("/schemes/{schemeId}/reading-submissions")
+    public ResponseEntity<ApiResponseDTO<PageResponseDTO<SchemeReadingSubmissionDTO>>> listSchemeReadings(
+            @PathVariable long schemeId,
+            @RequestParam String tenantCode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        PageResponseDTO<SchemeReadingSubmissionDTO> rows = personSchemeService.listSchemeReadings(
+                tenantCode,
+                schemeId,
+                page,
+                size
+        );
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Scheme readings retrieved", rows));
     }
 }
