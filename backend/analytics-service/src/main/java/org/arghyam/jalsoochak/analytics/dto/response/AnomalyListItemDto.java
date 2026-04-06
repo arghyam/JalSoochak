@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -30,7 +31,8 @@ public class AnomalyListItemDto {
     private LocalDate previousReadingDate;
     private Integer consecutiveDaysMissed;
     private String reason;
-    private Integer status;
+    @JsonIgnore
+    private Integer statusCode;
     private String remarks;
     private String correlationId;
     private Integer resolvedBy;
@@ -42,4 +44,10 @@ public class AnomalyListItemDto {
 
     @JsonProperty("scheme_name")
     private String schemeName;
+
+    @JsonProperty("status")
+    public String getStatus() {
+        AnomalyStatusDto status = AnomalyStatusDto.fromCode(statusCode);
+        return status != null ? status.getLabel() : null;
+    }
 }

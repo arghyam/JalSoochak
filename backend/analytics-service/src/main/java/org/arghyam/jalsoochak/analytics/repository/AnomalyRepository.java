@@ -25,7 +25,8 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                         a.reason, a.status, a.remarks, a.correlationId, a.resolvedBy, a.resolvedAt, a.deletedAt, a.deletedBy,
                         a.createdAt, a.updatedAt, s.schemeName)
                     FROM Anomaly a, DimUserSchemeMapping m, DimScheme s
-                    WHERE m.schemeId = a.schemeId AND m.userId = :mappedUserId
+                    WHERE a.tenantId = :tenantId
+                      AND m.schemeId = a.schemeId AND m.userId = :mappedUserId
                       AND s.schemeId = a.schemeId
                       AND a.deletedAt IS NULL
                       AND a.createdAt >= :fromInclusive
@@ -36,7 +37,8 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
             countQuery = """
                     SELECT count(distinct a.id)
                     FROM Anomaly a, DimUserSchemeMapping m, DimScheme s
-                    WHERE m.schemeId = a.schemeId AND m.userId = :mappedUserId
+                    WHERE a.tenantId = :tenantId
+                      AND m.schemeId = a.schemeId AND m.userId = :mappedUserId
                       AND s.schemeId = a.schemeId
                       AND a.deletedAt IS NULL
                       AND a.createdAt >= :fromInclusive
@@ -45,6 +47,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                       AND (:schemeName = '' OR lower(s.schemeName) like lower(concat('%', :schemeName, '%')))
                     """)
     Page<AnomalyListItemDto> findAnomaliesForMappedUserSchemesInRange(
+            @Param("tenantId") Integer tenantId,
             @Param("mappedUserId") Integer mappedUserId,
             @Param("fromInclusive") OffsetDateTime fromInclusive,
             @Param("toExclusive") OffsetDateTime toExclusive,

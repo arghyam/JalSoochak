@@ -18,6 +18,7 @@ public class AnomalyQueryService {
     private final AnomalyRepository anomalyRepository;
 
     public Page<AnomalyListItemDto> getAnomaliesForUserSchemes(
+            Integer tenantId,
             Integer mappedUserId,
             LocalDate startDate,
             LocalDate endDate,
@@ -36,6 +37,7 @@ public class AnomalyQueryService {
         String schemeNameFilter = (schemeName == null || schemeName.isBlank()) ? "" : schemeName.trim();
 
         return anomalyRepository.findAnomaliesForMappedUserSchemesInRange(
+                tenantId,
                 mappedUserId,
                 from,
                 to,

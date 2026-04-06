@@ -450,6 +450,7 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<AnomalyPaginatedResponse> getAnomalies(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "user_id") Integer mappedUserId,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
@@ -468,6 +469,7 @@ public class AnalyticsSchemeReportingController {
 
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<AnomalyListItemDto> page = anomalyQueryService.getAnomaliesForUserSchemes(
+                    tenantId,
                     mappedUserId,
                     startDate,
                     endDate,
