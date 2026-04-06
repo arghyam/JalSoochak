@@ -18,8 +18,10 @@ import static org.mockito.Mockito.when;
 import java.nio.file.Path;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.SmsCountryService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,6 +62,9 @@ class NotificationEventRouterTest {
 
     @Mock
     private AccountEmailService accountEmailService;
+
+    @Mock
+    private SmsCountryService smsCountryService;
 
     @InjectMocks
     private NotificationEventRouter router;
@@ -606,5 +611,47 @@ class NotificationEventRouterTest {
                 """);
 
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
+    }
+
+    // ──────────────────────────────── SEND_LOGIN_OTP ───────────────────────────
+
+    @Test
+    void route_sendsLoginOtp_usingStoredGlificId() {
+        when(whatsAppChannel.sendLoginOtp(42L, "123456")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"WHATSAPP","glific_id":42}
+                """);
+
+        verify(whatsAppChannel).sendLoginOtp(42L, "123456");
+        verify(glificWhatsAppService, never()).optIn(anyString());
+    }
+
+    @Test
+    void route_sendsLoginOtp_usingOptIn_whenGlificIdAbsent() {
+        when(glificWhatsAppService.optIn("919876543210")).thenReturn(99L);
+        when(whatsAppChannel.sendLoginOtp(99L, "123456")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"WHATSAPP","officerPhoneNumber":"919876543210"}
+                """);
+
+        verify(glificWhatsAppService).optIn("919876543210");
+        verify(whatsAppChannel).sendLoginOtp(99L, "123456");
+    }
+
+    @Test
+    void route_rethrowsException_whenLoginOtpDeliveryFails() {
+        when(whatsAppChannel.sendLoginOtp(42L, "123456")).thenReturn(false);
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"WHATSAPP","glific_id":42}
+                """))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed")
+                .cause().isInstanceOf(IllegalStateException.class);
     }
 }
