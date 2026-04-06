@@ -32,7 +32,7 @@ public class FactEscalation {
     private Integer schemeId;
 
     @Column(name = "escalation_type")
-    private Integer escalationType;
+    private String escalationType;
 
     private String message;
 

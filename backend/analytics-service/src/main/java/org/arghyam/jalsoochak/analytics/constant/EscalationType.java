@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.constant;
 
 import java.util.EnumSet;
+import java.util.Locale;
 import java.util.Set;
 
 /** Mirrors AnomalyConstants in telemetry-service. Integer codes must stay in sync. */
@@ -21,6 +22,42 @@ public enum EscalationType {
     EscalationType(int code, String label) {
         this.code = code;
         this.label = label;
+    }
+
+    public String dbType() {
+        return switch (this) {
+            case NO_WATER_SUPPLY -> "no_supply";
+            case LOW_WATER_SUPPLY -> "under_supply";
+            case OVER_WATER_SUPPLY -> "over_supply";
+            case NO_SUBMISSION -> "no_submission";
+            default -> label.toLowerCase(Locale.ROOT);
+        };
+    }
+
+    public static EscalationType fromCode(Integer code) {
+        if (code == null) return null;
+        for (EscalationType type : values()) {
+            if (type.code == code) {
+                return type;
+            }
+        }
+        return null;
+    }
+
+    public static String toDbType(Integer code) {
+        EscalationType type = fromCode(code);
+        return type != null ? type.dbType() : null;
+    }
+
+    public static String normalizeDbType(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String normalized = raw.trim().toLowerCase(Locale.ROOT).replaceAll("[\\s-]+", "_");
+        return switch (normalized) {
+            case "no_water_supply" -> "no_supply";
+            case "low_water_supply" -> "under_supply";
+            case "over_water_supply" -> "over_supply";
+            default -> normalized;
+        };
     }
 
     /** Anomalies scoped to a water supply event — correlationId keyed on (tenantId, schemeId, type). */

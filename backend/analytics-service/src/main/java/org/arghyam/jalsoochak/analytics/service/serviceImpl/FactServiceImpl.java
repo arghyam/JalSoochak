@@ -123,7 +123,7 @@ public class FactServiceImpl implements FactService {
         FactEscalation fact = FactEscalation.builder()
                 .tenantId(event.getTenantId())
                 .schemeId(event.getSchemeId())
-                .escalationType(event.getEscalationType())
+                .escalationType(dbTypeOrUnknown(event.getEscalationType()))
                 .message(event.getMessage())
                 .userId(event.getUserId())
                 .resolutionStatus(event.getResolutionStatus())
@@ -240,7 +240,7 @@ public class FactServiceImpl implements FactService {
                     FactEscalation escalationFact = FactEscalation.builder()
                             .tenantId(event.getTenantId())
                             .schemeId(schemeId)
-                            .escalationType(EscalationType.NO_SUBMISSION.code)
+                            .escalationType(EscalationType.NO_SUBMISSION.dbType())
                             .message(escalationMessage)
                             .correlationId(correlationId)
                             .userId(event.getOfficerId().intValue())
@@ -270,7 +270,7 @@ public class FactServiceImpl implements FactService {
             try {
                 Anomaly anomaly = Anomaly.builder()
                         .uuid(UUID.randomUUID().toString())
-                        .type(EscalationType.NO_SUBMISSION.code)
+                        .type(EscalationType.NO_SUBMISSION.dbType())
                         .userId(op.getUserId())
                         .schemeId(schemeId)
                         .tenantId(event.getTenantId())
@@ -314,7 +314,7 @@ public class FactServiceImpl implements FactService {
 
         Anomaly anomaly = Anomaly.builder()
                 .uuid(uuid)
-                .type(event.getType())
+                .type(dbTypeOrUnknown(event.getType()))
                 .userId(event.getUserId())
                 .schemeId(event.getSchemeId())
                 .tenantId(event.getTenantId())
@@ -344,7 +344,7 @@ public class FactServiceImpl implements FactService {
             FactEscalation escalation = FactEscalation.builder()
                     .tenantId(event.getTenantId())
                     .schemeId(event.getSchemeId())
-                    .escalationType(event.getType())
+                    .escalationType(dbTypeOrUnknown(event.getType()))
                     .message(event.getReason())
                     .userId(event.getUserId())
                     .resolutionStatus(event.getStatus())
@@ -436,6 +436,11 @@ public class FactServiceImpl implements FactService {
             return false;
         }
         return EscalationType.WATER_ANOMALIES.stream().anyMatch(t -> t.code == type);
+    }
+
+    private String dbTypeOrUnknown(Integer type) {
+        String mapped = EscalationType.toDbType(type);
+        return mapped != null ? mapped : "unknown";
     }
 
     private String resolveCorrelationId(AnomalyEvent event) {

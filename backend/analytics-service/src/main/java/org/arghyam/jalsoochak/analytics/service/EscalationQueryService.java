@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.service;
 
 import lombok.RequiredArgsConstructor;
+import org.arghyam.jalsoochak.analytics.constant.EscalationType;
 import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.springframework.data.domain.Page;
@@ -20,7 +21,7 @@ public class EscalationQueryService {
     public Page<FactEscalation> getEscalations(
             Integer tenantId,
             Integer userId,
-            Integer escalationType,
+            String escalationType,
             Integer schemeId,
             LocalDate startDate,
             LocalDate endDate,
@@ -34,7 +35,7 @@ public class EscalationQueryService {
 
         Specification<FactEscalation> spec = Specification.where(tenantIdEquals(tenantId))
                 .and(userIdEquals(userId))
-                .and(escalationTypeEquals(escalationType))
+                .and(escalationTypeEquals(normalizeTypeFilter(escalationType)))
                 .and(schemeIdEquals(schemeId))
                 .and(createdAtInRange(from, to));
 
@@ -51,8 +52,8 @@ public class EscalationQueryService {
         return (root, query, cb) -> cb.equal(root.get("userId"), userId);
     }
 
-    private static Specification<FactEscalation> escalationTypeEquals(Integer escalationType) {
-        if (escalationType == null) return null;
+    private static Specification<FactEscalation> escalationTypeEquals(String escalationType) {
+        if (escalationType == null || escalationType.isBlank()) return null;
         return (root, query, cb) -> cb.equal(root.get("escalationType"), escalationType);
     }
 
@@ -67,5 +68,14 @@ public class EscalationQueryService {
                 cb.lessThan(root.get("createdAt"), toExclusive)
         );
     }
-}
 
+    private static String normalizeTypeFilter(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String trimmed = raw.trim();
+        if (trimmed.matches("^\\d+$")) {
+            String mapped = EscalationType.toDbType(Integer.parseInt(trimmed));
+            return mapped != null ? mapped : trimmed;
+        }
+        return EscalationType.normalizeDbType(trimmed);
+    }
+}

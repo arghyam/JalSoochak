@@ -31,7 +31,7 @@ public class Anomaly {
     private String uuid;
 
     @Column(name = "type", nullable = false)
-    private Integer type;
+    private String type;
 
     @Column(name = "user_id")
     private Integer userId;

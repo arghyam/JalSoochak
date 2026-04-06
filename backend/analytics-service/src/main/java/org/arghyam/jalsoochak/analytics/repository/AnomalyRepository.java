@@ -13,7 +13,7 @@ import java.util.List;
 public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
 
     boolean existsByCorrelationIdAndTypeAndSchemeIdAndTenantId(
-            String correlationId, Integer type, Integer schemeId, Integer tenantId);
+            String correlationId, String type, Integer schemeId, Integer tenantId);
 
     @Query(value = """
             SELECT a.*
@@ -31,6 +31,6 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
             @Param("mappedUserId") Integer mappedUserId,
             @Param("fromInclusive") OffsetDateTime fromInclusive,
             @Param("toExclusive") OffsetDateTime toExclusive,
-            @Param("anomalyType") Integer anomalyType
+            @Param("anomalyType") String anomalyType
     );
 }

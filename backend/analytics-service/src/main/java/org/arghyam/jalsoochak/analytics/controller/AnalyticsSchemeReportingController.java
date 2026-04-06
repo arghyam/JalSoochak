@@ -306,7 +306,7 @@ public class AnalyticsSchemeReportingController {
             @RequestParam(name = "user_id") Integer userId,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
-            @RequestParam(name = "escalation_type", required = false) Integer escalationType,
+            @RequestParam(name = "escalation_type", required = false) String escalationType,
             @RequestParam(name = "scheme_id", required = false) Integer schemeId,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
@@ -362,7 +362,7 @@ public class AnalyticsSchemeReportingController {
             @RequestParam(name = "user_id") Integer mappedUserId,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(name = "anomaly_type", required = false) Integer anomalyType
+            @RequestParam(name = "anomaly_type", required = false) String anomalyType
     ) {
         try {
             List<Anomaly> data = anomalyQueryService.getAnomaliesForUserSchemes(
@@ -433,4 +433,3 @@ public class AnalyticsSchemeReportingController {
         }
     }
 }
-
