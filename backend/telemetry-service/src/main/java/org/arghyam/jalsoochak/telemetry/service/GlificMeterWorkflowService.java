@@ -807,7 +807,6 @@ public class GlificMeterWorkflowService {
                     resolvedIssueReason
             );
             int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
-            String anomalyReason = "No Water Supply";
             telemetryTenantRepository.createTenantAnomalyRecord(
                     operatorWithSchema.schemaName(),
                     operatorWithSchema.operator().id(),
@@ -828,7 +827,7 @@ public class GlificMeterWorkflowService {
                     null,
                     null,
                     0,
-                    anomalyReason,
+                    resolvedIssueReason,
                     AnomalyConstants.STATUS_OPEN,
                     correlationId
             );
