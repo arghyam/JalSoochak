@@ -7,8 +7,10 @@ import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
+import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.arghyam.jalsoochak.analytics.entity.Anomaly;
 import org.arghyam.jalsoochak.analytics.entity.DimDate;
+import org.arghyam.jalsoochak.analytics.entity.DimOperatorAttendance;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
@@ -16,6 +18,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimOperatorAttendanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
@@ -57,12 +60,17 @@ public class FactServiceImpl implements FactService {
     private final AnomalyRepository anomalyRepository;
     private final DimTenantRepository dimTenantRepository;
     private final DimDateRepository dimDateRepository;
+    private final DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
 
     @Override
     @Transactional
     public void ingestMeterReading(MeterReadingEvent event) {
         LocalDateTime readingAt = parseTimestamp(event.getReadingAt());
         LocalDate readingDate = parseDate(event.getReadingDate());
+        Integer submissionStatus = event.getSubmissionStatus() != null
+                ? event.getSubmissionStatus()
+                : SubmissionStatus.SUBMITTED.getCode();
+        Integer readingType = event.getReadingType() != null ? event.getReadingType() : 0;
 
         FactMeterReading fact = FactMeterReading.builder()
                 .tenantId(event.getTenantId())
@@ -75,10 +83,15 @@ public class FactServiceImpl implements FactService {
                 .readingAt(readingAt)
                 .channel(event.getChannel())
                 .readingDate(readingDate)
+                .submissionStatus(submissionStatus)
+                .readingType(readingType)
                 .createdAt(LocalDateTime.now())
                 .build();
 
         meterReadingRepository.save(fact);
+        ensureDateExists(readingDate);
+        updateOperatorAttendance(event, readingDate);
+        updateWaterQuantityFromReading(event, readingDate, submissionStatus);
         log.info("Ingested fact_meter_reading_table for scheme={} tenant={}", event.getSchemeId(), event.getTenantId());
     }
 
@@ -116,7 +129,7 @@ public class FactServiceImpl implements FactService {
         FactEscalation fact = FactEscalation.builder()
                 .tenantId(event.getTenantId())
                 .schemeId(event.getSchemeId())
-                .escalationType(event.getEscalationType())
+                .escalationType(intCodeToVarchar(event.getEscalationType()))
                 .message(event.getMessage())
                 .userId(event.getUserId())
                 .resolutionStatus(event.getResolutionStatus())
@@ -180,6 +193,96 @@ public class FactServiceImpl implements FactService {
         }
     }
 
+    private void updateOperatorAttendance(MeterReadingEvent event, LocalDate readingDate) {
+        if (event.getTenantId() == null || event.getSchemeId() == null || event.getUserId() == null || readingDate == null) {
+            log.warn("Skipping operator attendance update due to missing tenant/scheme/user/date (tenantId={}, schemeId={}, userId={}, date={})",
+                    event.getTenantId(), event.getSchemeId(), event.getUserId(), readingDate);
+            return;
+        }
+
+        Integer dateKey = Integer.parseInt(readingDate.format(DateTimeFormatter.BASIC_ISO_DATE));
+        boolean exists = dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(
+                event.getTenantId(),
+                event.getSchemeId(),
+                event.getUserId(),
+                dateKey
+        );
+        if (exists) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        DimOperatorAttendance attendance = DimOperatorAttendance.builder()
+                .tenantId(event.getTenantId())
+                .schemeId(event.getSchemeId())
+                .userId(event.getUserId())
+                .dateKey(dateKey)
+                .attendance(1)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        dimOperatorAttendanceRepository.save(attendance);
+    }
+
+    private void updateWaterQuantityFromReading(MeterReadingEvent event, LocalDate readingDate, Integer submissionStatus) {
+        if (event.getTenantId() == null || event.getSchemeId() == null || readingDate == null) {
+            log.warn("Skipping water quantity update due to missing tenant/scheme/date (tenantId={}, schemeId={}, date={})",
+                    event.getTenantId(), event.getSchemeId(), readingDate);
+            return;
+        }
+
+        Integer currentReading = event.getConfirmedReading() != null
+                ? event.getConfirmedReading()
+                : event.getExtractedReading();
+        if (currentReading == null) {
+            log.warn("Skipping water quantity update; current reading missing (tenantId={}, schemeId={}, date={})",
+                    event.getTenantId(), event.getSchemeId(), readingDate);
+            return;
+        }
+
+        LocalDate previousDate = readingDate.minusDays(1);
+        Integer previousReading = meterReadingRepository
+                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(
+                        event.getTenantId(),
+                        event.getSchemeId(),
+                        previousDate
+                )
+                .map(FactMeterReading::getConfirmedReading)
+                .orElse(0);
+
+        int waterQuantity = currentReading - (previousReading != null ? previousReading : 0);
+        LocalDateTime now = LocalDateTime.now();
+        FactWaterQuantity fact = waterQuantityRepository
+                .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                        event.getTenantId(),
+                        event.getSchemeId(),
+                        readingDate
+                )
+                .map(existing -> {
+                    existing.setWaterQuantity(waterQuantity);
+                    existing.setUserId(event.getUserId());
+                    existing.setSubmissionStatus(submissionStatus);
+                    existing.setOutageReason(null);
+                    existing.setNonSubmissionReason(null);
+                    existing.setUpdatedAt(now);
+                    return existing;
+                })
+                .orElseGet(() -> FactWaterQuantity.builder()
+                        .tenantId(event.getTenantId())
+                        .schemeId(event.getSchemeId())
+                        .userId(event.getUserId())
+                        .waterQuantity(waterQuantity)
+                        .submissionStatus(submissionStatus)
+                        .outageReason(null)
+                        .nonSubmissionReason(null)
+                        .date(readingDate)
+                        .createdAt(now)
+                        .updatedAt(now)
+                        .build());
+
+        waterQuantityRepository.save(fact);
+    }
+
     @Override
     @Transactional
     public void ingestTenantEscalation(TenantEscalationEvent event) {
@@ -233,7 +336,7 @@ public class FactServiceImpl implements FactService {
                     FactEscalation escalationFact = FactEscalation.builder()
                             .tenantId(event.getTenantId())
                             .schemeId(schemeId)
-                            .escalationType(EscalationType.NO_SUBMISSION.code)
+                            .escalationType(intCodeToVarchar(EscalationType.NO_SUBMISSION.code))
                             .message(escalationMessage)
                             .correlationId(correlationId)
                             .userId(event.getOfficerId().intValue())
@@ -263,7 +366,7 @@ public class FactServiceImpl implements FactService {
             try {
                 Anomaly anomaly = Anomaly.builder()
                         .uuid(UUID.randomUUID().toString())
-                        .type(EscalationType.NO_SUBMISSION.code)
+                        .type(intCodeToVarchar(EscalationType.NO_SUBMISSION.code))
                         .userId(op.getUserId())
                         .schemeId(schemeId)
                         .tenantId(event.getTenantId())
@@ -289,12 +392,6 @@ public class FactServiceImpl implements FactService {
     @Override
     @Transactional
     public void ingestAnomalyRecorded(AnomalyEvent event) {
-        if (event.getType() != null
-                && event.getType().equals(EscalationType.NO_WATER_SUPPLY.code)
-                && (event.getCorrelationId() == null || event.getCorrelationId().isBlank())) {
-            log.warn("Skipping NO_WATER_SUPPLY anomaly without correlationId (uuid={})", event.getUuid());
-            return;
-        }
         OffsetDateTime now = OffsetDateTime.now();
         String uuid = event.getUuid();
         if (uuid == null || uuid.isBlank()) {
@@ -305,10 +402,15 @@ public class FactServiceImpl implements FactService {
         if (event.getStatus() == null) {
             log.warn("Anomaly event missing status; defaulting to status=1 (OPEN) for uuid={}", uuid);
         }
+        String correlationId = event.getCorrelationId();
+        if (isWaterAnomaly(event.getType()) && (correlationId == null || correlationId.isBlank())) {
+            correlationId = resolveCorrelationId(event);
+            log.warn("Water anomaly missing correlationId, derived correlationId={} (uuid={})", correlationId, uuid);
+        }
 
         Anomaly anomaly = Anomaly.builder()
                 .uuid(uuid)
-                .type(event.getType())
+                .type(intCodeToVarchar(event.getType()))
                 .userId(event.getUserId())
                 .schemeId(event.getSchemeId())
                 .tenantId(event.getTenantId())
@@ -321,7 +423,7 @@ public class FactServiceImpl implements FactService {
                 .consecutiveDaysMissed(event.getConsecutiveDaysMissed())
                 .reason(event.getReason())
                 .status(status)
-                .correlationId(event.getCorrelationId())
+                .correlationId(correlationId)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -332,6 +434,24 @@ public class FactServiceImpl implements FactService {
                     event.getSchemeId(), event.getTenantId(), event.getUuid());
         } catch (DataIntegrityViolationException e) {
             log.debug("Skipping duplicate anomaly uuid={} (unique constraint)", event.getUuid());
+        }
+
+        if (isWaterAnomaly(event.getType())) {
+            FactEscalation escalation = FactEscalation.builder()
+                    .tenantId(event.getTenantId())
+                    .schemeId(event.getSchemeId())
+                    .escalationType(intCodeToVarchar(event.getType()))
+                    .message(event.getReason())
+                    .userId(event.getUserId())
+                    .resolutionStatus(event.getStatus())
+                    .remark(null)
+                    .correlationId(correlationId)
+                    .createdAt(LocalDateTime.now())
+                    .updatedAt(LocalDateTime.now())
+                    .build();
+            escalationRepository.save(escalation);
+            log.info("Ingested fact_escalation_table for water anomaly type={} scheme={} tenant={}",
+                    event.getType(), event.getSchemeId(), event.getTenantId());
         }
     }
 
@@ -405,5 +525,44 @@ public class FactServiceImpl implements FactService {
             log.warn("Could not parse date '{}', storing null", value);
             return null;
         }
+    }
+
+    private static String intCodeToVarchar(Integer code) {
+        if (code == null) {
+            return null;
+        }
+        EscalationType type = EscalationType.fromCode(code);
+        if (type == null) {
+            return String.valueOf(code);
+        }
+        return switch (type) {
+            case NO_WATER_SUPPLY -> "no_supply";
+            case LOW_WATER_SUPPLY -> "under_supply";
+            case OVER_WATER_SUPPLY -> "over_supply";
+            default -> type.label.toLowerCase(Locale.ROOT);
+        };
+    }
+
+    private boolean isWaterAnomaly(Integer type) {
+        if (type == null) {
+            return false;
+        }
+        return EscalationType.WATER_ANOMALIES.stream().anyMatch(t -> t.code == type);
+    }
+
+    private String resolveCorrelationId(AnomalyEvent event) {
+        if (event.getCorrelationId() != null && !event.getCorrelationId().isBlank()) {
+            return event.getCorrelationId();
+        }
+        if (event.getType() != null) {
+            EscalationType type = EscalationType.WATER_ANOMALIES.stream()
+                    .filter(t -> t.code == event.getType())
+                    .findFirst()
+                    .orElse(null);
+            if (type != null) {
+                return buildCorrelationId(type, event.getUserId(), event.getTenantId(), event.getSchemeId());
+            }
+        }
+        return event.getUuid();
     }
 }

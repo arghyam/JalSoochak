@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.user.controller;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorUploadResponseDTO;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadService;
@@ -17,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/v1/state-admin/pump-operators")
 @RequiredArgsConstructor
+@Slf4j
 public class PumpOperatorUploadController {
 
     private final PumpOperatorUploadService pumpOperatorUploadService;
@@ -26,7 +28,12 @@ public class PumpOperatorUploadController {
             @RequestPart("file") MultipartFile file,
             @RequestHeader(HttpHeaders.AUTHORIZATION) String authorizationHeader
     ) {
-        PumpOperatorUploadResponseDTO res = pumpOperatorUploadService.uploadPumpOperatorMappings(file, authorizationHeader);
-        return ResponseEntity.ok(ApiResponseDTO.of(200, "Upload processed", res));
+        try {
+            PumpOperatorUploadResponseDTO res = pumpOperatorUploadService.uploadPumpOperatorMappings(file, authorizationHeader);
+            return ResponseEntity.ok(ApiResponseDTO.of(200, "Upload processed", res));
+        } catch (Exception e) {
+            log.error("Logout failed for session: {}", e.getMessage());
+            throw e;
+        }
     }
 }

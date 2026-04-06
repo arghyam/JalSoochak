@@ -31,8 +31,8 @@ public class FactEscalation {
     @Column(name = "scheme_id")
     private Integer schemeId;
 
-    @Column(name = "escalation_type")
-    private Integer escalationType;
+    @Column(name = "escalation_type", length = 128)
+    private String escalationType;
 
     private String message;
 

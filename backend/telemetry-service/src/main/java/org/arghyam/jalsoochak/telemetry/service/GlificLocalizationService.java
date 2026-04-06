@@ -12,6 +12,9 @@ public class GlificLocalizationService {
     private static final Pattern SUBMITTED_PREVIOUS_PATTERN = Pattern.compile(
             "(?i)submitted\\s+reading:\\s*([^\\.]+)\\.\\s*previous\\s+reading:\\s*([^\\.]+)\\.?"
     );
+    private static final Pattern EXTRACTED_READING_PATTERN = Pattern.compile(
+            "(?i)extracted\\s+reading:\\s*([^\\.]+)"
+    );
 
     private final GlificOperatorContextService operatorContextService;
 
@@ -204,11 +207,78 @@ public class GlificLocalizationService {
         if (normalized.contains("manual reading could not be saved")) {
             return "मैनुअल रीडिंग सेव नहीं हो सकी। कृपया दोबारा प्रयास करें।";
         }
+        if (normalized.contains("please type your issue in a few words")) {
+            return "कृपया अपनी समस्या संक्षेप में लिखें।";
+        }
+        if (normalized.contains("please select your issue by typing any of the number")) {
+            return "कृपया नंबर टाइप करके अपनी समस्या चुनें";
+        }
+        if (normalized.contains("please select the no submission reasons by typing any of the number")) {
+            return "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें";
+        }
+        if (normalized.contains("electricity supply disconnected")) {
+            return "बिजली आपूर्ति बंद है";
+        }
+        if (normalized.contains("no electricity supply today")) {
+            return "आज बिजली की आपूर्ति नहीं है";
+        }
+        if (normalized.contains("pump failure")) {
+            return "पंप खराब है";
+        }
+        if (normalized.contains("pipeline break")) {
+            return "पाइपलाइन टूटी है";
+        }
+        if (normalized.contains("water quality issues")) {
+            return "पानी की गुणवत्ता में समस्या है";
+        }
+        if (normalized.contains("source drying")) {
+            return "स्रोत सूख रहा है";
+        }
+        if (normalized.contains("natural calamity")) {
+            return "प्राकृतिक आपदा";
+        }
+        if (normalized.equals("others")) {
+            return "अन्य";
+        }
+        if (normalized.contains("meter replaced")) {
+            return "मीटर बदला गया";
+        }
+        if (normalized.contains("meter not working")) {
+            return "मीटर काम नहीं कर रहा";
+        }
+        if (normalized.contains("meter damaged") || normalized.contains("meter damage")) {
+            return "मीटर खराब है";
+        }
+        if (normalized.contains("reading captured successfully")) {
+            Matcher matcher = EXTRACTED_READING_PATTERN.matcher(message);
+            if (matcher.find()) {
+                String reading = matcher.group(1).trim();
+                return "रीडिंग सफलतापूर्वक दर्ज हुई। प्राप्त रीडिंग: " + reading;
+            }
+            return "रीडिंग सफलतापूर्वक दर्ज हुई।";
+        }
+        if (normalized.contains("low ocr confidence")) {
+            Matcher matcher = EXTRACTED_READING_PATTERN.matcher(message);
+            if (matcher.find()) {
+                String reading = matcher.group(1).trim();
+                return "OCR भरोसा कम है। प्राप्त रीडिंग: " + reading + "। कृपया रीडिंग की पुष्टि करें।";
+            }
+            return "OCR भरोसा कम है। कृपया रीडिंग की पुष्टि करें।";
+        }
+        if (normalized.contains("invalid reading value")) {
+            return "रीडिंग मान्य नहीं है।";
+        }
         if (normalized.contains("could not read meter value from image")) {
             return "इमेज से मीटर रीडिंग नहीं पढ़ी जा सकी। कृपया स्पष्ट फोटो भेजें।";
         }
         if (normalized.contains("ocr failed")) {
             return "मीटर रीडिंग पढ़ने में त्रुटि हुई। कृपया स्पष्ट फोटो भेजें।";
+        }
+        if (normalized.contains("location saved successfully")) {
+            return "लोकेशन सफलतापूर्वक सेव हो गई।";
+        }
+        if (normalized.contains("reading updated successfully")) {
+            return "रीडिंग सफलतापूर्वक अपडेट हुई।";
         }
         return message;
     }

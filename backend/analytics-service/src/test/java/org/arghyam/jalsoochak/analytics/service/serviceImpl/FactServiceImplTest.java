@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 
 import org.arghyam.jalsoochak.analytics.constant.EscalationType;
+import org.arghyam.jalsoochak.analytics.dto.event.AnomalyEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
@@ -13,6 +14,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimOperatorAttendanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
@@ -59,6 +61,8 @@ class FactServiceImplTest {
     private DimTenantRepository dimTenantRepository;
     @Mock
     private DimDateRepository dimDateRepository;
+    @Mock
+    private DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
 
     @InjectMocks
     private FactServiceImpl service;
@@ -76,6 +80,15 @@ class FactServiceImplTest {
         event.setReadingAt("2026-01-01T10:15:00");
         event.setChannel(2);
         event.setReadingDate("2026-01-01");
+        event.setSubmissionStatus(1);
+        event.setReadingType(0);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
 
         service.ingestMeterReading(event);
 
@@ -85,6 +98,8 @@ class FactServiceImplTest {
         assertThat(captor.getValue().getSchemeId()).isEqualTo(11);
         assertThat(captor.getValue().getReadingAt()).isEqualTo(LocalDateTime.parse("2026-01-01T10:15:00"));
         assertThat(captor.getValue().getReadingDate()).isEqualTo(LocalDate.of(2026, 1, 1));
+        assertThat(captor.getValue().getSubmissionStatus()).isEqualTo(1);
+        assertThat(captor.getValue().getReadingType()).isEqualTo(0);
     }
 
     @Test
@@ -122,8 +137,30 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getEscalationType()).isEqualTo(3);
+        assertThat(captor.getValue().getEscalationType()).isEqualTo("consecutive_override_5_days");
         assertThat(captor.getValue().getResolutionStatus()).isEqualTo(0);
+    }
+
+    @Test
+    void ingestAnomalyRecorded_forWaterAnomaly_alsoSavesEscalationFact() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-1");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(EscalationType.NO_WATER_SUPPLY.code);
+        event.setReason("No water supply");
+        event.setStatus(1);
+
+        service.ingestAnomalyRecorded(event);
+
+        verify(anomalyRepository, times(1)).save(any());
+        ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
+        verify(escalationRepository, times(1)).save(captor.capture());
+        FactEscalation saved = captor.getValue();
+        assertThat(saved.getEscalationType()).isEqualTo("no_supply");
+        assertThat(saved.getCorrelationId())
+                .isEqualTo(service.buildCorrelationId(EscalationType.NO_WATER_SUPPLY, 21, 1, 11));
     }
 
     // ── ingestTenantEscalation ───────────────────────────────────────────────
