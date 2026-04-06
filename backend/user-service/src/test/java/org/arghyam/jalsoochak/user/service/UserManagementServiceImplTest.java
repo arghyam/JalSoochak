@@ -544,7 +544,6 @@ class UserManagementServiceImplTest {
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findAdminUserByEmail("sa@mp.com")).thenReturn(Optional.empty());
             when(userCommonRepository.existsTenantByStateCode("MP")).thenReturn(true);
             when(userCommonRepository.findUserTypeIdByName("STATE_ADMIN")).thenReturn(Optional.of(2));
@@ -913,8 +912,6 @@ class UserManagementServiceImplTest {
 
             when(userCommonRepository.findAdminUserById(7L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
             when(userCommonRepository.findTenantTitleByStateCode("MP")).thenReturn(Optional.of("Madhya Pradesh"));
             when(userCommonRepository.findInviteTokenByEmail("sa@mp.com")).thenReturn(Optional.of(existingToken));
