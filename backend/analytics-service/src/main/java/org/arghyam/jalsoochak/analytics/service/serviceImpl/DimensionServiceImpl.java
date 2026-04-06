@@ -4,7 +4,9 @@ import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
@@ -24,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -163,6 +166,40 @@ public class DimensionServiceImpl implements DimensionService {
 
         dimDepartmentLocationRepository.save(dept);
         log.info("Upserted dim_department_location_table [id={}]", event.getDepartmentId());
+    }
+
+    @Override
+    @Transactional
+    public void updateWaterNorm(WaterNormUpdatedEvent event) {
+        DimTenant tenant = dimTenantRepository.findById(event.getTenantId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "No dim_tenant_table row for tenantId=" + event.getTenantId()));
+        tenant.setRequiredLpcd(event.getWaterNorm());
+        tenant.setUpdatedAt(LocalDateTime.now());
+        dimTenantRepository.save(tenant);
+        log.info("Updated dim_tenant_table.required_lpcd={} [tenantId={}]",
+                event.getWaterNorm(), event.getTenantId());
+    }
+
+    @Override
+    @Transactional
+    public void updateLocationHierarchyNames(TenantLocationHierarchyUpdatedEvent event) {
+        boolean isLgd = "LGD".equalsIgnoreCase(event.getHierarchyType());
+        for (TenantLocationHierarchyUpdatedEvent.LevelEntry entry : event.getLevels()) {
+            if (isLgd) {
+                List<DimLgdLocation> locs = dimLgdLocationRepository
+                        .findByTenantIdAndLgdLevel(event.getTenantId(), entry.getLevel());
+                locs.forEach(l -> { l.setLgdCName(entry.getName()); l.setUpdatedAt(LocalDateTime.now()); });
+                dimLgdLocationRepository.saveAll(locs);
+            } else {
+                List<DimDepartmentLocation> locs = dimDepartmentLocationRepository
+                        .findByTenantIdAndDepartmentLevel(event.getTenantId(), entry.getLevel());
+                locs.forEach(l -> { l.setDepartmentCName(entry.getName()); l.setUpdatedAt(LocalDateTime.now()); });
+                dimDepartmentLocationRepository.saveAll(locs);
+            }
+        }
+        log.info("Updated location hierarchy names [tenantId={}, hierarchyType={}]",
+                event.getTenantId(), event.getHierarchyType());
     }
 
     private Geometry parseGeoJson(String geoJson) {
