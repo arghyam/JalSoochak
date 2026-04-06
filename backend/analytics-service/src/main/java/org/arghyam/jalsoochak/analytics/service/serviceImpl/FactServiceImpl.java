@@ -292,6 +292,10 @@ public class FactServiceImpl implements FactService {
         int escalationRowsCreated = 0;
         int anomalyRowsCreated = 0;
 
+        String resolvedAnomalyType = (event.getAnomalyType() != null && !event.getAnomalyType().isBlank())
+                ? event.getAnomalyType()
+                : intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
+
         // One fact_escalation_table row + one anomaly_table row per operator
         if (event.getOperators() == null) return;
         for (TenantEscalationEvent.TenantOperatorEscalationDetail op : event.getOperators()) {
@@ -336,7 +340,7 @@ public class FactServiceImpl implements FactService {
                     FactEscalation escalationFact = FactEscalation.builder()
                             .tenantId(event.getTenantId())
                             .schemeId(schemeId)
-                            .escalationType(intCodeToVarchar(EscalationType.NO_SUBMISSION.code))
+                            .escalationType(resolvedAnomalyType)
                             .message(escalationMessage)
                             .correlationId(correlationId)
                             .userId(event.getOfficerId().intValue())
@@ -366,7 +370,7 @@ public class FactServiceImpl implements FactService {
             try {
                 Anomaly anomaly = Anomaly.builder()
                         .uuid(UUID.randomUUID().toString())
-                        .type(intCodeToVarchar(EscalationType.NO_SUBMISSION.code))
+                        .type(resolvedAnomalyType)
                         .userId(op.getUserId())
                         .schemeId(schemeId)
                         .tenantId(event.getTenantId())
