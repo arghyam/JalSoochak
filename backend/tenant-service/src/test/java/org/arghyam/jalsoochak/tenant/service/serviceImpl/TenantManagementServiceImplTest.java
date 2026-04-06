@@ -1070,6 +1070,64 @@ class TenantManagementServiceImplTest {
             verify(tenantCommonRepository, never()).updateTenantStatus(any(), any(), any());
         }
 
+        @Test
+        @DisplayName("Should publish WaterNormUpdatedEvent when WATER_NORM key is set")
+        void setTenantConfigs_withWaterNorm_publishesWaterNormUpdatedEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.WATER_NORM, objectMapper.readTree("{\"value\": \"70\"}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.WATER_NORM.name())
+                    .configValue("{\"value\":\"70\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.WATER_NORM.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            assertInstanceOf(org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent.class, captor.getValue());
+            org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent event =
+                    (org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent) captor.getValue();
+            assertEquals(tenantId, event.getTenantId());
+            assertEquals("MP", event.getStateCode());
+            assertEquals(70, event.getWaterNorm());
+        }
+
+        @Test
+        @DisplayName("Should not publish WaterNormUpdatedEvent when WATER_NORM key is absent")
+        void setTenantConfigs_withoutWaterNorm_doesNotPublishWaterNormUpdatedEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON, objectMapper.readTree("{\"value\": \"tmpl\"}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"tmpl\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(eventPublisher, never()).publishEvent(
+                    any(org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent.class));
+        }
+
         private SetTenantConfigRequestDTO request(Map<TenantConfigKeyEnum, JsonNode> configs) {
             return SetTenantConfigRequestDTO.builder().configs(configs).build();
         }
@@ -1625,6 +1683,68 @@ class TenantManagementServiceImplTest {
             InvalidConfigValueException ex = assertThrows(InvalidConfigValueException.class,
                     () -> tenantManagementService.updateLocationHierarchy(tenantId, "LGD", levelsWithDuplicates));
             assertTrue(ex.getMessage().contains("unique"));
+        }
+
+        @Test
+        @DisplayName("Should publish TenantLocationHierarchyUpdatedEvent on name-only change")
+        void updateLocationHierarchy_nameOnlyChange_publishesHierarchyUpdatedEvent() {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("mp").build();
+            List<LocationLevelConfigDTO> existingLevels = List.of(
+                    LocationLevelConfigDTO.builder().level(1)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("State").build())).build(),
+                    LocationLevelConfigDTO.builder().level(2)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("District").build())).build());
+            List<LocationLevelConfigDTO> renamedLevels = List.of(
+                    LocationLevelConfigDTO.builder().level(1)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("Rajya").build())).build(),
+                    LocationLevelConfigDTO.builder().level(2)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("Zila").build())).build());
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantSchemaRepository.getLocationHierarchy("tenant_mp", RegionTypeEnum.LGD))
+                    .thenReturn(LocationConfigDTO.builder().locationHierarchy(existingLevels).build());
+
+            tenantManagementService.updateLocationHierarchy(tenantId, "LGD", renamedLevels);
+
+            ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            assertInstanceOf(org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent.class, captor.getValue());
+            org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent event =
+                    (org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent) captor.getValue();
+            assertEquals(tenantId, event.getTenantId());
+            assertEquals("mp", event.getStateCode());
+            assertEquals("LGD", event.getHierarchyType());
+            assertEquals(renamedLevels, event.getLevels());
+        }
+
+        @Test
+        @DisplayName("Should not publish TenantLocationHierarchyUpdatedEvent on structural change")
+        void updateLocationHierarchy_structuralChange_doesNotPublishHierarchyUpdatedEvent() {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("mp").build();
+            List<LocationLevelConfigDTO> existingLevels = List.of(
+                    LocationLevelConfigDTO.builder().level(1)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("State").build())).build());
+            // Different level number — structural change
+            List<LocationLevelConfigDTO> newLevels = List.of(
+                    LocationLevelConfigDTO.builder().level(1)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("State").build())).build(),
+                    LocationLevelConfigDTO.builder().level(2)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("District").build())).build());
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantSchemaRepository.getLocationHierarchy("tenant_mp", RegionTypeEnum.LGD))
+                    .thenReturn(LocationConfigDTO.builder().locationHierarchy(existingLevels).build());
+
+            tenantManagementService.updateLocationHierarchy(tenantId, "LGD", newLevels);
+
+            verify(eventPublisher, never()).publishEvent(
+                    any(org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent.class));
         }
     }
 
