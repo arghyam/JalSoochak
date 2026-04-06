@@ -149,7 +149,49 @@ class NotificationEventRouterTest {
 
     @Test
     void route_generatesAndSendsEscalation_usingStoredContactId_whenPresent() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("report.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("report.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
+        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+
+        router.route("""
+                {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
+                 "escalationLevel":2,"tenantId":1,"officerLanguageId":1,
+                 "officerId":20,"officerWhatsappConnectionId":77,"tenantSchema":"tenant_mp",
+                 "officerUserType":"JE","correlationId":"corr-stored",
+                 "operators":[{"name":"Op A","phoneNumber":"911111111111","schemeName":"S1",
+                               "schemeId":"1","soName":"SO X","consecutiveDaysMissed":8,
+                               "lastRecordedBfmDate":"2024-01-01"}]}
+                """);
+
+        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"), eq("corr-stored"));
+        verify(minioStorageService).upload(any(Path.class));
+        verify(whatsAppChannel).sendDocument(eq(77L), eq("https://minio.example.com/report.pdf"));
+        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void route_passesEmptyOfficerUserType_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("report.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
+        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+
+        router.route("""
+                {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
+                 "escalationLevel":2,"tenantId":1,"officerLanguageId":1,
+                 "officerId":20,"officerWhatsappConnectionId":77,"tenantSchema":"tenant_mp",
+                 "correlationId":"corr-no-type",
+                 "operators":[{"name":"Op A","phoneNumber":"911111111111","schemeName":"S1",
+                               "schemeId":"1","soName":"SO X","consecutiveDaysMissed":8,
+                               "lastRecordedBfmDate":"2024-01-01"}]}
+                """);
+
+        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq(""), eq("corr-no-type"));
+    }
+
+    @Test
+    void route_passesEmptyCorrelationId_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq(""))).thenReturn("report.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
@@ -163,34 +205,12 @@ class NotificationEventRouterTest {
                                "lastRecordedBfmDate":"2024-01-01"}]}
                 """);
 
-        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"));
-        verify(minioStorageService).upload(any(Path.class));
-        verify(whatsAppChannel).sendDocument(eq(77L), eq("https://minio.example.com/report.pdf"));
-        verify(glificWhatsAppService, never()).optIn(anyString());
-        verify(kafkaProducer, never()).publishJson(anyString(), any());
-    }
-
-    @Test
-    void route_passesEmptyOfficerUserType_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("report.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
-        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
-
-        router.route("""
-                {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
-                 "escalationLevel":2,"tenantId":1,"officerLanguageId":1,
-                 "officerId":20,"officerWhatsappConnectionId":77,"tenantSchema":"tenant_mp",
-                 "operators":[{"name":"Op A","phoneNumber":"911111111111","schemeName":"S1",
-                               "schemeId":"1","soName":"SO X","consecutiveDaysMissed":8,
-                               "lastRecordedBfmDate":"2024-01-01"}]}
-                """);
-
-        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq(""));
+        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"), eq(""));
     }
 
     @Test
     void route_fallsBackToOptIn_andPublishesEvent_forEscalation_whenNoStoredContactId() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("r.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("r.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/r.pdf");
         when(glificWhatsAppService.optIn("919876500000")).thenReturn(88L);
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
@@ -236,14 +256,14 @@ class NotificationEventRouterTest {
 
     @Test
     void route_isCaseInsensitive_forEscalationEventType() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("r.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-case"))).thenReturn("r.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/r.pdf");
         when(glificWhatsAppService.optIn(anyString())).thenReturn(11L);
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
         router.route("""
                 {"eventType":"escalation","officerPhone":"919876500002","officerName":"DO",
-                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,
+                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"correlationId":"corr-case",
                  "operators":[{"name":"Op","phoneNumber":"911111111112","schemeName":"S","schemeId":"1",
                                "soName":"SO","consecutiveDaysMissed":4,"lastRecordedBfmDate":"2024-01-01"}]}
                 """);
@@ -277,12 +297,12 @@ class NotificationEventRouterTest {
 
     @Test
     void route_rethrowsException_forKafkaRetry_whenPdfGenerationFails() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString()))
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-pdf-fail")))
                 .thenThrow(new RuntimeException("PDF write failed"));
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500003","officerName":"DO",
-                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,
+                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"correlationId":"corr-pdf-fail",
                  "operators":[{"name":"Op","phoneNumber":"911111111113","schemeName":"S","schemeId":"1",
                                "soName":"SO","consecutiveDaysMissed":4,"lastRecordedBfmDate":"2024-01-01"}]}
                 """))
@@ -292,12 +312,12 @@ class NotificationEventRouterTest {
 
     @Test
     void route_rethrowsException_forKafkaRetry_whenMinioUploadFails() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("r.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-minio-fail"))).thenReturn("r.pdf");
         when(minioStorageService.upload(any(Path.class))).thenThrow(new Exception("MinIO error"));
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500004","officerName":"DO",
-                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,
+                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"correlationId":"corr-minio-fail",
                  "operators":[{"name":"Op","phoneNumber":"911111111114","schemeName":"S","schemeId":"1",
                                "soName":"SO","consecutiveDaysMissed":4,"lastRecordedBfmDate":"2024-01-01"}]}
                 """))
