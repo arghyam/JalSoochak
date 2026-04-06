@@ -51,8 +51,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.security.core.context.SecurityContextHolder.clearContext;
-import static org.springframework.security.core.context.SecurityContextHolder.getContext;
 
 @WebMvcTest(controllers = AnalyticsSchemeReportingController.class)
 @Import(GlobalExceptionHandler.class)
@@ -561,25 +559,15 @@ class AnalyticsSchemeReportingControllerTest {
         when(operatorAttendanceQueryService.getDayWiseAttendance(eq(uuid), eq(start), eq(end)))
                 .thenReturn(List.of(row));
 
-        getContext().setAuthentication(new org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken(
-                org.springframework.security.oauth2.jwt.Jwt.withTokenValue("test")
-                        .header("alg", "none")
-                        .subject(uuid.toString())
-                        .claim("typ", "JWT")
-                        .build()
-        ));
-        try {
-            mockMvc.perform(get(BASE + "/operator-attendance")
-                            .param("start_date", start.toString())
-                            .param("end_date", end.toString()))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data").isArray())
-                    .andExpect(jsonPath("$.data[0].date").value("2026-04-02"))
-                    .andExpect(jsonPath("$.data[0].attendance").value(1));
-        } finally {
-            clearContext();
-        }
+        mockMvc.perform(get(BASE + "/operator-attendance")
+                        .param("uuid", uuid.toString())
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data[0].date").value("2026-04-02"))
+                .andExpect(jsonPath("$.data[0].attendance").value(1));
 
         verify(operatorAttendanceQueryService, times(1)).getDayWiseAttendance(eq(uuid), eq(start), eq(end));
     }
@@ -593,48 +581,15 @@ class AnalyticsSchemeReportingControllerTest {
         when(operatorAttendanceQueryService.getDayWiseAttendance(eq(uuid), eq(start), eq(end)))
                 .thenThrow(new IllegalArgumentException("start_date must be on or before end_date"));
 
-        getContext().setAuthentication(new org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken(
-                org.springframework.security.oauth2.jwt.Jwt.withTokenValue("test")
-                        .header("alg", "none")
-                        .subject(uuid.toString())
-                        .claim("typ", "JWT")
-                        .build()
-        ));
-        try {
-            mockMvc.perform(get(BASE + "/operator-attendance")
-                            .param("start_date", start.toString())
-                            .param("end_date", end.toString()))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.data").value(nullValue()));
-        } finally {
-            clearContext();
-        }
+        mockMvc.perform(get(BASE + "/operator-attendance")
+                        .param("uuid", uuid.toString())
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
 
         verify(operatorAttendanceQueryService, times(1)).getDayWiseAttendance(eq(uuid), eq(start), eq(end));
-    }
-
-    @Test
-    void getOperatorAttendanceDayWise_whenTokenSubjectInvalid_returnsBadRequest() throws Exception {
-        getContext().setAuthentication(new org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken(
-                org.springframework.security.oauth2.jwt.Jwt.withTokenValue("test")
-                        .header("alg", "none")
-                        .subject("not-a-uuid")
-                        .claim("typ", "JWT")
-                        .build()
-        ));
-        try {
-            mockMvc.perform(get(BASE + "/operator-attendance")
-                            .param("start_date", START.toString())
-                            .param("end_date", END.toString()))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.data").value(nullValue()));
-        } finally {
-            clearContext();
-        }
-
-        verify(operatorAttendanceQueryService, never()).getDayWiseAttendance(any(), any(), any());
     }
 
     @Test
