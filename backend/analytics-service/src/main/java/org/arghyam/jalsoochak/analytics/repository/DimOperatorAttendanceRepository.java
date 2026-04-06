@@ -30,4 +30,11 @@ public interface DimOperatorAttendanceRepository extends JpaRepository<DimOperat
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );
+
+    boolean existsByTenantIdAndSchemeIdAndUserIdAndDateKey(
+            Integer tenantId,
+            Integer schemeId,
+            Integer userId,
+            Integer dateKey
+    );
 }

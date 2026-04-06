@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeSummaryDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
+import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.service.PiiEncryptionService;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -643,7 +644,7 @@ public class PersonSchemeRepository {
                     .id(row.id())
                     .uuid(row.uuid())
                     .name(row.nameValue())
-                    .status(row.statusValue())
+                    .status(mapStatus(row.statusValue()))
                     .schemes(schemes.getOrDefault(row.id(), List.of()))
                     .reportingRatePercent(row.reportingRatePercent())
                     .lastSubmissionAt(row.lastSubmissionAt())
@@ -848,5 +849,12 @@ public class PersonSchemeRepository {
 
     public Integer parseStatus(String status) {
         return normalizeStatus(status);
+    }
+
+    private TenantUserStatus mapStatus(Integer status) {
+        if (status == null) {
+            return null;
+        }
+        return TenantUserStatus.fromCode(status);
     }
 }
