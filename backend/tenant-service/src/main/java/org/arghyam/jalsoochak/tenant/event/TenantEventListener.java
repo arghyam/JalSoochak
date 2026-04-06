@@ -1,8 +1,10 @@
 package org.arghyam.jalsoochak.tenant.event;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelNameDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
@@ -66,9 +68,51 @@ public class TenantEventListener {
             log.error("Failed to evict tenant from Redis after deactivate [id={}]", event.getTenant().getId(), e);
         }
         try {
-            publishTenantEvent(event.getTenant(), "TENANT_DEACTIVATED");
+            publishTenantEvent(event.getTenant(), "TENANT_UPDATED");
         } catch (Exception e) {
             log.error("Failed to publish TENANT_DEACTIVATED event [id={}]", event.getTenant().getId(), e);
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleWaterNormUpdated(WaterNormUpdatedEvent event) {
+        log.info("Handling WaterNormUpdatedEvent after commit [tenantId={}]", event.getTenantId());
+        try {
+            Map<String, Object> payload = Map.of(
+                    "eventType", "WATER_NORM_UPDATED",
+                    "tenantId",  event.getTenantId(),
+                    "stateCode", event.getStateCode(),
+                    "waterNorm", event.getWaterNorm());
+            kafkaProducer.publishJson(TENANT_TOPIC, payload);
+            log.info("Published WATER_NORM_UPDATED event [tenantId={}]", event.getTenantId());
+        } catch (Exception e) {
+            log.error("Failed to publish WATER_NORM_UPDATED event [tenantId={}]", event.getTenantId(), e);
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleLocationHierarchyUpdated(TenantLocationHierarchyUpdatedEvent event) {
+        log.info("Handling TenantLocationHierarchyUpdatedEvent after commit [tenantId={}]", event.getTenantId());
+        try {
+            List<Map<String, Object>> levelList = event.getLevels().stream()
+                    .map(l -> {
+                        List<LocationLevelNameDTO> names = l.getLevelName();
+                        String canonicalName = (names != null && !names.isEmpty())
+                                ? names.get(0).getTitle()
+                                : null;
+                        return Map.<String, Object>of("level", l.getLevel(), "name", canonicalName != null ? canonicalName : "");
+                    })
+                    .toList();
+            Map<String, Object> payload = Map.of(
+                    "eventType",     "TENANT_LOCATION_HIERARCHY_UPDATED",
+                    "tenantId",      event.getTenantId(),
+                    "stateCode",     event.getStateCode(),
+                    "hierarchyType", event.getHierarchyType(),
+                    "levels",        levelList);
+            kafkaProducer.publishJson(TENANT_TOPIC, payload);
+            log.info("Published TENANT_LOCATION_HIERARCHY_UPDATED event [tenantId={}]", event.getTenantId());
+        } catch (Exception e) {
+            log.error("Failed to publish TENANT_LOCATION_HIERARCHY_UPDATED event [tenantId={}]", event.getTenantId(), e);
         }
     }
 

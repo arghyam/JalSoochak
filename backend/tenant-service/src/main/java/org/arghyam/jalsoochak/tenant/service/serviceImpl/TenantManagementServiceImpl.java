@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -22,14 +21,14 @@ import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
-import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
-import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
@@ -47,19 +46,20 @@ import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum.ConfigType;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.event.TenantCreatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantDeactivatedEvent;
+import org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.ConfigurationException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigKeyException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
 import org.arghyam.jalsoochak.tenant.exception.StorageException;
-import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
-import org.springframework.web.multipart.MultipartFile;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
+import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
 import org.springframework.context.ApplicationEventPublisher;
@@ -67,6 +67,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -357,6 +358,12 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         }
 
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.WATER_NORM)) {
+            SimpleConfigValueDTO dto = (SimpleConfigValueDTO) results.get(TenantConfigKeyEnum.WATER_NORM);
+            eventPublisher.publishEvent(
+                    new WaterNormUpdatedEvent(tenantId, tenant.getStateCode(), Integer.parseInt(dto.getValue())));
+        }
+
         return TenantConfigResponseDTO.builder()
                 .tenantId(tenantId)
                 .configs(results)
@@ -568,6 +575,9 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             tenantSchemaRepository.rewriteLocationHierarchyIfNoSeededData(schemaName, regionType, levels, currentUserId);
         } else {
             tenantSchemaRepository.updateLevelNames(schemaName, regionType, levels, currentUserId);
+            eventPublisher.publishEvent(
+                    new TenantLocationHierarchyUpdatedEvent(
+                            tenantId, tenant.getStateCode(), hierarchyType.toUpperCase(), levels));
         }
 
         log.info("Location hierarchy updated successfully [id={}, hierarchyType={}, structuralChange={}]",
