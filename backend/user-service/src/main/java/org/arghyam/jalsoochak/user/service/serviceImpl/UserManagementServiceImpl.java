@@ -25,6 +25,7 @@ import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserTokenRow;
 import org.arghyam.jalsoochak.user.event.InviteEmailEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
 import org.arghyam.jalsoochak.user.service.MetadataDecryptionHelper;
@@ -64,6 +65,7 @@ public class UserManagementServiceImpl implements UserManagementService {
     private final UserCommonRepository userCommonRepository;
     private final UserTenantRepository userTenantRepository;
     private final UserNotificationEventPublisher userNotificationEventPublisher;
+    private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final KeycloakAdminHelper keycloakAdminHelper;
     private final InviteProperties inviteProperties;
     private final FrontendProperties frontendProperties;
@@ -314,8 +316,9 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         usersResource.get(keycloakId).update(rep);
 
-        return keycloakAdminHelper.buildAdminUserResponse(
-                userCommonRepository.findAdminUserByUuid(keycloakId).orElse(user));
+        AdminUserRow refreshedUser = userCommonRepository.findAdminUserByUuid(keycloakId).orElse(user);
+        userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(refreshedUser);
+        return keycloakAdminHelper.buildAdminUserResponse(refreshedUser);
     }
 
     @Override
@@ -476,8 +479,9 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         usersResource.get(user.uuid()).update(rep);
 
-        return keycloakAdminHelper.buildAdminUserResponse(
-                userCommonRepository.findAdminUserById(id).orElse(user));
+        AdminUserRow refreshedUser = userCommonRepository.findAdminUserById(id).orElse(user);
+        userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(refreshedUser);
+        return keycloakAdminHelper.buildAdminUserResponse(refreshedUser);
     }
 
     private void applyNameUpdatesAndSyncProfile(AdminUserRow user, UpdateProfileRequestDTO request,
@@ -550,6 +554,9 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         userCommonRepository.deactivateAdminUser(id, callerRow.id());
 
+        AdminUserRow deactivatedUser = userCommonRepository.findAdminUserById(id).orElse(target);
+        userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(deactivatedUser);
+
         var usersResource = keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm()).users();
         UserRepresentation rep = usersResource.get(target.uuid()).toRepresentation();
         rep.setEnabled(false);
@@ -584,6 +591,9 @@ public class UserManagementServiceImpl implements UserManagementService {
         }
 
         userCommonRepository.activateAdminUser(id, callerRow.id());
+
+        AdminUserRow activatedUser = userCommonRepository.findAdminUserById(id).orElse(target);
+        userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(activatedUser);
 
         var usersResource = keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm()).users();
         UserRepresentation rep = usersResource.get(target.uuid()).toRepresentation();
