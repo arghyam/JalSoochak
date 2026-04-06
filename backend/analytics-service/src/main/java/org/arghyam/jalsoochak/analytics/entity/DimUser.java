@@ -35,6 +35,12 @@ public class DimUser {
     @Column(name = "uuid")
     private UUID uuid;
 
+    @Column(name = "title")
+    private String title;
+
+    @Column(name = "status")
+    private Integer status;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

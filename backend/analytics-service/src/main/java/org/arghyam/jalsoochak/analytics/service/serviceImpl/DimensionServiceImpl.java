@@ -61,6 +61,11 @@ public class DimensionServiceImpl implements DimensionService {
     @Override
     @Transactional
     public void upsertUser(UserEvent event) {
+        if (event.getTenantId() == null || event.getTenantId() == 0) {
+            log.debug("Skipping dim_user upsert for SUPER_USER [userId={}]", event.getUserId());
+            return;
+        }
+
         DimUser user = dimUserRepository.findById(event.getUserId())
                 .orElse(DimUser.builder()
                         .userId(event.getUserId())
@@ -71,6 +76,8 @@ public class DimensionServiceImpl implements DimensionService {
         user.setEmail(event.getEmail());
         user.setUserType(event.getUserType());
         user.setUuid(event.getUuid());
+        if (event.getTitle() != null) user.setTitle(event.getTitle());
+        if (event.getStatus() != null) user.setStatus(event.getStatus());
         user.setUpdatedAt(LocalDateTime.now());
 
         dimUserRepository.save(user);
