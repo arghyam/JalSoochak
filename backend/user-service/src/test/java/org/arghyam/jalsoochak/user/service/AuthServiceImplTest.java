@@ -29,6 +29,7 @@ import org.arghyam.jalsoochak.user.dto.request.ResetPasswordRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.InviteInfoResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.event.ResetPasswordEmailEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
@@ -80,6 +81,9 @@ class AuthServiceImplTest {
     private UserNotificationEventPublisher userNotificationEventPublisher;
 
     @Mock
+    private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+
+    @Mock
     private KeycloakAdminHelper keycloakAdminHelper;
 
     @Mock
@@ -100,7 +104,7 @@ class AuthServiceImplTest {
     void setUp() {
         authService = new AuthServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
-                userNotificationEventPublisher, keycloakAdminHelper, passwordResetProperties,
+                userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, passwordResetProperties,
                 frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper
         );
     }
@@ -609,6 +613,8 @@ class AuthServiceImplTest {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             doNothing().when(userCommonRepository).activatePendingAdminUser(eq(20L), anyString(), anyString());
+            AdminUserRow activatedUser = new AdminUserRow(20L, "sa-kc-id", "newsa@example.com", "", 1, 3, "STATE_ADMIN", AdminUserStatus.ACTIVE, 0, null);
+            when(userCommonRepository.findAdminUserByUuid("sa-kc-id")).thenReturn(Optional.of(activatedUser));
             when(userTenantRepository.createUser(anyString(), anyString(), any(), anyString(),
                     anyString(), any(), anyString(), anyString(), any())).thenReturn(1L);
             when(keycloakClient.obtainToken(anyString(), anyString())).thenReturn(tokenResponse());

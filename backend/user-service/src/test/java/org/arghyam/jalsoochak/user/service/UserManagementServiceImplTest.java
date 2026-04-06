@@ -30,6 +30,7 @@ import org.arghyam.jalsoochak.user.dto.request.UpdateProfileRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.AdminUserResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.event.InviteEmailEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
@@ -83,6 +84,9 @@ class UserManagementServiceImplTest {
     private UserNotificationEventPublisher userNotificationEventPublisher;
 
     @Mock
+    private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+
+    @Mock
     private KeycloakAdminHelper keycloakAdminHelper;
 
     @Mock
@@ -104,7 +108,7 @@ class UserManagementServiceImplTest {
         MetadataDecryptionHelper metadataDecryptionHelper = new MetadataDecryptionHelper(new ObjectMapper(), pii);
         userManagementService = new UserManagementServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
-                userNotificationEventPublisher, keycloakAdminHelper, inviteProperties, frontendProperties,
+                userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, inviteProperties, frontendProperties,
                 tokenService, new ObjectMapper(), pii, metadataDecryptionHelper
         );
     }
