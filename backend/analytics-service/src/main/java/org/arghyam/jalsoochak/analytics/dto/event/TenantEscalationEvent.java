@@ -15,6 +15,7 @@ public class TenantEscalationEvent {
 
     private String eventType;
     private Integer escalationLevel;
+    private String anomalyType;
     private String officerPhone;
     private String officerName;
     private List<TenantOperatorEscalationDetail> operators;
