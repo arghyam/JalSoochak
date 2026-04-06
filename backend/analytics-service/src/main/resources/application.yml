@@ -6,10 +6,9 @@ spring:
     name: analytics-service
 
   datasource:
-    # url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://192.1 
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/jalsoochak_analytics_db}?stringtype=unspecified
-    username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:Zaqwsx@1123}
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10

@@ -247,7 +247,7 @@ public class PublicPumpOperatorRepository {
                         .name(pii.safeDecrypt(rs.getString("title")))
                         .email(rs.getString("email"))
                         .phoneNumber(pii.safeDecrypt(rs.getString("phone_number")))
-                        .status(getNullableInt(rs, "status"))
+                        .status(mapStatus(getNullableInt(rs, "status")))
                         .schemeId(getNullableInt(rs, "scheme_id"))
                         .schemeName(rs.getString("scheme_name"))
                         .schemeLatitude(getNullableDouble(rs, "scheme_latitude"))

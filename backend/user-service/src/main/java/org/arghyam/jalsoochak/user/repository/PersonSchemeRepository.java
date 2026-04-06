@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeSummaryDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
+import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.service.PiiEncryptionService;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -341,9 +342,15 @@ public class PersonSchemeRepository {
         String sql = String.format("""
                 SELECT COUNT(1)
                 FROM %s.flow_reading_table fr
+                JOIN %s.user_table u
+                  ON u.id = fr.created_by
+                 AND u.deleted_at IS NULL
+                JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type
                 WHERE fr.deleted_at IS NULL
                   AND fr.scheme_id = ?
-                """, schemaName);
+                  AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
+                """, schemaName, schemaName);
         Long total = jdbcTemplate.queryForObject(sql, Long.class, schemeId);
         return total == null ? 0 : total;
     }
@@ -637,7 +644,7 @@ public class PersonSchemeRepository {
                     .id(row.id())
                     .uuid(row.uuid())
                     .name(row.nameValue())
-                    .status(row.statusValue())
+                    .status(mapStatus(row.statusValue()))
                     .schemes(schemes.getOrDefault(row.id(), List.of()))
                     .reportingRatePercent(row.reportingRatePercent())
                     .lastSubmissionAt(row.lastSubmissionAt())
@@ -842,5 +849,12 @@ public class PersonSchemeRepository {
 
     public Integer parseStatus(String status) {
         return normalizeStatus(status);
+    }
+
+    private TenantUserStatus mapStatus(Integer status) {
+        if (status == null) {
+            return null;
+        }
+        return TenantUserStatus.fromCode(status);
     }
 }

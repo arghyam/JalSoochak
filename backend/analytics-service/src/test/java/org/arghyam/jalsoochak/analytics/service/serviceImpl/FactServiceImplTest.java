@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimOperatorAttendanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
@@ -60,6 +61,8 @@ class FactServiceImplTest {
     private DimTenantRepository dimTenantRepository;
     @Mock
     private DimDateRepository dimDateRepository;
+    @Mock
+    private DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
 
     @InjectMocks
     private FactServiceImpl service;
@@ -79,6 +82,13 @@ class FactServiceImplTest {
         event.setReadingDate("2026-01-01");
         event.setSubmissionStatus(1);
         event.setReadingType(0);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
 
         service.ingestMeterReading(event);
 
@@ -127,7 +137,7 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getEscalationType()).isEqualTo(3);
+        assertThat(captor.getValue().getEscalationType()).isEqualTo("consecutive_override_5_days");
         assertThat(captor.getValue().getResolutionStatus()).isEqualTo(0);
     }
 
@@ -148,7 +158,7 @@ class FactServiceImplTest {
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
         FactEscalation saved = captor.getValue();
-        assertThat(saved.getEscalationType()).isEqualTo(EscalationType.NO_WATER_SUPPLY.code);
+        assertThat(saved.getEscalationType()).isEqualTo("no_supply");
         assertThat(saved.getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_WATER_SUPPLY, 21, 1, 11));
     }

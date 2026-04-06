@@ -30,8 +30,8 @@ public class Anomaly {
     @Column(name = "uuid", nullable = false, unique = true)
     private String uuid;
 
-    @Column(name = "type", nullable = false)
-    private Integer type;
+    @Column(name = "type", nullable = false, length = 128)
+    private String type;
 
     @Column(name = "user_id")
     private Integer userId;

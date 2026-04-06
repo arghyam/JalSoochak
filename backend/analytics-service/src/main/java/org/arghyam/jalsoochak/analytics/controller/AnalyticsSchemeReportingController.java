@@ -3,16 +3,19 @@ package org.arghyam.jalsoochak.analytics.controller;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationPaginatedResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
+import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
+import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
-import org.arghyam.jalsoochak.analytics.entity.Anomaly;
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyPaginatedResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -38,6 +41,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/analytics")
@@ -46,13 +50,12 @@ import java.util.Objects;
 public class AnalyticsSchemeReportingController {
 
     private static final String CSV_OUTPUT_FORMAT = "csv";
-    private static final int DEFAULT_ESCALATIONS_PAGE_NUMBER = 1;
-    private static final int DEFAULT_ESCALATIONS_LIMIT = 10;
 
     private final FactSchemePerformanceRepository schemePerformanceRepository;
     private final SchemeRegularityService schemeRegularityService;
     private final EscalationQueryService escalationQueryService;
     private final AnomalyQueryService anomalyQueryService;
+    private final OperatorAttendanceQueryService operatorAttendanceQueryService;
 
     @GetMapping("/schemes/status-count")
     @Operation(
@@ -306,7 +309,7 @@ public class AnalyticsSchemeReportingController {
             @RequestParam(name = "user_id") Integer userId,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
-            @RequestParam(name = "escalation_type", required = false) Integer escalationType,
+            @RequestParam(name = "escalation_type", required = false) String escalationType,
             @RequestParam(name = "scheme_id", required = false) Integer schemeId,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
@@ -320,7 +323,7 @@ public class AnalyticsSchemeReportingController {
             }
 
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
-            Page<FactEscalation> page = escalationQueryService.getEscalations(
+            Page<EscalationListItemDto> page = escalationQueryService.getEscalations(
                     tenantId,
                     userId,
                     escalationType,
@@ -356,30 +359,141 @@ public class AnalyticsSchemeReportingController {
         }
     }
 
-    @GetMapping("/anomalies")
-    @Operation(summary = "Get anomalies for schemes mapped to a user (via dim_user_scheme_mapping_table)")
-    public ResponseEntity<ApiResponse<List<Anomaly>>> getAnomalies(
-            @RequestParam(name = "user_id") Integer mappedUserId,
+    @GetMapping("/operator-attendance")
+    @Operation(
+            summary = "operator attendance for a user (by UUID) within an optional date range",
+            description = "Defaults: end_date = today, start_date = end_date minus 30 days. Returns one entry per calendar day in range; days with no rows are attendance 0 (absent). Multiple schemes on the same day use max(attendance). Source: dim_operator_attendance_table, dim_user_table (uuid), dim_date_table.",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Attendance rows returned (may be empty)",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request (e.g. start_date after end_date)",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<List<OperatorAttendanceDayItemDto>>> getOperatorAttendanceDayWise(
+            @RequestParam(name = "uuid") UUID userUuid,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(name = "anomaly_type", required = false) Integer anomalyType
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
         try {
-            List<Anomaly> data = anomalyQueryService.getAnomaliesForUserSchemes(
-                    mappedUserId,
-                    startDate,
-                    endDate,
-                    anomalyType
-            );
-
-            return ResponseEntity.ok(ApiResponse.<List<Anomaly>>builder()
+            List<OperatorAttendanceDayItemDto> data = operatorAttendanceQueryService.getDayWiseAttendance(
+                    userUuid, startDate, endDate);
+            return ResponseEntity.ok(ApiResponse.<List<OperatorAttendanceDayItemDto>>builder()
                     .success(true)
                     .data(data)
                     .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<Anomaly>>builder()
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<List<OperatorAttendanceDayItemDto>>builder()
                     .success(false)
                     .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<OperatorAttendanceDayItemDto>>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
+    @GetMapping("/anomalies")
+    @Operation(
+            summary = "Get paginated anomalies for schemes mapped to a user (via dim_user_scheme_mapping_table)",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Anomalies fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = AnomalyPaginatedResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = AnomalyPaginatedResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = AnomalyPaginatedResponse.class)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<AnomalyPaginatedResponse> getAnomalies(
+            @RequestParam(name = "user_id") Integer mappedUserId,
+            @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
+            @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
+            @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(name = "anomaly_type", required = false) String anomalyType
+    ) {
+        try {
+            if (pageNumber < 1) {
+                throw new IllegalArgumentException("page_number must be >= 1");
+            }
+            if (limit < 1) {
+                throw new IllegalArgumentException("limit must be >= 1");
+            }
+
+            PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
+            Page<AnomalyListItemDto> page = anomalyQueryService.getAnomaliesForUserSchemes(
+                    mappedUserId,
+                    startDate,
+                    endDate,
+                    anomalyType,
+                    pageable
+            );
+
+            return ResponseEntity.ok(AnomalyPaginatedResponse.builder()
+                    .success(true)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(page.getTotalElements())
+                    .anomalies(page.getContent())
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(AnomalyPaginatedResponse.builder()
+                    .success(false)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(0)
+                    .anomalies(List.of())
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(AnomalyPaginatedResponse.builder()
+                    .success(false)
+                    .page(pageNumber)
+                    .limit(limit)
+                    .totalCount(0)
+                    .anomalies(List.of())
                     .build());
         }
     }

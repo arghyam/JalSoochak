@@ -512,11 +512,20 @@ public class NotificationEventRouter {
             return;
         }
         try {
-            accountEmailService.sendInviteEmail(event.getTo(), event.getName(), event.getRole(), event.getInviteLink(), event.getExpiryHours());
+            if ("STATE_ADMIN".equalsIgnoreCase(event.getRole())
+                    && event.getStateName() != null && !event.getStateName().isBlank()) {
+                accountEmailService.sendStateAdminInviteEmail(
+                        event.getTo(), event.getName(), event.getStateName(),
+                        event.getInviteLink(), event.getExpiryHours());
+            } else {
+                accountEmailService.sendInviteEmail(
+                        event.getTo(), event.getName(), event.getRole(),
+                        event.getInviteLink(), event.getExpiryHours());
+            }
             log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={}", event.getRole());
         } catch (Exception e) {
-            log.error("[Router/INVITE_EMAIL] SMTP failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "smtp_error: " + e.getMessage());
+            log.error("[Router/INVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 
@@ -543,8 +552,8 @@ public class NotificationEventRouter {
             accountEmailService.sendReinviteEmail(event.getTo(), event.getName(), event.getInviteLink(), event.getExpiryHours());
             log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={}", event.getRole());
         } catch (Exception e) {
-            log.error("[Router/REINVITE_EMAIL] SMTP failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "smtp_error: " + e.getMessage());
+            log.error("[Router/REINVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 
@@ -571,8 +580,8 @@ public class NotificationEventRouter {
             accountEmailService.sendPasswordResetEmail(event.getTo(), event.getResetLink(), event.getExpiryMinutes());
             log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched");
         } catch (Exception e) {
-            log.error("[Router/PASSWORD_RESET_EMAIL] SMTP failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "smtp_error: " + e.getMessage());
+            log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
 

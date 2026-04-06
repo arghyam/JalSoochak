@@ -1,0 +1,124 @@
+package org.arghyam.jalsoochak.message.channel;
+
+import org.arghyam.jalsoochak.message.config.MailProperties;
+import org.arghyam.jalsoochak.message.dto.MailRequest;
+import org.arghyam.jalsoochak.message.dto.MailTemplate;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mail.MailSendException;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
+
+@ExtendWith(MockitoExtension.class)
+class SmtpMailSenderTest {
+
+    @Mock
+    private JavaMailSender javaMailSender;
+
+    private SmtpMailSender smtpMailSender;
+
+    @BeforeEach
+    void setUp() {
+        MailProperties.SmtpTemplate pwReset = new MailProperties.SmtpTemplate(
+                "Reset Your JalSoochak Password",
+                "Dear User,\n\nReset: {reset_link}\n\nExpires in {expiry_minutes} minutes.");
+        MailProperties.SmtpTemplate reinvite = new MailProperties.SmtpTemplate(
+                "Reminder: Your JalSoochak Invitation",
+                "Dear {name},\n\nActivate: {activation_link}\n\nExpires in {expiry_hours} hours.");
+        MailProperties.SmtpTemplate defaultInvite = new MailProperties.SmtpTemplate(
+                "You are invited to join JalSoochak",
+                "Dear {name},\n\nActivate: {activation_link}\n\nExpires in {expiry_hours} hours.");
+        MailProperties.SmtpTemplate superUser = new MailProperties.SmtpTemplate(
+                "You are assigned as Super User by JalSoochak",
+                "Dear {name},\n\nActivate: {activation_link}\n\nExpires in {expiry_hours} hours.");
+        MailProperties.SmtpTemplate stateAdmin = new MailProperties.SmtpTemplate(
+                "You are assigned as State System Admin by JalSoochak",
+                "Dear {name},\n\nManage {state_name}.\n\nActivate: {activation_link}\n\nExpires in {expiry_hours} hours.");
+
+        MailProperties.SmtpTemplates smtpTemplates = new MailProperties.SmtpTemplates(
+                pwReset, reinvite, defaultInvite, superUser, stateAdmin);
+        MailProperties mailProperties = new MailProperties(
+                "smtp", "noreply@test.com", "Test", null,
+                null,
+                new MailProperties.Smtp(smtpTemplates));
+
+        smtpMailSender = new SmtpMailSender(mailProperties, javaMailSender);
+    }
+
+    @Test
+    void send_passwordReset_interpolatesResetLinkAndExpiry() {
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+
+        smtpMailSender.send(new MailRequest(
+                "user@example.com",
+                MailTemplate.PASSWORD_RESET,
+                Map.of("reset_link", "https://reset?t=abc", "expiry_minutes", 30)));
+
+        verify(javaMailSender).send(captor.capture());
+        SimpleMailMessage msg = captor.getValue();
+        assertThat(msg.getSubject()).isEqualTo("Reset Your JalSoochak Password");
+        assertThat(msg.getText()).contains("https://reset?t=abc");
+        assertThat(msg.getText()).contains("30");
+        assertThat(msg.getTo()).containsExactly("user@example.com");
+        assertThat(msg.getFrom()).isEqualTo("noreply@test.com");
+    }
+
+    @Test
+    void send_stateAdminInvitation_interpolatesStateName() {
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+
+        smtpMailSender.send(new MailRequest(
+                "admin@state.gov",
+                MailTemplate.STATE_ADMIN_INVITATION,
+                Map.of("name", "Ravi Kumar", "state_name", "Madhya Pradesh",
+                        "activation_link", "https://activate?t=sa1", "expiry_hours", 24)));
+
+        verify(javaMailSender).send(captor.capture());
+        SimpleMailMessage msg = captor.getValue();
+        assertThat(msg.getSubject()).isEqualTo("You are assigned as State System Admin by JalSoochak");
+        assertThat(msg.getText()).contains("Ravi Kumar");
+        assertThat(msg.getText()).contains("Madhya Pradesh");
+        assertThat(msg.getText()).contains("https://activate?t=sa1");
+    }
+
+    @Test
+    void send_defaultInvitation_interpolatesNameAndLink() {
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+
+        smtpMailSender.send(new MailRequest(
+                "op@tenant.in",
+                MailTemplate.DEFAULT_INVITATION,
+                Map.of("name", "Sunita", "activation_link", "https://activate?t=d1", "expiry_hours", 48)));
+
+        verify(javaMailSender).send(captor.capture());
+        SimpleMailMessage msg = captor.getValue();
+        assertThat(msg.getSubject()).isEqualTo("You are invited to join JalSoochak");
+        assertThat(msg.getText()).contains("Sunita");
+        assertThat(msg.getText()).contains("https://activate?t=d1");
+    }
+
+    @Test
+    void send_throwsRuntimeException_whenMailExceptionOccurs() {
+        doThrow(new MailSendException("SMTP connection refused"))
+                .when(javaMailSender).send(any(SimpleMailMessage.class));
+
+        assertThatThrownBy(() -> smtpMailSender.send(new MailRequest(
+                "user@example.com",
+                MailTemplate.PASSWORD_RESET,
+                Map.of("reset_link", "https://reset", "expiry_minutes", 15))))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("SmtpMailSender failure");
+    }
+}

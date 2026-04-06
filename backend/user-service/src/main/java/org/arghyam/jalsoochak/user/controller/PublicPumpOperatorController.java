@@ -189,14 +189,16 @@ public class PublicPumpOperatorController {
             @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) Integer durationDays
+            @RequestParam(required = false) Integer durationDays,
+            @RequestParam(required = false) Integer duration
     ) {
+        Integer effectiveDurationDays = duration != null ? duration : durationDays;
         PageResponseDTO<PumpOperatorSummaryWithMetricsDTO> rows = personSchemeService.listPumpOperatorsByPerson(
                 tenantCode,
                 personId,
                 name,
                 status,
-                durationDays,
+                effectiveDurationDays,
                 sortBy,
                 sortDir,
                 page,

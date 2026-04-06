@@ -182,6 +182,7 @@ public class UserManagementServiceImpl implements UserManagementService {
                 .role(request.getRole())
                 .inviteLink(inviteUrl)
                 .expiryHours(inviteProperties.expiryHours())
+                .stateName(tenantName)
                 .build());
     }
 
@@ -282,6 +283,7 @@ public class UserManagementServiceImpl implements UserManagementService {
                 .role(targetRole)
                 .inviteLink(inviteUrl)
                 .expiryHours(inviteProperties.expiryHours())
+                .stateName(tenantName)
                 .build());
     }
 

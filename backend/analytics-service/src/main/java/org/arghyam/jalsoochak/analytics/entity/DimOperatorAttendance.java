@@ -14,12 +14,12 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "fact_escalation_table", schema = "analytics_schema")
+@Table(name = "dim_operator_attendance_table", schema = "analytics_schema")
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class FactEscalation {
+public class DimOperatorAttendance {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -28,24 +28,22 @@ public class FactEscalation {
     @Column(name = "tenant_id", nullable = false)
     private Integer tenantId;
 
-    @Column(name = "scheme_id")
-    private Integer schemeId;
-
-    @Column(name = "escalation_type", length = 128)
-    private String escalationType;
-
-    private String message;
-
-    @Column(name = "correlation_id")
-    private String correlationId;
+    @Column(name = "date_key", nullable = false)
+    private Integer dateKey;
 
     @Column(name = "user_id", nullable = false)
     private Integer userId;
 
-    @Column(name = "resolution_status")
-    private Integer resolutionStatus;
+    @Column(name = "scheme_id", nullable = false)
+    private Integer schemeId;
+
+    @Column(name = "attendance", nullable = false)
+    private Integer attendance;
 
     private String remark;
+
+    @Column(name = "remark_by")
+    private Integer remarkBy;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
