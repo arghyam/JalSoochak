@@ -19,8 +19,10 @@ import java.nio.file.Path;
 import java.util.List;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.SmsCountryService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -66,6 +68,9 @@ class NotificationEventRouterTest {
 
     @Mock
     private JdbcTemplate jdbcTemplate;
+
+    @Mock
+    private SmsCountryService smsCountryService;
 
     @InjectMocks
     private NotificationEventRouter router;
@@ -647,18 +652,18 @@ class NotificationEventRouterTest {
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
 
-    // ───────────────────────────── SEND_LOGIN_OTP ──────────────────────────────
+    // ──────────────────────────────── SEND_LOGIN_OTP ───────────────────────────
 
     @Test
     void route_sendsLoginOtp_usingStoredGlificId() {
-        when(whatsAppChannel.sendLoginOtp(42L, "123456")).thenReturn(true);
+        when(whatsAppChannel.sendLoginOtp(42L, "654321")).thenReturn(true);
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO Singh",
-                 "OTP":"123456","glific_id":"42","officerPhoneNumber":"919876500010"}
+                 "OTP":"654321","deliveryChannel":"WHATSAPP","glific_id":42}
                 """);
 
-        verify(whatsAppChannel).sendLoginOtp(42L, "123456");
+        verify(whatsAppChannel).sendLoginOtp(42L, "654321");
         verify(glificWhatsAppService, never()).optIn(anyString());
     }
 
@@ -669,7 +674,7 @@ class NotificationEventRouterTest {
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO Singh",
-                 "OTP":"654321","glific_id":"","officerPhoneNumber":"919876500010"}
+                 "OTP":"654321","deliveryChannel":"WHATSAPP","glific_id":"","officerPhoneNumber":"919876500010"}
                 """);
 
         verify(glificWhatsAppService).optIn("919876500010");
@@ -713,7 +718,7 @@ class NotificationEventRouterTest {
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"222222",
-                 "glific_id":"","officerPhoneNumber":"919000000002"}
+                 "deliveryChannel":"WHATSAPP","glific_id":"","officerPhoneNumber":"919000000002"}
                 """))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Notification event processing failed");

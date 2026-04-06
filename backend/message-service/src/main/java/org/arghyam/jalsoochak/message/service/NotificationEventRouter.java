@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.SmsCountryService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
@@ -16,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -25,6 +27,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -94,6 +97,7 @@ public class NotificationEventRouter {
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
     private final GlificWhatsAppService glificWhatsAppService;
+    private final SmsCountryService smsCountryService;
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
     private final MinioStorageService minioStorageService;
@@ -451,45 +455,79 @@ public class NotificationEventRouter {
     }
 
     private void handleSendLoginOtp(JsonNode root) {
-        String officerName = root.path("officerName").asText("Officer");
         String otp = root.path("OTP").asText("");
-        String glificId = root.path("glific_id").asText("").strip();
-        String phone = root.path("officerPhoneNumber").asText("").strip();
+        String deliveryChannel = root.path("deliveryChannel").asText("").trim().toUpperCase(Locale.ROOT);
 
         if (otp.isBlank()) {
             log.warn("[Router/SEND_LOGIN_OTP] OTP is missing, skipping");
             return;
         }
 
-        long contactId;
-        if (!glificId.isBlank()) {
-            try {
-                contactId = Long.parseLong(glificId);
-            } catch (NumberFormatException e) {
-                log.warn("[Router/SEND_LOGIN_OTP] Invalid glific_id '{}', skipping", glificId);
-                return;
-            }
-            if (contactId <= 0) {
-                log.warn("[Router/SEND_LOGIN_OTP] glific_id must be > 0, got {}, skipping", contactId);
-                return;
-            }
-        } else if (!phone.isBlank()) {
-            log.info("[Router/SEND_LOGIN_OTP] glific_id not provided, opting in via phone");
-            contactId = glificWhatsAppService.optIn(phone);
-            if (contactId <= 0) {
-                log.warn("[Router/SEND_LOGIN_OTP] optIn returned invalid contactId {}, skipping", contactId);
-                return;
-            }
-        } else {
-            log.warn("[Router/SEND_LOGIN_OTP] Neither glific_id nor officerPhoneNumber provided, skipping");
+        if (deliveryChannel.isBlank()) {
+            log.error("[Router/SEND_LOGIN_OTP] deliveryChannel is missing or blank, skipping");
             return;
         }
 
-        boolean sent = whatsAppChannel.sendLoginOtp(contactId, otp);
-        if (!sent) {
-            throw new IllegalStateException("[Router/SEND_LOGIN_OTP] WhatsApp login OTP delivery failed");
+        if ("SMS".equals(deliveryChannel)) {
+            String phone = root.path("officerPhoneNumber").asText("").strip();
+            int expiryMinutes = 5; // Default OTP TTL; expiryMinutes not provided by SendLoginOtpEvent
+
+            if (phone.isBlank()) {
+                log.warn("[Router/SEND_LOGIN_OTP/SMS] officerPhoneNumber is missing, skipping");
+                return;
+            }
+
+            // Use reactive flow to avoid blocking the Kafka listener thread
+            smsCountryService.sendOtpReactive(phone, otp, expiryMinutes)
+                    .doOnNext(sent -> {
+                        if (sent) {
+                            log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
+                            log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
+                        } else {
+                            // Non-retryable failure (4xx API rejection) — log as warning, do not throw
+                            log.warn("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery rejected by provider (non-retryable)");
+                            log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → REJECTED", phone);
+                        }
+                    })
+                    .doOnError(e -> {
+                        // Retryable failure (5xx, network issue) — log error; exception will propagate to Kafka container
+                        log.error("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed (retryable): {}", e.getMessage());
+                        log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → ERROR: {}", phone, e.getMessage());
+                    })
+                    .onErrorResume(e -> {
+                        // Swallow retryable errors to prevent Kafka retries of the entire event
+                        // (OTP sends are time-sensitive; a delayed retry would deliver an expired OTP)
+                        log.warn("[Router/SEND_LOGIN_OTP/SMS] Suppressing retryable error to prevent Kafka retry");
+                        return Mono.empty();
+                    })
+                    .subscribe();
+        } else if ("WHATSAPP".equals(deliveryChannel)) {
+            String phone = root.path("officerPhoneNumber").asText("").strip();
+            JsonNode glificIdNode = root.path("glific_id");
+            long contactId = glificIdNode.asLong(0);
+
+            if (contactId > 0) {
+                // glific_id was provided and valid
+            } else if (!phone.isBlank()) {
+                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id not provided, opting in via phone");
+                contactId = glificWhatsAppService.optIn(phone);
+                if (contactId <= 0) {
+                    log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] optIn returned invalid contactId {}, skipping", contactId);
+                    return;
+                }
+            } else {
+                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor officerPhoneNumber provided, skipping");
+                return;
+            }
+
+            boolean sent = whatsAppChannel.sendLoginOtp(contactId, otp);
+            if (!sent) {
+                throw new IllegalStateException("[Router/SEND_LOGIN_OTP/WHATSAPP] WhatsApp login OTP delivery failed");
+            }
+            log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] → SENT contactId={}", contactId);
+        } else {
+            log.error("[Router/SEND_LOGIN_OTP] Unsupported deliveryChannel '{}', must be 'SMS' or 'WHATSAPP', skipping", deliveryChannel);
         }
-        log.info("[Router/SEND_LOGIN_OTP] → SENT contactId={}", contactId);
     }
 
     private void handleInviteEmail(JsonNode root) {
