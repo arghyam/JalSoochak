@@ -30,6 +30,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -77,6 +79,8 @@ class DimensionServiceImplTest {
         event.setEmail("user@test.local");
         event.setUserType(2);
         event.setUuid(UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        event.setTitle("First Last");
+        event.setStatus(1);
         when(dimUserRepository.findById(11)).thenReturn(Optional.of(DimUser.builder().userId(11).build()));
 
         service.upsertUser(event);
@@ -86,6 +90,56 @@ class DimensionServiceImplTest {
         assertThat(captor.getValue().getEmail()).isEqualTo("user@test.local");
         assertThat(captor.getValue().getTenantId()).isEqualTo(1);
         assertThat(captor.getValue().getUuid()).isEqualTo(event.getUuid());
+        assertThat(captor.getValue().getTitle()).isEqualTo("First Last");
+        assertThat(captor.getValue().getStatus()).isEqualTo(1);
+    }
+
+    @Test
+    void upsertUser_superUser_tenantIdZero_skipsUpsert() {
+        UserEvent event = new UserEvent();
+        event.setUserId(1);
+        event.setTenantId(0);
+        event.setEmail("super@system.local");
+
+        service.upsertUser(event);
+
+        verify(dimUserRepository, never()).findById(any());
+        verify(dimUserRepository, never()).save(any());
+    }
+
+    @Test
+    void upsertUser_nullTenantId_skipsUpsert() {
+        UserEvent event = new UserEvent();
+        event.setUserId(1);
+        event.setTenantId(null);
+        event.setEmail("super@system.local");
+
+        service.upsertUser(event);
+
+        verify(dimUserRepository, never()).findById(any());
+        verify(dimUserRepository, never()).save(any());
+    }
+
+    @Test
+    void upsertUser_nullTitle_doesNotOverwriteExistingTitle() {
+        UserEvent event = new UserEvent();
+        event.setUserId(11);
+        event.setTenantId(1);
+        event.setEmail("user@test.local");
+        event.setUserType(2);
+        event.setUuid(UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        event.setTitle(null);
+        event.setStatus(0);
+
+        DimUser existing = DimUser.builder().userId(11).title("Preserved Title").build();
+        when(dimUserRepository.findById(11)).thenReturn(Optional.of(existing));
+
+        service.upsertUser(event);
+
+        ArgumentCaptor<DimUser> captor = ArgumentCaptor.forClass(DimUser.class);
+        verify(dimUserRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getTitle()).isEqualTo("Preserved Title");
+        assertThat(captor.getValue().getStatus()).isEqualTo(0);
     }
 
     @Test
