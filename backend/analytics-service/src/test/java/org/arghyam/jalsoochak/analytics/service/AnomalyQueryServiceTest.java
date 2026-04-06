@@ -30,7 +30,7 @@ class AnomalyQueryServiceTest {
     private AnomalyQueryService anomalyQueryService;
 
     @Test
-    void getAnomaliesForUserSchemes_passesEmptyStringTypeFilterAndPageableToRepository() {
+    void getAnomaliesForUserSchemes_passesEmptyStringFiltersAndPageableToRepository() {
         LocalDate start = LocalDate.of(2026, 1, 1);
         LocalDate end = LocalDate.of(2026, 1, 15);
         Pageable pageable = PageRequest.of(0, 5);
@@ -40,32 +40,36 @@ class AnomalyQueryServiceTest {
                 eq(start.atStartOfDay().atOffset(ZoneOffset.UTC)),
                 eq(end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC)),
                 eq(""),
+                eq(""),
                 eq(pageable)))
                 .thenReturn(org.springframework.data.domain.Page.empty(pageable));
 
-        anomalyQueryService.getAnomaliesForUserSchemes(42, start, end, null, pageable);
+        anomalyQueryService.getAnomaliesForUserSchemes(42, start, end, null, null, pageable);
 
         verify(anomalyRepository).findAnomaliesForMappedUserSchemesInRange(
                 eq(42),
                 eq(start.atStartOfDay().atOffset(ZoneOffset.UTC)),
                 eq(end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC)),
                 eq(""),
+                eq(""),
                 eq(pageable));
     }
 
     @Test
-    void getAnomaliesForUserSchemes_trimsAnomalyType() {
+    void getAnomaliesForUserSchemes_trimsAnomalyTypeAndSchemeName() {
         Pageable pageable = PageRequest.of(0, 10);
         when(anomalyRepository.findAnomaliesForMappedUserSchemesInRange(
-                any(), any(), any(), eq("3"), eq(pageable)))
+                any(), any(), any(), eq("3"), eq("My Scheme"), eq(pageable)))
                 .thenReturn(org.springframework.data.domain.Page.empty(pageable));
 
         anomalyQueryService.getAnomaliesForUserSchemes(
-                1, LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), "  3  ", pageable);
+                1, LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), "  3  ", "  My Scheme  ", pageable);
 
         ArgumentCaptor<String> typeCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> schemeCaptor = ArgumentCaptor.forClass(String.class);
         verify(anomalyRepository).findAnomaliesForMappedUserSchemesInRange(
-                any(), any(), any(), typeCaptor.capture(), eq(pageable));
+                any(), any(), any(), typeCaptor.capture(), schemeCaptor.capture(), eq(pageable));
         assertThat(typeCaptor.getValue()).isEqualTo("3");
+        assertThat(schemeCaptor.getValue()).isEqualTo("My Scheme");
     }
 }

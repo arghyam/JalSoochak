@@ -31,6 +31,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                       AND a.createdAt >= :fromInclusive
                       AND a.createdAt < :toExclusive
                       AND (:anomalyType = '' OR a.type = :anomalyType)
+                      AND (:schemeName = '' OR lower(s.schemeName) like lower(concat('%', :schemeName, '%')))
                     """,
             countQuery = """
                     SELECT count(distinct a.id)
@@ -41,12 +42,14 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                       AND a.createdAt >= :fromInclusive
                       AND a.createdAt < :toExclusive
                       AND (:anomalyType = '' OR a.type = :anomalyType)
+                      AND (:schemeName = '' OR lower(s.schemeName) like lower(concat('%', :schemeName, '%')))
                     """)
     Page<AnomalyListItemDto> findAnomaliesForMappedUserSchemesInRange(
             @Param("mappedUserId") Integer mappedUserId,
             @Param("fromInclusive") OffsetDateTime fromInclusive,
             @Param("toExclusive") OffsetDateTime toExclusive,
             @Param("anomalyType") String anomalyType,
+            @Param("schemeName") String schemeName,
             Pageable pageable
     );
 }
