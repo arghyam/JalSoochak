@@ -123,7 +123,7 @@ public class FactServiceImpl implements FactService {
         FactEscalation fact = FactEscalation.builder()
                 .tenantId(event.getTenantId())
                 .schemeId(event.getSchemeId())
-                .escalationType(event.getEscalationType())
+                .escalationType(intCodeToVarchar(event.getEscalationType()))
                 .message(event.getMessage())
                 .userId(event.getUserId())
                 .resolutionStatus(event.getResolutionStatus())
@@ -240,7 +240,7 @@ public class FactServiceImpl implements FactService {
                     FactEscalation escalationFact = FactEscalation.builder()
                             .tenantId(event.getTenantId())
                             .schemeId(schemeId)
-                            .escalationType(EscalationType.NO_SUBMISSION.code)
+                            .escalationType(intCodeToVarchar(EscalationType.NO_SUBMISSION.code))
                             .message(escalationMessage)
                             .correlationId(correlationId)
                             .userId(event.getOfficerId().intValue())
@@ -270,7 +270,7 @@ public class FactServiceImpl implements FactService {
             try {
                 Anomaly anomaly = Anomaly.builder()
                         .uuid(UUID.randomUUID().toString())
-                        .type(EscalationType.NO_SUBMISSION.code)
+                        .type(intCodeToVarchar(EscalationType.NO_SUBMISSION.code))
                         .userId(op.getUserId())
                         .schemeId(schemeId)
                         .tenantId(event.getTenantId())
@@ -314,7 +314,7 @@ public class FactServiceImpl implements FactService {
 
         Anomaly anomaly = Anomaly.builder()
                 .uuid(uuid)
-                .type(event.getType())
+                .type(intCodeToVarchar(event.getType()))
                 .userId(event.getUserId())
                 .schemeId(event.getSchemeId())
                 .tenantId(event.getTenantId())
@@ -344,7 +344,7 @@ public class FactServiceImpl implements FactService {
             FactEscalation escalation = FactEscalation.builder()
                     .tenantId(event.getTenantId())
                     .schemeId(event.getSchemeId())
-                    .escalationType(event.getType())
+                    .escalationType(intCodeToVarchar(event.getType()))
                     .message(event.getReason())
                     .userId(event.getUserId())
                     .resolutionStatus(event.getStatus())
@@ -429,6 +429,10 @@ public class FactServiceImpl implements FactService {
             log.warn("Could not parse date '{}', storing null", value);
             return null;
         }
+    }
+
+    private static String intCodeToVarchar(Integer code) {
+        return code == null ? null : String.valueOf(code);
     }
 
     private boolean isWaterAnomaly(Integer type) {
