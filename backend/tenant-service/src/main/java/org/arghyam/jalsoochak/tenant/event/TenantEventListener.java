@@ -95,6 +95,27 @@ public class TenantEventListener {
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleWaterSupplyThresholdUpdated(WaterSupplyThresholdUpdatedEvent event) {
+        log.info("Handling WaterSupplyThresholdUpdatedEvent after commit [tenantId={}]", event.getTenantId());
+        if (event.getTenantId() == null || event.getStateCode() == null || event.getStateCode().isBlank()) {
+            log.warn("Cannot publish WATER_SUPPLY_THRESHOLD_UPDATED event: tenantId or stateCode is null/blank [tenantId={}]", event.getTenantId());
+            return;
+        }
+        try {
+            Map<String, Object> payload = Map.of(
+                "eventType", "WATER_SUPPLY_THRESHOLD_UPDATED",
+                "tenantId", event.getTenantId(),
+                "stateCode", event.getStateCode(),
+                "underSupplyThresholdPercent", event.getUnderSupplyThresholdPercent(),
+                "overSupplyThresholdPercent", event.getOverSupplyThresholdPercent());
+            kafkaProducer.publishJson(TENANT_TOPIC, payload);
+            log.info("Published WATER_SUPPLY_THRESHOLD_UPDATED event [tenantId={}]", event.getTenantId());
+        } catch (Exception e) {
+            log.error("Failed to publish WATER_SUPPLY_THRESHOLD_UPDATED event [tenantId={}]", event.getTenantId(), e);
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleLocationHierarchyUpdated(TenantLocationHierarchyUpdatedEvent event) {
         log.info("Handling TenantLocationHierarchyUpdatedEvent after commit [tenantId={}]", event.getTenantId());
         if (event.getTenantId() == null || event.getStateCode() == null || event.getStateCode().isBlank()) {
