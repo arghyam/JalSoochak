@@ -11,11 +11,13 @@ import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
+import org.arghyam.jalsoochak.analytics.service.UserAlertTotalsService;
 import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyPaginatedResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.UserAlertTotalsResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -56,6 +58,7 @@ public class AnalyticsSchemeReportingController {
     private final EscalationQueryService escalationQueryService;
     private final AnomalyQueryService anomalyQueryService;
     private final OperatorAttendanceQueryService operatorAttendanceQueryService;
+    private final UserAlertTotalsService userAlertTotalsService;
 
     @GetMapping("/schemes/status-count")
     @Operation(
@@ -504,6 +507,62 @@ public class AnalyticsSchemeReportingController {
                     .limit(limit)
                     .totalCount(0)
                     .anomalies(List.of())
+                    .build());
+        }
+    }
+
+    @GetMapping("/officer/dashboard")
+    @Operation(
+            summary = "Get totals for escalations, anomalies, mapped schemes and water supplied for a user",
+            description = "Escalations are counted where fact_escalation_table.user_id = user_id. Anomalies/scheme/water totals are scoped to schemes mapped to the user via dim_user_scheme_mapping_table. Date range defaults: end_date=today, start_date=end_date-30 days.",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Totals fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<UserAlertTotalsResponse>> getUserAlertTotals(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "user_id") Integer userId,
+            @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    ) {
+        try {
+            UserAlertTotalsResponse data = userAlertTotalsService.getTotals(tenantId, userId, startDate, endDate);
+            return ResponseEntity.ok(ApiResponse.<UserAlertTotalsResponse>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<UserAlertTotalsResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<UserAlertTotalsResponse>builder()
+                    .success(false)
+                    .data(null)
                     .build());
         }
     }

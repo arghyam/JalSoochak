@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
+import org.arghyam.jalsoochak.analytics.service.UserAlertTotalsService;
 import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -74,6 +75,8 @@ class AnalyticsSchemeReportingControllerTest {
     private AnomalyQueryService anomalyQueryService;
     @MockBean
     private OperatorAttendanceQueryService operatorAttendanceQueryService;
+    @MockBean
+    private UserAlertTotalsService userAlertTotalsService;
 
     @ParameterizedTest
     @MethodSource("schemeStatusValidRoutes")
@@ -649,6 +652,32 @@ class AnalyticsSchemeReportingControllerTest {
 
         verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(
                 eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class));
+    }
+
+    @Test
+    void getUserAlertTotals_returnsExpectedShape() throws Exception {
+        LocalDate start = LocalDate.of(2026, 3, 1);
+        LocalDate end = LocalDate.of(2026, 3, 31);
+
+        when(userAlertTotalsService.getTotals(eq(10), eq(9001), eq(start), eq(end)))
+                .thenReturn(org.arghyam.jalsoochak.analytics.dto.response.UserAlertTotalsResponse.builder()
+                        .totalEscalationCount(12L)
+                        .totalAnomalyCount(7L)
+                        .totalMappedSchemeCount(5)
+                        .totalWaterSupplied(143200L)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/officer/dashboard")
+                        .param("tenant_id", "10")
+                        .param("user_id", "9001")
+                        .param("start_date", start.toString())
+                        .param("end_date", end.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.totalEscalationCount").value(12))
+                .andExpect(jsonPath("$.data.totalAnomalyCount").value(7))
+                .andExpect(jsonPath("$.data.totalMappedSchemeCount").value(5))
+                .andExpect(jsonPath("$.data.totalWaterSupplied").value(143200));
     }
 
     private static Stream<Arguments> schemeStatusValidRoutes() {

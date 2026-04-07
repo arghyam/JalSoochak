@@ -33,6 +33,27 @@ public class EscalationQueryService {
 
     private final EntityManager em;
 
+    public long countEscalations(
+            Integer tenantId,
+            Integer userId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        LocalDate safeEndDate = (endDate != null) ? endDate : LocalDate.now();
+        LocalDate safeStartDate = (startDate != null) ? startDate : safeEndDate.minusDays(30);
+
+        LocalDateTime from = safeStartDate.atStartOfDay();
+        LocalDateTime to = safeEndDate.plusDays(1).atStartOfDay();
+
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+        CriteriaQuery<Long> countQuery = cb.createQuery(Long.class);
+        Root<FactEscalation> e = countQuery.from(FactEscalation.class);
+        countQuery.select(cb.count(e.get("id")));
+        countQuery.where(buildPredicatesNoScheme(cb, e, tenantId, userId, null, null, null, from, to));
+        Long total = em.createQuery(countQuery).getSingleResult();
+        return total != null ? total : 0L;
+    }
+
     public Page<EscalationListItemDto> getEscalations(
             Integer tenantId,
             Integer userId,

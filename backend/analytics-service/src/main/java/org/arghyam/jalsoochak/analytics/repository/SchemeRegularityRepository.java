@@ -938,6 +938,25 @@ public class SchemeRegularityRepository {
         return jdbcTemplate.queryForObject(sql, Integer.class, userId);
     }
 
+    public long getTotalWaterSuppliedByUserSchemes(Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH user_schemes AS (
+                    SELECT DISTINCT usm.scheme_id
+                    FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    WHERE usm.user_id = ?
+                )
+                SELECT COALESCE(SUM(f.water_quantity), 0)::bigint AS total_water_supplied
+                FROM analytics_schema.fact_water_quantity_table f
+                JOIN user_schemes us
+                    ON us.scheme_id = f.scheme_id
+                WHERE f.tenant_id = ?
+                  AND f.date BETWEEN ? AND ?
+                """;
+
+        Long value = jdbcTemplate.queryForObject(sql, Long.class, userId, tenantId, startDate, endDate);
+        return value != null ? value : 0L;
+    }
+
     public SubmissionStatusCount getSubmissionStatusCountByUser(
             Integer userId, LocalDate startDate, LocalDate endDate) {
         String sql = """

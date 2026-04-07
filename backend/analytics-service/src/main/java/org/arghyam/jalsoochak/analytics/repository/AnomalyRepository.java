@@ -58,4 +58,20 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
             @Param("status") int status,
             Pageable pageable
     );
+
+    @Query("""
+            SELECT count(distinct a.id)
+            FROM Anomaly a, DimUserSchemeMapping m
+            WHERE a.tenantId = :tenantId
+              AND m.schemeId = a.schemeId AND m.userId = :mappedUserId
+              AND a.deletedAt IS NULL
+              AND a.createdAt >= :fromInclusive
+              AND a.createdAt < :toExclusive
+            """)
+    long countAnomaliesForMappedUserSchemesInRange(
+            @Param("tenantId") Integer tenantId,
+            @Param("mappedUserId") Integer mappedUserId,
+            @Param("fromInclusive") OffsetDateTime fromInclusive,
+            @Param("toExclusive") OffsetDateTime toExclusive
+    );
 }
