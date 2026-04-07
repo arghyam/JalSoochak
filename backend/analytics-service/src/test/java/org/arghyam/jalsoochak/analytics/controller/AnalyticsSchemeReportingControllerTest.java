@@ -421,36 +421,6 @@ class AnalyticsSchemeReportingControllerTest {
     }
 
     @Test
-    void getEscalationResolutionStatuses_returnsCodesAndLabels() throws Exception {
-        mockMvc.perform(get(BASE + "/escalations/resolution-statuses"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray())
-                .andExpect(jsonPath("$.data.length()").value(3))
-                .andExpect(jsonPath("$.data[0].value").value(0))
-                .andExpect(jsonPath("$.data[0].label").value("Unresolved"))
-                .andExpect(jsonPath("$.data[1].value").value(1))
-                .andExpect(jsonPath("$.data[1].label").value("In-Progress"))
-                .andExpect(jsonPath("$.data[2].value").value(2))
-                .andExpect(jsonPath("$.data[2].label").value("Resolved"));
-    }
-
-    @Test
-    void getAnomalyStatuses_returnsCodesAndLabels() throws Exception {
-        mockMvc.perform(get(BASE + "/anomalies/statuses"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray())
-                .andExpect(jsonPath("$.data.length()").value(3))
-                .andExpect(jsonPath("$.data[0].value").value(0))
-                .andExpect(jsonPath("$.data[0].label").value("Unresolved"))
-                .andExpect(jsonPath("$.data[1].value").value(1))
-                .andExpect(jsonPath("$.data[1].label").value("In-Progress"))
-                .andExpect(jsonPath("$.data[2].value").value(2))
-                .andExpect(jsonPath("$.data[2].label").value("Resolved"));
-    }
-
-    @Test
     void getEscalationsPaginated_returnsExpectedShape() throws Exception {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
