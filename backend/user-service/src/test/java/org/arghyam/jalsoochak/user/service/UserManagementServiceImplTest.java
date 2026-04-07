@@ -781,8 +781,7 @@ class UserManagementServiceImplTest {
             AdminUserRow refreshedUser = userRow(1L, "kc-id", "user@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(1L, "user@example.com", "SUPER_USER");
 
-            when(userCommonRepository.findAdminUserByUuid("kc-id")).thenReturn(Optional.of(user));
-            when(userCommonRepository.findAdminUserById(1L)).thenReturn(Optional.of(refreshedUser));
+            when(userCommonRepository.findAdminUserByUuid("kc-id")).thenReturn(Optional.of(user), Optional.of(refreshedUser));
             when(keycloakProvider.getRealm()).thenReturn("test-realm");
             UserRepresentation rep = new UserRepresentation();
             rep.setFirstName("Old");
@@ -808,8 +807,7 @@ class UserManagementServiceImplTest {
             AdminUserRow refreshedUser = userRow(2L, "kc-sa", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
 
-            when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(user));
-            when(userCommonRepository.findAdminUserById(2L)).thenReturn(Optional.of(refreshedUser));
+            when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(user), Optional.of(refreshedUser));
             when(keycloakProvider.getRealm()).thenReturn("test-realm");
             UserRepresentation rep = new UserRepresentation();
             rep.setFirstName("State");
