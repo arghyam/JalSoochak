@@ -18,6 +18,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
+
 @ExtendWith(MockitoExtension.class)
 class AnalyticsKafkaConsumerTest {
 
@@ -90,6 +92,21 @@ class AnalyticsKafkaConsumerTest {
 
         verifyNoInteractions(dimensionService);
         verifyNoInteractions(factService);
+    }
+
+    @Test
+    void consumeTenantEvents_tenantUpdated_routesToUpsertTenant() throws Exception {
+        String message = """
+                {"eventType":"TENANT_UPDATED","tenantId":5,"stateCode":"RJ","title":"Rajasthan","status":1}
+                """;
+
+        consumer.consumeTenantEvents(message);
+
+        ArgumentCaptor<TenantEvent> captor = ArgumentCaptor.forClass(TenantEvent.class);
+        verify(dimensionService).upsertTenant(captor.capture());
+        assertThat(captor.getValue().getTenantId()).isEqualTo(5);
+        assertThat(captor.getValue().getStateCode()).isEqualTo("RJ");
+        assertThat(captor.getValue().getTitle()).isEqualTo("Rajasthan");
     }
 
     @Test

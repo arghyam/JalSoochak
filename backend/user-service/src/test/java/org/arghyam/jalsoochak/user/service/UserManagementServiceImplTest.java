@@ -649,9 +649,12 @@ class UserManagementServiceImplTest {
         void deactivateUser_success() {
             Authentication auth = superUserAuth("kc-super");
             AdminUserRow target = userRow(4L, "kc-target", "su2@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
+            AdminUserRow deactivatedTarget = userRow(4L, "kc-target", "su2@example.com", 0, 1, "SUPER_USER", AdminUserStatus.INACTIVE);
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
-            when(userCommonRepository.findAdminUserById(4L)).thenReturn(Optional.of(target));
+            when(userCommonRepository.findAdminUserById(4L))
+                    .thenReturn(Optional.of(target))        // initial lookup
+                    .thenReturn(Optional.of(deactivatedTarget)); // post-deactivation refresh
             when(userCommonRepository.countActiveSuperUsers()).thenReturn(3);
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
             doNothing().when(userCommonRepository).deactivateAdminUser(4L, 1L);
@@ -659,7 +662,7 @@ class UserManagementServiceImplTest {
             userManagementService.deactivateUser(4L, auth);
 
             verify(userCommonRepository).deactivateAdminUser(4L, 1L);
-            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(target);
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(deactivatedTarget);
         }
 
         @Test
@@ -684,15 +687,19 @@ class UserManagementServiceImplTest {
         void activateUser_success() {
             Authentication auth = superUserAuth("kc-super");
             AdminUserRow target = userRow(5L, "kc-target", "deactivated@example.com", 0, 1, "SUPER_USER", AdminUserStatus.INACTIVE);
+            AdminUserRow activatedTarget = userRow(5L, "kc-target", "deactivated@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
-            when(userCommonRepository.findAdminUserById(5L)).thenReturn(Optional.of(target));
+            when(userCommonRepository.findAdminUserById(5L))
+                    .thenReturn(Optional.of(target))        // initial lookup
+                    .thenReturn(Optional.of(activatedTarget)); // post-activation refresh
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
             doNothing().when(userCommonRepository).activateAdminUser(5L, 1L);
 
             userManagementService.activateUser(5L, auth);
 
             verify(userCommonRepository).activateAdminUser(5L, 1L);
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(activatedTarget);
         }
 
         @Test

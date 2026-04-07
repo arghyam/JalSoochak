@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.user.event;
 
-import lombok.RequiredArgsConstructor;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
@@ -17,15 +18,27 @@ import java.util.Map;
  *
  * <p>If no transaction is active (e.g. tests or async contexts), the event is
  * published immediately.</p>
+ *
+ * <p><strong>Fire-and-forget:</strong> publish failures are logged as warnings and
+ * counted via the {@code user.analytics.publish.failures} Micrometer counter, but
+ * are not retried. Analytics loss is therefore possible if Kafka is unavailable.
+ * For stricter delivery guarantees, consider routing failed payloads to a DLQ topic.</p>
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class UserAnalyticsEventPublisher {
 
     private static final String USER_TOPIC = "user-service-topic";
 
     private final KafkaProducer kafkaProducer;
+    private final Counter publishFailureCounter;
+
+    public UserAnalyticsEventPublisher(KafkaProducer kafkaProducer, MeterRegistry meterRegistry) {
+        this.kafkaProducer = kafkaProducer;
+        this.publishFailureCounter = Counter.builder("user.analytics.publish.failures")
+                .description("Number of user analytics events that failed to publish to Kafka")
+                .register(meterRegistry);
+    }
 
     public void publishUserCreatedAfterCommit(AdminUserRow user, String title) {
         publishAfterCommit(buildPayload("USER_CREATED", user, title));
@@ -37,7 +50,8 @@ public class UserAnalyticsEventPublisher {
 
     /**
      * Variant for tenant-schema users (e.g. staff role updates) where an {@code AdminUserRow}
-     * is not available. Payload fields are supplied individually.
+     * is not available. The {@code uuid} (Keycloak UUID) is the globally-unique identifier
+     * for the user across tenants.
      */
     public void publishStaffUserUpdatedAfterCommit(Long userId, Integer tenantId, Integer userType,
                                                    String uuid, String email, int status) {
@@ -81,6 +95,7 @@ public class UserAnalyticsEventPublisher {
     private void doPublish(Map<String, Object> payload) {
         boolean ok = kafkaProducer.publishJson(USER_TOPIC, payload);
         if (!ok) {
+            publishFailureCounter.increment();
             log.warn("[user-analytics] Failed to publish {} event to topic={}", payload.get("eventType"), USER_TOPIC);
         }
     }

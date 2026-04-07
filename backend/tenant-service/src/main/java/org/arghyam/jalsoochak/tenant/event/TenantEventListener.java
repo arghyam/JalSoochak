@@ -107,6 +107,7 @@ public class TenantEventListener {
         }
         try {
             List<Map<String, Object>> levelList = event.getLevels().stream()
+                    .filter(l -> l.getLevel() != null)
                     .map(l -> {
                         List<LocationLevelNameDTO> names = l.getLevelName();
                         String canonicalName = (names != null && !names.isEmpty())

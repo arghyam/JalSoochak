@@ -81,7 +81,7 @@ class DimensionServiceImplTest {
         event.setUuid(UUID.fromString("11111111-1111-1111-1111-111111111111"));
         event.setTitle("First Last");
         event.setStatus(1);
-        when(dimUserRepository.findById(11)).thenReturn(Optional.of(DimUser.builder().userId(11).build()));
+        when(dimUserRepository.findByUuid(event.getUuid())).thenReturn(Optional.of(DimUser.builder().userId(11).build()));
 
         service.upsertUser(event);
 
@@ -132,7 +132,7 @@ class DimensionServiceImplTest {
         event.setStatus(0);
 
         DimUser existing = DimUser.builder().userId(11).title("Preserved Title").build();
-        when(dimUserRepository.findById(11)).thenReturn(Optional.of(existing));
+        when(dimUserRepository.findByUuid(event.getUuid())).thenReturn(Optional.of(existing));
 
         service.upsertUser(event);
 

@@ -327,7 +327,8 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         usersResource.get(keycloakId).update(rep);
 
-        AdminUserRow refreshedUser = userCommonRepository.findAdminUserByUuid(keycloakId).orElse(user);
+        AdminUserRow refreshedUser = userCommonRepository.findAdminUserByUuid(keycloakId)
+                .orElseThrow(() -> new IllegalStateException("User record missing after update [uuid=" + keycloakId + "]"));
         userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(refreshedUser);
         return keycloakAdminHelper.buildAdminUserResponse(refreshedUser);
     }
@@ -571,7 +572,8 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         userCommonRepository.deactivateAdminUser(id, callerRow.id());
 
-        AdminUserRow deactivatedUser = userCommonRepository.findAdminUserById(id).orElse(target);
+        AdminUserRow deactivatedUser = userCommonRepository.findAdminUserById(id)
+                .orElseThrow(() -> new IllegalStateException("User record missing after deactivation [id=" + id + "]"));
         userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(deactivatedUser);
 
         var usersResource = keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm()).users();
@@ -609,7 +611,8 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         userCommonRepository.activateAdminUser(id, callerRow.id());
 
-        AdminUserRow activatedUser = userCommonRepository.findAdminUserById(id).orElse(target);
+        AdminUserRow activatedUser = userCommonRepository.findAdminUserById(id)
+                .orElseThrow(() -> new IllegalStateException("User record missing after activation [id=" + id + "]"));
         userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(activatedUser);
 
         var usersResource = keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm()).users();

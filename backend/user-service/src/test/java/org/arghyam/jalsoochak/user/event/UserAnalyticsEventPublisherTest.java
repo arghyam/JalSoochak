@@ -1,8 +1,10 @@
 package org.arghyam.jalsoochak.user.event;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -20,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isA;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -27,6 +30,9 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class UserAnalyticsEventPublisherTest {
+
+    @Mock
+    private MeterRegistry meterRegistry;
 
     @Mock
     private KafkaProducer kafkaProducer;
@@ -39,6 +45,27 @@ class UserAnalyticsEventPublisherTest {
                 42L, "kc-uuid-1234", "admin@state.gov", "91XXXXXXXXXX",
                 tenantId, 2, "STATE_ADMIN", status, null, LocalDateTime.now()
         );
+    }
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(meterRegistry.counter(any())).thenReturn(new io.micrometer.core.instrument.Counter() {
+            @Override
+            public void increment() {}
+
+            @Override
+            public void increment(double amount) {}
+
+            @Override
+            public double count() {
+                return 0;
+            }
+
+            @Override
+            public io.micrometer.core.instrument.Meter.Id getId() {
+                return null;
+            }
+        });
     }
 
     @Test

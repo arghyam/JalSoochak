@@ -470,7 +470,7 @@ public class NotificationEventRouter {
 
         if ("SMS".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
-            int expiryMinutes = 5; // Default OTP TTL; expiryMinutes not provided by SendLoginOtpEvent
+            int expiryMinutes = root.path("expiryMinutes").asInt(5);
 
             if (phone.isBlank()) {
                 log.warn("[Router/SEND_LOGIN_OTP/SMS] officerPhoneNumber is missing, skipping");

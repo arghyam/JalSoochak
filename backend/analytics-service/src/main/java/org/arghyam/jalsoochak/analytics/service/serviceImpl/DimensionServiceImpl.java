@@ -66,11 +66,23 @@ public class DimensionServiceImpl implements DimensionService {
             return;
         }
 
-        DimUser user = dimUserRepository.findById(event.getUserId())
-                .orElse(DimUser.builder()
-                        .userId(event.getUserId())
-                        .createdAt(LocalDateTime.now())
-                        .build());
+        // Prefer UUID-based lookup (globally unique across tenants). Fall back to
+        // (tenantId, userId) composite when uuid is absent — never userId alone,
+        // since tenant-scoped ids collide across tenants.
+        DimUser user;
+        if (event.getUuid() != null) {
+            user = dimUserRepository.findByUuid(event.getUuid())
+                    .orElse(DimUser.builder()
+                            .userId(event.getUserId())
+                            .createdAt(LocalDateTime.now())
+                            .build());
+        } else {
+            user = dimUserRepository.findByTenantIdAndUserId(event.getTenantId(), event.getUserId())
+                    .orElse(DimUser.builder()
+                            .userId(event.getUserId())
+                            .createdAt(LocalDateTime.now())
+                            .build());
+        }
 
         user.setTenantId(event.getTenantId());
         user.setEmail(event.getEmail());
@@ -81,7 +93,7 @@ public class DimensionServiceImpl implements DimensionService {
         user.setUpdatedAt(LocalDateTime.now());
 
         dimUserRepository.save(user);
-        log.info("Upserted dim_user_table [id={}]", event.getUserId());
+        log.info("Upserted dim_user_table [uuid={}, userId={}]", event.getUuid(), event.getUserId());
     }
 
     @Override

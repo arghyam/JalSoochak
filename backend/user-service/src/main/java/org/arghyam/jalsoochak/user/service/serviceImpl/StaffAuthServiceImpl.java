@@ -36,6 +36,10 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class StaffAuthServiceImpl implements StaffAuthService {
 
+    private static final String ROLE_SUPER_USER = "SUPER_USER";
+    private static final String ROLE_STATE_ADMIN = "STATE_ADMIN";
+    private static final String ROLE_PUMP_OPERATOR = "PUMP_OPERATOR";
+
     private final UserCommonRepository userCommonRepository;
     private final UserTenantRepository userTenantRepository;
     private final OtpProperties otpProperties;
@@ -86,7 +90,7 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         }
 
         // Pump operators do not have OTP login access — silently ignore to preserve anti-enumeration.
-        if ("PUMP_OPERATOR".equalsIgnoreCase(user.cName())) {
+        if (ROLE_PUMP_OPERATOR.equalsIgnoreCase(user.cName())) {
             // Log at INFO for production visibility, but without sensitive data
             log.info("OTP_REQUEST_DENIED reason=pump_operator_role_not_eligible");
             return new OtpRequestResponseDTO(otpProperties.otpLength());
@@ -129,7 +133,7 @@ public class StaffAuthServiceImpl implements StaffAuthService {
     }
 
     private static boolean isSystemAdminRole(String cName) {
-        return "SUPER_USER".equalsIgnoreCase(cName) || "STATE_ADMIN".equalsIgnoreCase(cName);
+        return ROLE_SUPER_USER.equalsIgnoreCase(cName) || ROLE_STATE_ADMIN.equalsIgnoreCase(cName);
     }
 
     @Override
