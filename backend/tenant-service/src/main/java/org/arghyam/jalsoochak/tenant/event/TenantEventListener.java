@@ -70,13 +70,17 @@ public class TenantEventListener {
         try {
             publishTenantEvent(event.getTenant(), "TENANT_UPDATED");
         } catch (Exception e) {
-            log.error("Failed to publish TENANT_DEACTIVATED event [id={}]", event.getTenant().getId(), e);
+            log.error("Failed to publish TENANT_UPDATED event [id={}]", event.getTenant().getId(), e);
         }
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleWaterNormUpdated(WaterNormUpdatedEvent event) {
         log.info("Handling WaterNormUpdatedEvent after commit [tenantId={}]", event.getTenantId());
+        if (event.getTenantId() == null || event.getStateCode() == null || event.getStateCode().isBlank()) {
+            log.warn("Cannot publish WATER_NORM_UPDATED event: tenantId or stateCode is null/blank [tenantId={}]", event.getTenantId());
+            return;
+        }
         try {
             Map<String, Object> payload = Map.of(
                     "eventType", "WATER_NORM_UPDATED",
@@ -93,6 +97,14 @@ public class TenantEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleLocationHierarchyUpdated(TenantLocationHierarchyUpdatedEvent event) {
         log.info("Handling TenantLocationHierarchyUpdatedEvent after commit [tenantId={}]", event.getTenantId());
+        if (event.getTenantId() == null || event.getStateCode() == null || event.getStateCode().isBlank()) {
+            log.warn("Cannot publish TENANT_LOCATION_HIERARCHY_UPDATED event: tenantId or stateCode is null/blank [tenantId={}]", event.getTenantId());
+            return;
+        }
+        if (event.getLevels() == null) {
+            log.warn("Cannot publish TENANT_LOCATION_HIERARCHY_UPDATED event: levels is null [tenantId={}]", event.getTenantId());
+            return;
+        }
         try {
             List<Map<String, Object>> levelList = event.getLevels().stream()
                     .map(l -> {

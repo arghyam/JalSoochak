@@ -21,8 +21,8 @@ public class SendLoginOtpEvent {
     String eventType;
 
     /** Decrypted phone number with country code (e.g. {@code "919876543210"}). PII — do not log. */
-    @JsonProperty("phoneNumber")
-    String phoneNumber;
+    @JsonProperty("officerPhoneNumber")
+    String officerPhoneNumber;
 
     /** Glific contact ID from {@code user_table.whatsapp_connection_id}. Omitted for SMS delivery. */
     @JsonInclude(JsonInclude.Include.NON_NULL)

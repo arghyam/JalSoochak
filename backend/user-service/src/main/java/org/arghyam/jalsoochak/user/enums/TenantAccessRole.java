@@ -23,8 +23,10 @@ public enum TenantAccessRole {
         if (cName == null) {
             throw new IllegalArgumentException("Unrecognised user type c_name: null");
         }
+        // Normalize: trim, replace whitespace with underscore, uppercase — so "Super User" and "super_user" both match SUPER_USER
+        String normalized = cName.trim().replaceAll("\\s+", "_").toUpperCase(java.util.Locale.ROOT);
         for (TenantAccessRole role : values()) {
-            if (role.name().equalsIgnoreCase(cName)) {
+            if (role.name().equals(normalized)) {
                 return role;
             }
         }

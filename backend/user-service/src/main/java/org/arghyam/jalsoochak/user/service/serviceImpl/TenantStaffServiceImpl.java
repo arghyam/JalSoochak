@@ -133,8 +133,12 @@ public class TenantStaffServiceImpl implements TenantStaffService {
 
             Integer tenantId = userCommonRepository.findTenantIdByStateCode(request.tenantCode())
                     .orElse(null);
-            userAnalyticsEventPublisher.publishStaffUserUpdatedAfterCommit(
-                    id, tenantId, newUserTypeId.intValue(), keycloakUuid, user.email(), 1);
+            if (tenantId == null) {
+                log.warn("Cannot publish staff user analytics event: tenantId not found for stateCode={}", request.tenantCode());
+            } else {
+                userAnalyticsEventPublisher.publishStaffUserUpdatedAfterCommit(
+                        id, tenantId, newUserTypeId.intValue(), keycloakUuid, user.email(), 1);
+            }
 
             return tenantStaffRepository.findStaffById(schema, id)
                     .orElseThrow(() -> new ResourceNotFoundException("Staff not found after update: " + id));

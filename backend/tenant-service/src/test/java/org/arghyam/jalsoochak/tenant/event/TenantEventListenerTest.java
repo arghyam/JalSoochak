@@ -267,7 +267,7 @@ class TenantEventListenerTest {
         verify(kafkaProducer).publishJson(eq("tenant-service-topic"), argThat(payload -> {
             if (!(payload instanceof Map)) return false;
             Map<?, ?> m = (Map<?, ?>) payload;
-            return "TENANT_DEACTIVATED".equals(m.get("eventType"));
+            return "TENANT_UPDATED".equals(m.get("eventType"));
         }));
     }
 

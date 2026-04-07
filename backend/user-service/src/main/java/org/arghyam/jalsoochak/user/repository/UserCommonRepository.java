@@ -565,6 +565,11 @@ public class UserCommonRepository {
     private AdminUserRow mapAdminUserRow(java.sql.ResultSet rs) throws java.sql.SQLException {
         Timestamp createdAtTs = rs.getTimestamp("created_at");
         String phoneNumber = pii.safeDecrypt(rs.getString("phone_number"));
+        String userTypeCName = rs.getString("user_type_c_name");
+        if (userTypeCName == null || userTypeCName.isBlank()) {
+            throw new java.sql.SQLException(
+                    "user_type_c_name is null or blank for admin user id=" + rs.getLong("id"));
+        }
         return new AdminUserRow(
                 rs.getLong("id"),
                 rs.getString("uuid"),
@@ -572,7 +577,7 @@ public class UserCommonRepository {
                 phoneNumber,
                 rs.getInt("tenant_id"),
                 rs.getInt("admin_level"),
-                rs.getString("user_type_c_name"),
+                userTypeCName,
                 AdminUserStatus.fromCode(rs.getInt("status")),
                 rs.getInt("created_by"),
                 createdAtTs != null ? createdAtTs.toLocalDateTime() : null

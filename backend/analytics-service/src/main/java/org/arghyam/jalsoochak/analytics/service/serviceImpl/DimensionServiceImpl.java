@@ -191,6 +191,11 @@ public class DimensionServiceImpl implements DimensionService {
     @Override
     @Transactional
     public void updateLocationHierarchyNames(TenantLocationHierarchyUpdatedEvent event) {
+        if (event.getLevels() == null || event.getLevels().isEmpty()) {
+            log.info("No levels to update [tenantId={}, hierarchyType={}]",
+                    event.getTenantId(), event.getHierarchyType());
+            return;
+        }
         boolean isLgd = "LGD".equalsIgnoreCase(event.getHierarchyType());
         for (TenantLocationHierarchyUpdatedEvent.LevelEntry entry : event.getLevels()) {
             if (isLgd) {

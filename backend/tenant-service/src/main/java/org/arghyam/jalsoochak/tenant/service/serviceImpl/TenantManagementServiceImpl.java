@@ -360,8 +360,13 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         if (request.getConfigs().containsKey(TenantConfigKeyEnum.WATER_NORM)) {
             SimpleConfigValueDTO dto = (SimpleConfigValueDTO) results.get(TenantConfigKeyEnum.WATER_NORM);
-            eventPublisher.publishEvent(
-                    new WaterNormUpdatedEvent(tenantId, tenant.getStateCode(), Integer.parseInt(dto.getValue())));
+            try {
+                int waterNorm = Integer.parseInt(dto.getValue());
+                eventPublisher.publishEvent(new WaterNormUpdatedEvent(tenantId, tenant.getStateCode(), waterNorm));
+            } catch (NumberFormatException e) {
+                log.error("Invalid WATER_NORM value '{}' for tenantId={}, stateCode={} — skipping event publish",
+                        dto.getValue(), tenantId, tenant.getStateCode());
+            }
         }
 
         return TenantConfigResponseDTO.builder()

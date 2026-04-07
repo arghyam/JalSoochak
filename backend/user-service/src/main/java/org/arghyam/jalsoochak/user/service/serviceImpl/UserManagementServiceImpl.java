@@ -83,7 +83,10 @@ public class UserManagementServiceImpl implements UserManagementService {
         AdminUserRow callerRow = userCommonRepository.findAdminUserByUuid(callerUuid)
                 .orElseThrow(() -> new UnauthorizedAccessException("Caller is not registered in the system"));
 
-        String callerRole = callerRow.userTypeCName() != null ? callerRow.userTypeCName() : "";
+        String callerRole = callerRow.userTypeCName();
+        if (callerRole == null || callerRole.isBlank()) {
+            throw new IllegalStateException("Caller user role is missing for user id: " + callerRow.id());
+        }
 
         if ("STATE_ADMIN".equals(callerRole)) {
             if (!"STATE_ADMIN".equals(request.getRole())) {
@@ -204,8 +207,14 @@ public class UserManagementServiceImpl implements UserManagementService {
         AdminUserRow callerRow = userCommonRepository.findAdminUserByUuid(callerUuid)
                 .orElseThrow(() -> new UnauthorizedAccessException("Caller is not registered in the system"));
 
-        String callerRole = callerRow.userTypeCName() != null ? callerRow.userTypeCName() : "";
-        String targetRole = target.userTypeCName() != null ? target.userTypeCName() : "";
+        String callerRole = callerRow.userTypeCName();
+        if (callerRole == null || callerRole.isBlank()) {
+            throw new IllegalStateException("Caller user role is missing for user id: " + callerRow.id());
+        }
+        String targetRole = target.userTypeCName();
+        if (targetRole == null || targetRole.isBlank()) {
+            throw new IllegalStateException("Target user role is missing for user id: " + target.id());
+        }
 
         if ("STATE_ADMIN".equals(callerRole)) {
             if (!"STATE_ADMIN".equals(targetRole)) {
@@ -494,6 +503,9 @@ public class UserManagementServiceImpl implements UserManagementService {
             rep.setLastName(request.getLastName());
 
         String roleName = user.userTypeCName();
+        if (roleName == null || roleName.isBlank()) {
+            throw new IllegalStateException("User role is missing for user id: " + user.id());
+        }
         if ("STATE_ADMIN".equals(roleName)
                 && (request.getPhoneNumber() != null || request.getFirstName() != null
                         || request.getLastName() != null)) {
@@ -523,7 +535,10 @@ public class UserManagementServiceImpl implements UserManagementService {
             throw new ForbiddenAccessException("Cannot deactivate your own account");
         }
 
-        String targetRole = target.userTypeCName() != null ? target.userTypeCName() : "";
+        String targetRole = target.userTypeCName();
+        if (targetRole == null || targetRole.isBlank()) {
+            throw new IllegalStateException("Target user role is missing for user id: " + target.id());
+        }
         Optional<String> callerRole = SecurityUtils.extractRole(caller);
 
         if (callerRole.map("STATE_ADMIN"::equals).orElse(false)) {

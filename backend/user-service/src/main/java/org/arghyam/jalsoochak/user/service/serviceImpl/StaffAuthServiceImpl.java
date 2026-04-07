@@ -116,7 +116,7 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         boolean isWhatsapp = "WHATSAPP".equalsIgnoreCase(otpProperties.deliveryChannel());
         SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                 .eventType("SEND_LOGIN_OTP")
-                .phoneNumber(user.phoneNumber())
+                .officerPhoneNumber(user.phoneNumber())
                 .glificId(isWhatsapp ? user.whatsappConnectionId() : null)
                 .otp(rawOtp)
                 .expiryMinutes(otpProperties.expiryMinutes())

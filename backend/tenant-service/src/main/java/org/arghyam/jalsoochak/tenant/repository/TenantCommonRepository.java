@@ -304,7 +304,11 @@ public class TenantCommonRepository {
                 SET status = ?, updated_at = NOW(), updated_by = ?
                 WHERE id = ?
                 """;
-        jdbcTemplate.update(sql, status.getCode(), updatedBy, tenantId);
+        int rowsAffected = jdbcTemplate.update(sql, status.getCode(), updatedBy, tenantId);
+        if (rowsAffected == 0) {
+            throw new IllegalStateException(
+                    "No tenant found with tenantId=" + tenantId + " when updating status to " + status);
+        }
     }
 
     /**
