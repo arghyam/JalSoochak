@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.config;
 
+import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
@@ -23,9 +24,11 @@ public class JwtAuthConverter implements Converter<Jwt, AbstractAuthenticationTo
 
     private final JwtGrantedAuthoritiesConverter defaultConverter = new JwtGrantedAuthoritiesConverter();
     private final String keycloakClientId;
+    private final AppProperties appProperties;
 
-    public JwtAuthConverter(@Value("${keycloak.resource:}") String keycloakClientId) {
+    public JwtAuthConverter(@Value("${keycloak.resource:}") String keycloakClientId, AppProperties appProperties) {
         this.keycloakClientId = keycloakClientId == null ? "" : keycloakClientId.trim();
+        this.appProperties = appProperties;
     }
 
     @Override
@@ -38,6 +41,11 @@ public class JwtAuthConverter implements Converter<Jwt, AbstractAuthenticationTo
                         extractUserTypeAuthority(jwt))
                 .flatMap(Collection::stream)
                 .collect(Collectors.toSet());
+
+        // Expand SUPER_STATE_ADMIN only in Single Tenant Mode; in MTM the role has no effect
+        if (appProperties.isSingleTenantMode()) {
+            authorities = expandSuperStateAdminAuthority(authorities);
+        }
 
         String principalName = jwt.getClaimAsString("preferred_username");
         if (principalName == null || principalName.isBlank()) {
@@ -92,5 +100,21 @@ public class JwtAuthConverter implements Converter<Jwt, AbstractAuthenticationTo
             return Collections.emptySet();
         }
         return Set.of(new SimpleGrantedAuthority("USER_TYPE_" + userType.toUpperCase()));
+    }
+
+    /**
+     * Expands the SUPER_STATE_ADMIN authority to include ROLE_SUPER_USER and ROLE_STATE_ADMIN.
+     * This allows SUPER_STATE_ADMIN users to pass all SUPER_USER and STATE_ADMIN authorization checks.
+     *
+     * @param authorities the original set of authorities
+     * @return expanded set of authorities
+     */
+    private Set<GrantedAuthority> expandSuperStateAdminAuthority(Set<GrantedAuthority> authorities) {
+        Set<GrantedAuthority> expanded = new java.util.HashSet<>(authorities);
+        if (authorities.contains(new SimpleGrantedAuthority("ROLE_SUPER_STATE_ADMIN"))) {
+            expanded.add(new SimpleGrantedAuthority("ROLE_SUPER_USER"));
+            expanded.add(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"));
+        }
+        return expanded;
     }
 }
