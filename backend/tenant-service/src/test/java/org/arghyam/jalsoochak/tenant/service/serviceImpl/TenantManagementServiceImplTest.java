@@ -1133,6 +1133,66 @@ class TenantManagementServiceImplTest {
                     any(org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent.class));
         }
 
+        @Test
+        @DisplayName("Should publish WaterSupplyThresholdUpdatedEvent when TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD key is set")
+        void setTenantConfigs_withWaterSupplyThreshold_publishesWaterSupplyThresholdUpdatedEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD,
+                    objectMapper.readTree("{\"undersupplyThresholdPercent\": 20.0, \"oversupplyThresholdPercent\": 30.0}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.name())
+                    .configValue("{\"undersupplyThresholdPercent\":20.0,\"oversupplyThresholdPercent\":30.0}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            assertInstanceOf(org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent.class, captor.getValue());
+            org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent event =
+                    (org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent) captor.getValue();
+            assertEquals(tenantId, event.getTenantId());
+            assertEquals("MP", event.getStateCode());
+            assertEquals(20, event.getUnderSupplyThresholdPercent());
+            assertEquals(30, event.getOverSupplyThresholdPercent());
+        }
+
+        @Test
+        @DisplayName("Should not publish WaterSupplyThresholdUpdatedEvent when threshold key is absent")
+        void setTenantConfigs_withoutWaterSupplyThreshold_doesNotPublishWaterSupplyThresholdUpdatedEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON, objectMapper.readTree("{\"value\": \"tmpl\"}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"tmpl\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(eventPublisher, never()).publishEvent(
+                    any(org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent.class));
+        }
+
         private SetTenantConfigRequestDTO request(Map<TenantConfigKeyEnum, JsonNode> configs) {
             return SetTenantConfigRequestDTO.builder().configs(configs).build();
         }

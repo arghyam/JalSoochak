@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.event;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelNameDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
+import org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -110,6 +111,41 @@ class TenantEventListenerTest {
         assertThat(levels.get(0).get("name")).isEqualTo("District");
     }
 
+
+    @Test
+    void handleWaterSupplyThresholdUpdated_publishesCorrectPayload() {
+        WaterSupplyThresholdUpdatedEvent event = new WaterSupplyThresholdUpdatedEvent(4, "MH", 20, 30);
+
+        listener.handleWaterSupplyThresholdUpdated(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(kafkaProducer).publishJson(anyString(), captor.capture());
+        Map<String, Object> payload = captor.getValue();
+        assertThat(payload.get("eventType")).isEqualTo("WATER_SUPPLY_THRESHOLD_UPDATED");
+        assertThat(payload.get("tenantId")).isEqualTo(4);
+        assertThat(payload.get("stateCode")).isEqualTo("MH");
+        assertThat(payload.get("underSupplyThresholdPercent")).isEqualTo(20);
+        assertThat(payload.get("overSupplyThresholdPercent")).isEqualTo(30);
+    }
+
+    @Test
+    void handleWaterSupplyThresholdUpdated_skipsKafka_whenTenantIdIsNull() {
+        WaterSupplyThresholdUpdatedEvent event = new WaterSupplyThresholdUpdatedEvent(null, "MH", 20, 30);
+
+        listener.handleWaterSupplyThresholdUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleWaterSupplyThresholdUpdated_skipsKafka_whenStateCodeIsBlank() {
+        WaterSupplyThresholdUpdatedEvent event = new WaterSupplyThresholdUpdatedEvent(5, "  ", 20, 30);
+
+        listener.handleWaterSupplyThresholdUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
 
     // ── helpers ───────────────────────────────────────────────────────────────────
 
