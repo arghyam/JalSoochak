@@ -5,6 +5,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReporting
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationPaginatedResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.EscalationResolutionStatusDto;
+import org.arghyam.jalsoochak.analytics.dto.response.EscalationResolutionStatusOptionDto;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
@@ -16,6 +18,8 @@ import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyPaginatedResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyStatusDto;
+import org.arghyam.jalsoochak.analytics.dto.response.AnomalyStatusOptionDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -38,6 +42,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -274,6 +279,24 @@ public class AnalyticsSchemeReportingController {
         }
     }
 
+    @GetMapping("/escalations/resolution-statuses")
+    @Operation(
+            summary = "List escalation resolution status codes and labels",
+            description = "Returns every allowed resolution_status integer value with its display string for filters and UI."
+    )
+    public ResponseEntity<ApiResponse<List<EscalationResolutionStatusOptionDto>>> getEscalationResolutionStatuses() {
+        List<EscalationResolutionStatusOptionDto> items = Arrays.stream(EscalationResolutionStatusDto.values())
+                .map(v -> EscalationResolutionStatusOptionDto.builder()
+                        .value(v.getCode())
+                        .label(v.getLabel())
+                        .build())
+                .toList();
+        return ResponseEntity.ok(ApiResponse.<List<EscalationResolutionStatusOptionDto>>builder()
+                .success(true)
+                .data(items)
+                .build());
+    }
+
     @GetMapping("/escalations")
     @Operation(
             summary = "Get paginated escalations list with filters",
@@ -417,6 +440,24 @@ public class AnalyticsSchemeReportingController {
                     .data(null)
                     .build());
         }
+    }
+
+    @GetMapping("/anomalies/statuses")
+    @Operation(
+            summary = "List anomaly status codes and labels",
+            description = "Returns every allowed anomaly status integer value with its display string for filters and UI."
+    )
+    public ResponseEntity<ApiResponse<List<AnomalyStatusOptionDto>>> getAnomalyStatuses() {
+        List<AnomalyStatusOptionDto> items = Arrays.stream(AnomalyStatusDto.values())
+                .map(v -> AnomalyStatusOptionDto.builder()
+                        .value(v.getCode())
+                        .label(v.getLabel())
+                        .build())
+                .toList();
+        return ResponseEntity.ok(ApiResponse.<List<AnomalyStatusOptionDto>>builder()
+                .success(true)
+                .data(items)
+                .build());
     }
 
     @GetMapping("/anomalies")
