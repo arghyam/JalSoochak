@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
@@ -107,6 +108,9 @@ class TenantManagementServiceImplTest {
     private TenantSchemaRepository tenantSchemaRepository;
 
     @Mock
+    private AppProperties appProperties;
+
+    @Mock
     private TenantDefaultsProperties tenantDefaults;
 
     @Mock
@@ -141,6 +145,7 @@ class TenantManagementServiceImplTest {
             tenantCommonRepository,
             tenantSchemaRepository,
             objectMapper,
+            appProperties, 
             tenantDefaults,
             eventPublisher,
             schedulerManager,

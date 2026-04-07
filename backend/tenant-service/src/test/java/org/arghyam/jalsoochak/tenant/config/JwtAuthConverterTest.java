@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.config;
 
+import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -12,12 +13,29 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class JwtAuthConverterTest {
 
     private static final String CLIENT_ID = "tenant-service";
 
-    private final JwtAuthConverter converter = new JwtAuthConverter(CLIENT_ID);
+    private final AppProperties mtmProperties = mtmProperties();
+    private final AppProperties stmProperties = stmProperties();
+
+    private final JwtAuthConverter converter = new JwtAuthConverter(CLIENT_ID, mtmProperties);
+
+    private static AppProperties mtmProperties() {
+        AppProperties p = mock(AppProperties.class);
+        when(p.isSingleTenantMode()).thenReturn(false);
+        return p;
+    }
+
+    private static AppProperties stmProperties() {
+        AppProperties p = mock(AppProperties.class);
+        when(p.isSingleTenantMode()).thenReturn(true);
+        return p;
+    }
 
     private static Jwt buildJwt(Map<String, Object> claims) {
         return new Jwt(
@@ -103,7 +121,7 @@ class JwtAuthConverterTest {
 
     @Test
     void convert_blankClientId_producesNoClientRoles() {
-        JwtAuthConverter converterNoClient = new JwtAuthConverter("");
+        JwtAuthConverter converterNoClient = new JwtAuthConverter("", mtmProperties);
         Jwt jwt = buildJwt(Map.of(
                 "sub", "user-uuid",
                 "resource_access", Map.of(CLIENT_ID, Map.of("roles", List.of("STATE_ADMIN")))));
@@ -162,6 +180,34 @@ class JwtAuthConverterTest {
         JwtAuthenticationToken token = toAuthToken(jwt);
 
         assertThat(authorities(token)).noneMatch(a -> a.startsWith("USER_TYPE_"));
+    }
+
+    // ── SUPER_STATE_ADMIN expansion ──────────────────────────────────────────────
+
+    @Test
+    void convert_superStateAdmin_inStm_expandsToSuperUserAndStateAdmin() {
+        JwtAuthConverter stmConverter = new JwtAuthConverter(CLIENT_ID, stmProperties);
+        Jwt jwt = buildJwt(Map.of(
+                "sub", "ssa-uuid",
+                "realm_access", Map.of("roles", List.of("SUPER_STATE_ADMIN"))));
+
+        JwtAuthenticationToken token = (JwtAuthenticationToken) stmConverter.convert(jwt);
+        Set<String> auths = authorities(token);
+
+        assertThat(auths).contains("ROLE_SUPER_STATE_ADMIN", "ROLE_SUPER_USER", "ROLE_STATE_ADMIN");
+    }
+
+    @Test
+    void convert_superStateAdmin_inMtm_doesNotExpandAuthorities() {
+        Jwt jwt = buildJwt(Map.of(
+                "sub", "ssa-uuid",
+                "realm_access", Map.of("roles", List.of("SUPER_STATE_ADMIN"))));
+
+        JwtAuthenticationToken token = toAuthToken(jwt); // uses MTM converter
+        Set<String> auths = authorities(token);
+
+        assertThat(auths).contains("ROLE_SUPER_STATE_ADMIN");
+        assertThat(auths).doesNotContain("ROLE_SUPER_USER", "ROLE_STATE_ADMIN");
     }
 
     private JwtAuthenticationToken toAuthToken(Jwt jwt) {

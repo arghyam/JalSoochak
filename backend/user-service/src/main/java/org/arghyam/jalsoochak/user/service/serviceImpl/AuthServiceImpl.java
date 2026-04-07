@@ -251,7 +251,7 @@ public class AuthServiceImpl implements AuthService {
                 userAnalyticsEventPublisher.publishUserCreatedAfterCommit(activatedUser, title.isBlank() ? null : title);
             }
 
-            if ("STATE_ADMIN".equals(role)) {
+            if ("STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role)) {
                 String schema = "tenant_" + tenantCode.toLowerCase();
                 String title = request.getFirstName() + " " + request.getLastName();
                 // Use the same Keycloak UUID so both tables share a single identity key

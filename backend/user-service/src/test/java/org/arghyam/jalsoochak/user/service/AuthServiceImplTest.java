@@ -312,6 +312,32 @@ class AuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("SUPER_STATE_ADMIN: returns invite info with tenant name")
+        void getInviteInfo_superStateAdmin_returnsInfo() {
+            String rawToken = "ssa-invite-token";
+            String hash = "ssa-invite-hash";
+            String metadata = "{\"role\":\"SUPER_STATE_ADMIN\",\"tenantName\":\"Madhya Pradesh\",\"tenantCode\":\"MP\",\"firstName\":\"<enc-hybrid>\",\"lastName\":\"<enc-admin>\"}";
+            when(tokenService.hash(rawToken)).thenReturn(hash);
+            when(userCommonRepository.findActiveTokenByHash(hash)).thenReturn(Optional.of(
+                    activeTokenRow("ssa@example.com", hash, "INVITE", metadata)));
+            when(metadataDecryptionHelper.parseAndDecrypt(metadata, "firstName")).thenReturn("Hybrid");
+            when(metadataDecryptionHelper.parseAndDecrypt(metadata, "lastName")).thenReturn("Admin");
+            when(userCommonRepository.existsActiveAdminUserByEmail("ssa@example.com")).thenReturn(false);
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            AdminUserRow pendingUser = new AdminUserRow(6L, "placeholder-uuid", "ssa@example.com", "9198765432", 1, 4, "SUPER_STATE_ADMIN", AdminUserStatus.PENDING, 0, null);
+            when(userCommonRepository.findAdminUserByEmail("ssa@example.com")).thenReturn(Optional.of(pendingUser));
+
+            InviteInfoResponseDTO info = authService.getInviteInfo(rawToken);
+
+            assertEquals("ssa@example.com", info.getEmail());
+            assertEquals("SUPER_STATE_ADMIN", info.getRole());
+            assertEquals("Madhya Pradesh", info.getTenantName());
+            assertEquals("Hybrid", info.getFirstName());
+            assertEquals("Admin", info.getLastName());
+        }
+
+        @Test
         @DisplayName("Should throw BadRequestException when token not found in DB")
         void getInviteInfo_unknownToken_throwsBadRequest() {
             when(tokenService.hash(anyString())).thenReturn("unknown-hash");
@@ -589,6 +615,50 @@ class AuthServiceImplTest {
             req.setPhoneNumber("91XXXXXXXXXX");
 
             assertThrows(ForbiddenAccessException.class, () -> authService.activateAccount(req));
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN: activates successfully with tenant row creation")
+        void activateAccount_superStateAdmin_returnsAuthResult() {
+            String hash = "ssa-hash";
+            when(tokenService.hash("ssa-token")).thenReturn(hash);
+            when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
+                    activeTokenRow("newssa@example.com", hash, "INVITE",
+                            "{\"role\":\"SUPER_STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
+
+            AdminUserRow pendingUser = new AdminUserRow(30L, "pending-ssa-uuid", "newssa@example.com", "", 1, 4, "SUPER_STATE_ADMIN", AdminUserStatus.PENDING, 0, null);
+            when(userCommonRepository.findAdminUserByEmail("newssa@example.com")).thenReturn(Optional.of(pendingUser));
+
+            when(keycloakProvider.getRealm()).thenReturn("test-realm");
+            jakarta.ws.rs.core.Response createResp = jakarta.ws.rs.core.Response
+                    .created(java.net.URI.create("http://keycloak/users/ssa-kc-id"))
+                    .build();
+            when(keycloakProvider.getAdminInstance().realm("test-realm").users().create(any()))
+                    .thenReturn(createResp);
+            doNothing().when(keycloakAdminHelper).assignRoleToUser(anyString(), anyString());
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            doNothing().when(userCommonRepository).activatePendingAdminUser(eq(30L), anyString(), anyString());
+            AdminUserRow activatedUser = new AdminUserRow(30L, "ssa-kc-id", "newssa@example.com", "", 1, 4, "SUPER_STATE_ADMIN", AdminUserStatus.ACTIVE, 0, null);
+            when(userCommonRepository.findAdminUserByUuid("ssa-kc-id")).thenReturn(Optional.of(activatedUser));
+            when(userTenantRepository.createUser(anyString(), anyString(), any(), anyString(),
+                    anyString(), any(), anyString(), anyString(), any())).thenReturn(1L);
+            when(keycloakClient.obtainToken(anyString(), anyString())).thenReturn(tokenResponse());
+
+            ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
+            req.setInviteToken("ssa-token");
+            req.setFirstName("Hybrid");
+            req.setLastName("Admin");
+            req.setPassword("Pass@123");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            AuthResult result = authService.activateAccount(req);
+
+            assertNotNull(result);
+            assertEquals("MP", result.tokenResponse().getTenantCode());
+            verify(userCommonRepository).activatePendingAdminUser(eq(30L), anyString(), anyString());
+            verify(userTenantRepository).createUser(eq("tenant_mp"), anyString(), any(), eq("Hybrid Admin"),
+                    eq("newssa@example.com"), any(), anyString(), anyString(), any());
         }
 
         @Test

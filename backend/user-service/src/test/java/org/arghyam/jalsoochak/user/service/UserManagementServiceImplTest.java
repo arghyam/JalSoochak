@@ -21,6 +21,7 @@ import java.util.Optional;
 
 import org.arghyam.jalsoochak.user.clients.KeycloakClient;
 import org.arghyam.jalsoochak.user.config.KeycloakProvider;
+import org.arghyam.jalsoochak.user.config.properties.AppProperties;
 import org.arghyam.jalsoochak.user.config.properties.FrontendProperties;
 import org.arghyam.jalsoochak.user.config.properties.InviteProperties;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
@@ -90,6 +91,9 @@ class UserManagementServiceImplTest {
     private KeycloakAdminHelper keycloakAdminHelper;
 
     @Mock
+    private AppProperties appProperties;
+
+    @Mock
     private InviteProperties inviteProperties;
 
     @Mock
@@ -108,8 +112,8 @@ class UserManagementServiceImplTest {
         MetadataDecryptionHelper metadataDecryptionHelper = new MetadataDecryptionHelper(new ObjectMapper(), pii);
         userManagementService = new UserManagementServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
-                userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, inviteProperties, frontendProperties,
-                tokenService, new ObjectMapper(), pii, metadataDecryptionHelper
+                userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, appProperties,
+                inviteProperties, frontendProperties, tokenService, new ObjectMapper(), pii, metadataDecryptionHelper
         );
     }
 
@@ -569,6 +573,79 @@ class UserManagementServiceImplTest {
             ArgumentCaptor<InviteEmailEvent> captor = ArgumentCaptor.forClass(InviteEmailEvent.class);
             verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(captor.capture());
             assertEquals("Madhya Pradesh", captor.getValue().getStateName());
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN role in MTM throws BadRequestException")
+        void inviteUser_superStateAdmin_inMtm_throwsBadRequest() {
+            Authentication auth = superUserAuth("kc-super");
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
+            when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
+            when(appProperties.isSingleTenantMode()).thenReturn(false);
+
+            InviteRequestDTO req = new InviteRequestDTO();
+            req.setEmail("ssa@example.com");
+            req.setRole("SUPER_STATE_ADMIN");
+            req.setFirstName("Hybrid");
+            req.setLastName("Admin");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            BadRequestException ex = assertThrows(BadRequestException.class,
+                    () -> userManagementService.inviteUser(req, auth));
+            assertTrue(ex.getMessage().contains("Single Tenant Mode"));
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN role in STM with no tenant throws BadRequestException")
+        void inviteUser_superStateAdmin_inStm_noTenant_throwsBadRequest() {
+            Authentication auth = superUserAuth("kc-super");
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
+            when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
+            when(appProperties.isSingleTenantMode()).thenReturn(true);
+            when(userCommonRepository.findSingleTenant()).thenReturn(Optional.empty());
+
+            InviteRequestDTO req = new InviteRequestDTO();
+            req.setEmail("ssa@example.com");
+            req.setRole("SUPER_STATE_ADMIN");
+            req.setFirstName("Hybrid");
+            req.setLastName("Admin");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            assertThrows(BadRequestException.class, () -> userManagementService.inviteUser(req, auth));
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN role in STM with existing tenant succeeds")
+        void inviteUser_superStateAdmin_inStm_success() {
+            Authentication auth = superUserAuth("kc-super");
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
+            when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
+            when(appProperties.isSingleTenantMode()).thenReturn(true);
+            when(userCommonRepository.findSingleTenant()).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+            when(userCommonRepository.findAdminUserByEmail("ssa@example.com")).thenReturn(Optional.empty());
+            when(userCommonRepository.findUserTypeIdByName("SUPER_STATE_ADMIN")).thenReturn(Optional.of(4));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.createAdminUserPending(eq("ssa@example.com"), anyString(), eq(1), eq(4), eq(1))).thenReturn(10L);
+            when(tokenService.generateRawToken()).thenReturn("raw-token");
+            when(tokenService.hash("raw-token")).thenReturn("hashed-token");
+            when(inviteProperties.expiryHours()).thenReturn(24);
+            doNothing().when(userCommonRepository).insertToken(
+                    eq("ssa@example.com"), eq("hashed-token"), eq("INVITE"), anyString(), any(), eq(1));
+            when(frontendProperties.baseUrl()).thenReturn("http://localhost:3000");
+            when(frontendProperties.invitePath()).thenReturn("/invite");
+
+            InviteRequestDTO req = new InviteRequestDTO();
+            req.setEmail("ssa@example.com");
+            req.setRole("SUPER_STATE_ADMIN");
+            req.setFirstName("Hybrid");
+            req.setLastName("Admin");
+            req.setPhoneNumber("91XXXXXXXXXX");
+
+            userManagementService.inviteUser(req, auth);
+
+            verify(userCommonRepository).createAdminUserPending(eq("ssa@example.com"), anyString(), eq(1), eq(4), eq(1));
+            verify(userNotificationEventPublisher).publishInviteEmailAfterCommit(any());
         }
 
         @Test

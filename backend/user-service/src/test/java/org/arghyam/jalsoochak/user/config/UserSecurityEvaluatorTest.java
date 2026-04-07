@@ -60,6 +60,15 @@ class UserSecurityEvaluatorTest {
         return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_STATE_ADMIN")));
     }
 
+    private JwtAuthenticationToken superStateAdminAuth(String tenantCode) {
+        Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").claim("sub", "ssa-uuid").build();
+        return new JwtAuthenticationToken(jwt, List.of(
+                new SimpleGrantedAuthority("ROLE_SUPER_STATE_ADMIN"),
+                new SimpleGrantedAuthority("ROLE_SUPER_USER"),
+                new SimpleGrantedAuthority("ROLE_STATE_ADMIN"),
+                new SimpleGrantedAuthority("TENANT_" + tenantCode.toUpperCase())));
+    }
+
     private JwtAuthenticationToken noRoleAuth() {
         Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").claim("sub", "anon-uuid").build();
         return new JwtAuthenticationToken(jwt, List.of());
@@ -227,6 +236,24 @@ class UserSecurityEvaluatorTest {
             boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
 
             assertFalse(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
+        }
+    }
+
+    // ── SUPER_STATE_ADMIN ─────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("SUPER_STATE_ADMIN")
+    class SuperStateAdmin {
+
+        @Test
+        @DisplayName("can access any user without hitting the tenant DB — behaves like SUPER_USER")
+        void canAccessAnyUser() {
+            when(userCommonRepository.findAdminUserByUuid("ssa-uuid")).thenReturn(Optional.of(activeAdminRow("ssa-uuid")));
+
+            boolean result = evaluator.canAccessUser(42L, superStateAdminAuth("MP"));
+
+            assertTrue(result);
             verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
         }
     }
