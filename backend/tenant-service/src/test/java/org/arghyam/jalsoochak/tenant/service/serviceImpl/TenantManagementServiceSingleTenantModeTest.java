@@ -5,9 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import java.util.Optional;
 
 import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
@@ -17,14 +20,18 @@ import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
+import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -64,9 +71,11 @@ public class TenantManagementServiceSingleTenantModeTest {
     private SystemManagementService systemManagementService;
 
     private TenantManagementServiceImpl tenantManagementService;
+    private MockedStatic<SecurityUtils> mockedSecurityUtils;
 
     @BeforeEach
     void setUp() {
+        mockedSecurityUtils = mockStatic(SecurityUtils.class);
         tenantManagementService = new TenantManagementServiceImpl(
                 tenantCommonRepository,
                 tenantSchemaRepository,
@@ -77,6 +86,11 @@ public class TenantManagementServiceSingleTenantModeTest {
                 schedulerManager,
                 objectStorageService,
                 systemManagementService);
+    }
+
+    @AfterEach
+    void tearDown() {
+        mockedSecurityUtils.close();
     }
 
     @Nested
@@ -157,6 +171,52 @@ public class TenantManagementServiceSingleTenantModeTest {
             verify(tenantCommonRepository).countNonDeletedTenants();
             // Verify state code check was NOT performed (STM check failed first)
             verify(tenantCommonRepository, never()).findByStateCode(anyString());
+        }
+
+        @Test
+        @DisplayName("DataIntegrityViolationException in STM is wrapped as single-tenant conflict")
+        void testDataIntegrityViolationInSTMWrapsAsIllegalState() {
+            when(appProperties.isSingleTenantMode()).thenReturn(true);
+            when(tenantCommonRepository.countNonDeletedTenants()).thenReturn(0);
+            when(tenantCommonRepository.findByStateCode(anyString())).thenReturn(Optional.empty());
+            mockedSecurityUtils.when(SecurityUtils::getCurrentUserUuid).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(1));
+            when(tenantCommonRepository.createTenant(any(), anyInt()))
+                    .thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+            CreateTenantRequestDTO request = new CreateTenantRequestDTO();
+            request.setStateCode("MP");
+            request.setName("Madhya Pradesh");
+            request.setLgdCode(5);
+
+            IllegalStateException ex = assertThrows(
+                    IllegalStateException.class,
+                    () -> tenantManagementService.createTenant(request));
+
+            assertEquals("A tenant already exists. Only one tenant is allowed in Single Tenant Mode.",
+                    ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("DataIntegrityViolationException in MTM is wrapped as duplicate state code conflict")
+        void testDataIntegrityViolationInMTMWrapsAsDuplicateStateCode() {
+            when(appProperties.isSingleTenantMode()).thenReturn(false);
+            when(tenantCommonRepository.findByStateCode(anyString())).thenReturn(Optional.empty());
+            mockedSecurityUtils.when(SecurityUtils::getCurrentUserUuid).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(1));
+            when(tenantCommonRepository.createTenant(any(), anyInt()))
+                    .thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+            CreateTenantRequestDTO request = new CreateTenantRequestDTO();
+            request.setStateCode("MP");
+            request.setName("Madhya Pradesh");
+            request.setLgdCode(5);
+
+            IllegalStateException ex = assertThrows(
+                    IllegalStateException.class,
+                    () -> tenantManagementService.createTenant(request));
+
+            assertEquals("Tenant with state code 'MP' already exists", ex.getMessage());
         }
     }
 }

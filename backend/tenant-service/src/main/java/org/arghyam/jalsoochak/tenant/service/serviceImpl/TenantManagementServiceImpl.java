@@ -16,6 +16,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.DataIntegrityViolationException;
+
 import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
@@ -104,7 +106,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     public TenantResponseDTO createTenant(CreateTenantRequestDTO request) {
         log.info("Creating tenant – stateCode: {}, name: {}", request.getStateCode(), request.getName());
 
-        // Single Tenant Mode enforcement: only one tenant allowed
+        // Single Tenant Mode: fast-fail before insert. DataIntegrityViolationException is caught
+        // below to convert any concurrent-insert race into a clear error.
         if (appProperties.isSingleTenantMode()) {
             int count = tenantCommonRepository.countNonDeletedTenants();
             if (count > 0) {
@@ -120,8 +123,18 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         Integer currentUserId = resolveCurrentUserId();
 
-        TenantResponseDTO tenant = tenantCommonRepository.createTenant(request, currentUserId)
-                .orElseThrow(() -> new RuntimeException("Tenant creation failed – no record returned"));
+        TenantResponseDTO tenant;
+        try {
+            tenant = tenantCommonRepository.createTenant(request, currentUserId)
+                    .orElseThrow(() -> new RuntimeException("Tenant creation failed – no record returned"));
+        } catch (DataIntegrityViolationException e) {
+            if (appProperties.isSingleTenantMode()) {
+                throw new IllegalStateException(
+                        "A tenant already exists. Only one tenant is allowed in Single Tenant Mode.", e);
+            }
+            throw new IllegalStateException(
+                    "Tenant with state code '" + request.getStateCode() + "' already exists", e);
+        }
         log.info("Tenant record created in common_schema with id: {}", tenant.getId());
 
         String schemaName = "tenant_" + request.getStateCode().toLowerCase();
@@ -387,17 +400,23 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         if (request.getConfigs().containsKey(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD)) {
             WaterSupplyThresholdConfigDTO dto = (WaterSupplyThresholdConfigDTO) results
                     .get(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD);
-            try {
-                int getUndersupplyThreshold = dto.getUndersupplyThresholdPercent().intValue();
-                int getOversupplyThreshold = dto.getOversupplyThresholdPercent().intValue();
-                eventPublisher.publishEvent(new WaterSupplyThresholdUpdatedEvent(
-                        tenantId,
-                        tenant.getStateCode(),
-                        getUndersupplyThreshold,
-                        getOversupplyThreshold));
-            } catch (Exception e) {
-                 log.error("Invalid TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD values '{}', '{}' for tenantId={}, stateCode={} — skipping event publish",
-                        dto.getUndersupplyThresholdPercent(), dto.getOversupplyThresholdPercent(), tenantId, tenant.getStateCode());
+            if (dto == null) {
+                log.error("TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD config resolved to null for tenantId={} — skipping event publish", tenantId);
+            } else {
+                String undersupply = String.valueOf(dto.getUndersupplyThresholdPercent());
+                String oversupply = String.valueOf(dto.getOversupplyThresholdPercent());
+                try {
+                    int undersupplyThreshold = dto.getUndersupplyThresholdPercent().intValue();
+                    int oversupplyThreshold = dto.getOversupplyThresholdPercent().intValue();
+                    eventPublisher.publishEvent(new WaterSupplyThresholdUpdatedEvent(
+                            tenantId,
+                            tenant.getStateCode(),
+                            undersupplyThreshold,
+                            oversupplyThreshold));
+                } catch (Exception e) {
+                    log.error("Invalid TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD values '{}', '{}' for tenantId={}, stateCode={} — skipping event publish",
+                            undersupply, oversupply, tenantId, tenant.getStateCode(), e);
+                }
             }
         }
 

@@ -70,8 +70,8 @@ public class UserSecurityEvaluator {
 
             Optional<String> callerRole = SecurityUtils.extractRole(authentication);
 
-            // SUPER_USER can access any user
-            if (callerRole.map("SUPER_USER"::equals).orElse(false)) {
+            // SUPER_USER and SUPER_STATE_ADMIN can access any user
+            if (callerRole.map(r -> r.equals("SUPER_USER") || r.equals("SUPER_STATE_ADMIN")).orElse(false)) {
                 return true;
             }
 

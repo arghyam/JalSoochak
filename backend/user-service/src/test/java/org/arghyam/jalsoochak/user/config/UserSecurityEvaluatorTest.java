@@ -64,8 +64,6 @@ class UserSecurityEvaluatorTest {
         Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").claim("sub", "ssa-uuid").build();
         return new JwtAuthenticationToken(jwt, List.of(
                 new SimpleGrantedAuthority("ROLE_SUPER_STATE_ADMIN"),
-                new SimpleGrantedAuthority("ROLE_SUPER_USER"),
-                new SimpleGrantedAuthority("ROLE_STATE_ADMIN"),
                 new SimpleGrantedAuthority("TENANT_" + tenantCode.toUpperCase())));
     }
 
@@ -252,6 +250,23 @@ class UserSecurityEvaluatorTest {
             when(userCommonRepository.findAdminUserByUuid("ssa-uuid")).thenReturn(Optional.of(activeAdminRow("ssa-uuid")));
 
             boolean result = evaluator.canAccessUser(42L, superStateAdminAuth("MP"));
+
+            assertTrue(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("behaves like SUPER_USER regardless of authority iteration order")
+        void superUserEquivalentRegardlessOfAuthorityOrder() {
+            when(userCommonRepository.findAdminUserByUuid("ssa-uuid")).thenReturn(Optional.of(activeAdminRow("ssa-uuid")));
+
+            Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").claim("sub", "ssa-uuid").build();
+            // Authorities in reversed order: TENANT_ first, then ROLE_SUPER_STATE_ADMIN
+            JwtAuthenticationToken reversedAuth = new JwtAuthenticationToken(jwt, List.of(
+                    new SimpleGrantedAuthority("TENANT_MP"),
+                    new SimpleGrantedAuthority("ROLE_SUPER_STATE_ADMIN")));
+
+            boolean result = evaluator.canAccessUser(42L, reversedAuth);
 
             assertTrue(result);
             verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());

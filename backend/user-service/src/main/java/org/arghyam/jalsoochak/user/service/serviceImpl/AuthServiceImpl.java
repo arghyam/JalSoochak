@@ -231,7 +231,7 @@ public class AuthServiceImpl implements AuthService {
 
             keycloakAdminHelper.assignRoleToUser(keycloakUuid, role);
 
-            if ("STATE_ADMIN".equals(role)) {
+            if ("STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role)) {
                 setKeycloakUserAttribute(usersResource, keycloakUuid, "tenant_state_code", tenantCode);
             } else if (!"SUPER_USER".equals(role)) {
                 setKeycloakUserAttribute(usersResource, keycloakUuid, "user_type", role);
@@ -262,7 +262,7 @@ public class AuthServiceImpl implements AuthService {
             log.info("activateAccount – account activated successfully, role={}", role);
             KeycloakTokenResponse token = keycloakClient.obtainToken(email, request.getPassword());
             String tenantStateCode = "SUPER_USER".equals(role) ? null : tenantCode;
-            String name = "STATE_ADMIN".equals(role)
+            String name = ("STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role))
                     ? request.getFirstName() + " " + request.getLastName()
                     : null;
             Integer resolvedTenantId = "SUPER_USER".equals(role) ? null : tenantId;

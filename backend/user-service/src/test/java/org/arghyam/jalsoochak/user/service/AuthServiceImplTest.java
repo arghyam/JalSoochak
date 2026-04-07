@@ -325,7 +325,7 @@ class AuthServiceImplTest {
             when(userCommonRepository.existsActiveAdminUserByEmail("ssa@example.com")).thenReturn(false);
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
-            AdminUserRow pendingUser = new AdminUserRow(6L, "placeholder-uuid", "ssa@example.com", "9198765432", 1, 4, "SUPER_STATE_ADMIN", AdminUserStatus.PENDING, 0, null);
+            AdminUserRow pendingUser = new AdminUserRow(6L, "placeholder-uuid", "ssa@example.com", "91XXXXXXXXXX", 1, 4, "SUPER_STATE_ADMIN", AdminUserStatus.PENDING, 0, null);
             when(userCommonRepository.findAdminUserByEmail("ssa@example.com")).thenReturn(Optional.of(pendingUser));
 
             InviteInfoResponseDTO info = authService.getInviteInfo(rawToken);
@@ -656,6 +656,7 @@ class AuthServiceImplTest {
 
             assertNotNull(result);
             assertEquals("MP", result.tokenResponse().getTenantCode());
+            assertEquals("Hybrid Admin", result.tokenResponse().getName());
             verify(userCommonRepository).activatePendingAdminUser(eq(30L), anyString(), anyString());
             verify(userTenantRepository).createUser(eq("tenant_mp"), anyString(), any(), eq("Hybrid Admin"),
                     eq("newssa@example.com"), any(), anyString(), anyString(), any());

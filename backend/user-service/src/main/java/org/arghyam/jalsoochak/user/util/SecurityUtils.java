@@ -69,7 +69,7 @@ public class SecurityUtils {
                 .map(GrantedAuthority::getAuthority)
                 .filter(a -> a.startsWith("ROLE_"))
                 .map(a -> a.substring("ROLE_".length()))
-                .filter(r -> r.equals("SUPER_USER") || r.equals("STATE_ADMIN"))
+                .filter(r -> r.equals("SUPER_USER") || r.equals("STATE_ADMIN") || r.equals("SUPER_STATE_ADMIN"))
                 .findFirst();
     }
 }

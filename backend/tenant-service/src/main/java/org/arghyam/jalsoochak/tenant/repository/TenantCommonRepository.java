@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
+import org.arghyam.jalsoochak.tenant.util.TenantConstants;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -385,8 +386,8 @@ public class TenantCommonRepository {
      * @return the count of non-deleted, non-system tenants
      */
     public int countNonDeletedTenants() {
-        String sql = "SELECT COUNT(*) FROM common_schema.tenant_master_table WHERE id != 0 AND deleted_at IS NULL";
-        Integer count = jdbcTemplate.queryForObject(sql, Integer.class);
+        String sql = "SELECT COUNT(*) FROM common_schema.tenant_master_table WHERE id != ? AND deleted_at IS NULL";
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, TenantConstants.SYSTEM_TENANT_ID);
         return count != null ? count : 0;
     }
 
