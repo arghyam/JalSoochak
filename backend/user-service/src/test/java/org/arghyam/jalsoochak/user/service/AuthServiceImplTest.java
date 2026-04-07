@@ -29,6 +29,7 @@ import org.arghyam.jalsoochak.user.dto.request.ResetPasswordRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.InviteInfoResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.event.ResetPasswordEmailEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
@@ -80,6 +81,9 @@ class AuthServiceImplTest {
     private UserNotificationEventPublisher userNotificationEventPublisher;
 
     @Mock
+    private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+
+    @Mock
     private KeycloakAdminHelper keycloakAdminHelper;
 
     @Mock
@@ -100,7 +104,7 @@ class AuthServiceImplTest {
     void setUp() {
         authService = new AuthServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
-                userNotificationEventPublisher, keycloakAdminHelper, passwordResetProperties,
+                userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, passwordResetProperties,
                 frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper
         );
     }
@@ -108,15 +112,15 @@ class AuthServiceImplTest {
     // ── helpers ──────────────────────────────────────────────────────────────────
 
     private AdminUserRow superUserRow() {
-        return new AdminUserRow(1L, "kc-uuid", "user@example.com", "91XXXXXXXXXX", 0, 1, AdminUserStatus.ACTIVE, 0, null);
+        return new AdminUserRow(1L, "kc-uuid", "user@example.com", "91XXXXXXXXXX", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE, 0, null);
     }
 
     private AdminUserRow stateAdminRow() {
-        return new AdminUserRow(2L, "kc-sa", "sa@example.com", "91XXXXXXXXXX", 1, 2, AdminUserStatus.ACTIVE, 0, null);
+        return new AdminUserRow(2L, "kc-sa", "sa@example.com", "91XXXXXXXXXX", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE, 0, null);
     }
 
     private AdminUserRow deactivatedUser() {
-        return new AdminUserRow(1L, "kc-uuid", "user@example.com", "91XXXXXXXXXX", 0, 1, AdminUserStatus.INACTIVE, 0, null);
+        return new AdminUserRow(1L, "kc-uuid", "user@example.com", "91XXXXXXXXXX", 0, 1, "SUPER_USER", AdminUserStatus.INACTIVE, 0, null);
     }
 
     private AdminUserTokenRow activeTokenRow(String email, String hash, String type, String metadata) {
@@ -156,7 +160,6 @@ class AuthServiceImplTest {
         void login_superUser_returnsAuthResult() {
             when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
             when(keycloakClient.obtainToken("user@example.com", "pass")).thenReturn(tokenResponse());
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
 
             AuthResult result = authService.login(loginRequest("user@example.com", "pass"));
 
@@ -177,7 +180,6 @@ class AuthServiceImplTest {
             when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(keycloakClient.obtainToken("sa@example.com", "pass")).thenReturn(tokenResponse());
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
 
             TenantUserRecord tenantUser = new TenantUserRecord(10L, 1, "91XXXXXXXXXX", "sa@example.com", 2L, "STATE_ADMIN", "State Admin", null, null, null);
@@ -196,7 +198,6 @@ class AuthServiceImplTest {
             when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(keycloakClient.obtainToken("sa@example.com", "pass")).thenReturn(tokenResponse());
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
             when(userTenantRepository.findUserByEmail("tenant_mp", "sa@example.com")).thenReturn(Optional.empty());
 
@@ -250,7 +251,6 @@ class AuthServiceImplTest {
             // FAKE_JWT payload decodes to {"sub":"kc-uuid"} — extractSubFromJwt() returns "kc-uuid"
             when(keycloakClient.refreshToken("valid-refresh")).thenReturn(tokenResponse());
             when(userCommonRepository.findAdminUserByUuid("kc-uuid")).thenReturn(Optional.of(superUserRow()));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
 
             AuthResult result = authService.refreshToken("valid-refresh");
 
@@ -298,7 +298,7 @@ class AuthServiceImplTest {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             // phoneNumber is fetched from the PENDING user record
-            AdminUserRow pendingUser = new AdminUserRow(5L, "placeholder-uuid", "invited@example.com", "9112345678", 1, 2, AdminUserStatus.PENDING, 0, null);
+            AdminUserRow pendingUser = new AdminUserRow(5L, "placeholder-uuid", "invited@example.com", "9112345678", 1, 2, "STATE_ADMIN", AdminUserStatus.PENDING, 0, null);
             when(userCommonRepository.findAdminUserByEmail("invited@example.com")).thenReturn(Optional.of(pendingUser));
 
             InviteInfoResponseDTO info = authService.getInviteInfo(rawToken);
@@ -406,7 +406,7 @@ class AuthServiceImplTest {
             AdminUserTokenRow tokenRow = activeTokenRow("user@example.com", hash, "RESET", null);
             when(userCommonRepository.consumeActiveTokenOfType(hash, "RESET")).thenReturn(Optional.of(tokenRow));
 
-            AdminUserRow user = new AdminUserRow(1L, "kc-uuid", "user@example.com", "91XXXXXXXXXX", 0, 1, AdminUserStatus.ACTIVE, 0, null);
+            AdminUserRow user = new AdminUserRow(1L, "kc-uuid", "user@example.com", "91XXXXXXXXXX", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE, 0, null);
             when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(user));
 
             ResetPasswordRequestDTO req = new ResetPasswordRequestDTO();
@@ -493,7 +493,7 @@ class AuthServiceImplTest {
             when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
                     activeTokenRow("existing@example.com", hash, "INVITE", "{\"role\":\"SUPER_USER\"}")));
             // activateAccount finds the user record and checks status; status=1 (active) => already registered
-            AdminUserRow activeUser = new AdminUserRow(5L, "kc-dup", "existing@example.com", "91XXXXXXXXXX", 0, 1, AdminUserStatus.ACTIVE, 0, null);
+            AdminUserRow activeUser = new AdminUserRow(5L, "kc-dup", "existing@example.com", "91XXXXXXXXXX", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE, 0, null);
             when(userCommonRepository.findAdminUserByEmail("existing@example.com")).thenReturn(Optional.of(activeUser));
 
             ActivateAccountRequestDTO req = new ActivateAccountRequestDTO();
@@ -515,7 +515,7 @@ class AuthServiceImplTest {
                     activeTokenRow("newsuper@example.com", hash, "INVITE", "{\"role\":\"SUPER_USER\"}")));
 
             // Pending user record (status=2) created at invite time
-            AdminUserRow pendingUser = new AdminUserRow(10L, "pending-uuid", "newsuper@example.com", "", 0, 1, AdminUserStatus.PENDING, 0, null);
+            AdminUserRow pendingUser = new AdminUserRow(10L, "pending-uuid", "newsuper@example.com", "", 0, 1, "SUPER_USER", AdminUserStatus.PENDING, 0, null);
             when(userCommonRepository.findAdminUserByEmail("newsuper@example.com")).thenReturn(Optional.of(pendingUser));
 
             when(keycloakProvider.getRealm()).thenReturn("test-realm");
@@ -553,8 +553,8 @@ class AuthServiceImplTest {
             when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
                     activeTokenRow("mismatch@example.com", hash, "INVITE",
                             "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
-            // Pending user has adminLevel=1 (SUPER_USER), but token says STATE_ADMIN
-            AdminUserRow pendingUser = new AdminUserRow(25L, "pending-mismatch-uuid", "mismatch@example.com", "", 0, 1, AdminUserStatus.PENDING, 0, null);
+            // Pending user is SUPER_USER in DB, but token says STATE_ADMIN — mismatch expected
+            AdminUserRow pendingUser = new AdminUserRow(25L, "pending-mismatch-uuid", "mismatch@example.com", "", 0, 1, "SUPER_USER", AdminUserStatus.PENDING, 0, null);
             when(userCommonRepository.findAdminUserByEmail("mismatch@example.com")).thenReturn(Optional.of(pendingUser));
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
 
@@ -576,7 +576,7 @@ class AuthServiceImplTest {
             when(userCommonRepository.consumeActiveTokenOfType(hash, "INVITE")).thenReturn(Optional.of(
                     activeTokenRow("newsa@example.com", hash, "INVITE",
                             "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
-            AdminUserRow pendingUser = new AdminUserRow(20L, "pending-sa-uuid", "newsa@example.com", "", 1, 2, AdminUserStatus.PENDING, 0, null);
+            AdminUserRow pendingUser = new AdminUserRow(20L, "pending-sa-uuid", "newsa@example.com", "", 1, 2, "STATE_ADMIN", AdminUserStatus.PENDING, 0, null);
             when(userCommonRepository.findAdminUserByEmail("newsa@example.com")).thenReturn(Optional.of(pendingUser));
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(6)); // ARCHIVED
@@ -600,7 +600,7 @@ class AuthServiceImplTest {
                     activeTokenRow("newsa@example.com", hash, "INVITE",
                             "{\"role\":\"STATE_ADMIN\",\"tenantCode\":\"MP\"}")));
 
-            AdminUserRow pendingUser = new AdminUserRow(20L, "pending-sa-uuid", "newsa@example.com", "", 1, 2, AdminUserStatus.PENDING, 0, null);
+            AdminUserRow pendingUser = new AdminUserRow(20L, "pending-sa-uuid", "newsa@example.com", "", 1, 2, "STATE_ADMIN", AdminUserStatus.PENDING, 0, null);
             when(userCommonRepository.findAdminUserByEmail("newsa@example.com")).thenReturn(Optional.of(pendingUser));
 
             when(keycloakProvider.getRealm()).thenReturn("test-realm");
@@ -613,6 +613,8 @@ class AuthServiceImplTest {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             doNothing().when(userCommonRepository).activatePendingAdminUser(eq(20L), anyString(), anyString());
+            AdminUserRow activatedUser = new AdminUserRow(20L, "sa-kc-id", "newsa@example.com", "", 1, 3, "STATE_ADMIN", AdminUserStatus.ACTIVE, 0, null);
+            when(userCommonRepository.findAdminUserByUuid("sa-kc-id")).thenReturn(Optional.of(activatedUser));
             when(userTenantRepository.createUser(anyString(), anyString(), any(), anyString(),
                     anyString(), any(), anyString(), anyString(), any())).thenReturn(1L);
             when(keycloakClient.obtainToken(anyString(), anyString())).thenReturn(tokenResponse());

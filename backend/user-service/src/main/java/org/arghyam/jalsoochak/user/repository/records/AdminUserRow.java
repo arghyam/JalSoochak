@@ -10,7 +10,8 @@ public record AdminUserRow(
         String email,
         String phoneNumber,
         Integer tenantId,
-        Integer adminLevel,
+        Integer adminLevel,       // FK to user_type_master_table — kept for write-side use (createUser)
+        String userTypeCName,     // c_name from user_type_master_table — use this for role resolution
         AdminUserStatus status,
         Integer createdBy,
         LocalDateTime createdAt

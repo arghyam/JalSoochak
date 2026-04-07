@@ -32,7 +32,31 @@ public class UserNotificationEventPublisher {
     }
 
     public void publishLoginOtpAfterCommit(SendLoginOtpEvent event) {
-        publishAfterCommit("SEND_LOGIN_OTP", event);
+        publishLoginOtpAfterCommit(event, null, null);
+    }
+
+    public void publishLoginOtpAfterCommit(SendLoginOtpEvent event, Long staffUserId, String tenantCode) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    boolean ok = kafkaProducer.publishJson(COMMON_TOPIC, event);
+                    if (!ok) {
+                        log.warn("[notification-event] Failed to publish SEND_LOGIN_OTP event to topic={}", COMMON_TOPIC);
+                    } else if (staffUserId != null && tenantCode != null) {
+                        log.info("OTP requested for staffUserId={} tenantCode={}", staffUserId, tenantCode);
+                    }
+                }
+            });
+        } else {
+            log.warn("[notification-event] No active transaction; publishing SEND_LOGIN_OTP event immediately");
+            boolean ok = kafkaProducer.publishJson(COMMON_TOPIC, event);
+            if (!ok) {
+                log.warn("[notification-event] Failed to publish SEND_LOGIN_OTP event to topic={}", COMMON_TOPIC);
+            } else if (staffUserId != null && tenantCode != null) {
+                log.info("OTP requested for staffUserId={} tenantCode={}", staffUserId, tenantCode);
+            }
+        }
     }
 
     private void publishAfterCommit(String label, Object event) {

@@ -4,7 +4,9 @@ import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
@@ -24,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -58,20 +61,39 @@ public class DimensionServiceImpl implements DimensionService {
     @Override
     @Transactional
     public void upsertUser(UserEvent event) {
-        DimUser user = dimUserRepository.findById(event.getUserId())
-                .orElse(DimUser.builder()
-                        .userId(event.getUserId())
-                        .createdAt(LocalDateTime.now())
-                        .build());
+        if (event.getTenantId() == null || event.getTenantId() == 0) {
+            log.debug("Skipping dim_user upsert for SUPER_USER [userId={}]", event.getUserId());
+            return;
+        }
+
+        // Prefer UUID-based lookup (globally unique across tenants). Fall back to
+        // (tenantId, userId) composite when uuid is absent — never userId alone,
+        // since tenant-scoped ids collide across tenants.
+        DimUser user;
+        if (event.getUuid() != null) {
+            user = dimUserRepository.findByUuid(event.getUuid())
+                    .orElse(DimUser.builder()
+                            .userId(event.getUserId())
+                            .createdAt(LocalDateTime.now())
+                            .build());
+        } else {
+            user = dimUserRepository.findByTenantIdAndUserId(event.getTenantId(), event.getUserId())
+                    .orElse(DimUser.builder()
+                            .userId(event.getUserId())
+                            .createdAt(LocalDateTime.now())
+                            .build());
+        }
 
         user.setTenantId(event.getTenantId());
         user.setEmail(event.getEmail());
         user.setUserType(event.getUserType());
         user.setUuid(event.getUuid());
+        if (event.getTitle() != null) user.setTitle(event.getTitle());
+        if (event.getStatus() != null) user.setStatus(event.getStatus());
         user.setUpdatedAt(LocalDateTime.now());
 
         dimUserRepository.save(user);
-        log.info("Upserted dim_user_table [id={}]", event.getUserId());
+        log.info("Upserted dim_user_table [uuid={}, userId={}]", event.getUuid(), event.getUserId());
     }
 
     @Override
@@ -163,6 +185,45 @@ public class DimensionServiceImpl implements DimensionService {
 
         dimDepartmentLocationRepository.save(dept);
         log.info("Upserted dim_department_location_table [id={}]", event.getDepartmentId());
+    }
+
+    @Override
+    @Transactional
+    public void updateWaterNorm(WaterNormUpdatedEvent event) {
+        DimTenant tenant = dimTenantRepository.findById(event.getTenantId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "No dim_tenant_table row for tenantId=" + event.getTenantId()));
+        tenant.setRequiredLpcd(event.getWaterNorm());
+        tenant.setUpdatedAt(LocalDateTime.now());
+        dimTenantRepository.save(tenant);
+        log.info("Updated dim_tenant_table.required_lpcd={} [tenantId={}]",
+                event.getWaterNorm(), event.getTenantId());
+    }
+
+    @Override
+    @Transactional
+    public void updateLocationHierarchyNames(TenantLocationHierarchyUpdatedEvent event) {
+        if (event.getLevels() == null || event.getLevels().isEmpty()) {
+            log.info("No levels to update [tenantId={}, hierarchyType={}]",
+                    event.getTenantId(), event.getHierarchyType());
+            return;
+        }
+        boolean isLgd = "LGD".equalsIgnoreCase(event.getHierarchyType());
+        for (TenantLocationHierarchyUpdatedEvent.LevelEntry entry : event.getLevels()) {
+            if (isLgd) {
+                List<DimLgdLocation> locs = dimLgdLocationRepository
+                        .findByTenantIdAndLgdLevel(event.getTenantId(), entry.getLevel());
+                locs.forEach(l -> { l.setLgdCName(entry.getName()); l.setUpdatedAt(LocalDateTime.now()); });
+                dimLgdLocationRepository.saveAll(locs);
+            } else {
+                List<DimDepartmentLocation> locs = dimDepartmentLocationRepository
+                        .findByTenantIdAndDepartmentLevel(event.getTenantId(), entry.getLevel());
+                locs.forEach(l -> { l.setDepartmentCName(entry.getName()); l.setUpdatedAt(LocalDateTime.now()); });
+                dimDepartmentLocationRepository.saveAll(locs);
+            }
+        }
+        log.info("Updated location hierarchy names [tenantId={}, hierarchyType={}]",
+                event.getTenantId(), event.getHierarchyType());
     }
 
     private Geometry parseGeoJson(String geoJson) {

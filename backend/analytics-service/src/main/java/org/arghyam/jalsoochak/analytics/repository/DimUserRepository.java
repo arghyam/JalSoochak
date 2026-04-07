@@ -14,4 +14,6 @@ public interface DimUserRepository extends JpaRepository<DimUser, Integer> {
     List<DimUser> findByTenantId(Integer tenantId);
 
     Optional<DimUser> findByUuid(UUID uuid);
+
+    Optional<DimUser> findByTenantIdAndUserId(Integer tenantId, Integer userId);
 }

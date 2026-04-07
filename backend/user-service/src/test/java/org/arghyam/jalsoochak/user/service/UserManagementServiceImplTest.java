@@ -30,6 +30,7 @@ import org.arghyam.jalsoochak.user.dto.request.UpdateProfileRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.AdminUserResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.event.InviteEmailEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
@@ -83,6 +84,9 @@ class UserManagementServiceImplTest {
     private UserNotificationEventPublisher userNotificationEventPublisher;
 
     @Mock
+    private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+
+    @Mock
     private KeycloakAdminHelper keycloakAdminHelper;
 
     @Mock
@@ -104,15 +108,15 @@ class UserManagementServiceImplTest {
         MetadataDecryptionHelper metadataDecryptionHelper = new MetadataDecryptionHelper(new ObjectMapper(), pii);
         userManagementService = new UserManagementServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
-                userNotificationEventPublisher, keycloakAdminHelper, inviteProperties, frontendProperties,
+                userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, inviteProperties, frontendProperties,
                 tokenService, new ObjectMapper(), pii, metadataDecryptionHelper
         );
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────────
 
-    private AdminUserRow userRow(Long id, String uuid, String email, int tenantId, int adminLevel, AdminUserStatus status) {
-        return new AdminUserRow(id, uuid, email, "91XXXXXXXXXX", tenantId, adminLevel, status, 0, null);
+    private AdminUserRow userRow(Long id, String uuid, String email, int tenantId, int adminLevel, String userTypeCName, AdminUserStatus status) {
+        return new AdminUserRow(id, uuid, email, "91XXXXXXXXXX", tenantId, adminLevel, userTypeCName, status, 0, null);
     }
 
     private AdminUserResponseDTO responseDTO(Long id, String email, String role) {
@@ -149,7 +153,7 @@ class UserManagementServiceImplTest {
         @Test
         @DisplayName("Should return profile for authenticated user")
         void getMe_success() {
-            AdminUserRow row = userRow(1L, "kc-id", "user@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow row = userRow(1L, "kc-id", "user@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(1L, "user@example.com", "SUPER_USER");
 
             when(userCommonRepository.findAdminUserByUuid("kc-id")).thenReturn(Optional.of(row));
@@ -181,7 +185,7 @@ class UserManagementServiceImplTest {
         @DisplayName("SUPER_USER: should return user DTO for valid id")
         void getUserById_success() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow row = userRow(5L, "kc-id", "admin@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow row = userRow(5L, "kc-id", "admin@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(5L, "admin@example.com", "STATE_ADMIN");
 
             when(userCommonRepository.findAdminUserById(5L)).thenReturn(Optional.of(row));
@@ -197,7 +201,7 @@ class UserManagementServiceImplTest {
         void getUserById_stateAdminCrossTenant_throwsForbidden() {
             Authentication auth = stateAdminAuth("kc-sa", "MP");
             // Target user is in tenant 2 (GJ), caller is MP
-            AdminUserRow row = userRow(5L, "kc-id", "admin@example.com", 2, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow row = userRow(5L, "kc-id", "admin@example.com", 2, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(5L)).thenReturn(Optional.of(row));
             when(userCommonRepository.findTenantStateCodeById(2)).thenReturn(Optional.of("GJ"));
@@ -224,7 +228,7 @@ class UserManagementServiceImplTest {
         @Test
         @DisplayName("Should return paginated super users with no status filter")
         void listSuperUsers_success() {
-            AdminUserRow row = userRow(1L, "kc-1", "su@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow row = userRow(1L, "kc-1", "su@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(1L, "su@example.com", "SUPER_USER");
 
             when(userCommonRepository.listSuperUsers(null, 0, 20)).thenReturn(List.of(row));
@@ -241,7 +245,7 @@ class UserManagementServiceImplTest {
         @Test
         @DisplayName("Should pass ACTIVE status filter through to repository")
         void listSuperUsers_withStatusFilter_passesStatusToRepo() {
-            AdminUserRow row = userRow(1L, "kc-1", "su@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow row = userRow(1L, "kc-1", "su@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(1L, "su@example.com", "SUPER_USER");
 
             when(userCommonRepository.listSuperUsers(AdminUserStatus.ACTIVE, 0, 20)).thenReturn(List.of(row));
@@ -266,7 +270,7 @@ class UserManagementServiceImplTest {
         @DisplayName("SUPER_USER with tenantCode should filter by that tenant")
         void listStateAdmins_superUser_withTenantCode_filtersResults() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow row = userRow(2L, "kc-2", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow row = userRow(2L, "kc-2", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
 
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
@@ -283,7 +287,7 @@ class UserManagementServiceImplTest {
         @DisplayName("STATE_ADMIN should only see admins in their own tenant")
         void listStateAdmins_stateAdmin_usesOwnTenant() {
             Authentication auth = stateAdminAuth("kc-sa", "MP");
-            AdminUserRow row = userRow(2L, "kc-2", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow row = userRow(2L, "kc-2", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
 
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
@@ -300,7 +304,7 @@ class UserManagementServiceImplTest {
         @DisplayName("Should pass PENDING status filter through to repository")
         void listStateAdmins_withStatusFilter_passesStatusToRepo() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow row = userRow(3L, "kc-3", "pending@example.com", 1, 2, AdminUserStatus.PENDING);
+            AdminUserRow row = userRow(3L, "kc-3", "pending@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.PENDING);
             AdminUserResponseDTO dto = AdminUserResponseDTO.builder()
                     .id(3L).email("pending@example.com").role("STATE_ADMIN")
                     .status(AdminUserStatus.PENDING.name()).build();
@@ -320,7 +324,7 @@ class UserManagementServiceImplTest {
         @DisplayName("Name filter should resolve matching UUIDs from tenant user table and return filtered page")
         void listStateAdmins_withNameFilter_matchFound_returnsFilteredPage() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow row = userRow(2L, "kc-2", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow row = userRow(2L, "kc-2", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
 
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
@@ -363,10 +367,9 @@ class UserManagementServiceImplTest {
         @DisplayName("SUPER_USER should invite SUPER_USER successfully")
         void inviteUser_superUserInvitesSuperUser_success() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             // findAdminUserByEmail returns empty → user does not yet exist (fresh invite)
             when(userCommonRepository.findAdminUserByEmail("new@example.com")).thenReturn(Optional.empty());
             // adminLevelId lookup for the invited role
@@ -410,10 +413,9 @@ class UserManagementServiceImplTest {
         @DisplayName("STATE_ADMIN inviting across state boundary should throw ForbiddenAccessException")
         void inviteUser_stateAdminCrossState_throwsForbidden() {
             Authentication auth = stateAdminAuth("kc-sa", "MP");
-            AdminUserRow callerRow = userRow(2L, "kc-sa", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(2L, "kc-sa", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
 
             InviteRequestDTO req = new InviteRequestDTO();
             req.setEmail("other@example.com");
@@ -427,11 +429,10 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw UserAlreadyExistsException when email is already active")
         void inviteUser_emailAlreadyActive_throwsConflict() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
-            AdminUserRow existingUser = userRow(3L, "kc-dup", "dup@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow existingUser = userRow(3L, "kc-dup", "dup@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             when(userCommonRepository.findAdminUserByEmail("dup@example.com")).thenReturn(Optional.of(existingUser));
 
             InviteRequestDTO req = new InviteRequestDTO();
@@ -445,11 +446,10 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw UserAlreadyExistsException when email belongs to a deactivated user")
         void inviteUser_emailAlreadyInactive_throwsConflict() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
-            AdminUserRow existingUser = userRow(3L, "kc-dup", "dup@example.com", 0, 1, AdminUserStatus.INACTIVE);
+            AdminUserRow existingUser = userRow(3L, "kc-dup", "dup@example.com", 0, 1, "SUPER_USER", AdminUserStatus.INACTIVE);
             when(userCommonRepository.findAdminUserByEmail("dup@example.com")).thenReturn(Optional.of(existingUser));
 
             InviteRequestDTO req = new InviteRequestDTO();
@@ -463,11 +463,10 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw BadRequestException when email already has a pending invitation")
         void inviteUser_emailAlreadyPending_throwsBadRequest() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
-            AdminUserRow pendingUser = userRow(5L, "placeholder-uuid", "pending@example.com", 0, 1, AdminUserStatus.PENDING);
+            AdminUserRow pendingUser = userRow(5L, "placeholder-uuid", "pending@example.com", 0, 1, "SUPER_USER", AdminUserStatus.PENDING);
             when(userCommonRepository.findAdminUserByEmail("pending@example.com")).thenReturn(Optional.of(pendingUser));
 
             InviteRequestDTO req = new InviteRequestDTO();
@@ -484,10 +483,9 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw BadRequestException when STATE_ADMIN role has no tenantCode")
         void inviteUser_stateAdminWithNoTenantCode_throwsBadRequest() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
 
             InviteRequestDTO req = new InviteRequestDTO();
             req.setEmail("new@example.com");
@@ -501,10 +499,9 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw ResourceNotFoundException when tenantCode does not exist")
         void inviteUser_tenantNotFound_throwsResourceNotFound() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.existsTenantByStateCode("XX")).thenReturn(false);
 
             InviteRequestDTO req = new InviteRequestDTO();
@@ -519,15 +516,14 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw UserAlreadyExistsException when concurrent insert hits duplicate key for active user")
         void inviteUser_concurrentDuplicate_activeUser_throwsUserAlreadyExists() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findUserTypeIdByName("SUPER_USER")).thenReturn(Optional.of(1));
             doThrow(new DuplicateKeyException("duplicate key"))
                     .when(userCommonRepository).createAdminUserPending(eq("race@example.com"), any(), any(), any(), any());
             // Pre-check passes (empty), then re-query after catch finds the concurrently inserted active user
-            AdminUserRow activeUser = userRow(9L, "kc-race", "race@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow activeUser = userRow(9L, "kc-race", "race@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             when(userCommonRepository.findAdminUserByEmail("race@example.com"))
                     .thenReturn(Optional.empty())
                     .thenReturn(Optional.of(activeUser));
@@ -543,10 +539,9 @@ class UserManagementServiceImplTest {
         @DisplayName("STATE_ADMIN invite should include stateName in Kafka event")
         void inviteUser_stateAdminRole_stateNamePopulatedInEvent() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findAdminUserByEmail("sa@mp.com")).thenReturn(Optional.empty());
             when(userCommonRepository.existsTenantByStateCode("MP")).thenReturn(true);
             when(userCommonRepository.findUserTypeIdByName("STATE_ADMIN")).thenReturn(Optional.of(2));
@@ -580,15 +575,14 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw BadRequestException when concurrent insert hits duplicate key for pending user")
         void inviteUser_concurrentDuplicate_pendingUser_throwsBadRequest() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findUserTypeIdByName("SUPER_USER")).thenReturn(Optional.of(1));
             doThrow(new DuplicateKeyException("duplicate key"))
                     .when(userCommonRepository).createAdminUserPending(eq("race@example.com"), any(), any(), any(), any());
             // Re-query after catch finds the concurrently inserted pending user
-            AdminUserRow pendingUser = userRow(10L, "placeholder", "race@example.com", 0, 1, AdminUserStatus.PENDING);
+            AdminUserRow pendingUser = userRow(10L, "placeholder", "race@example.com", 0, 1, "SUPER_USER", AdminUserStatus.PENDING);
             when(userCommonRepository.findAdminUserByEmail("race@example.com"))
                     .thenReturn(Optional.empty())
                     .thenReturn(Optional.of(pendingUser));
@@ -614,10 +608,9 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw InsufficientActiveUsersException when deactivating last super user")
         void deactivateUser_lastSuperUser_throwsInsufficient() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow target = userRow(1L, "kc-target", "su@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(1L, "kc-target", "su@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(1L)).thenReturn(Optional.of(target));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.countActiveSuperUsers()).thenReturn(1);
 
             assertThrows(InsufficientActiveUsersException.class,
@@ -628,10 +621,9 @@ class UserManagementServiceImplTest {
         @DisplayName("Should throw InsufficientActiveUsersException when deactivating last state admin in tenant")
         void deactivateUser_lastStateAdmin_throwsInsufficient() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow target = userRow(2L, "kc-target", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(2L, "kc-target", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(2L)).thenReturn(Optional.of(target));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.countActiveStateAdminsForTenant(1)).thenReturn(1);
 
             assertThrows(InsufficientActiveUsersException.class,
@@ -642,10 +634,9 @@ class UserManagementServiceImplTest {
         @DisplayName("STATE_ADMIN deactivating user in another state should throw ForbiddenAccessException")
         void deactivateUser_crossTenant_throwsForbidden() {
             Authentication auth = stateAdminAuth("kc-sa", "MP");
-            AdminUserRow target = userRow(3L, "kc-target", "other@example.com", 2, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(3L, "kc-target", "other@example.com", 2, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(3L)).thenReturn(Optional.of(target));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             // caller is MP, target is in tenant 2 → different state
             when(userCommonRepository.findTenantStateCodeById(2)).thenReturn(Optional.of("GJ"));
 
@@ -657,11 +648,13 @@ class UserManagementServiceImplTest {
         @DisplayName("Should deactivate user and disable in Keycloak on success")
         void deactivateUser_success() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow target = userRow(4L, "kc-target", "su2@example.com", 0, 1, AdminUserStatus.ACTIVE);
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(4L, "kc-target", "su2@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
+            AdminUserRow deactivatedTarget = userRow(4L, "kc-target", "su2@example.com", 0, 1, "SUPER_USER", AdminUserStatus.INACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
-            when(userCommonRepository.findAdminUserById(4L)).thenReturn(Optional.of(target));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
+            when(userCommonRepository.findAdminUserById(4L))
+                    .thenReturn(Optional.of(target))        // initial lookup
+                    .thenReturn(Optional.of(deactivatedTarget)); // post-deactivation refresh
             when(userCommonRepository.countActiveSuperUsers()).thenReturn(3);
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
             doNothing().when(userCommonRepository).deactivateAdminUser(4L, 1L);
@@ -669,6 +662,7 @@ class UserManagementServiceImplTest {
             userManagementService.deactivateUser(4L, auth);
 
             verify(userCommonRepository).deactivateAdminUser(4L, 1L);
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(deactivatedTarget);
         }
 
         @Test
@@ -692,23 +686,27 @@ class UserManagementServiceImplTest {
         @DisplayName("Should activate user and enable in Keycloak on success")
         void activateUser_success() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow target = userRow(5L, "kc-target", "deactivated@example.com", 0, 1, AdminUserStatus.INACTIVE);
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(5L, "kc-target", "deactivated@example.com", 0, 1, "SUPER_USER", AdminUserStatus.INACTIVE);
+            AdminUserRow activatedTarget = userRow(5L, "kc-target", "deactivated@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
-            when(userCommonRepository.findAdminUserById(5L)).thenReturn(Optional.of(target));
+            when(userCommonRepository.findAdminUserById(5L))
+                    .thenReturn(Optional.of(target))        // initial lookup
+                    .thenReturn(Optional.of(activatedTarget)); // post-activation refresh
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
             doNothing().when(userCommonRepository).activateAdminUser(5L, 1L);
 
             userManagementService.activateUser(5L, auth);
 
             verify(userCommonRepository).activateAdminUser(5L, 1L);
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(activatedTarget);
         }
 
         @Test
         @DisplayName("Should throw UnauthorizedAccessException when caller not in DB")
         void activateUser_callerNotInDB_throwsUnauthorized() {
             Authentication auth = superUserAuth("kc-unknown");
-            AdminUserRow target = userRow(5L, "kc-target", "deactivated@example.com", 0, 1, AdminUserStatus.INACTIVE);
+            AdminUserRow target = userRow(5L, "kc-target", "deactivated@example.com", 0, 1, "SUPER_USER", AdminUserStatus.INACTIVE);
 
             when(userCommonRepository.findAdminUserById(5L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-unknown")).thenReturn(Optional.empty());
@@ -722,8 +720,8 @@ class UserManagementServiceImplTest {
         void activateUser_stateAdminCrossTenant_throwsForbidden() {
             Authentication auth = stateAdminAuth("kc-sa", "MP");
             // Target user is in tenant 2 (GJ), caller is in MP
-            AdminUserRow target = userRow(6L, "kc-target", "other@example.com", 2, 2, AdminUserStatus.INACTIVE);
-            AdminUserRow callerRow = userRow(2L, "kc-sa", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(6L, "kc-target", "other@example.com", 2, 2, "STATE_ADMIN", AdminUserStatus.INACTIVE);
+            AdminUserRow callerRow = userRow(2L, "kc-sa", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(6L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(callerRow));
@@ -743,7 +741,7 @@ class UserManagementServiceImplTest {
         @Test
         @DisplayName("Should throw InvalidCredentialsException when current password is wrong")
         void changePassword_wrongCurrentPassword_throwsInvalidCredentials() {
-            AdminUserRow user = userRow(1L, "kc-id", "user@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow user = userRow(1L, "kc-id", "user@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             when(userCommonRepository.findAdminUserByUuid("kc-id")).thenReturn(Optional.of(user));
             when(keycloakClient.obtainToken("user@example.com", "wrongpass"))
                     .thenThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
@@ -779,17 +777,17 @@ class UserManagementServiceImplTest {
         @Test
         @DisplayName("SUPER_USER: should update Keycloak only (no tenant schema call)")
         void updateMe_superUser_updatesKeycloakOnly() {
-            AdminUserRow user = userRow(1L, "kc-id", "user@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow user = userRow(1L, "kc-id", "user@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
+            AdminUserRow refreshedUser = userRow(1L, "kc-id", "user@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(1L, "user@example.com", "SUPER_USER");
 
-            when(userCommonRepository.findAdminUserByUuid("kc-id")).thenReturn(Optional.of(user));
+            when(userCommonRepository.findAdminUserByUuid("kc-id")).thenReturn(Optional.of(user), Optional.of(refreshedUser));
             when(keycloakProvider.getRealm()).thenReturn("test-realm");
             UserRepresentation rep = new UserRepresentation();
             rep.setFirstName("Old");
             rep.setLastName("Name");
             when(keycloakProvider.getAdminInstance().realm("test-realm").users().get("kc-id").toRepresentation())
                     .thenReturn(rep);
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(keycloakAdminHelper.buildAdminUserResponse(any())).thenReturn(dto);
 
             UpdateProfileRequestDTO req = new UpdateProfileRequestDTO();
@@ -799,22 +797,23 @@ class UserManagementServiceImplTest {
 
             assertNotNull(result);
             verify(userTenantRepository, org.mockito.Mockito.never()).updateUserProfile(any(), any(), any(), any());
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(refreshedUser);
         }
 
         @Test
         @DisplayName("STATE_ADMIN: should sync tenant schema when name changes")
         void updateMe_stateAdmin_updatesTenantSchema() {
-            AdminUserRow user = userRow(2L, "kc-sa", "sa@example.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow user = userRow(2L, "kc-sa", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
+            AdminUserRow refreshedUser = userRow(2L, "kc-sa", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
 
-            when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(user));
+            when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(user), Optional.of(refreshedUser));
             when(keycloakProvider.getRealm()).thenReturn("test-realm");
             UserRepresentation rep = new UserRepresentation();
             rep.setFirstName("State");
             rep.setLastName("Admin");
             when(keycloakProvider.getAdminInstance().realm("test-realm").users().get("kc-sa").toRepresentation())
                     .thenReturn(rep);
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
             doNothing().when(userTenantRepository).updateUserProfile(anyString(), any(), anyString(), any());
             when(keycloakAdminHelper.buildAdminUserResponse(any())).thenReturn(dto);
@@ -825,6 +824,7 @@ class UserManagementServiceImplTest {
             userManagementService.updateMe("kc-sa", req);
 
             verify(userTenantRepository).updateUserProfile(eq("tenant_mp"), any(), anyString(), any());
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(refreshedUser);
         }
     }
 
@@ -838,8 +838,8 @@ class UserManagementServiceImplTest {
         @DisplayName("Should resend invite token and email for a PENDING user")
         void reinviteUser_success() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow target = userRow(7L, "pending-uuid", "pending@example.com", 0, 1, AdminUserStatus.PENDING);
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(7L, "pending-uuid", "pending@example.com", 0, 1, "SUPER_USER", AdminUserStatus.PENDING);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             AdminUserTokenRow existingToken = new AdminUserTokenRow(1L, "pending@example.com", "old-hash",
                     "INVITE", "{\"role\":\"SUPER_USER\",\"firstName\":\"New\",\"lastName\":\"User\"}",
@@ -847,7 +847,6 @@ class UserManagementServiceImplTest {
 
             when(userCommonRepository.findAdminUserById(7L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findInviteTokenByEmail("pending@example.com")).thenReturn(Optional.of(existingToken));
             when(tokenService.generateRawToken()).thenReturn("new-raw-token");
             when(tokenService.hash("new-raw-token")).thenReturn("new-hash");
@@ -868,8 +867,8 @@ class UserManagementServiceImplTest {
         @DisplayName("Should carry over names from an expired invite token when reinviting")
         void reinviteUser_expiredToken_namesCarriedOver() {
             Authentication auth = superUserAuth("kc-super");
-            AdminUserRow target = userRow(7L, "pending-uuid", "pending@example.com", 0, 1, AdminUserStatus.PENDING);
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(7L, "pending-uuid", "pending@example.com", 0, 1, "SUPER_USER", AdminUserStatus.PENDING);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             // Token is expired (in the past) but unconsumed — names stored as encrypted values
             String encFirstName = "Rklyc3ROYW1lQ2lwaGVyVGV4dA=="; // placeholder for encrypted "Jane"
@@ -882,7 +881,6 @@ class UserManagementServiceImplTest {
 
             when(userCommonRepository.findAdminUserById(7L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
             when(userCommonRepository.findInviteTokenByEmail("pending@example.com")).thenReturn(Optional.of(expiredToken));
             when(tokenService.generateRawToken()).thenReturn("new-raw-token");
             when(tokenService.hash("new-raw-token")).thenReturn("new-hash");
@@ -915,8 +913,8 @@ class UserManagementServiceImplTest {
         void reinviteUser_stateAdminTarget_stateNamePopulatedInEvent() {
             Authentication auth = superUserAuth("kc-super");
             // tenantId=1 → state code MP → title "Madhya Pradesh"
-            AdminUserRow target = userRow(7L, "pending-uuid", "sa@mp.com", 1, 2, AdminUserStatus.PENDING);
-            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(7L, "pending-uuid", "sa@mp.com", 1, 2, "STATE_ADMIN", AdminUserStatus.PENDING);
+            AdminUserRow callerRow = userRow(1L, "kc-super", "super@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             AdminUserTokenRow existingToken = new AdminUserTokenRow(1L, "sa@mp.com", "old-hash",
                     "INVITE", "{\"role\":\"STATE_ADMIN\",\"firstName\":\"U3RhdGU=\",\"lastName\":\"QWRtaW4=\"}",
@@ -924,8 +922,6 @@ class UserManagementServiceImplTest {
 
             when(userCommonRepository.findAdminUserById(7L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-super")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(1)).thenReturn(Optional.of("SUPER_USER"));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
             when(userCommonRepository.findTenantTitleByStateCode("MP")).thenReturn(Optional.of("Madhya Pradesh"));
             when(userCommonRepository.findInviteTokenByEmail("sa@mp.com")).thenReturn(Optional.of(existingToken));
@@ -949,7 +945,7 @@ class UserManagementServiceImplTest {
         void reinviteUser_alreadyActivated_throwsBadRequest() {
             Authentication auth = superUserAuth("kc-super");
             // status=1 means already active (not pending)
-            AdminUserRow target = userRow(8L, "kc-active", "active@example.com", 0, 1, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(8L, "kc-active", "active@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(8L)).thenReturn(Optional.of(target));
 
@@ -961,12 +957,11 @@ class UserManagementServiceImplTest {
         void reinviteUser_stateAdminCrossState_throwsForbidden() {
             Authentication auth = stateAdminAuth("kc-sa", "MP");
             // Target is in tenant 2 (GJ), caller is in MP
-            AdminUserRow target = userRow(9L, "kc-pending", "pending@gj.com", 2, 2, AdminUserStatus.PENDING);
-            AdminUserRow callerRow = userRow(2L, "kc-sa", "sa@mp.com", 1, 2, AdminUserStatus.ACTIVE);
+            AdminUserRow target = userRow(9L, "kc-pending", "pending@gj.com", 2, 2, "STATE_ADMIN", AdminUserStatus.PENDING);
+            AdminUserRow callerRow = userRow(2L, "kc-sa", "sa@mp.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
 
             when(userCommonRepository.findAdminUserById(9L)).thenReturn(Optional.of(target));
             when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(callerRow));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(2)).thenReturn(Optional.of("GJ"));
 
             assertThrows(ForbiddenAccessException.class, () -> userManagementService.reinviteUser(9L, auth));

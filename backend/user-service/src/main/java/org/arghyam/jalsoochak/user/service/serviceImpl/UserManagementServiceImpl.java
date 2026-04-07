@@ -25,6 +25,7 @@ import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserTokenRow;
 import org.arghyam.jalsoochak.user.event.InviteEmailEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
 import org.arghyam.jalsoochak.user.service.MetadataDecryptionHelper;
@@ -64,6 +65,7 @@ public class UserManagementServiceImpl implements UserManagementService {
     private final UserCommonRepository userCommonRepository;
     private final UserTenantRepository userTenantRepository;
     private final UserNotificationEventPublisher userNotificationEventPublisher;
+    private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final KeycloakAdminHelper keycloakAdminHelper;
     private final InviteProperties inviteProperties;
     private final FrontendProperties frontendProperties;
@@ -81,7 +83,10 @@ public class UserManagementServiceImpl implements UserManagementService {
         AdminUserRow callerRow = userCommonRepository.findAdminUserByUuid(callerUuid)
                 .orElseThrow(() -> new UnauthorizedAccessException("Caller is not registered in the system"));
 
-        String callerRole = userCommonRepository.findUserTypeNameById(callerRow.adminLevel()).orElse("");
+        String callerRole = callerRow.userTypeCName();
+        if (callerRole == null || callerRole.isBlank()) {
+            throw new IllegalStateException("Caller user role is missing for user id: " + callerRow.id());
+        }
 
         if ("STATE_ADMIN".equals(callerRole)) {
             if (!"STATE_ADMIN".equals(request.getRole())) {
@@ -202,8 +207,14 @@ public class UserManagementServiceImpl implements UserManagementService {
         AdminUserRow callerRow = userCommonRepository.findAdminUserByUuid(callerUuid)
                 .orElseThrow(() -> new UnauthorizedAccessException("Caller is not registered in the system"));
 
-        String callerRole = userCommonRepository.findUserTypeNameById(callerRow.adminLevel()).orElse("");
-        String targetRole = userCommonRepository.findUserTypeNameById(target.adminLevel()).orElse("");
+        String callerRole = callerRow.userTypeCName();
+        if (callerRole == null || callerRole.isBlank()) {
+            throw new IllegalStateException("Caller user role is missing for user id: " + callerRow.id());
+        }
+        String targetRole = target.userTypeCName();
+        if (targetRole == null || targetRole.isBlank()) {
+            throw new IllegalStateException("Target user role is missing for user id: " + target.id());
+        }
 
         if ("STATE_ADMIN".equals(callerRole)) {
             if (!"STATE_ADMIN".equals(targetRole)) {
@@ -316,8 +327,10 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         usersResource.get(keycloakId).update(rep);
 
-        return keycloakAdminHelper.buildAdminUserResponse(
-                userCommonRepository.findAdminUserByUuid(keycloakId).orElse(user));
+        AdminUserRow refreshedUser = userCommonRepository.findAdminUserByUuid(keycloakId)
+                .orElseThrow(() -> new IllegalStateException("User record missing after update [uuid=" + keycloakId + "]"));
+        userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(refreshedUser);
+        return keycloakAdminHelper.buildAdminUserResponse(refreshedUser);
     }
 
     @Override
@@ -478,8 +491,11 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         usersResource.get(user.uuid()).update(rep);
 
-        return keycloakAdminHelper.buildAdminUserResponse(
-                userCommonRepository.findAdminUserById(id).orElse(user));
+        AdminUserRow refreshedUser = userCommonRepository.findAdminUserById(id)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Failed to refresh user after profile update [id=" + id + "]"));
+        userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(refreshedUser);
+        return keycloakAdminHelper.buildAdminUserResponse(refreshedUser);
     }
 
     private void applyNameUpdatesAndSyncProfile(AdminUserRow user, UpdateProfileRequestDTO request,
@@ -489,7 +505,10 @@ public class UserManagementServiceImpl implements UserManagementService {
         if (request.getLastName() != null && !request.getLastName().isBlank())
             rep.setLastName(request.getLastName());
 
-        String roleName = userCommonRepository.findUserTypeNameById(user.adminLevel()).orElse(null);
+        String roleName = user.userTypeCName();
+        if (roleName == null || roleName.isBlank()) {
+            throw new IllegalStateException("User role is missing for user id: " + user.id());
+        }
         if ("STATE_ADMIN".equals(roleName)
                 && (request.getPhoneNumber() != null || request.getFirstName() != null
                         || request.getLastName() != null)) {
@@ -519,7 +538,10 @@ public class UserManagementServiceImpl implements UserManagementService {
             throw new ForbiddenAccessException("Cannot deactivate your own account");
         }
 
-        String targetRole = userCommonRepository.findUserTypeNameById(target.adminLevel()).orElse("");
+        String targetRole = target.userTypeCName();
+        if (targetRole == null || targetRole.isBlank()) {
+            throw new IllegalStateException("Target user role is missing for user id: " + target.id());
+        }
         Optional<String> callerRole = SecurityUtils.extractRole(caller);
 
         if (callerRole.map("STATE_ADMIN"::equals).orElse(false)) {
@@ -551,6 +573,10 @@ public class UserManagementServiceImpl implements UserManagementService {
                 .orElseThrow(() -> new UnauthorizedAccessException("Caller is not registered in the system"));
 
         userCommonRepository.deactivateAdminUser(id, callerRow.id());
+
+        AdminUserRow deactivatedUser = userCommonRepository.findAdminUserById(id)
+                .orElseThrow(() -> new IllegalStateException("User record missing after deactivation [id=" + id + "]"));
+        userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(deactivatedUser);
 
         var usersResource = keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm()).users();
         UserRepresentation rep = usersResource.get(target.uuid()).toRepresentation();
@@ -586,6 +612,10 @@ public class UserManagementServiceImpl implements UserManagementService {
         }
 
         userCommonRepository.activateAdminUser(id, callerRow.id());
+
+        AdminUserRow activatedUser = userCommonRepository.findAdminUserById(id)
+                .orElseThrow(() -> new IllegalStateException("User record missing after activation [id=" + id + "]"));
+        userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(activatedUser);
 
         var usersResource = keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm()).users();
         UserRepresentation rep = usersResource.get(target.uuid()).toRepresentation();

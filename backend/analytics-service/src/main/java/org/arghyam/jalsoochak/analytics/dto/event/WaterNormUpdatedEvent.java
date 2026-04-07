@@ -1,22 +1,17 @@
 package org.arghyam.jalsoochak.analytics.dto.event;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.UUID;
-
 @Data
 @NoArgsConstructor
+@AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class UserEvent {
-
+public class WaterNormUpdatedEvent {
     private String eventType;
-    private Integer userId;
     private Integer tenantId;
-    private String email;
-    private Integer userType;
-    private UUID uuid;
-    private String title;
-    private Integer status;
+    private String stateCode;
+    private Integer waterNorm;
 }

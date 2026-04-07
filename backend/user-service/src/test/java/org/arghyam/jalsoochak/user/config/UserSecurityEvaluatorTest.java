@@ -66,11 +66,11 @@ class UserSecurityEvaluatorTest {
     }
 
     private static AdminUserRow activeAdminRow(String uuid) {
-        return new AdminUserRow(1L, uuid, "user@example.com", null, 1, 1, AdminUserStatus.ACTIVE, 1, null);
+        return new AdminUserRow(1L, uuid, "user@example.com", null, 1, 1, "SUPER_USER", AdminUserStatus.ACTIVE, 1, null);
     }
 
     private static AdminUserRow inactiveAdminRow(String uuid) {
-        return new AdminUserRow(2L, uuid, "inactive@example.com", null, 1, 1, AdminUserStatus.INACTIVE, 1, null);
+        return new AdminUserRow(2L, uuid, "inactive@example.com", null, 1, 1, "SUPER_USER", AdminUserStatus.INACTIVE, 1, null);
     }
 
     private JwtAuthenticationToken authForUuid(String uuid) {

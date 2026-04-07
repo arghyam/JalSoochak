@@ -6,6 +6,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.arghyam.jalsoochak.user.clients.KeycloakClient;
 import org.arghyam.jalsoochak.user.clients.KeycloakTokenResponse;
@@ -22,6 +24,7 @@ import org.arghyam.jalsoochak.user.dto.response.TokenResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
+import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.arghyam.jalsoochak.user.exceptions.KeycloakOperationException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
@@ -32,6 +35,7 @@ import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserTokenRow;
 import org.arghyam.jalsoochak.user.event.ResetPasswordEmailEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.service.AuthService;
 import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
@@ -64,6 +68,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserCommonRepository userCommonRepository;
     private final UserTenantRepository userTenantRepository;
     private final UserNotificationEventPublisher userNotificationEventPublisher;
+    private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final KeycloakAdminHelper keycloakAdminHelper;
     private final PasswordResetProperties passwordResetProperties;
     private final FrontendProperties frontendProperties;
@@ -84,7 +89,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Account is deactivated");
         }
 
-        validateTenantStatus(user.tenantId(), TenantAccessRole.fromAdminLevel(user.adminLevel()));
+        validateTenantStatus(user.tenantId(), TenantAccessRole.fromCName(user.userTypeCName()));
 
         KeycloakTokenResponse token = keycloakClient.obtainToken(request.getEmail(), request.getPassword());
         return buildEnrichedAuthResult(token, user);
@@ -108,7 +113,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountDeactivatedException("Account is deactivated");
         }
 
-        validateTenantStatus(user.tenantId(), TenantAccessRole.fromAdminLevel(user.adminLevel()));
+        validateTenantStatus(user.tenantId(), TenantAccessRole.fromCName(user.userTypeCName()));
 
         return buildEnrichedAuthResult(token, user);
     }
@@ -179,11 +184,11 @@ public class AuthServiceImpl implements AuthService {
                 : userCommonRepository.findTenantIdByStateCode(tenantCode)
                         .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for code: " + tenantCode));
         
-        // Derive role from token and validate consistency with pendingUser.adminLevel()
+        // Derive role from token and validate consistency with pendingUser.userTypeCName()
         TenantAccessRole tokenRole = "SUPER_USER".equals(role) ? TenantAccessRole.SUPER_USER
                 : "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN
                 : TenantAccessRole.STAFF;
-        TenantAccessRole adminLevelRole = TenantAccessRole.fromAdminLevel(pendingUser.adminLevel());
+        TenantAccessRole adminLevelRole = TenantAccessRole.fromCName(pendingUser.userTypeCName());
         
         // Validate role consistency: token role must match admin level role
         if (tokenRole != adminLevelRole) {
@@ -206,13 +211,15 @@ public class AuthServiceImpl implements AuthService {
             userRep.setEnabled(true);
             userRep.setEmailVerified(true);
 
+            String extractedUuid;
             try (Response createResponse = usersResource.create(userRep)) {
                 if (createResponse.getStatus() != 201) {
                     throw new KeycloakOperationException("Failed to create Keycloak user");
                 }
                 String location = createResponse.getLocation().toString();
-                keycloakUuid = location.substring(location.lastIndexOf('/') + 1);
+                extractedUuid = location.substring(location.lastIndexOf('/') + 1);
             }
+            keycloakUuid = extractedUuid;
 
             CredentialRepresentation cred = new CredentialRepresentation();
             cred.setType(CredentialRepresentation.PASSWORD);
@@ -230,6 +237,17 @@ public class AuthServiceImpl implements AuthService {
 
             // Update the PENDING user record with the real Keycloak UUID and activate it
             userCommonRepository.activatePendingAdminUser(pendingUser.id(), keycloakUuid, request.getPhoneNumber());
+
+            // Publish USER_CREATED analytics event (non-SUPER_USER only — SUPER_USER has no dim_tenant FK row)
+            if (!"SUPER_USER".equals(role)) {
+                final String finalUuid = keycloakUuid;
+                AdminUserRow activatedUser = userCommonRepository.findAdminUserByUuid(finalUuid)
+                        .orElseThrow(() -> new IllegalStateException("Activated user not found: " + finalUuid));
+                String title = Stream.of(request.getFirstName(), request.getLastName())
+                        .filter(s -> s != null && !s.isBlank())
+                        .collect(Collectors.joining(" "));
+                userAnalyticsEventPublisher.publishUserCreatedAfterCommit(activatedUser, title.isBlank() ? null : title);
+            }
 
             if ("STATE_ADMIN".equals(role)) {
                 String schema = "tenant_" + tenantCode.toLowerCase();
@@ -324,7 +342,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private AuthResult buildEnrichedAuthResult(KeycloakTokenResponse token, AdminUserRow user) {
-        String roleName = userCommonRepository.findUserTypeNameById(user.adminLevel()).orElse(null);
+        String roleName = user.userTypeCName();
         String tenantCode = user.tenantId() != 0
                 ? userCommonRepository.findTenantStateCodeById(user.tenantId()).orElse(null)
                 : null;

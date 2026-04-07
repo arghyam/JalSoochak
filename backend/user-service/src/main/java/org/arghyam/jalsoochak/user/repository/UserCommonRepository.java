@@ -218,9 +218,11 @@ public class UserCommonRepository {
 
     public Optional<AdminUserRow> findAdminUserByUuid(String uuid) {
         String sql = """
-                SELECT id, uuid, email, phone_number, tenant_id, admin_level, status, created_by, created_at
-                FROM common_schema.tenant_admin_user_master_table
-                WHERE uuid = ?
+                SELECT t.id, t.uuid, t.email, t.phone_number, t.tenant_id, t.admin_level,
+                       ut.c_name AS user_type_c_name, t.status, t.created_by, t.created_at
+                FROM common_schema.tenant_admin_user_master_table t
+                LEFT JOIN common_schema.user_type_master_table ut ON ut.id = t.admin_level
+                WHERE t.uuid = ?
                 LIMIT 1
                 """;
         List<AdminUserRow> rows = jdbcTemplate.query(sql, (rs, n) -> mapAdminUserRow(rs), uuid);
@@ -229,9 +231,11 @@ public class UserCommonRepository {
 
     public Optional<AdminUserRow> findAdminUserByEmail(String email) {
         String sql = """
-                SELECT id, uuid, email, phone_number, tenant_id, admin_level, status, created_by, created_at
-                FROM common_schema.tenant_admin_user_master_table
-                WHERE LOWER(email) = LOWER(?)
+                SELECT t.id, t.uuid, t.email, t.phone_number, t.tenant_id, t.admin_level,
+                       ut.c_name AS user_type_c_name, t.status, t.created_by, t.created_at
+                FROM common_schema.tenant_admin_user_master_table t
+                LEFT JOIN common_schema.user_type_master_table ut ON ut.id = t.admin_level
+                WHERE LOWER(t.email) = LOWER(?)
                 LIMIT 1
                 """;
         List<AdminUserRow> rows = jdbcTemplate.query(sql, (rs, n) -> mapAdminUserRow(rs), email);
@@ -240,9 +244,11 @@ public class UserCommonRepository {
 
     public Optional<AdminUserRow> findAdminUserById(Long id) {
         String sql = """
-                SELECT id, uuid, email, phone_number, tenant_id, admin_level, status, created_by, created_at
-                FROM common_schema.tenant_admin_user_master_table
-                WHERE id = ?
+                SELECT t.id, t.uuid, t.email, t.phone_number, t.tenant_id, t.admin_level,
+                       ut.c_name AS user_type_c_name, t.status, t.created_by, t.created_at
+                FROM common_schema.tenant_admin_user_master_table t
+                LEFT JOIN common_schema.user_type_master_table ut ON ut.id = t.admin_level
+                WHERE t.id = ?
                 LIMIT 1
                 """;
         List<AdminUserRow> rows = jdbcTemplate.query(sql, (rs, n) -> mapAdminUserRow(rs), id);
@@ -334,15 +340,17 @@ public class UserCommonRepository {
         }
         List<Object> args = new java.util.ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                SELECT id, uuid, email, phone_number, tenant_id, admin_level, status, created_by, created_at
-                FROM common_schema.tenant_admin_user_master_table
-                WHERE tenant_id = 0
+                SELECT t.id, t.uuid, t.email, t.phone_number, t.tenant_id, t.admin_level,
+                       ut.c_name AS user_type_c_name, t.status, t.created_by, t.created_at
+                FROM common_schema.tenant_admin_user_master_table t
+                LEFT JOIN common_schema.user_type_master_table ut ON ut.id = t.admin_level
+                WHERE t.tenant_id = 0
                 """);
         if (status != null) {
-            sql.append(" AND status = ?");
+            sql.append(" AND t.status = ?");
             args.add(status.code);
         }
-        sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+        sql.append(" ORDER BY t.created_at DESC LIMIT ? OFFSET ?");
         args.add(limit);
         args.add(offset);
         return jdbcTemplate.query(sql.toString(), (rs, n) -> mapAdminUserRow(rs), args.toArray());
@@ -378,26 +386,28 @@ public class UserCommonRepository {
         }
         List<Object> args = new java.util.ArrayList<>();
         StringBuilder sql = new StringBuilder("""
-                SELECT id, uuid, email, phone_number, tenant_id, admin_level, status, created_by, created_at
-                FROM common_schema.tenant_admin_user_master_table
+                SELECT t.id, t.uuid, t.email, t.phone_number, t.tenant_id, t.admin_level,
+                       ut.c_name AS user_type_c_name, t.status, t.created_by, t.created_at
+                FROM common_schema.tenant_admin_user_master_table t
+                LEFT JOIN common_schema.user_type_master_table ut ON ut.id = t.admin_level
                 WHERE
                 """);
         if (tenantId == null) {
-            sql.append(" tenant_id != 0");
+            sql.append(" t.tenant_id != 0");
         } else {
-            sql.append(" tenant_id = ?");
+            sql.append(" t.tenant_id = ?");
             args.add(tenantId);
         }
         if (status != null) {
-            sql.append(" AND status = ?");
+            sql.append(" AND t.status = ?");
             args.add(status.code);
         }
         if (nameFilterUuids != null && !nameFilterUuids.isEmpty()) {
             String placeholders = String.join(",", Collections.nCopies(nameFilterUuids.size(), "?"));
-            sql.append(" AND uuid IN (").append(placeholders).append(")");
+            sql.append(" AND t.uuid IN (").append(placeholders).append(")");
             args.addAll(nameFilterUuids);
         }
-        sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+        sql.append(" ORDER BY t.created_at DESC LIMIT ? OFFSET ?");
         args.add(limit);
         args.add(offset);
         return jdbcTemplate.query(sql.toString(), (rs, n) -> mapAdminUserRow(rs), args.toArray());
@@ -555,6 +565,11 @@ public class UserCommonRepository {
     private AdminUserRow mapAdminUserRow(java.sql.ResultSet rs) throws java.sql.SQLException {
         Timestamp createdAtTs = rs.getTimestamp("created_at");
         String phoneNumber = pii.safeDecrypt(rs.getString("phone_number"));
+        String userTypeCName = rs.getString("user_type_c_name");
+        if (userTypeCName == null || userTypeCName.isBlank()) {
+            throw new java.sql.SQLException(
+                    "user_type_c_name is null or blank for admin user id=" + rs.getLong("id"));
+        }
         return new AdminUserRow(
                 rs.getLong("id"),
                 rs.getString("uuid"),
@@ -562,6 +577,7 @@ public class UserCommonRepository {
                 phoneNumber,
                 rs.getInt("tenant_id"),
                 rs.getInt("admin_level"),
+                userTypeCName,
                 AdminUserStatus.fromCode(rs.getInt("status")),
                 rs.getInt("created_by"),
                 createdAtTs != null ? createdAtTs.toLocalDateTime() : null

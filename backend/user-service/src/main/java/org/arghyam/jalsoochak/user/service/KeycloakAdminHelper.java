@@ -27,7 +27,7 @@ public class KeycloakAdminHelper {
      * firstName/lastName from Keycloak and resolving role/tenantCode names.
      */
     public AdminUserResponseDTO buildAdminUserResponse(AdminUserRow user) {
-        String roleName = userCommonRepository.findUserTypeNameById(user.adminLevel()).orElse(null);
+        String roleName = user.userTypeCName();
         String tenantCode = user.tenantId() != 0
                 ? userCommonRepository.findTenantStateCodeById(user.tenantId()).orElse(null)
                 : null;

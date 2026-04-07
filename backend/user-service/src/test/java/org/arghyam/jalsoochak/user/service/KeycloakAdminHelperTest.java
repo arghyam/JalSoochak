@@ -54,7 +54,7 @@ class KeycloakAdminHelperTest {
     }
 
     private AdminUserRow row(Long id, String uuid, String email, AdminUserStatus status) {
-        return new AdminUserRow(id, uuid, email, "91XXXXXXXXXX", 1, 2, status, 0, null);
+        return new AdminUserRow(id, uuid, email, "91XXXXXXXXXX", 1, 2, "STATE_ADMIN", status, 0, null);
     }
 
     private AdminUserTokenRow tokenRow(String email, String metadata) {
@@ -72,7 +72,6 @@ class KeycloakAdminHelperTest {
             String metadata = "{\"firstName\":\"Alice\",\"lastName\":\"Smith\",\"role\":\"STATE_ADMIN\"}";
             when(userCommonRepository.findInviteTokenByEmail("admin@example.com"))
                     .thenReturn(Optional.of(tokenRow("admin@example.com", metadata)));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
 
             AdminUserResponseDTO result = helper.buildAdminUserResponse(user);
@@ -88,7 +87,6 @@ class KeycloakAdminHelperTest {
             AdminUserRow user = row(2L, "placeholder-uuid", "notoken@example.com", AdminUserStatus.PENDING);
             when(userCommonRepository.findInviteTokenByEmail("notoken@example.com"))
                     .thenReturn(Optional.empty());
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
 
             AdminUserResponseDTO result = helper.buildAdminUserResponse(user);
@@ -107,7 +105,6 @@ class KeycloakAdminHelperTest {
             String metadata = "{\"firstName\":\"" + encFirstName + "\",\"lastName\":\"" + encLastName + "\",\"role\":\"STATE_ADMIN\"}";
             when(userCommonRepository.findInviteTokenByEmail("enc@example.com"))
                     .thenReturn(Optional.of(tokenRow("enc@example.com", metadata)));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
             when(pii.safeDecrypt(encFirstName)).thenReturn("Alice");
             when(pii.safeDecrypt(encLastName)).thenReturn("Smith");
@@ -124,7 +121,6 @@ class KeycloakAdminHelperTest {
             AdminUserRow user = row(3L, "placeholder-uuid", "bad@example.com", AdminUserStatus.PENDING);
             when(userCommonRepository.findInviteTokenByEmail("bad@example.com"))
                     .thenReturn(Optional.of(tokenRow("bad@example.com", "not-valid-json{")));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
 
             AdminUserResponseDTO result = helper.buildAdminUserResponse(user);
@@ -147,7 +143,6 @@ class KeycloakAdminHelperTest {
             rep.setLastName("Jones");
             when(keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm())
                     .users().get("keycloak-uuid-123").toRepresentation()).thenReturn(rep);
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
 
             AdminUserResponseDTO result = helper.buildAdminUserResponse(user);
@@ -155,7 +150,6 @@ class KeycloakAdminHelperTest {
             assertEquals("Bob", result.getFirstName());
             assertEquals("Jones", result.getLastName());
             assertEquals("ACTIVE", result.getStatus());
-            verify(userCommonRepository).findUserTypeNameById(2);
         }
 
         @Test
@@ -164,7 +158,6 @@ class KeycloakAdminHelperTest {
             when(keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm())
                     .users().get("keycloak-uuid-456").toRepresentation())
                     .thenThrow(new RuntimeException("Keycloak unavailable"));
-            when(userCommonRepository.findUserTypeNameById(2)).thenReturn(Optional.of("STATE_ADMIN"));
             when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
 
             AdminUserResponseDTO result = helper.buildAdminUserResponse(user);
