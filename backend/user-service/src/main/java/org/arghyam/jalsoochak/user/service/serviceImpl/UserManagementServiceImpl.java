@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.clients.KeycloakClient;
 import org.arghyam.jalsoochak.user.config.KeycloakProvider;
+import org.arghyam.jalsoochak.user.config.properties.AppProperties;
 import org.arghyam.jalsoochak.user.config.properties.FrontendProperties;
 import org.arghyam.jalsoochak.user.config.properties.InviteProperties;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
@@ -67,6 +68,7 @@ public class UserManagementServiceImpl implements UserManagementService {
     private final UserNotificationEventPublisher userNotificationEventPublisher;
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final KeycloakAdminHelper keycloakAdminHelper;
+    private final AppProperties appProperties;
     private final InviteProperties inviteProperties;
     private final FrontendProperties frontendProperties;
     private final TokenService tokenService;
@@ -96,6 +98,19 @@ public class UserManagementServiceImpl implements UserManagementService {
             if (callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(request.getTenantCode())) {
                 throw new ForbiddenAccessException("State admin can only invite within their own state");
             }
+        }
+
+        // SUPER_STATE_ADMIN role is only available in Single Tenant Mode
+        if ("SUPER_STATE_ADMIN".equals(request.getRole())) {
+            if (!appProperties.isSingleTenantMode()) {
+                throw new BadRequestException("SUPER_STATE_ADMIN role is only available in Single Tenant Mode.");
+            }
+            // Resolve tenant_id from the single existing tenant; fail fast if none exists yet
+            Integer tenantId = userCommonRepository.findSingleTenant()
+                    .orElseThrow(() -> new BadRequestException(
+                            "No tenant exists yet. Create the tenant before inviting a SUPER_STATE_ADMIN."));
+            request.setTenantCode(userCommonRepository.findTenantStateCodeById(tenantId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for id: " + tenantId)));
         }
 
         if ("STATE_ADMIN".equals(request.getRole())) {

@@ -148,7 +148,8 @@ public class AuthServiceImpl implements AuthService {
             String tenantCode = parseMetadata(tokenRow.metadata(), "tenantCode");
             Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
                     .orElseThrow(() -> new AccountDeactivatedException("Tenant not found or no longer exists."));
-            TenantAccessRole accessRole = "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN : TenantAccessRole.STAFF;
+            TenantAccessRole accessRole = "STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role)
+                    ? TenantAccessRole.STATE_ADMIN : TenantAccessRole.STAFF;
             validateTenantStatus(tenantId, accessRole);
         }
 
@@ -187,6 +188,7 @@ public class AuthServiceImpl implements AuthService {
         // Derive role from token and validate consistency with pendingUser.userTypeCName()
         TenantAccessRole tokenRole = "SUPER_USER".equals(role) ? TenantAccessRole.SUPER_USER
                 : "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN
+                : "SUPER_STATE_ADMIN".equals(role) ? TenantAccessRole.SUPER_STATE_ADMIN
                 : TenantAccessRole.STAFF;
         TenantAccessRole adminLevelRole = TenantAccessRole.fromCName(pendingUser.userTypeCName());
         

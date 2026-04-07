@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
@@ -84,6 +85,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final TenantCommonRepository tenantCommonRepository;
     private final TenantSchemaRepository tenantSchemaRepository;
     private final ObjectMapper objectMapper;
+    private final AppProperties appProperties;
     private final TenantDefaultsProperties tenantDefaults;
     private final ApplicationEventPublisher eventPublisher;
     private final TenantSchedulerManager schedulerManager;
@@ -99,6 +101,15 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     @Transactional
     public TenantResponseDTO createTenant(CreateTenantRequestDTO request) {
         log.info("Creating tenant – stateCode: {}, name: {}", request.getStateCode(), request.getName());
+
+        // Single Tenant Mode enforcement: only one tenant allowed
+        if (appProperties.isSingleTenantMode()) {
+            int count = tenantCommonRepository.countNonDeletedTenants();
+            if (count > 0) {
+                throw new IllegalStateException(
+                        "A tenant already exists. Only one tenant is allowed in Single Tenant Mode.");
+            }
+        }
 
         tenantCommonRepository.findByStateCode(request.getStateCode()).ifPresent(existing -> {
             throw new IllegalStateException(

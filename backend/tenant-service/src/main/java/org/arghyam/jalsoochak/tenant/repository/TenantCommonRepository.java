@@ -379,6 +379,18 @@ public class TenantCommonRepository {
     }
 
     /**
+     * Counts the total number of non-deleted tenants (excluding the system tenant).
+     * Used for single-tenant mode enforcement.
+     *
+     * @return the count of non-deleted, non-system tenants
+     */
+    public int countNonDeletedTenants() {
+        String sql = "SELECT COUNT(*) FROM common_schema.tenant_master_table WHERE id != 0 AND deleted_at IS NULL";
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class);
+        return count != null ? count : 0;
+    }
+
+    /**
      * Validates a schema name.
      */
     private void validateSchemaName(String schemaName) {

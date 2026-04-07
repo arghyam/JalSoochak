@@ -133,6 +133,22 @@ public class UserCommonRepository {
                 String.class);
     }
 
+    /**
+     * Finds the single tenant in Single Tenant Mode.
+     * Returns the tenant ID if exactly one non-deleted, non-system tenant exists.
+     * Used for SUPER_STATE_ADMIN role assignment in STM.
+     */
+    public Optional<Integer> findSingleTenant() {
+        String sql = """
+                SELECT id
+                FROM common_schema.tenant_master_table
+                WHERE id != 0 AND deleted_at IS NULL
+                LIMIT 1
+                """;
+        List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getInt("id"));
+        return rows.stream().findFirst();
+    }
+
     public Optional<String> findTenantTitleByStateCode(String stateCode) {
         String sql = """
                 SELECT title
