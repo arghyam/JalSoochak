@@ -1,6 +1,6 @@
 package org.arghyam.jalsoochak.tenant;
 
-import org.arghyam.jalsoochak.tenant.config.TenantDefaultsProperties;
+import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
