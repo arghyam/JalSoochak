@@ -27,6 +27,8 @@ public final class SwaggerExamples {
               "data": {
                 "tenantId": 10,
                 "stateCode": "MP",
+                "parentLgdLevel": 1,
+                "parentDepartmentLevel": null,
                 "childBoundaryCount": 2,
                 "boundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}",
                 "averageSchemeRegularity": 0.75,
@@ -175,6 +177,7 @@ public final class SwaggerExamples {
                 "parentLgdId": 101,
                 "parentLgdCName": "Parent",
                 "parentLgdTitle": "Parent LGD",
+                "parentLgdLevel": 2,
                 "activeSchemeCount": 1,
                 "inactiveSchemeCount": 1,
                 "topSchemeCount": 1,
@@ -189,7 +192,24 @@ public final class SwaggerExamples {
                     "totalWaterSupplied": 150,
                     "immediateParentLgdId": 100,
                     "immediateParentLgdCName": "Parent",
-                    "immediateParentLgdTitle": "Parent LGD"
+                    "immediateParentLgdTitle": "Parent LGD",
+                    "immediateParentLgdLevel": 3,
+                    "lgdLadder": {
+                      "level_1": 10,
+                      "level_2": 50,
+                      "level_3": 100,
+                      "level_4": 101,
+                      "level_5": null,
+                      "level_6": null
+                    },
+                    "departmentLadder": {
+                      "level_1": 2001,
+                      "level_2": 2002,
+                      "level_3": null,
+                      "level_4": null,
+                      "level_5": null,
+                      "level_6": null
+                    }
                   }
                 ]
               }

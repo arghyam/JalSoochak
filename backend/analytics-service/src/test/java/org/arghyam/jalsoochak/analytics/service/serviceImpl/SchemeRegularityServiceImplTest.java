@@ -11,6 +11,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.PeriodicSchemeRegularityRes
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicWaterQuantityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserOutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SubmissionStatusSummaryResponse;
@@ -361,6 +362,95 @@ class SchemeRegularityServiceImplTest {
         assertThat(result)
                 .containsEntry("active_schemes_count", 0)
                 .containsEntry("inactive_schemes_count", 7);
+    }
+
+    @Test
+    void getSchemeStatusAndTopReportingByLgd_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
+        mockRedisValueOps();
+        String key = ":schemes:dashboard:parent_lgd:101:scheme_count:5:start:2026-01-01:end:2026-01-03:v1";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        when(schemeRegularityRepository.getLgdLevel(101)).thenReturn(2);
+        when(schemeRegularityRepository.getSchemeStatusCountByLgd(101))
+                .thenReturn(new SchemeRegularityRepository.SchemeStatusCount(1, 1));
+        when(schemeRegularityRepository.getParentLgdCNameByLgd(101)).thenReturn("Parent");
+        when(schemeRegularityRepository.getParentLgdTitleByLgd(101)).thenReturn("District");
+        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(101, START, END, 5))
+                .thenReturn(List.of(new SchemeRegularityRepository.SchemeSubmissionMetrics(
+                        1,
+                        "Scheme A",
+                        1,
+                        2,
+                        150L,
+                        100,
+                        "Immediate Parent",
+                        "Block",
+                        3,
+                        null,
+                        null,
+                        null,
+                        null,
+                        10, 50, 100, 101, null, null,
+                        2001, 2002, null, null, null, null
+                )));
+
+        SchemeStatusAndTopReportingResponse response =
+                service.getSchemeStatusAndTopReportingByLgd(101, START, END, 5);
+
+        assertThat(response.getParentLgdLevel()).isEqualTo(2);
+        assertThat(response.getParentDepartmentLevel()).isNull();
+        assertThat(response.getTopSchemes()).hasSize(1);
+        assertThat(response.getTopSchemes().getFirst().getImmediateParentLgdLevel()).isEqualTo(3);
+        assertThat(response.getTopSchemes().getFirst().getLgdLadder())
+                .containsEntry("level_1", 10)
+                .containsEntry("level_4", 101)
+                .containsEntry("level_6", null);
+        assertThat(response.getTopSchemes().getFirst().getDepartmentLadder())
+                .containsEntry("level_1", 2001)
+                .containsEntry("level_2", 2002)
+                .containsEntry("level_6", null);
+    }
+
+    @Test
+    void getSchemeStatusAndTopReportingByDepartment_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
+        when(schemeRegularityRepository.getDepartmentLevel(201)).thenReturn(4);
+        when(schemeRegularityRepository.getSchemeStatusCountByDepartment(201))
+                .thenReturn(new SchemeRegularityRepository.SchemeStatusCount(2, 0));
+        when(schemeRegularityRepository.getParentDepartmentCNameByDepartment(201)).thenReturn("Dept");
+        when(schemeRegularityRepository.getParentDepartmentTitleByDepartment(201)).thenReturn("Division");
+        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByDepartment(201, START, END, 3))
+                .thenReturn(List.of(new SchemeRegularityRepository.SchemeSubmissionMetrics(
+                        2,
+                        "Scheme B",
+                        1,
+                        3,
+                        80L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        200,
+                        "Immediate Dept",
+                        "SubDivision",
+                        5,
+                        11, 22, 33, null, null, null,
+                        900, 901, 902, 903, null, null
+                )));
+
+        SchemeStatusAndTopReportingResponse response =
+                service.getSchemeStatusAndTopReportingByDepartment(201, START, END, 3);
+
+        assertThat(response.getParentLgdLevel()).isNull();
+        assertThat(response.getParentDepartmentLevel()).isEqualTo(4);
+        assertThat(response.getTopSchemes()).hasSize(1);
+        assertThat(response.getTopSchemes().getFirst().getImmediateParentDepartmentLevel()).isEqualTo(5);
+        assertThat(response.getTopSchemes().getFirst().getLgdLadder())
+                .containsEntry("level_1", 11)
+                .containsEntry("level_3", 33);
+        assertThat(response.getTopSchemes().getFirst().getDepartmentLadder())
+                .containsEntry("level_1", 900)
+                .containsEntry("level_4", 903);
     }
 
     @Test

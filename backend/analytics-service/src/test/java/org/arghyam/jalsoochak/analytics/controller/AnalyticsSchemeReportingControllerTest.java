@@ -118,6 +118,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentLgdId(101)
                         .parentLgdCName("Parent")
                         .parentLgdTitle("Parent LGD")
+                        .parentLgdLevel(2)
                         .activeSchemeCount(1)
                         .inactiveSchemeCount(1)
                         .topSchemeCount(1)
@@ -132,6 +133,17 @@ class AnalyticsSchemeReportingControllerTest {
                                 .immediateParentLgdId(100)
                                 .immediateParentLgdCName("Parent")
                                 .immediateParentLgdTitle("Parent LGD")
+                                .immediateParentLgdLevel(3)
+                                .lgdLadder(Map.of(
+                                        "level_1", 10,
+                                        "level_2", 50,
+                                        "level_3", 100,
+                                        "level_4", 101
+                                ))
+                                .departmentLadder(Map.of(
+                                        "level_1", 2001,
+                                        "level_2", 2002
+                                ))
                                 .build()))
                         .build());
 
@@ -145,10 +157,14 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.parentLgdId").value(101))
                 .andExpect(jsonPath("$.data.parentLgdCName").value("Parent"))
                 .andExpect(jsonPath("$.data.parentLgdTitle").value("Parent LGD"))
+                .andExpect(jsonPath("$.data.parentLgdLevel").value(2))
                 .andExpect(jsonPath("$.data.topSchemes[0].totalWaterSupplied").value(150))
                 .andExpect(jsonPath("$.data.topSchemes[0].immediateParentLgdId").value(100))
                 .andExpect(jsonPath("$.data.topSchemes[0].immediateParentLgdCName").value("Parent"))
-                .andExpect(jsonPath("$.data.topSchemes[0].immediateParentLgdTitle").value("Parent LGD"));
+                .andExpect(jsonPath("$.data.topSchemes[0].immediateParentLgdTitle").value("Parent LGD"))
+                .andExpect(jsonPath("$.data.topSchemes[0].immediateParentLgdLevel").value(3))
+                .andExpect(jsonPath("$.data.topSchemes[0].lgdLadder.level_1").value(10))
+                .andExpect(jsonPath("$.data.topSchemes[0].departmentLadder.level_2").value(2002));
     }
 
     @Test
@@ -158,6 +174,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentDepartmentId(201)
                         .parentDepartmentCName("Parent Dept")
                         .parentDepartmentTitle("Parent Dept")
+                        .parentDepartmentLevel(4)
                         .activeSchemeCount(1)
                         .inactiveSchemeCount(1)
                         .topSchemeCount(1)
@@ -172,6 +189,9 @@ class AnalyticsSchemeReportingControllerTest {
                                 .immediateParentDepartmentId(200)
                                 .immediateParentDepartmentCName("Parent Dept")
                                 .immediateParentDepartmentTitle("Parent Dept")
+                                .immediateParentDepartmentLevel(5)
+                                .lgdLadder(Map.of("level_1", 11, "level_2", 22, "level_3", 33))
+                                .departmentLadder(Map.of("level_1", 900, "level_2", 901, "level_3", 902, "level_4", 903))
                                 .build()))
                         .build());
 
@@ -185,10 +205,14 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.parentDepartmentId").value(201))
                 .andExpect(jsonPath("$.data.parentDepartmentCName").value("Parent Dept"))
                 .andExpect(jsonPath("$.data.parentDepartmentTitle").value("Parent Dept"))
+                .andExpect(jsonPath("$.data.parentDepartmentLevel").value(4))
                 .andExpect(jsonPath("$.data.topSchemes[0].totalWaterSupplied").value(80))
                 .andExpect(jsonPath("$.data.topSchemes[0].immediateParentDepartmentId").value(200))
                 .andExpect(jsonPath("$.data.topSchemes[0].immediateParentDepartmentCName").value("Parent Dept"))
-                .andExpect(jsonPath("$.data.topSchemes[0].immediateParentDepartmentTitle").value("Parent Dept"));
+                .andExpect(jsonPath("$.data.topSchemes[0].immediateParentDepartmentTitle").value("Parent Dept"))
+                .andExpect(jsonPath("$.data.topSchemes[0].immediateParentDepartmentLevel").value(5))
+                .andExpect(jsonPath("$.data.topSchemes[0].lgdLadder.level_2").value(22))
+                .andExpect(jsonPath("$.data.topSchemes[0].departmentLadder.level_4").value(903));
     }
 
     @Test

@@ -16,6 +16,8 @@ public class TenantDetailsResponse {
 
     private Integer tenantId;
     private String stateCode;
+    private Integer parentLgdLevel;
+    private Integer parentDepartmentLevel;
     private Integer childBoundaryCount;
     private String boundaryGeoJson;
     private BigDecimal averageSchemeRegularity;

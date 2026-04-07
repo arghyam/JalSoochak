@@ -1788,6 +1788,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevel(parentLgdId);
 
         SchemeRegularityRepository.SchemeStatusCount statusCount =
                 schemeRegularityRepository.getSchemeStatusCountByLgd(parentLgdId);
@@ -1804,6 +1805,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .parentDepartmentCName(null)
                 .parentLgdTitle(parentLgdTitle)
                 .parentDepartmentTitle(null)
+                .parentLgdLevel(parentLgdLevel)
+                .parentDepartmentLevel(null)
                 .startDate(startDate)
                 .endDate(endDate)
                 .daysInRange(daysInRange)
@@ -1822,9 +1825,15 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                 .immediateParentLgdId(metric.immediateParentLgdId())
                                 .immediateParentLgdCName(metric.immediateParentLgdCName())
                                 .immediateParentLgdTitle(metric.immediateParentLgdTitle())
+                                .immediateParentLgdLevel(metric.immediateParentLgdLevel())
                                 .immediateParentDepartmentId(metric.immediateParentDepartmentId())
                                 .immediateParentDepartmentCName(metric.immediateParentDepartmentCName())
                                 .immediateParentDepartmentTitle(metric.immediateParentDepartmentTitle())
+                                .immediateParentDepartmentLevel(metric.immediateParentDepartmentLevel())
+                                .lgdLadder(buildLevelLadder(metric.level1LgdId(), metric.level2LgdId(), metric.level3LgdId(),
+                                        metric.level4LgdId(), metric.level5LgdId(), metric.level6LgdId()))
+                                .departmentLadder(buildLevelLadder(metric.level1DeptId(), metric.level2DeptId(), metric.level3DeptId(),
+                                        metric.level4DeptId(), metric.level5DeptId(), metric.level6DeptId()))
                                 .build())
                         .toList())
                 .build();
@@ -1840,6 +1849,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         topSchemeCount = topSchemeCount == null ? DEFAULT_TOP_SCHEME_COUNT : topSchemeCount;
         validateTopSchemeCount(topSchemeCount);
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevel(parentDepartmentId);
 
         SchemeRegularityRepository.SchemeStatusCount statusCount =
                 schemeRegularityRepository.getSchemeStatusCountByDepartment(parentDepartmentId);
@@ -1858,6 +1868,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .parentDepartmentCName(parentDepartmentCName)
                 .parentLgdTitle(null)
                 .parentDepartmentTitle(parentDepartmentTitle)
+                .parentLgdLevel(null)
+                .parentDepartmentLevel(parentDepartmentLevel)
                 .startDate(startDate)
                 .endDate(endDate)
                 .daysInRange(daysInRange)
@@ -1876,12 +1888,30 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                 .immediateParentLgdId(metric.immediateParentLgdId())
                                 .immediateParentLgdCName(metric.immediateParentLgdCName())
                                 .immediateParentLgdTitle(metric.immediateParentLgdTitle())
+                                .immediateParentLgdLevel(metric.immediateParentLgdLevel())
                                 .immediateParentDepartmentId(metric.immediateParentDepartmentId())
                                 .immediateParentDepartmentCName(metric.immediateParentDepartmentCName())
                                 .immediateParentDepartmentTitle(metric.immediateParentDepartmentTitle())
+                                .immediateParentDepartmentLevel(metric.immediateParentDepartmentLevel())
+                                .lgdLadder(buildLevelLadder(metric.level1LgdId(), metric.level2LgdId(), metric.level3LgdId(),
+                                        metric.level4LgdId(), metric.level5LgdId(), metric.level6LgdId()))
+                                .departmentLadder(buildLevelLadder(metric.level1DeptId(), metric.level2DeptId(), metric.level3DeptId(),
+                                        metric.level4DeptId(), metric.level5DeptId(), metric.level6DeptId()))
                                 .build())
                         .toList())
                 .build();
+    }
+
+    private static Map<String, Integer> buildLevelLadder(
+            Integer level1, Integer level2, Integer level3, Integer level4, Integer level5, Integer level6) {
+        Map<String, Integer> ladder = new LinkedHashMap<>();
+        ladder.put("level_1", level1);
+        ladder.put("level_2", level2);
+        ladder.put("level_3", level3);
+        ladder.put("level_4", level4);
+        ladder.put("level_5", level5);
+        ladder.put("level_6", level6);
+        return ladder;
     }
 
     @Override
