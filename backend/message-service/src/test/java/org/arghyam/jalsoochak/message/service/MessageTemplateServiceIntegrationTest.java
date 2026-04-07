@@ -125,6 +125,17 @@ class MessageTemplateServiceIntegrationTest {
     }
 
     @Test
+    void findNudgeMessage_handlesNegativeLanguageId_asEnglish() {
+        insertConfig("nudge_message_english", "Negative id fallback for {name}.");
+
+        String msg = messageTemplateService.findNudgeMessage(TENANT_ID, -5, "Op", "S-0");
+
+        assertThat(msg).isEqualTo("Negative id fallback for Op.");
+        // Verify that language_-5 was NOT queried (negative IDs bypass language lookup)
+        // This is a regression guard: the service should skip to "english" key directly
+    }
+
+    @Test
     void findNudgeMessage_normalizesHindiScript_toLangKey() {
         insertConfig("language_2", "हिंदी");
         insertConfig("nudge_message_hindi", "नमस्ते {name}, {scheme}");

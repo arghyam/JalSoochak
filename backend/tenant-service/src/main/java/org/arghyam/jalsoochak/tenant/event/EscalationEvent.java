@@ -14,6 +14,7 @@ import java.util.List;
 public class EscalationEvent {
     private String eventType;
     private int escalationLevel;
+    private String anomalyType;
     private String officerPhone;
     private String officerName;
     private List<OperatorEscalationDetail> operators;

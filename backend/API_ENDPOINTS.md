@@ -151,6 +151,8 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/analytics/scheme-regularity/average` | Average scheme regularity |
 | GET | `/api/v1/analytics/scheme-regularity/periodic` | Periodic scheme regularity |
 | GET | `/api/v1/analytics/reading-submission-rate` | Reading submission rate |
+| GET | `/api/v1/analytics/anomalies/statuses` | Anomaly statuses list |
+| GET | `/api/v1/analytics/escalations/statuses` | Escalation statuses list |
 
 ---
 

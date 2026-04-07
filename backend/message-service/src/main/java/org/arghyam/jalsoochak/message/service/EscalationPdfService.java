@@ -42,17 +42,24 @@ public class EscalationPdfService {
      * Generates the escalation PDF and saves it to the report directory.
      *
      * @param officerUserType the officer's configured role/designation (e.g. "JE", "SECTION_OFFICER")
+     * @param correlationId   stable key used as the filename suffix so retries overwrite the same
+     *                        file rather than accumulating new ones; falls back to a random UUID
+     *                        if blank
      * @return the filename (not the full path) of the saved PDF
      */
     public String generate(List<OperatorEscalationDetail> operators, int level, String officerName,
-                           String officerUserType) throws IOException {
+                           String officerUserType, String correlationId) throws IOException {
         ensureReportDirExists();
 
         String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         String safeOfficerName = (officerName != null ? officerName : "Unknown")
                 .replaceAll("[^a-zA-Z0-9_\\-]", "_");
+        String sanitizedCorrelationId = correlationId != null
+                ? correlationId.replaceAll("[^a-zA-Z0-9_\\-]", "") : "";
+        String stableKey = sanitizedCorrelationId.isBlank()
+                ? UUID.randomUUID().toString() : sanitizedCorrelationId;
         String filename = String.format("escalation_L%d_%s_%s-%s.pdf",
-                level, safeOfficerName, dateStr, UUID.randomUUID());
+                level, safeOfficerName, dateStr, stableKey);
         Path filePath = Paths.get(reportDir, filename);
 
         String roleLabel = (officerUserType != null && !officerUserType.isBlank())

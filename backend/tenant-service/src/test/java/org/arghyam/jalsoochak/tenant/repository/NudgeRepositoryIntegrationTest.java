@@ -155,6 +155,16 @@ class NudgeRepositoryIntegrationTest {
     }
 
     @Test
+    void streamUsersWithNoUploadToday_excludesOperator_whenUserIsInactive() {
+        int opId = insertInactiveUser("Op Deactivated", "914500000001", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1); // active mapping, but user is inactive
+
+        List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     void streamUsersWithNoUploadToday_includesOperator_whenReadingFromYesterdayOnly() {
         int opId = insertUser("Op Yesterday", "915555555555", operatorTypeId);
         insertSchemeMapping(opId, schemeId, 1);
@@ -230,6 +240,17 @@ class NudgeRepositoryIntegrationTest {
     }
 
     @Test
+    void streamUsersWithMissedDays_excludesOperator_whenUserIsInactive() {
+        int opId = insertInactiveUser("Op Deactivated Missed", "914500000002", operatorTypeId);
+        insertSchemeMapping(opId, schemeId, 1); // active mapping, but user is inactive
+        // no readings → would normally be included (never uploaded)
+
+        List<Map<String, Object>> result = collectMissedDays("tenant_test", 3);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     void streamUsersWithMissedDays_includesSchemeName() {
         jdbcTemplate.update("UPDATE tenant_test.scheme_master_table SET state_scheme_id = 'MY-SCHEME' WHERE id = ?", schemeId);
         int opId = insertUser("Op Scheme", "917070707070", operatorTypeId);
@@ -260,6 +281,17 @@ class NudgeRepositoryIntegrationTest {
     void findOfficerByUserType_returnsNull_whenNoOfficerMapped() {
         Map<String, Object> result = nudgeRepository.findOfficerByUserType(
                 "tenant_test", schemeId, "DISTRICT_OFFICER");
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void findOfficerByUserType_returnsNull_whenUserIsInactive() {
+        int officerId = insertInactiveUser("SO Inactive User", "914500000003", sectionOfficerTypeId);
+        insertSchemeMapping(officerId, schemeId, 1); // active mapping, but user is inactive
+
+        Map<String, Object> result = nudgeRepository.findOfficerByUserType(
+                "tenant_test", schemeId, "SECTION_OFFICER");
 
         assertThat(result).isNull();
     }
@@ -319,6 +351,17 @@ class NudgeRepositoryIntegrationTest {
                 : result.values().iterator().next();
         assertThat(((Number) chosen.get("user_id")).intValue()).isEqualTo(officerLow);
         assertThat(chosen.get("name")).isEqualTo("SO First");
+    }
+
+    @Test
+    void findAllOfficersByUserType_excludesInactiveUsers() {
+        int officerId = insertInactiveUser("SO Inactive User2", "914500000004", sectionOfficerTypeId);
+        insertSchemeMapping(officerId, schemeId, 1); // active mapping, but user is inactive
+
+        java.util.Map<Object, java.util.Map<String, Object>> result =
+                nudgeRepository.findAllOfficersByUserType("tenant_test", "SECTION_OFFICER");
+
+        assertThat(result).isEmpty();
     }
 
     @Test
@@ -483,6 +526,13 @@ class NudgeRepositoryIntegrationTest {
                 "INSERT INTO tenant_test.user_table (title, phone_number, user_type, language_id, email) " +
                 "VALUES (?, ?, ?, ?, ?) RETURNING id",
                 Integer.class, name, phone, userTypeId, languageId, phone + "@test.com");
+    }
+
+    private int insertInactiveUser(String name, String phone, int userTypeId) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO tenant_test.user_table (title, phone_number, user_type, language_id, email, status) " +
+                "VALUES (?, ?, ?, 0, ?, 0) RETURNING id",
+                Integer.class, name, phone, userTypeId, phone + "@test.com");
     }
 
     private void insertSchemeMapping(int userId, int schemeId, int status) {

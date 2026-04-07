@@ -16,10 +16,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.util.List;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.SmsCountryService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +30,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -61,6 +66,12 @@ class NotificationEventRouterTest {
     @Mock
     private AccountEmailService accountEmailService;
 
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
+    @Mock
+    private SmsCountryService smsCountryService;
+
     @InjectMocks
     private NotificationEventRouter router;
 
@@ -73,6 +84,19 @@ class NotificationEventRouterTest {
         ReflectionTestUtils.setField(router, "objectMapper", new ObjectMapper());
         ReflectionTestUtils.setField(router, "reportDir", tempDir.toString() + "/");
         ReflectionTestUtils.setField(router, "baseUrl", "https://example.com");
+    }
+
+    /**
+     * Helper method to stub jdbcTemplate.query for user lookup.
+     * Centralizes the SQL matcher and return list handling.
+     */
+    @SuppressWarnings("unchecked")
+    private void stubUserLookup(String tenantCode, String phone, List<Long> returnList) {
+        when(jdbcTemplate.query(
+                argThat(sql -> sql.contains("FROM tenant_" + tenantCode + ".user_table") && sql.contains("WHERE phone_number = ?")),
+                any(RowMapper.class),
+                eq(phone)))
+                .thenReturn(returnList);
     }
 
     // ──────────────────────────────── NUDGE ────────────────────────────────────
@@ -149,7 +173,49 @@ class NotificationEventRouterTest {
 
     @Test
     void route_generatesAndSendsEscalation_usingStoredContactId_whenPresent() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("report.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("report.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
+        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+
+        router.route("""
+                {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
+                 "escalationLevel":2,"tenantId":1,"officerLanguageId":1,
+                 "officerId":20,"officerWhatsappConnectionId":77,"tenantSchema":"tenant_mp",
+                 "officerUserType":"JE","correlationId":"corr-stored",
+                 "operators":[{"name":"Op A","phoneNumber":"911111111111","schemeName":"S1",
+                               "schemeId":"1","soName":"SO X","consecutiveDaysMissed":8,
+                               "lastRecordedBfmDate":"2024-01-01"}]}
+                """);
+
+        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"), eq("corr-stored"));
+        verify(minioStorageService).upload(any(Path.class));
+        verify(whatsAppChannel).sendDocument(eq(77L), eq("https://minio.example.com/report.pdf"));
+        verify(glificWhatsAppService, never()).optIn(anyString());
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void route_passesEmptyOfficerUserType_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("report.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
+        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
+
+        router.route("""
+                {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
+                 "escalationLevel":2,"tenantId":1,"officerLanguageId":1,
+                 "officerId":20,"officerWhatsappConnectionId":77,"tenantSchema":"tenant_mp",
+                 "correlationId":"corr-no-type",
+                 "operators":[{"name":"Op A","phoneNumber":"911111111111","schemeName":"S1",
+                               "schemeId":"1","soName":"SO X","consecutiveDaysMissed":8,
+                               "lastRecordedBfmDate":"2024-01-01"}]}
+                """);
+
+        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq(""), eq("corr-no-type"));
+    }
+
+    @Test
+    void route_passesEmptyCorrelationId_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq(""))).thenReturn("report.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
@@ -163,34 +229,12 @@ class NotificationEventRouterTest {
                                "lastRecordedBfmDate":"2024-01-01"}]}
                 """);
 
-        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"));
-        verify(minioStorageService).upload(any(Path.class));
-        verify(whatsAppChannel).sendDocument(eq(77L), eq("https://minio.example.com/report.pdf"));
-        verify(glificWhatsAppService, never()).optIn(anyString());
-        verify(kafkaProducer, never()).publishJson(anyString(), any());
-    }
-
-    @Test
-    void route_passesEmptyOfficerUserType_toGeneratePdf_whenFieldAbsentInPayload() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("report.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/report.pdf");
-        when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
-
-        router.route("""
-                {"eventType":"ESCALATION","officerPhone":"919876500000","officerName":"DO Singh",
-                 "escalationLevel":2,"tenantId":1,"officerLanguageId":1,
-                 "officerId":20,"officerWhatsappConnectionId":77,"tenantSchema":"tenant_mp",
-                 "operators":[{"name":"Op A","phoneNumber":"911111111111","schemeName":"S1",
-                               "schemeId":"1","soName":"SO X","consecutiveDaysMissed":8,
-                               "lastRecordedBfmDate":"2024-01-01"}]}
-                """);
-
-        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq(""));
+        verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"), eq(""));
     }
 
     @Test
     void route_fallsBackToOptIn_andPublishesEvent_forEscalation_whenNoStoredContactId() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("r.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), anyString())).thenReturn("r.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/r.pdf");
         when(glificWhatsAppService.optIn("919876500000")).thenReturn(88L);
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
@@ -236,14 +280,14 @@ class NotificationEventRouterTest {
 
     @Test
     void route_isCaseInsensitive_forEscalationEventType() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("r.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-case"))).thenReturn("r.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio.example.com/r.pdf");
         when(glificWhatsAppService.optIn(anyString())).thenReturn(11L);
         when(whatsAppChannel.sendDocument(anyLong(), anyString())).thenReturn(true);
 
         router.route("""
                 {"eventType":"escalation","officerPhone":"919876500002","officerName":"DO",
-                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,
+                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"correlationId":"corr-case",
                  "operators":[{"name":"Op","phoneNumber":"911111111112","schemeName":"S","schemeId":"1",
                                "soName":"SO","consecutiveDaysMissed":4,"lastRecordedBfmDate":"2024-01-01"}]}
                 """);
@@ -277,12 +321,12 @@ class NotificationEventRouterTest {
 
     @Test
     void route_rethrowsException_forKafkaRetry_whenPdfGenerationFails() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString()))
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-pdf-fail")))
                 .thenThrow(new RuntimeException("PDF write failed"));
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500003","officerName":"DO",
-                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,
+                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"correlationId":"corr-pdf-fail",
                  "operators":[{"name":"Op","phoneNumber":"911111111113","schemeName":"S","schemeId":"1",
                                "soName":"SO","consecutiveDaysMissed":4,"lastRecordedBfmDate":"2024-01-01"}]}
                 """))
@@ -292,12 +336,12 @@ class NotificationEventRouterTest {
 
     @Test
     void route_rethrowsException_forKafkaRetry_whenMinioUploadFails() throws Exception {
-        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString())).thenReturn("r.pdf");
+        when(escalationPdfService.generate(anyList(), anyInt(), anyString(), anyString(), eq("corr-minio-fail"))).thenReturn("r.pdf");
         when(minioStorageService.upload(any(Path.class))).thenThrow(new Exception("MinIO error"));
 
         assertThatThrownBy(() -> router.route("""
                 {"eventType":"ESCALATION","officerPhone":"919876500004","officerName":"DO",
-                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,
+                 "escalationLevel":1,"tenantId":1,"officerLanguageId":0,"correlationId":"corr-minio-fail",
                  "operators":[{"name":"Op","phoneNumber":"911111111114","schemeName":"S","schemeId":"1",
                                "soName":"SO","consecutiveDaysMissed":4,"lastRecordedBfmDate":"2024-01-01"}]}
                 """))
@@ -606,5 +650,175 @@ class NotificationEventRouterTest {
                 """);
 
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
+    }
+
+    // ──────────────────────────────── SEND_LOGIN_OTP ───────────────────────────
+
+    @Test
+    void route_sendsLoginOtp_usingStoredGlificId() {
+        when(whatsAppChannel.sendLoginOtp(42L, "654321")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO Singh",
+                 "OTP":"654321","deliveryChannel":"WHATSAPP","glific_id":42}
+                """);
+
+        verify(whatsAppChannel).sendLoginOtp(42L, "654321");
+        verify(glificWhatsAppService, never()).optIn(anyString());
+    }
+
+    @Test
+    void route_sendsLoginOtp_usingOptIn_whenGlificIdAbsent() {
+        when(glificWhatsAppService.optIn("919876500010")).thenReturn(77L);
+        when(whatsAppChannel.sendLoginOtp(77L, "654321")).thenReturn(true);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO Singh",
+                 "OTP":"654321","deliveryChannel":"WHATSAPP","glific_id":"","officerPhoneNumber":"919876500010"}
+                """);
+
+        verify(glificWhatsAppService).optIn("919876500010");
+        verify(whatsAppChannel).sendLoginOtp(77L, "654321");
+    }
+
+    @Test
+    void route_skipsLoginOtp_whenOtpIsBlank() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"","glific_id":"42"}
+                """);
+
+        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsLoginOtp_whenNeitherGlificIdNorPhoneProvided() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"999999",
+                 "glific_id":"","officerPhoneNumber":""}
+                """);
+
+        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsLoginOtp_whenGlificIdIsInvalidNumber() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"111111",
+                 "glific_id":"not-a-number"}
+                """);
+
+        verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
+    }
+
+    @Test
+    void route_rethrowsException_whenLoginOtpDeliveryFails() {
+        when(glificWhatsAppService.optIn(anyString())).thenReturn(55L);
+        when(whatsAppChannel.sendLoginOtp(anyLong(), anyString()))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"222222",
+                 "deliveryChannel":"WHATSAPP","glific_id":"","officerPhoneNumber":"919000000002"}
+                """))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
+    }
+
+    // ──────────────────────── SEND_WELCOME_MESSAGE ─────────────────────────────
+
+    @Test
+    void route_sendsWelcomeMessage_whenContactIdFound() {
+        stubUserLookup("mp", "919111111111", List.of(88L));
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919111111111"]}
+                """);
+
+        verify(glificWhatsAppService).startWelcomeFlow(88L);
+        verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
+    }
+
+    @Test
+    void route_routesToDlt_whenNoContactIdFound() {
+        stubUserLookup("mp", "919222222222", List.of());
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919222222222"]}
+                """);
+
+        verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong());
+        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"), any());
+    }
+
+    @Test
+    void route_skipsWelcomeMessage_whenTenantCodeIsBlank() {
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"",
+                 "pumpOperatorPhones":["919333333333"]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsWelcomeMessage_whenPhonesListIsEmpty() {
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":[]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService);
+    }
+
+    // ──────────────────────── UPDATE_USER_LANGUAGE ─────────────────────────────
+
+    @Test
+    void route_updatesLanguage_whenContactIdFound() {
+        stubUserLookup("mp", "919444444444", List.of(99L));
+
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "glificLanguageId":3,
+                 "pumpOperatorPhones":["919444444444"]}
+                """);
+
+        verify(glificWhatsAppService).updateContactLanguage(99L, 3);
+    }
+
+    @Test
+    void route_rethrowsException_whenUpdateLanguageFails_forPhoneNotFound() {
+        stubUserLookup("mp", "919555555555", List.of());
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "glificLanguageId":2,
+                 "pumpOperatorPhones":["919555555555"]}
+                """))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
+    }
+
+    @Test
+    void route_skipsUpdateLanguage_whenTenantCodeIsInvalid() {
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"INVALID CODE!",
+                 "glificLanguageId":1,
+                 "pumpOperatorPhones":["919666666666"]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService, jdbcTemplate);
+    }
+
+    @Test
+    void route_skipsUpdateLanguage_whenGlificLanguageIdIsZero() {
+        router.route("""
+                {"eventType":"UPDATE_USER_LANGUAGE","tenantCode":"mp",
+                 "glificLanguageId":0,
+                 "pumpOperatorPhones":["919777777777"]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService, jdbcTemplate);
     }
 }
