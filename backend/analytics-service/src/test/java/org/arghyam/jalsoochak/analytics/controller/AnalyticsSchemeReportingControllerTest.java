@@ -444,6 +444,7 @@ class AnalyticsSchemeReportingControllerTest {
                 eq("2"),
                 eq(101),
                 eq("Test"),
+                eq(0),
                 eq(start),
                 eq(end),
                 any(Pageable.class)
@@ -457,6 +458,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("escalation_type", "2")
                         .param("scheme_id", "101")
                         .param("scheme_name", "Test")
+                        .param("resolution_status", "0")
                         .param("start_date", start.toString())
                         .param("end_date", end.toString()))
                 .andExpect(status().isOk())
@@ -486,6 +488,7 @@ class AnalyticsSchemeReportingControllerTest {
                 eq("2"),
                 eq(101),
                 eq("Test"),
+                eq(0),
                 eq(start),
                 eq(end),
                 any(Pageable.class)
@@ -497,6 +500,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("escalation_type", "2")
                         .param("scheme_id", "101")
                         .param("scheme_name", "Test")
+                        .param("resolution_status", "0")
                         .param("start_date", start.toString())
                         .param("end_date", end.toString()))
                 .andExpect(status().isOk())
@@ -526,7 +530,7 @@ class AnalyticsSchemeReportingControllerTest {
 
         Page<AnomalyListItemDto> anomalyPage = new PageImpl<>(List.of(a1), PageRequest.of(0, 10), 25);
         when(anomalyQueryService.getAnomaliesForUserSchemes(
-                eq(10), eq(9001), eq(start), eq(end), eq("2"), eq("Mapped"), any(Pageable.class)))
+                eq(10), eq(9001), eq(start), eq(end), eq("2"), eq("Mapped"), eq(1), any(Pageable.class)))
                 .thenReturn(anomalyPage);
 
         mockMvc.perform(get(BASE + "/anomalies")
@@ -536,6 +540,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("end_date", end.toString())
                         .param("anomaly_type", "2")
                         .param("scheme_name", "Mapped")
+                        .param("status", "1")
                         .param("page_number", "1")
                         .param("limit", "10"))
                 .andExpect(status().isOk())
@@ -551,7 +556,7 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.anomalies[0].scheme_name").value("Mapped Scheme"));
 
         verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(
-                eq(10), eq(9001), eq(start), eq(end), eq("2"), eq("Mapped"), any(Pageable.class));
+                eq(10), eq(9001), eq(start), eq(end), eq("2"), eq("Mapped"), eq(1), any(Pageable.class));
     }
 
     @Test
@@ -605,7 +610,7 @@ class AnalyticsSchemeReportingControllerTest {
     void getAnomalies_withoutDates_defaultsHandledInService() throws Exception {
         Page<AnomalyListItemDto> empty = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
         when(anomalyQueryService.getAnomaliesForUserSchemes(
-                eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
+                eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
                 .thenReturn(empty);
 
         mockMvc.perform(get(BASE + "/anomalies")
@@ -619,7 +624,7 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.anomalies").isArray());
 
         verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(
-                eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), any(Pageable.class));
+                eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class));
     }
 
     private static Stream<Arguments> schemeStatusValidRoutes() {

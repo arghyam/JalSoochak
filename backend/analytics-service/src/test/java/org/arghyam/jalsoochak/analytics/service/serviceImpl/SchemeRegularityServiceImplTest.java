@@ -591,7 +591,7 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getLgdLevel(101)).thenReturn(2);
         when(schemeRegularityRepository.getRegionWiseWaterQuantityByLgd(101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(401, null, "LGD-A", 120L, 10L, 9L, 12L)
+                        new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(401, null, "LGD-A", 120L, 10L, 9L, 12L, 5L)
                 ));
 
         var response = service.getRegionWiseWaterQuantityByLgd(101, START, END);
@@ -606,7 +606,7 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getDepartmentLevel(201)).thenReturn(2);
         when(schemeRegularityRepository.getRegionWiseWaterQuantityByDepartment(201, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(null, 501, "Dept-A", 150L, 11L, 10L, 13L)
+                        new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(null, 501, "Dept-A", 150L, 11L, 10L, 13L, 6L)
                 ));
 
         var response = service.getRegionWiseWaterQuantityByDepartment(201, START, END);

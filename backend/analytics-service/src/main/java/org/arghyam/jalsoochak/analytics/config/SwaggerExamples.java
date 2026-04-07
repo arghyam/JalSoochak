@@ -248,7 +248,8 @@ public final class SwaggerExamples {
                     "childLgdTitle": "Child Region Title",
                     "schemeCount": 2,
                     "householdCount": 150,
-                    "totalWaterQuantity": 8200
+                    "totalWaterQuantity": 8200,
+                    "supplyDaysInEfficientRange": 45
                   }
                 ]
               }

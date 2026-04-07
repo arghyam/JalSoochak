@@ -42,10 +42,11 @@ class AnomalyQueryServiceTest {
                 eq(end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC)),
                 eq(""),
                 eq(""),
+                eq(-1),
                 eq(pageable)))
                 .thenReturn(org.springframework.data.domain.Page.empty(pageable));
 
-        anomalyQueryService.getAnomaliesForUserSchemes(10, 42, start, end, null, null, pageable);
+        anomalyQueryService.getAnomaliesForUserSchemes(10, 42, start, end, null, null, null, pageable);
 
         verify(anomalyRepository).findAnomaliesForMappedUserSchemesInRange(
                 eq(10),
@@ -54,6 +55,7 @@ class AnomalyQueryServiceTest {
                 eq(end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC)),
                 eq(""),
                 eq(""),
+                eq(-1),
                 eq(pageable));
     }
 
@@ -61,16 +63,16 @@ class AnomalyQueryServiceTest {
     void getAnomaliesForUserSchemes_trimsAnomalyTypeAndSchemeName() {
         Pageable pageable = PageRequest.of(0, 10);
         when(anomalyRepository.findAnomaliesForMappedUserSchemesInRange(
-                any(), any(), any(), any(), eq("3"), eq("My Scheme"), eq(pageable)))
+                any(), any(), any(), any(), eq("3"), eq("My Scheme"), eq(2), eq(pageable)))
                 .thenReturn(org.springframework.data.domain.Page.empty(pageable));
 
         anomalyQueryService.getAnomaliesForUserSchemes(
-                1, 1, LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), "  3  ", "  My Scheme  ", pageable);
+                1, 1, LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28), "  3  ", "  My Scheme  ", 2, pageable);
 
         ArgumentCaptor<String> typeCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> schemeCaptor = ArgumentCaptor.forClass(String.class);
         verify(anomalyRepository).findAnomaliesForMappedUserSchemesInRange(
-                any(), any(), any(), any(), typeCaptor.capture(), schemeCaptor.capture(), eq(pageable));
+                any(), any(), any(), any(), typeCaptor.capture(), schemeCaptor.capture(), eq(2), eq(pageable));
         assertThat(typeCaptor.getValue()).isEqualTo("3");
         assertThat(schemeCaptor.getValue()).isEqualTo("My Scheme");
     }

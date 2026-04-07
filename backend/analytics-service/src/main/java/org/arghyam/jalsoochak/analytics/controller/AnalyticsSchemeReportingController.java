@@ -312,6 +312,7 @@ public class AnalyticsSchemeReportingController {
             @RequestParam(name = "escalation_type", required = false) String escalationType,
             @RequestParam(name = "scheme_id", required = false) Integer schemeId,
             @RequestParam(name = "scheme_name", required = false) String schemeName,
+            @RequestParam(name = "resolution_status", required = false) Integer resolutionStatus,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
@@ -330,6 +331,7 @@ public class AnalyticsSchemeReportingController {
                     escalationType,
                     schemeId,
                     schemeName,
+                    resolutionStatus,
                     startDate,
                     endDate,
                     pageable
@@ -457,7 +459,8 @@ public class AnalyticsSchemeReportingController {
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "anomaly_type", required = false) String anomalyType,
-            @RequestParam(name = "scheme_name", required = false) String schemeName
+            @RequestParam(name = "scheme_name", required = false) String schemeName,
+            @RequestParam(name = "status", required = false) Integer status
     ) {
         try {
             if (pageNumber < 1) {
@@ -475,6 +478,7 @@ public class AnalyticsSchemeReportingController {
                     endDate,
                     anomalyType,
                     schemeName,
+                    status,
                     pageable
             );
 
