@@ -477,6 +477,12 @@ public class NotificationEventRouter {
                 return;
             }
 
+            // Validate expiryMinutes and default to 5 if invalid
+            if (expiryMinutes <= 0) {
+                log.warn("[Router/SEND_LOGIN_OTP/SMS] invalid expiryMinutes={}, defaulting to 5", expiryMinutes);
+                expiryMinutes = 5;
+            }
+
             // Use reactive flow to avoid blocking the Kafka listener thread
             smsCountryService.sendOtpReactive(phone, otp, expiryMinutes)
                     .doOnNext(sent -> {

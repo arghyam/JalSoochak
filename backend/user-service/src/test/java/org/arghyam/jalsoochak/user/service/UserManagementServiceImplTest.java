@@ -778,9 +778,11 @@ class UserManagementServiceImplTest {
         @DisplayName("SUPER_USER: should update Keycloak only (no tenant schema call)")
         void updateMe_superUser_updatesKeycloakOnly() {
             AdminUserRow user = userRow(1L, "kc-id", "user@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
+            AdminUserRow refreshedUser = userRow(1L, "kc-id", "user@example.com", 0, 1, "SUPER_USER", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(1L, "user@example.com", "SUPER_USER");
 
             when(userCommonRepository.findAdminUserByUuid("kc-id")).thenReturn(Optional.of(user));
+            when(userCommonRepository.findAdminUserById(1L)).thenReturn(Optional.of(refreshedUser));
             when(keycloakProvider.getRealm()).thenReturn("test-realm");
             UserRepresentation rep = new UserRepresentation();
             rep.setFirstName("Old");
@@ -796,16 +798,18 @@ class UserManagementServiceImplTest {
 
             assertNotNull(result);
             verify(userTenantRepository, org.mockito.Mockito.never()).updateUserProfile(any(), any(), any(), any());
-            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(user);
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(refreshedUser);
         }
 
         @Test
         @DisplayName("STATE_ADMIN: should sync tenant schema when name changes")
         void updateMe_stateAdmin_updatesTenantSchema() {
             AdminUserRow user = userRow(2L, "kc-sa", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
+            AdminUserRow refreshedUser = userRow(2L, "kc-sa", "sa@example.com", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE);
             AdminUserResponseDTO dto = responseDTO(2L, "sa@example.com", "STATE_ADMIN");
 
             when(userCommonRepository.findAdminUserByUuid("kc-sa")).thenReturn(Optional.of(user));
+            when(userCommonRepository.findAdminUserById(2L)).thenReturn(Optional.of(refreshedUser));
             when(keycloakProvider.getRealm()).thenReturn("test-realm");
             UserRepresentation rep = new UserRepresentation();
             rep.setFirstName("State");
@@ -822,7 +826,7 @@ class UserManagementServiceImplTest {
             userManagementService.updateMe("kc-sa", req);
 
             verify(userTenantRepository).updateUserProfile(eq("tenant_mp"), any(), anyString(), any());
-            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(user);
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(refreshedUser);
         }
     }
 

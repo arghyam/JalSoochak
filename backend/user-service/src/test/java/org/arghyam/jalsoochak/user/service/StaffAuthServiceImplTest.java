@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.user.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -105,7 +106,7 @@ class StaffAuthServiceImplTest {
             service.requestOtp(request);
 
             verify(otpService).requestOtp(10L, 1, OtpType.LOGIN);
-            verify(eventPublisher).publishLoginOtpAfterCommit(any(SendLoginOtpEvent.class));
+            verify(eventPublisher).publishLoginOtpAfterCommit(any(SendLoginOtpEvent.class), eq(10L), eq("MP"));
         }
 
         @Test
@@ -116,7 +117,7 @@ class StaffAuthServiceImplTest {
             service.requestOtp(request); // must not throw
 
             verify(otpService, never()).requestOtp(any(), any(), any());
-            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any());
+            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any(), any(), any());
         }
 
         @Test
@@ -157,7 +158,7 @@ class StaffAuthServiceImplTest {
 
             service.requestOtp(request); // must not throw
 
-            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any());
+            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any(), any(), any());
         }
 
         @Test
@@ -169,7 +170,7 @@ class StaffAuthServiceImplTest {
             service.requestOtp(request);
 
             verify(otpService, never()).requestOtp(any(), any(), any());
-            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any());
+            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any(), any(), any());
         }
 
         @Test
@@ -229,7 +230,7 @@ class StaffAuthServiceImplTest {
             service.requestOtp(request); // must not throw
 
             verify(otpService, never()).requestOtp(any(), any(), any());
-            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any());
+            verify(eventPublisher, never()).publishLoginOtpAfterCommit(any(), any(), any());
         }
     }
 

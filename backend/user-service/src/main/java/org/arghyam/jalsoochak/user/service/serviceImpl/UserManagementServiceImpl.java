@@ -491,7 +491,9 @@ public class UserManagementServiceImpl implements UserManagementService {
 
         usersResource.get(user.uuid()).update(rep);
 
-        AdminUserRow refreshedUser = userCommonRepository.findAdminUserById(id).orElse(user);
+        AdminUserRow refreshedUser = userCommonRepository.findAdminUserById(id)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Failed to refresh user after profile update [id=" + id + "]"));
         userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(refreshedUser);
         return keycloakAdminHelper.buildAdminUserResponse(refreshedUser);
     }

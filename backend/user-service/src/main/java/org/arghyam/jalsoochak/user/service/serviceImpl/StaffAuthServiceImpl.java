@@ -127,8 +127,7 @@ public class StaffAuthServiceImpl implements StaffAuthService {
                 .deliveryChannel(otpProperties.deliveryChannel())
                 .build();
 
-        eventPublisher.publishLoginOtpAfterCommit(event);
-        log.info("OTP requested for staffUserId={} tenantCode={}", user.id(), tenantCode);
+        eventPublisher.publishLoginOtpAfterCommit(event, user.id(), tenantCode);
         return new OtpRequestResponseDTO(otpProperties.otpLength());
     }
 

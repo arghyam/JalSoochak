@@ -101,6 +101,10 @@ public class TenantEventListener {
             log.warn("Cannot publish TENANT_LOCATION_HIERARCHY_UPDATED event: tenantId or stateCode is null/blank [tenantId={}]", event.getTenantId());
             return;
         }
+        if (event.getHierarchyType() == null || event.getHierarchyType().isBlank()) {
+            log.warn("Cannot publish TENANT_LOCATION_HIERARCHY_UPDATED event: hierarchyType is null/blank [tenantId={}]", event.getTenantId());
+            return;
+        }
         if (event.getLevels() == null) {
             log.warn("Cannot publish TENANT_LOCATION_HIERARCHY_UPDATED event: levels is null [tenantId={}]", event.getTenantId());
             return;
