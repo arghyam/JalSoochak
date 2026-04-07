@@ -2174,7 +2174,19 @@ public class SchemeRegularityRepository {
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(parentLgdLevel);
 
         String sql = String.format("""
-                WITH child_regions AS (
+                WITH tenant_cfg AS (
+                    SELECT
+                        t.tenant_id,
+                        COALESCE(t.required_lpcd, 0) AS required_lpcd,
+                        COALESCE(t.person_count_per_household, 5) AS person_count_per_household,
+                        COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
+                        COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
+                    FROM analytics_schema.dim_tenant_table t
+                    JOIN analytics_schema.dim_lgd_location_table l
+                        ON l.tenant_id = t.tenant_id
+                    WHERE l.lgd_id = ?
+                ),
+                child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id,
                         l.title
@@ -2192,6 +2204,11 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
                 ),
+                dates_in_range AS (
+                    SELECT d.full_date AS date
+                    FROM analytics_schema.dim_date_table d
+                    WHERE d.full_date BETWEEN ? AND ?
+                ),
                 ewater_by_scheme AS (
                     SELECT
                         f.scheme_id,
@@ -2199,20 +2216,75 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.scheme_id
+                ),
+                region_scheme_agg AS (
+                    SELECT
+                        s.child_lgd_id,
+                        COALESCE(SUM(s.house_hold_count), 0)::bigint AS household_count,
+                        COALESCE(SUM(s.fhtc_count), 0)::bigint AS fhtc_count,
+                        COALESCE(SUM(s.planned_fhtc), 0)::bigint AS planned_fhtc,
+                        COALESCE(SUM(w.total_ewater_quantity), 0)::bigint AS ewater_quantity
+                    FROM schemes_in_scope s
+                    LEFT JOIN ewater_by_scheme w
+                        ON w.scheme_id = s.scheme_id
+                    GROUP BY s.child_lgd_id
+                ),
+                ewater_by_scheme_day AS (
+                    SELECT
+                        f.scheme_id,
+                        f.date,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.scheme_id, f.date
+                ),
+                region_supply_days AS (
+                    SELECT
+                        sd.child_lgd_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                     (
+                                         (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 - (tc.under_supply_range_percentage::numeric / 100))
+                                     )
+                                     AND
+                                     (
+                                         (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 + (tc.over_supply_range_percentage::numeric / 100))
+                                     )
+                                    THEN 1
+                                ELSE 0
+                            END
+                    ), 0)::bigint AS supply_days_in_efficient_range
+                    FROM (
+                        SELECT
+                            s.scheme_id,
+                            s.child_lgd_id,
+                            s.fhtc_count,
+                            dr.date
+                        FROM schemes_in_scope s
+                        CROSS JOIN dates_in_range dr
+                    ) sd
+                    LEFT JOIN ewater_by_scheme_day wd
+                        ON wd.scheme_id = sd.scheme_id
+                        AND wd.date = sd.date
+                    CROSS JOIN tenant_cfg tc
+                    GROUP BY sd.child_lgd_id
                 )
                 SELECT
                     c.child_lgd_id AS lgd_id,
                     c.title,
-                    COALESCE(SUM(s.house_hold_count), 0)::bigint AS household_count,
-                    COALESCE(SUM(s.fhtc_count), 0)::bigint AS fhtc_count,
-                    COALESCE(SUM(s.planned_fhtc), 0)::bigint AS planned_fhtc,
-                    COALESCE(SUM(w.total_ewater_quantity), 0)::bigint AS ewater_quantity
+                    COALESCE(a.household_count, 0)::bigint AS household_count,
+                    COALESCE(a.fhtc_count, 0)::bigint AS fhtc_count,
+                    COALESCE(a.planned_fhtc, 0)::bigint AS planned_fhtc,
+                    COALESCE(a.ewater_quantity, 0)::bigint AS ewater_quantity,
+                    COALESCE(ps.supply_days_in_efficient_range, 0)::bigint AS supply_days_in_efficient_range
                 FROM child_regions c
-                LEFT JOIN schemes_in_scope s
-                    ON s.child_lgd_id = c.child_lgd_id
-                LEFT JOIN ewater_by_scheme w
-                    ON w.scheme_id = s.scheme_id
-                GROUP BY c.child_lgd_id, c.title
+                LEFT JOIN region_scheme_agg a
+                    ON a.child_lgd_id = c.child_lgd_id
+                LEFT JOIN region_supply_days ps
+                    ON ps.child_lgd_id = c.child_lgd_id
                 ORDER BY c.child_lgd_id
                 """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
 
@@ -2225,10 +2297,16 @@ public class SchemeRegularityRepository {
                         rs.getLong("ewater_quantity"),
                         rs.getLong("household_count"),
                         rs.getLong("fhtc_count"),
-                        rs.getLong("planned_fhtc")),
+                        rs.getLong("planned_fhtc"),
+                        rs.getLong("supply_days_in_efficient_range")),
+                parentLgdId,
                 childLevel,
                 parentLgdId,
                 parentLgdId,
+                startDate,
+                endDate,
+                startDate,
+                endDate,
                 startDate,
                 endDate);
     }
@@ -2250,7 +2328,19 @@ public class SchemeRegularityRepository {
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(parentDepartmentLevel);
 
         String sql = String.format("""
-                WITH child_regions AS (
+                WITH tenant_cfg AS (
+                    SELECT
+                        t.tenant_id,
+                        COALESCE(t.required_lpcd, 0) AS required_lpcd,
+                        COALESCE(t.person_count_per_household, 5) AS person_count_per_household,
+                        COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
+                        COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
+                    FROM analytics_schema.dim_tenant_table t
+                    JOIN analytics_schema.dim_department_location_table d
+                        ON d.tenant_id = t.tenant_id
+                    WHERE d.department_id = ?
+                ),
+                child_regions AS (
                     SELECT
                         d.department_id AS child_department_id,
                         d.title
@@ -2268,6 +2358,11 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
                 ),
+                dates_in_range AS (
+                    SELECT d.full_date AS date
+                    FROM analytics_schema.dim_date_table d
+                    WHERE d.full_date BETWEEN ? AND ?
+                ),
                 ewater_by_scheme AS (
                     SELECT
                         f.scheme_id,
@@ -2275,20 +2370,75 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.scheme_id
+                ),
+                region_scheme_agg AS (
+                    SELECT
+                        s.child_department_id,
+                        COALESCE(SUM(s.house_hold_count), 0)::bigint AS household_count,
+                        COALESCE(SUM(s.fhtc_count), 0)::bigint AS fhtc_count,
+                        COALESCE(SUM(s.planned_fhtc), 0)::bigint AS planned_fhtc,
+                        COALESCE(SUM(w.total_ewater_quantity), 0)::bigint AS ewater_quantity
+                    FROM schemes_in_scope s
+                    LEFT JOIN ewater_by_scheme w
+                        ON w.scheme_id = s.scheme_id
+                    GROUP BY s.child_department_id
+                ),
+                ewater_by_scheme_day AS (
+                    SELECT
+                        f.scheme_id,
+                        f.date,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.scheme_id, f.date
+                ),
+                region_supply_days AS (
+                    SELECT
+                        sd.child_department_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                     (
+                                         (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 - (tc.under_supply_range_percentage::numeric / 100))
+                                     )
+                                     AND
+                                     (
+                                         (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 + (tc.over_supply_range_percentage::numeric / 100))
+                                     )
+                                    THEN 1
+                                ELSE 0
+                            END
+                    ), 0)::bigint AS supply_days_in_efficient_range
+                    FROM (
+                        SELECT
+                            s.scheme_id,
+                            s.child_department_id,
+                            s.fhtc_count,
+                            dr.date
+                        FROM schemes_in_scope s
+                        CROSS JOIN dates_in_range dr
+                    ) sd
+                    LEFT JOIN ewater_by_scheme_day wd
+                        ON wd.scheme_id = sd.scheme_id
+                        AND wd.date = sd.date
+                    CROSS JOIN tenant_cfg tc
+                    GROUP BY sd.child_department_id
                 )
                 SELECT
                     c.child_department_id AS department_id,
                     c.title,
-                    COALESCE(SUM(s.house_hold_count), 0)::bigint AS household_count,
-                    COALESCE(SUM(s.fhtc_count), 0)::bigint AS fhtc_count,
-                    COALESCE(SUM(s.planned_fhtc), 0)::bigint AS planned_fhtc,
-                    COALESCE(SUM(w.total_ewater_quantity), 0)::bigint AS ewater_quantity
+                    COALESCE(a.household_count, 0)::bigint AS household_count,
+                    COALESCE(a.fhtc_count, 0)::bigint AS fhtc_count,
+                    COALESCE(a.planned_fhtc, 0)::bigint AS planned_fhtc,
+                    COALESCE(a.ewater_quantity, 0)::bigint AS ewater_quantity,
+                    COALESCE(ps.supply_days_in_efficient_range, 0)::bigint AS supply_days_in_efficient_range
                 FROM child_regions c
-                LEFT JOIN schemes_in_scope s
-                    ON s.child_department_id = c.child_department_id
-                LEFT JOIN ewater_by_scheme w
-                    ON w.scheme_id = s.scheme_id
-                GROUP BY c.child_department_id, c.title
+                LEFT JOIN region_scheme_agg a
+                    ON a.child_department_id = c.child_department_id
+                LEFT JOIN region_supply_days ps
+                    ON ps.child_department_id = c.child_department_id
                 ORDER BY c.child_department_id
                 """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
 
@@ -2301,10 +2451,16 @@ public class SchemeRegularityRepository {
                         rs.getLong("ewater_quantity"),
                         rs.getLong("household_count"),
                         rs.getLong("fhtc_count"),
-                        rs.getLong("planned_fhtc")),
+                        rs.getLong("planned_fhtc"),
+                        rs.getLong("supply_days_in_efficient_range")),
+                parentDepartmentId,
                 childLevel,
                 parentDepartmentId,
                 parentDepartmentId,
+                startDate,
+                endDate,
+                startDate,
+                endDate,
                 startDate,
                 endDate);
     }
@@ -2813,7 +2969,8 @@ public class SchemeRegularityRepository {
             Long waterQuantity,
             Long householdCount,
             Long achievedFhtcCount,
-            Long plannedFhtcCount) {
+            Long plannedFhtcCount,
+            Long supplyDaysInEfficientRange) {
     }
 
     public record PeriodicSchemeRegularityMetrics(

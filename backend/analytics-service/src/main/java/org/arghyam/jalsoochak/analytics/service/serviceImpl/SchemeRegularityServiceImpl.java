@@ -1072,7 +1072,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":parent_lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v4";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1095,6 +1095,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .householdCount(metric.householdCount())
                         .achievedFhtcCount(metric.achievedFhtcCount())
                         .plannedFhtcCount(metric.plannedFhtcCount())
+                        .supplyDaysInEfficientRange(metric.supplyDaysInEfficientRange())
                         .build())
                 .toList();
 
@@ -1118,6 +1119,16 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
 
+        String cacheKey = REGION_WISE_WATER_QUANTITY_CACHE_PREFIX
+                + ":parent_department:" + parentDepartmentId
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v2";
+        RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
         Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevel(parentDepartmentId);
         if (parentDepartmentLevel == null) {
             throw new IllegalArgumentException(
@@ -1125,7 +1136,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> metrics =
-                schemeRegularityRepository.getRegionWiseWaterQuantityByDepartment(parentDepartmentId, startDate, endDate);
+                schemeRegularityRepository.getRegionWiseWaterQuantityByDepartment(
+                        parentDepartmentId, startDate, endDate);
 
         List<RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity> childRegions = metrics.stream()
                 .map(metric -> RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity.builder()
@@ -1136,10 +1148,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .householdCount(metric.householdCount())
                         .achievedFhtcCount(metric.achievedFhtcCount())
                         .plannedFhtcCount(metric.plannedFhtcCount())
+                        .supplyDaysInEfficientRange(metric.supplyDaysInEfficientRange())
                         .build())
                 .toList();
 
-        return RegionWiseWaterQuantityResponse.builder()
+        RegionWiseWaterQuantityResponse response = RegionWiseWaterQuantityResponse.builder()
                 .parentLgdId(null)
                 .parentDepartmentId(parentDepartmentId)
                 .parentLgdLevel(null)
@@ -1149,6 +1162,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .childRegionCount(childRegions.size())
                 .childRegions(childRegions)
                 .build();
+        writeToCache(cacheKey, response);
+        return response;
     }
 
     @Override
