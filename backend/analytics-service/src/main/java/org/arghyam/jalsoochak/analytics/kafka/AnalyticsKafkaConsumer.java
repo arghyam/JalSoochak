@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdated
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.AnomalyEvent;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
 import org.arghyam.jalsoochak.analytics.service.FactService;
@@ -46,9 +47,14 @@ public class AnalyticsKafkaConsumer {
                     dimensionService.updateWaterNorm(event);
                 }
                 case "TENANT_LOCATION_HIERARCHY_UPDATED" -> {
-                    TenantLocationHierarchyUpdatedEvent event =
-                            objectMapper.readValue(message, TenantLocationHierarchyUpdatedEvent.class);
+                    TenantLocationHierarchyUpdatedEvent event = objectMapper.readValue(message,
+                            TenantLocationHierarchyUpdatedEvent.class);
                     dimensionService.updateLocationHierarchyNames(event);
+                }
+                case "WATER_SUPPLY_THRESHOLD_UPDATED" -> {
+                    WaterSupplyThresholdUpdatedEvent event = objectMapper.readValue(message,
+                            WaterSupplyThresholdUpdatedEvent.class);
+                    dimensionService.updateWaterSupplyThreshold(event);
                 }
                 default -> log.debug("Ignoring tenant event type: {}", eventType);
             }

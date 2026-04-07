@@ -10,9 +10,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class WaterNormUpdatedEvent {
+public class WaterSupplyThresholdUpdatedEvent {
     private String eventType;
     private Integer tenantId;
     private String stateCode;
-    private Integer waterNorm;
+    private Integer underSupplyThresholdPercent;
+    private Integer overSupplyThresholdPercent;
 }
