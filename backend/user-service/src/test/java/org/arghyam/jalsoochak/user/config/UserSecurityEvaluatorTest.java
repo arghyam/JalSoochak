@@ -256,7 +256,7 @@ class UserSecurityEvaluatorTest {
         }
 
         @Test
-        @DisplayName("behaves like SUPER_USER regardless of authority iteration order")
+        @DisplayName("TENANT_* before ROLE_* does not affect SUPER_STATE_ADMIN behavior")
         void superUserEquivalentRegardlessOfAuthorityOrder() {
             when(userCommonRepository.findAdminUserByUuid("ssa-uuid")).thenReturn(Optional.of(activeAdminRow("ssa-uuid")));
 
@@ -267,6 +267,23 @@ class UserSecurityEvaluatorTest {
                     new SimpleGrantedAuthority("ROLE_SUPER_STATE_ADMIN")));
 
             boolean result = evaluator.canAccessUser(42L, reversedAuth);
+
+            assertTrue(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN wins over STATE_ADMIN when both ROLE_* authorities are present")
+        void superStateAdminTakesPrecedenceOverStateAdmin() {
+            when(userCommonRepository.findAdminUserByUuid("ssa-uuid")).thenReturn(Optional.of(activeAdminRow("ssa-uuid")));
+
+            Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").claim("sub", "ssa-uuid").build();
+            JwtAuthenticationToken multiRoleAuth = new JwtAuthenticationToken(jwt, List.of(
+                    new SimpleGrantedAuthority("ROLE_STATE_ADMIN"),
+                    new SimpleGrantedAuthority("ROLE_SUPER_STATE_ADMIN"),
+                    new SimpleGrantedAuthority("TENANT_MP")));
+
+            boolean result = evaluator.canAccessUser(42L, multiRoleAuth);
 
             assertTrue(result);
             verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());

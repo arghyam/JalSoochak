@@ -403,19 +403,24 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             if (dto == null) {
                 log.error("TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD config resolved to null for tenantId={} — skipping event publish", tenantId);
             } else {
-                String undersupply = String.valueOf(dto.getUndersupplyThresholdPercent());
-                String oversupply = String.valueOf(dto.getOversupplyThresholdPercent());
-                try {
-                    int undersupplyThreshold = dto.getUndersupplyThresholdPercent().intValue();
-                    int oversupplyThreshold = dto.getOversupplyThresholdPercent().intValue();
-                    eventPublisher.publishEvent(new WaterSupplyThresholdUpdatedEvent(
-                            tenantId,
-                            tenant.getStateCode(),
-                            undersupplyThreshold,
-                            oversupplyThreshold));
-                } catch (Exception e) {
-                    log.error("Invalid TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD values '{}', '{}' for tenantId={}, stateCode={} — skipping event publish",
-                            undersupply, oversupply, tenantId, tenant.getStateCode(), e);
+                Double undersupplyRaw = dto.getUndersupplyThresholdPercent();
+                Double oversupplyRaw = dto.getOversupplyThresholdPercent();
+                if (undersupplyRaw == null || oversupplyRaw == null) {
+                    log.error("TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD has null value — undersupply='{}', oversupply='{}' for tenantId={}, stateCode={} — skipping event publish",
+                            undersupplyRaw, oversupplyRaw, tenantId, tenant.getStateCode());
+                } else {
+                    try {
+                        int undersupplyThreshold = undersupplyRaw.intValue();
+                        int oversupplyThreshold = oversupplyRaw.intValue();
+                        eventPublisher.publishEvent(new WaterSupplyThresholdUpdatedEvent(
+                                tenantId,
+                                tenant.getStateCode(),
+                                undersupplyThreshold,
+                                oversupplyThreshold));
+                    } catch (Exception e) {
+                        log.error("Invalid TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD values '{}', '{}' for tenantId={}, stateCode={} — skipping event publish",
+                                undersupplyRaw, oversupplyRaw, tenantId, tenant.getStateCode(), e);
+                    }
                 }
             }
         }

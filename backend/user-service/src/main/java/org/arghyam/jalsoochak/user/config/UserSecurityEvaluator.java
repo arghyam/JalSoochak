@@ -99,7 +99,7 @@ public class UserSecurityEvaluator {
                 return allowed;
             }
 
-            log.warn("Request to user {} denied: caller has neither SUPER_USER nor STATE_ADMIN role", userId);
+            log.warn("Request to user {} denied: caller has neither SUPER_USER, SUPER_STATE_ADMIN nor STATE_ADMIN role", userId);
             return false;
         } catch (Exception e) {
             log.error("Unexpected error evaluating access to user {}: {}", userId, e.getMessage(), e);
