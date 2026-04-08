@@ -148,7 +148,8 @@ public class AuthServiceImpl implements AuthService {
             String tenantCode = parseMetadata(tokenRow.metadata(), "tenantCode");
             Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
                     .orElseThrow(() -> new AccountDeactivatedException("Tenant not found or no longer exists."));
-            TenantAccessRole accessRole = "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN : TenantAccessRole.STAFF;
+            TenantAccessRole accessRole = "STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role)
+                    ? TenantAccessRole.STATE_ADMIN : TenantAccessRole.STAFF;
             validateTenantStatus(tenantId, accessRole);
         }
 
@@ -187,6 +188,7 @@ public class AuthServiceImpl implements AuthService {
         // Derive role from token and validate consistency with pendingUser.userTypeCName()
         TenantAccessRole tokenRole = "SUPER_USER".equals(role) ? TenantAccessRole.SUPER_USER
                 : "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN
+                : "SUPER_STATE_ADMIN".equals(role) ? TenantAccessRole.SUPER_STATE_ADMIN
                 : TenantAccessRole.STAFF;
         TenantAccessRole adminLevelRole = TenantAccessRole.fromCName(pendingUser.userTypeCName());
         
@@ -229,7 +231,7 @@ public class AuthServiceImpl implements AuthService {
 
             keycloakAdminHelper.assignRoleToUser(keycloakUuid, role);
 
-            if ("STATE_ADMIN".equals(role)) {
+            if ("STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role)) {
                 setKeycloakUserAttribute(usersResource, keycloakUuid, "tenant_state_code", tenantCode);
             } else if (!"SUPER_USER".equals(role)) {
                 setKeycloakUserAttribute(usersResource, keycloakUuid, "user_type", role);
@@ -249,7 +251,7 @@ public class AuthServiceImpl implements AuthService {
                 userAnalyticsEventPublisher.publishUserCreatedAfterCommit(activatedUser, title.isBlank() ? null : title);
             }
 
-            if ("STATE_ADMIN".equals(role)) {
+            if ("STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role)) {
                 String schema = "tenant_" + tenantCode.toLowerCase();
                 String title = request.getFirstName() + " " + request.getLastName();
                 // Use the same Keycloak UUID so both tables share a single identity key
@@ -260,7 +262,7 @@ public class AuthServiceImpl implements AuthService {
             log.info("activateAccount – account activated successfully, role={}", role);
             KeycloakTokenResponse token = keycloakClient.obtainToken(email, request.getPassword());
             String tenantStateCode = "SUPER_USER".equals(role) ? null : tenantCode;
-            String name = "STATE_ADMIN".equals(role)
+            String name = ("STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role))
                     ? request.getFirstName() + " " + request.getLastName()
                     : null;
             Integer resolvedTenantId = "SUPER_USER".equals(role) ? null : tenantId;

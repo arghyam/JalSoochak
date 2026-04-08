@@ -14,7 +14,7 @@ public class InviteRequestDTO {
     private String email;
 
     @NotBlank(message = "Role is required")
-    @Pattern(regexp = "SUPER_USER|STATE_ADMIN", message = "Role must be SUPER_USER or STATE_ADMIN")
+    @Pattern(regexp = "SUPER_USER|STATE_ADMIN|SUPER_STATE_ADMIN", message = "Role must be one of: SUPER_USER, STATE_ADMIN, SUPER_STATE_ADMIN")
     private String role;
 
     @Pattern(regexp = "^[A-Z]{2,4}$", message = "Tenant code must be 2-4 uppercase letters")

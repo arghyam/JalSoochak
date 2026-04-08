@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
 import org.arghyam.jalsoochak.analytics.service.FactService;
 import org.junit.jupiter.api.Test;
@@ -107,6 +108,23 @@ class AnalyticsKafkaConsumerTest {
         assertThat(captor.getValue().getTenantId()).isEqualTo(5);
         assertThat(captor.getValue().getStateCode()).isEqualTo("RJ");
         assertThat(captor.getValue().getTitle()).isEqualTo("Rajasthan");
+    }
+
+    @Test
+    void consumeTenantEvents_waterSupplyThresholdUpdated_routesToUpdateWaterSupplyThreshold() throws Exception {
+        String message = """
+                {"eventType":"WATER_SUPPLY_THRESHOLD_UPDATED","tenantId":3,"stateCode":"MH","underSupplyThresholdPercent":20,"overSupplyThresholdPercent":30}
+                """;
+
+        consumer.consumeTenantEvents(message);
+
+        ArgumentCaptor<WaterSupplyThresholdUpdatedEvent> captor =
+                ArgumentCaptor.forClass(WaterSupplyThresholdUpdatedEvent.class);
+        verify(dimensionService).updateWaterSupplyThreshold(captor.capture());
+        assertThat(captor.getValue().getTenantId()).isEqualTo(3);
+        assertThat(captor.getValue().getStateCode()).isEqualTo("MH");
+        assertThat(captor.getValue().getUnderSupplyThresholdPercent()).isEqualTo(20);
+        assertThat(captor.getValue().getOverSupplyThresholdPercent()).isEqualTo(30);
     }
 
     @Test

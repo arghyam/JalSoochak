@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
@@ -248,6 +249,32 @@ class DimensionServiceImplTest {
 
         verify(dimLgdLocationRepository, times(1)).saveAll(List.of(loc));
         assertThat(loc.getLgdCName()).isEqualTo("District");
+    }
+
+    @Test
+    void updateWaterSupplyThreshold_setsThresholdFieldsAndSaves() {
+        WaterSupplyThresholdUpdatedEvent event =
+                new WaterSupplyThresholdUpdatedEvent("WATER_SUPPLY_THRESHOLD_UPDATED", 1, "MP", 20, 30);
+        DimTenant existing = DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build();
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(existing));
+
+        service.updateWaterSupplyThreshold(event);
+
+        ArgumentCaptor<DimTenant> captor = ArgumentCaptor.forClass(DimTenant.class);
+        verify(dimTenantRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getUnderSupplyRangePercentage()).isEqualTo(20);
+        assertThat(captor.getValue().getOverSupplyRangePercentage()).isEqualTo(30);
+    }
+
+    @Test
+    void updateWaterSupplyThreshold_tenantNotFound_throwsIllegalStateException() {
+        WaterSupplyThresholdUpdatedEvent event =
+                new WaterSupplyThresholdUpdatedEvent("WATER_SUPPLY_THRESHOLD_UPDATED", 99, "XX", 20, 30);
+        when(dimTenantRepository.findById(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updateWaterSupplyThreshold(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("99");
     }
 
     @Test

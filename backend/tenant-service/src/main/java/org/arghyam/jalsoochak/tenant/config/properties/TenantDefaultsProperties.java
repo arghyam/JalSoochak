@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.config;
+package org.arghyam.jalsoochak.tenant.config.properties;
 
 import java.util.List;
 

@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
@@ -88,8 +89,10 @@ public class DimensionServiceImpl implements DimensionService {
         user.setEmail(event.getEmail());
         user.setUserType(event.getUserType());
         user.setUuid(event.getUuid());
-        if (event.getTitle() != null) user.setTitle(event.getTitle());
-        if (event.getStatus() != null) user.setStatus(event.getStatus());
+        if (event.getTitle() != null)
+            user.setTitle(event.getTitle());
+        if (event.getStatus() != null)
+            user.setStatus(event.getStatus());
         user.setUpdatedAt(LocalDateTime.now());
 
         dimUserRepository.save(user);
@@ -213,12 +216,18 @@ public class DimensionServiceImpl implements DimensionService {
             if (isLgd) {
                 List<DimLgdLocation> locs = dimLgdLocationRepository
                         .findByTenantIdAndLgdLevel(event.getTenantId(), entry.getLevel());
-                locs.forEach(l -> { l.setLgdCName(entry.getName()); l.setUpdatedAt(LocalDateTime.now()); });
+                locs.forEach(l -> {
+                    l.setLgdCName(entry.getName());
+                    l.setUpdatedAt(LocalDateTime.now());
+                });
                 dimLgdLocationRepository.saveAll(locs);
             } else {
                 List<DimDepartmentLocation> locs = dimDepartmentLocationRepository
                         .findByTenantIdAndDepartmentLevel(event.getTenantId(), entry.getLevel());
-                locs.forEach(l -> { l.setDepartmentCName(entry.getName()); l.setUpdatedAt(LocalDateTime.now()); });
+                locs.forEach(l -> {
+                    l.setDepartmentCName(entry.getName());
+                    l.setUpdatedAt(LocalDateTime.now());
+                });
                 dimDepartmentLocationRepository.saveAll(locs);
             }
         }
@@ -226,8 +235,23 @@ public class DimensionServiceImpl implements DimensionService {
                 event.getTenantId(), event.getHierarchyType());
     }
 
+    @Override
+    @Transactional
+    public void updateWaterSupplyThreshold(WaterSupplyThresholdUpdatedEvent event) {
+        DimTenant tenant = dimTenantRepository.findById(event.getTenantId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "No dim_tenant_table row for tenantId=" + event.getTenantId()));
+        tenant.setUnderSupplyRangePercentage(event.getUnderSupplyThresholdPercent());
+        tenant.setOverSupplyRangePercentage(event.getOverSupplyThresholdPercent());
+        tenant.setUpdatedAt(LocalDateTime.now());
+        dimTenantRepository.save(tenant);
+        log.info("Updated dim_tenant_table supply thresholds [tenantId={}, under={}, over={}]",
+                event.getTenantId(), event.getUnderSupplyThresholdPercent(), event.getOverSupplyThresholdPercent());
+    }
+
     private Geometry parseGeoJson(String geoJson) {
-        if (geoJson == null || geoJson.isBlank()) return null;
+        if (geoJson == null || geoJson.isBlank())
+            return null;
         try {
             GeoJsonReader reader = new GeoJsonReader();
             return reader.read(geoJson);

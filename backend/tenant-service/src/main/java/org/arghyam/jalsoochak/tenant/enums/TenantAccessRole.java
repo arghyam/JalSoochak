@@ -8,7 +8,18 @@ package org.arghyam.jalsoochak.tenant.enums;
 public enum TenantAccessRole {
     SUPER_USER,
     STATE_ADMIN,
+    SUPER_STATE_ADMIN,
     STAFF;
+
+    /** Returns {@code true} if this role carries SUPER_USER-level privileges. */
+    public boolean isSuperUserEquivalent() {
+        return this == SUPER_USER || this == SUPER_STATE_ADMIN;
+    }
+
+    /** Returns {@code true} if this role carries STATE_ADMIN-level privileges. */
+    public boolean isStateAdminEquivalent() {
+        return this == STATE_ADMIN || this == SUPER_STATE_ADMIN;
+    }
 
     /**
      * Derives the access role from the {@code c_name} column of {@code user_type_master_table}.
