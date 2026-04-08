@@ -303,7 +303,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     )
             }
     )
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserOutageReasonSchemeCountResponse>> getOutageReasonWiseSchemeCountByUser(
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -399,7 +399,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     )
             }
     )
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserNonSubmissionReasonSchemeCountResponse>> getNonSubmissionReasonWiseSchemeCountByUser(
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -437,7 +437,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     )
             }
     )
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserSubmissionStatusResponse>> getSubmissionStatusByUser(
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -515,4 +515,3 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
         }
     }
 }
-

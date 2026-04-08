@@ -400,7 +400,7 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(3600))
                 .build();
-        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_SUPER_USER")));
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
     }
 
     private static RegionWiseWaterQuantityResponse regionWiseWaterQuantityResponse() {
@@ -480,4 +480,3 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .build();
     }
 }
-
