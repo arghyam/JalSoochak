@@ -58,6 +58,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                                     examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request"
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "500",
                             description = "Unexpected error",
                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
@@ -308,22 +312,15 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        try {
-            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
-                    AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
-            UserOutageReasonSchemeCountResponse data = userRef.userId() != null
-                    ? schemeRegularityService.getOutageReasonSchemeCountByUser(userRef.userId(), startDate, endDate)
-                    : schemeRegularityService.getOutageReasonSchemeCountByUserUuid(userRef.userUuid(), startDate, endDate);
-            return ResponseEntity.ok(ApiResponse.<UserOutageReasonSchemeCountResponse>builder()
-                    .success(true)
-                    .data(data)
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<UserOutageReasonSchemeCountResponse>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
+        AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
+        UserOutageReasonSchemeCountResponse data = userRef.userId() != null
+                ? schemeRegularityService.getOutageReasonSchemeCountByUser(userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getOutageReasonSchemeCountByUserUuid(userRef.userUuid(), startDate, endDate);
+        return ResponseEntity.ok(ApiResponse.<UserOutageReasonSchemeCountResponse>builder()
+                .success(true)
+                .data(data)
+                .build());
     }
 
     @GetMapping("/non-submission-reasons")
@@ -341,6 +338,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                             description = "Bad request",
                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
                                     examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request"
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "500",
@@ -407,22 +408,15 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        try {
-            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
-                    AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
-            UserNonSubmissionReasonSchemeCountResponse data = userRef.userId() != null
-                    ? schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(userRef.userId(), startDate, endDate)
-                    : schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(userRef.userUuid(), startDate, endDate);
-            return ResponseEntity.ok(ApiResponse.<UserNonSubmissionReasonSchemeCountResponse>builder()
-                    .success(true)
-                    .data(data)
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<UserNonSubmissionReasonSchemeCountResponse>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
+        AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
+        UserNonSubmissionReasonSchemeCountResponse data = userRef.userId() != null
+                ? schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(userRef.userUuid(), startDate, endDate);
+        return ResponseEntity.ok(ApiResponse.<UserNonSubmissionReasonSchemeCountResponse>builder()
+                .success(true)
+                .data(data)
+                .build());
     }
 
     @GetMapping("/submission-status/user")
@@ -434,6 +428,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                             description = "Submission status (user) fetched successfully",
                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
                                     examples = @ExampleObject(name = "success", value = SwaggerExamples.SUBMISSION_STATUS_USER_SUCCESS))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request"
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "500",
@@ -448,22 +446,15 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        try {
-            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
-                    AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
-            UserSubmissionStatusResponse data = userRef.userId() != null
-                    ? schemeRegularityService.getSubmissionStatusByUser(userRef.userId(), startDate, endDate)
-                    : schemeRegularityService.getSubmissionStatusByUserUuid(userRef.userUuid(), startDate, endDate);
-            return ResponseEntity.ok(ApiResponse.<UserSubmissionStatusResponse>builder()
-                    .success(true)
-                    .data(data)
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<UserSubmissionStatusResponse>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
+        AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
+        UserSubmissionStatusResponse data = userRef.userId() != null
+                ? schemeRegularityService.getSubmissionStatusByUser(userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getSubmissionStatusByUserUuid(userRef.userUuid(), startDate, endDate);
+        return ResponseEntity.ok(ApiResponse.<UserSubmissionStatusResponse>builder()
+                .success(true)
+                .data(data)
+                .build());
     }
 
     @GetMapping("/submission-status")
