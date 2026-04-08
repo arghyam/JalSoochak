@@ -34,6 +34,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/actuator/health", "/actuator/info", "/error").permitAll();
                     auth.requestMatchers(HttpMethod.GET, "/api/v1/analytics/**").permitAll();
+                    auth.requestMatchers(HttpMethod.PUT, "/api/v1/analytics/**").permitAll();
                     if (isProd) {
                         auth.requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").authenticated();
                     } else {

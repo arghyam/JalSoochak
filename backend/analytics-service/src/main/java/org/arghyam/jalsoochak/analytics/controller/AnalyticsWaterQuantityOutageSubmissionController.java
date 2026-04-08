@@ -303,6 +303,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     )
             }
     )
+    
     @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserOutageReasonSchemeCountResponse>> getOutageReasonWiseSchemeCountByUser(
             JwtAuthenticationToken authentication,

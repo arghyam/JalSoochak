@@ -6,8 +6,11 @@ import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationPaginatedResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
+import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
+import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
@@ -34,12 +37,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -59,6 +65,69 @@ public class AnalyticsSchemeReportingController {
     private final AnomalyQueryService anomalyQueryService;
     private final OperatorAttendanceQueryService operatorAttendanceQueryService;
     private final UserAlertTotalsService userAlertTotalsService;
+    private final DimUserRepository dimUserRepository;
+    private final FactEscalationRepository factEscalationRepository;
+
+    public record UpdateEscalationResolutionStatusRequest(Integer resolutionStatus) {
+    }
+
+    private Integer resolveUserIdByUuid(Integer tenantId, UUID userUuid) {
+        return dimUserRepository.findByTenantIdAndUuid(tenantId, userUuid)
+                .map(u -> u.getUserId())
+                .orElseThrow(() -> new IllegalArgumentException("No user found for uuid: " + userUuid));
+    }
+
+    @PutMapping("/escalations/status")
+    @Operation(summary = "Update escalation resolution status (UUID-scoped)")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateEscalationResolutionStatus(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "uuid") UUID userUuid,
+            @RequestParam(name = "escalation_id", required = false) Long escalationId,
+            @RequestParam(name = "correlation_id", required = false) String correlationId,
+            @RequestBody UpdateEscalationResolutionStatusRequest request
+    ) {
+        try {
+            if (request == null || request.resolutionStatus() == null) {
+                throw new IllegalArgumentException("resolutionStatus is required");
+            }
+            boolean hasEscalationId = escalationId != null;
+            boolean hasCorrelationId = correlationId != null && !correlationId.isBlank();
+            if (hasEscalationId == hasCorrelationId) {
+                throw new IllegalArgumentException("Provide exactly one of escalation_id or correlation_id");
+            }
+
+            Integer userId = resolveUserIdByUuid(tenantId, userUuid);
+
+            java.util.Optional<FactEscalation> opt = hasEscalationId
+                    ? factEscalationRepository.findByIdAndTenantIdAndUserId(escalationId, tenantId, userId)
+                    : factEscalationRepository.findFirstByTenantIdAndUserIdAndCorrelationIdOrderByCreatedAtDesc(
+                    tenantId, userId, correlationId.trim());
+
+            FactEscalation escalation = opt.orElseThrow(() -> new IllegalArgumentException("Escalation not found for the given user/identifier"));
+
+            escalation.setResolutionStatus(request.resolutionStatus());
+            escalation.setUpdatedAt(LocalDateTime.now());
+            FactEscalation saved = factEscalationRepository.save(escalation);
+
+            return ResponseEntity.ok(ApiResponse.<Map<String, Object>>builder()
+                    .success(true)
+                    .data(Map.of(
+                            "escalation_id", saved.getId(),
+                            "resolution_status", saved.getResolutionStatus()
+                    ))
+                    .build());
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(ApiResponse.<Map<String, Object>>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<Map<String, Object>>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
 
     @GetMapping("/schemes/status-count")
     @Operation(
@@ -309,7 +378,7 @@ public class AnalyticsSchemeReportingController {
     )
     public ResponseEntity<EscalationPaginatedResponse> getEscalationsPaginated(
             @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "user_id") Integer userId,
+            @RequestParam(name = "uuid") UUID userUuid,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "escalation_type", required = false) String escalationType,
@@ -327,6 +396,7 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("limit must be >= 1");
             }
 
+            Integer userId = resolveUserIdByUuid(tenantId, userUuid);
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<EscalationListItemDto> page = escalationQueryService.getEscalations(
                     tenantId,
@@ -456,7 +526,7 @@ public class AnalyticsSchemeReportingController {
     )
     public ResponseEntity<AnomalyPaginatedResponse> getAnomalies(
             @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "user_id") Integer mappedUserId,
+            @RequestParam(name = "uuid") UUID userUuid,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -473,6 +543,7 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("limit must be >= 1");
             }
 
+            Integer mappedUserId = resolveUserIdByUuid(tenantId, userUuid);
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<AnomalyListItemDto> page = anomalyQueryService.getAnomaliesForUserSchemes(
                     tenantId,
