@@ -1968,6 +1968,33 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<NationalDashboardTenantStateMetadata> getNationalDashboardTenantStateMetadata() {
+        String sql = """
+                SELECT DISTINCT ON (t.tenant_id)
+                    t.tenant_id,
+                    l.lgd_id,
+                    t.status AS tenant_status,
+                    CASE
+                        WHEN l.geom IS NOT NULL THEN ST_AsGeoJSON(l.geom, 9, 8)
+                        ELSE NULL
+                    END AS boundary_geojson
+                FROM analytics_schema.dim_tenant_table t
+                LEFT JOIN analytics_schema.dim_lgd_location_table l
+                    ON l.tenant_id = t.tenant_id
+                   AND l.lgd_level = 1
+                ORDER BY t.tenant_id, l.lgd_id NULLS LAST
+                """;
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            Integer lgdId = rs.getObject("lgd_id") == null ? null : rs.getInt("lgd_id");
+            return new NationalDashboardTenantStateMetadata(
+                    rs.getInt("tenant_id"),
+                    lgdId,
+                    rs.getInt("tenant_status"),
+                    rs.getString("boundary_geojson"));
+        });
+    }
+
     public List<StateSchemeRegularityMetrics> getStateWiseRegularityMetrics(
             LocalDate startDate, LocalDate endDate) {
         String sql = """
@@ -3101,6 +3128,13 @@ public class SchemeRegularityRepository {
             Integer lgdId,
             Integer departmentId,
             BigDecimal averagePerformanceScore) {
+    }
+
+    public record NationalDashboardTenantStateMetadata(
+            Integer tenantId,
+            Integer lgdId,
+            Integer tenantStatus,
+            String boundaryGeoJson) {
     }
 
     public record StateSchemeRegularityMetrics(

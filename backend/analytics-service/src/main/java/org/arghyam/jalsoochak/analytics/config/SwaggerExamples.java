@@ -448,16 +448,58 @@ public final class SwaggerExamples {
             {
               "success": true,
               "data": {
-                "stateCount": 0,
-                "states": [
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "stateWiseQuantityPerformance": [
                   {
                     "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
+                    "boundary": {
+                      "type": "Polygon",
+                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                    },
                     "stateCode": "MP",
-                    "title": "Madhya Pradesh",
+                    "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
-                    "averageRegularity": 0.74,
-                    "readingSubmissionRate": 0.83,
-                    "averageWaterSupply": 55.2
+                    "totalHouseholdCount": 1000,
+                    "totalAchievedFhtcCount": 900,
+                    "totalPlannedFhtcCount": 950,
+                    "totalWaterSuppliedLiters": 500000,
+                    "avgWaterSupplyPerScheme": 12800.0
+                  }
+                ],
+                "stateWiseRegularity": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
+                    "boundary": {
+                      "type": "Polygon",
+                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                    },
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "schemeCount": 12,
+                    "totalSupplyDays": 275,
+                    "averageRegularity": 0.74
+                  }
+                ],
+                "stateWiseReadingSubmissionRate": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
+                    "boundary": {
+                      "type": "Polygon",
+                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                    },
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "schemeCount": 12,
+                    "totalSubmissionDays": 310,
+                    "readingSubmissionRate": 0.83
                   }
                 ],
                 "overallOutageReasonDistribution": {}

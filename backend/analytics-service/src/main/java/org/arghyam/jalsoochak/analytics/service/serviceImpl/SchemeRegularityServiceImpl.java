@@ -26,6 +26,7 @@ import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -784,7 +786,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         return NATIONAL_DASHBOARD_CACHE_PREFIX
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v2";
+                + ":v3";
     }
 
     private NationalDashboardResponse buildAndCacheNationalDashboard(
@@ -799,9 +801,23 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         List<SchemeRegularityRepository.OutageReasonSchemeCount> outageRows =
                 schemeRegularityRepository.getOverallOutageReasonSchemeCount(startDate, endDate);
 
+        Map<Integer, SchemeRegularityRepository.NationalDashboardTenantStateMetadata> tenantStateMetadataByTenantId =
+                schemeRegularityRepository.getNationalDashboardTenantStateMetadata().stream()
+                        .collect(Collectors.toMap(
+                                SchemeRegularityRepository.NationalDashboardTenantStateMetadata::tenantId,
+                                Function.identity(),
+                                (a, b) -> a,
+                                LinkedHashMap::new));
+
         List<NationalDashboardResponse.StateQuantityPerformance> stateWiseQuantityPerformance = quantityMetrics.stream()
-                .map(metric -> NationalDashboardResponse.StateQuantityPerformance.builder()
+                .map(metric -> {
+                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata geo =
+                            tenantStateMetadataByTenantId.get(metric.tenantId());
+                    return NationalDashboardResponse.StateQuantityPerformance.builder()
                         .tenantId(metric.tenantId())
+                        .lgdId(geo != null ? geo.lgdId() : null)
+                        .tenantStatus(geo != null ? geo.tenantStatus() : null)
+                        .boundary(parseBoundaryGeoJson(geo != null ? geo.boundaryGeoJson() : null))
                         .stateCode(metric.stateCode())
                         .stateTitle(metric.title())
                         .schemeCount(metric.schemeCount())
@@ -810,11 +826,14 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .totalPlannedFhtcCount(metric.totalPlannedFhtcCount())
                         .totalWaterSuppliedLiters(metric.totalWaterSuppliedLiters())
                         .avgWaterSupplyPerScheme(metric.avgWaterSupplyPerScheme())
-                        .build())
+                        .build();
+                })
                 .toList();
 
         List<NationalDashboardResponse.StateRegularity> stateWiseRegularity = regularityMetrics.stream()
                 .map(metric -> {
+                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata geo =
+                            tenantStateMetadataByTenantId.get(metric.tenantId());
                     BigDecimal averageRegularity = BigDecimal.ZERO;
                     if (metric.schemeCount() > 0 && daysInRange > 0) {
                         averageRegularity = BigDecimal.valueOf(metric.totalSupplyDays())
@@ -822,6 +841,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                     }
                     return NationalDashboardResponse.StateRegularity.builder()
                             .tenantId(metric.tenantId())
+                            .lgdId(geo != null ? geo.lgdId() : null)
+                            .tenantStatus(geo != null ? geo.tenantStatus() : null)
+                            .boundary(parseBoundaryGeoJson(geo != null ? geo.boundaryGeoJson() : null))
                             .stateCode(metric.stateCode())
                             .stateTitle(metric.title())
                             .schemeCount(metric.schemeCount())
@@ -833,6 +855,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         List<NationalDashboardResponse.StateReadingSubmissionRate> stateWiseReadingSubmissionRate = submissionMetrics.stream()
                 .map(metric -> {
+                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata geo =
+                            tenantStateMetadataByTenantId.get(metric.tenantId());
                     BigDecimal readingSubmissionRate = BigDecimal.ZERO;
                     if (metric.schemeCount() > 0 && daysInRange > 0) {
                         readingSubmissionRate = BigDecimal.valueOf(metric.totalSubmissionDays())
@@ -840,6 +864,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                     }
                     return NationalDashboardResponse.StateReadingSubmissionRate.builder()
                             .tenantId(metric.tenantId())
+                            .lgdId(geo != null ? geo.lgdId() : null)
+                            .tenantStatus(geo != null ? geo.tenantStatus() : null)
+                            .boundary(parseBoundaryGeoJson(geo != null ? geo.boundaryGeoJson() : null))
                             .stateCode(metric.stateCode())
                             .stateTitle(metric.title())
                             .schemeCount(metric.schemeCount())
@@ -2397,6 +2424,18 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         DimTenant tenant = dimTenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Tenant not found for tenant_id: " + tenantId));
         return tenant.getStateCode();
+    }
+
+    private JsonNode parseBoundaryGeoJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(raw);
+        } catch (Exception e) {
+            log.warn("Failed to parse boundary GeoJSON: {}", e.getMessage());
+            return null;
+        }
     }
 
     private <T> T readFromCache(String cacheKey, Class<T> responseClass) {

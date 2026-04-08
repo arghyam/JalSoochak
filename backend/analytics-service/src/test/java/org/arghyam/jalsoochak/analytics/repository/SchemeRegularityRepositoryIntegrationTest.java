@@ -73,6 +73,37 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void getNationalDashboardTenantStateMetadata_returnsLevelOneLgdStatusAndGeoJsonWhenGeomPresent() {
+        jdbcTemplate.update(
+                """
+                        UPDATE analytics_schema.dim_lgd_location_table
+                        SET geom = ST_SetSRID(ST_GeomFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'), 4326)
+                        WHERE lgd_id = 100
+                        """);
+
+        List<SchemeRegularityRepository.NationalDashboardTenantStateMetadata> rows =
+                repository.getNationalDashboardTenantStateMetadata();
+
+        assertThat(rows).hasSize(1);
+        SchemeRegularityRepository.NationalDashboardTenantStateMetadata row = rows.getFirst();
+        assertThat(row.tenantId()).isEqualTo(1);
+        assertThat(row.lgdId()).isEqualTo(100);
+        assertThat(row.tenantStatus()).isEqualTo(1);
+        assertThat(row.boundaryGeoJson()).contains("Polygon");
+        assertThat(row.boundaryGeoJson()).contains("coordinates");
+    }
+
+    @Test
+    void getNationalDashboardTenantStateMetadata_returnsNullBoundaryWhenGeomMissing() {
+        List<SchemeRegularityRepository.NationalDashboardTenantStateMetadata> rows =
+                repository.getNationalDashboardTenantStateMetadata();
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().lgdId()).isEqualTo(100);
+        assertThat(rows.getFirst().boundaryGeoJson()).isNull();
+    }
+
+    @Test
     void getSchemeRegularityMetricsByLgd_countsOnlyPositiveConfirmedReadingDays() {
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
                 repository.getSchemeRegularityMetrics(100, D1, D3);
