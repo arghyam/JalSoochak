@@ -99,6 +99,46 @@ public class UserTenantRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<TenantUserRecord> findUserByKeycloakUuid(String schemaName, String keycloakUuid) {
+        validateSchemaName(schemaName);
+        if (keycloakUuid == null || keycloakUuid.isBlank()) {
+            return Optional.empty();
+        }
+
+        String sql = String.format("""
+        SELECT u.id,
+               u.tenant_id,
+               u.phone_number,
+               u.email,
+               u.user_type,
+               u.title,
+               u.uuid,
+               u.status,
+               u.whatsapp_connection_id,
+               ut.c_name
+        FROM %s.user_table u
+        LEFT JOIN common_schema.user_type_master_table ut
+               ON ut.id = u.user_type
+        WHERE u.uuid = ?
+        """, schemaName);
+
+        List<TenantUserRecord> rows = jdbcTemplate.query(sql, (rs, n) ->
+                new TenantUserRecord(
+                        toLong(rs.getObject("id")),
+                        toInteger(rs.getObject("tenant_id")),
+                        pii.safeDecrypt(rs.getString("phone_number")),
+                        rs.getString("email"),
+                        toLong(rs.getObject("user_type")),
+                        rs.getString("c_name"),
+                        pii.safeDecrypt(rs.getString("title")),
+                        rs.getString("uuid"),
+                        toInteger(rs.getObject("status")),
+                        toLong(rs.getObject("whatsapp_connection_id"))
+                ), keycloakUuid);
+
+        return rows.stream().findFirst();
+    }
+
     public Optional<TenantUserRecord> findUserByPhone(String schemaName, String phoneNumber) {
         validateSchemaName(schemaName);
         if (phoneNumber == null || phoneNumber.isBlank()) {

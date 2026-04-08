@@ -22,6 +22,7 @@ import org.arghyam.jalsoochak.user.dto.request.ResetPasswordRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.InviteInfoResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.TokenResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
+import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
@@ -103,6 +104,12 @@ public class AuthServiceImpl implements AuthService {
         }
         KeycloakTokenResponse token = keycloakClient.refreshToken(refreshToken);
         String sub = SecurityUtils.extractSubFromTrustedKeycloakJwt(token.accessToken());
+        String userType = SecurityUtils.extractClaimFromTrustedKeycloakJwt(token.accessToken(), "user_type");
+
+        if (userType != null) {
+            return refreshStaffToken(token, sub);
+        }
+
         AdminUserRow user = userCommonRepository.findAdminUserByUuid(sub)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
@@ -116,6 +123,37 @@ public class AuthServiceImpl implements AuthService {
         validateTenantStatus(user.tenantId(), TenantAccessRole.fromCName(user.userTypeCName()));
 
         return buildEnrichedAuthResult(token, user);
+    }
+
+    private AuthResult refreshStaffToken(KeycloakTokenResponse token, String sub) {
+        String tenantCode = SecurityUtils.extractClaimFromTrustedKeycloakJwt(token.accessToken(), "tenant_state_code");
+        if (tenantCode == null) {
+            throw new ResourceNotFoundException("User not found");
+        }
+        String schema = "tenant_" + tenantCode.toLowerCase();
+        TenantUserRecord user = userTenantRepository.findUserByKeycloakUuid(schema, sub)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        if (user.status() == null || user.status() != TenantUserStatus.ACTIVE.code) {
+            throw new AccountDeactivatedException("Account is deactivated");
+        }
+
+        Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
+                .orElseThrow(() -> new AccountDeactivatedException("Tenant not found or no longer exists."));
+        validateTenantStatus(tenantId, TenantAccessRole.STAFF);
+
+        return buildStaffAuthResult(token, user, tenantCode);
+    }
+
+    private AuthResult buildStaffAuthResult(KeycloakTokenResponse token, TenantUserRecord user, String tenantCode) {
+        TokenResponseDTO resp = buildTokenResponse(token);
+        resp.setPersonId(user.id());
+        resp.setTenantId(String.valueOf(user.tenantId()));
+        resp.setTenantCode(tenantCode);
+        resp.setRole(user.cName());
+        resp.setPhoneNumber(user.phoneNumber());
+        resp.setName(user.title());
+        return new AuthResult(resp, token.refreshToken(), token.refreshExpiresIn());
     }
 
     @Override

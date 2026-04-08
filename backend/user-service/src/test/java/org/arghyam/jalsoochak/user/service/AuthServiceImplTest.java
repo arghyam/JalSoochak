@@ -14,6 +14,8 @@ import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Optional;
 
 import org.arghyam.jalsoochak.user.clients.KeycloakClient;
@@ -28,6 +30,7 @@ import org.arghyam.jalsoochak.user.dto.request.LoginRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.ResetPasswordRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.InviteInfoResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
+import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
@@ -64,6 +67,20 @@ class AuthServiceImplTest {
      */
     private static final String FAKE_JWT =
             "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJrYy11dWlkIn0.fake_sig";
+
+    /** JWT with staff claims: sub=kc-staff-uuid, user_type=STAFF, tenant_state_code=MP. */
+    private static final String STAFF_JWT = makeJwt(
+            "{\"sub\":\"kc-staff-uuid\",\"user_type\":\"STAFF\",\"tenant_state_code\":\"MP\"}");
+
+    /** JWT with user_type but no tenant_state_code — simulates a malformed staff token. */
+    private static final String STAFF_JWT_NO_TENANT = makeJwt(
+            "{\"sub\":\"kc-staff-uuid\",\"user_type\":\"STAFF\"}");
+
+    private static String makeJwt(String jsonPayload) {
+        String encodedPayload = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(jsonPayload.getBytes(StandardCharsets.UTF_8));
+        return "eyJhbGciOiJSUzI1NiJ9." + encodedPayload + ".fake_sig";
+    }
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private KeycloakProvider keycloakProvider;
@@ -140,6 +157,15 @@ class AuthServiceImplTest {
      */
     private KeycloakTokenResponse tokenResponse() {
         return new KeycloakTokenResponse(FAKE_JWT, "refresh-token", 300, 1800, "Bearer", null, null, "openid");
+    }
+
+    private TenantUserRecord activeStaffRecord() {
+        return new TenantUserRecord(10L, 1, "91XXXXXXXXXX", null, 3L, "STAFF",
+                "Staff User", "kc-staff-uuid", TenantUserStatus.ACTIVE.code, null);
+    }
+
+    private KeycloakTokenResponse staffTokenResponse() {
+        return new KeycloakTokenResponse(STAFF_JWT, "staff-refresh-token", 300, 1800, "Bearer", null, null, "openid");
     }
 
     private LoginRequestDTO loginRequest(String email, String password) {
@@ -274,6 +300,82 @@ class AuthServiceImplTest {
             assertThrows(BadRequestException.class, () -> authService.refreshToken(""));
             assertThrows(BadRequestException.class, () -> authService.refreshToken(null));
             verify(keycloakClient, never()).refreshToken(anyString());
+        }
+    }
+
+    // ── refreshToken (staff path) ─────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("refreshToken() – staff user path")
+    class RefreshTokenStaffTests {
+
+        @Test
+        @DisplayName("Active staff user: should return AuthResult with staff fields, skip admin lookup")
+        void refreshToken_staff_success() {
+            when(keycloakClient.refreshToken("staff-refresh")).thenReturn(staffTokenResponse());
+            when(userTenantRepository.findUserByKeycloakUuid("tenant_mp", "kc-staff-uuid"))
+                    .thenReturn(Optional.of(activeStaffRecord()));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+
+            AuthResult result = authService.refreshToken("staff-refresh");
+
+            assertEquals(STAFF_JWT, result.tokenResponse().getAccessToken());
+            assertEquals("staff-refresh-token", result.refreshToken());
+            assertEquals(1800, result.refreshExpiresIn());
+            assertEquals("STAFF", result.tokenResponse().getRole());
+            assertEquals("MP", result.tokenResponse().getTenantCode());
+            assertEquals(10L, result.tokenResponse().getPersonId());
+            assertEquals("Staff User", result.tokenResponse().getName());
+            assertEquals("91XXXXXXXXXX", result.tokenResponse().getPhoneNumber());
+            verify(userCommonRepository, never()).findAdminUserByUuid(anyString());
+        }
+
+        @Test
+        @DisplayName("Staff user not found in tenant schema: should throw ResourceNotFoundException")
+        void refreshToken_staffNotFound_throwsResourceNotFound() {
+            when(keycloakClient.refreshToken("staff-refresh")).thenReturn(staffTokenResponse());
+            when(userTenantRepository.findUserByKeycloakUuid("tenant_mp", "kc-staff-uuid"))
+                    .thenReturn(Optional.empty());
+
+            assertThrows(ResourceNotFoundException.class, () -> authService.refreshToken("staff-refresh"));
+            verify(userCommonRepository, never()).findAdminUserByUuid(anyString());
+        }
+
+        @Test
+        @DisplayName("Deactivated staff user: should throw AccountDeactivatedException")
+        void refreshToken_staffDeactivated_throwsAccountDeactivated() {
+            TenantUserRecord inactiveStaff = new TenantUserRecord(10L, 1, "91XXXXXXXXXX", null, 3L, "STAFF",
+                    "Staff User", "kc-staff-uuid", TenantUserStatus.INACTIVE.code, null);
+            when(keycloakClient.refreshToken("staff-refresh")).thenReturn(staffTokenResponse());
+            when(userTenantRepository.findUserByKeycloakUuid("tenant_mp", "kc-staff-uuid"))
+                    .thenReturn(Optional.of(inactiveStaff));
+
+            assertThrows(AccountDeactivatedException.class, () -> authService.refreshToken("staff-refresh"));
+            verify(userCommonRepository, never()).findAdminUserByUuid(anyString());
+        }
+
+        @Test
+        @DisplayName("Tenant not found for staff: should throw AccountDeactivatedException")
+        void refreshToken_staffTenantNotFound_throwsAccountDeactivated() {
+            when(keycloakClient.refreshToken("staff-refresh")).thenReturn(staffTokenResponse());
+            when(userTenantRepository.findUserByKeycloakUuid("tenant_mp", "kc-staff-uuid"))
+                    .thenReturn(Optional.of(activeStaffRecord()));
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.empty());
+
+            assertThrows(AccountDeactivatedException.class, () -> authService.refreshToken("staff-refresh"));
+        }
+
+        @Test
+        @DisplayName("Missing tenant_state_code in JWT: should throw ResourceNotFoundException before DB lookup")
+        void refreshToken_staffMissingTenantCode_throwsResourceNotFound() {
+            KeycloakTokenResponse noTenantToken = new KeycloakTokenResponse(
+                    STAFF_JWT_NO_TENANT, "staff-refresh-token", 300, 1800, "Bearer", null, null, "openid");
+            when(keycloakClient.refreshToken("staff-refresh")).thenReturn(noTenantToken);
+
+            assertThrows(ResourceNotFoundException.class, () -> authService.refreshToken("staff-refresh"));
+            verify(userTenantRepository, never()).findUserByKeycloakUuid(anyString(), anyString());
+            verify(userCommonRepository, never()).findAdminUserByUuid(anyString());
         }
     }
 
