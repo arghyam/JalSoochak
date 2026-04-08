@@ -347,6 +347,45 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     }
 
     @Test
+    void getOutageReasonsByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
+        when(schemeRegularityService.getOutageReasonSchemeCountByUserUuid(USER_UUID, START, END))
+                .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
+
+        mockMvc.perform(get(BASE + "/outage-reasons/user")
+                        .principal(buildJwtAuthentication())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("No user found for uuid: " + USER_UUID));
+    }
+
+    @Test
+    void getNonSubmissionReasonsByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(USER_UUID, START, END))
+                .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
+
+        mockMvc.perform(get(BASE + "/non-submission-reasons/user")
+                        .principal(buildJwtAuthentication())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("No user found for uuid: " + USER_UUID));
+    }
+
+    @Test
+    void getSubmissionStatusByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
+        when(schemeRegularityService.getSubmissionStatusByUserUuid(USER_UUID, START, END))
+                .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
+
+        mockMvc.perform(get(BASE + "/submission-status/user")
+                        .principal(buildJwtAuthentication())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("No user found for uuid: " + USER_UUID));
+    }
+
+    @Test
     void getSubmissionStatusSummary_withLgdId_routesToLgdService() throws Exception {
         when(schemeRegularityService.getSubmissionStatusSummaryByLgd(100, START, END))
                 .thenReturn(SubmissionStatusSummaryResponse.builder()
