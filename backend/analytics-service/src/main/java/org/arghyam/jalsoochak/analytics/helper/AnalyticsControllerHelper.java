@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListRespons
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -54,6 +55,69 @@ public final class AnalyticsControllerHelper {
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("Authenticated user UUID is invalid");
         }
+    }
+
+    public static AuthenticatedUserRef extractAuthenticatedUserRef(JwtAuthenticationToken authentication) {
+        if (authentication == null || authentication.getToken() == null) {
+            throw new IllegalArgumentException("Authenticated user details are required");
+        }
+
+        Map<String, Object> claims = authentication.getToken().getClaims();
+        Integer userIdFromClaim = parsePositiveInteger(claims.get("user_id"));
+        if (userIdFromClaim != null) {
+            return new AuthenticatedUserRef(userIdFromClaim, null);
+        }
+
+        String subject = authentication.getToken().getSubject();
+        Integer userIdFromSubject = parsePositiveInteger(subject);
+        if (userIdFromSubject != null) {
+            return new AuthenticatedUserRef(userIdFromSubject, null);
+        }
+
+        if (subject != null && !subject.isBlank()) {
+            try {
+                return new AuthenticatedUserRef(null, UUID.fromString(subject));
+            } catch (IllegalArgumentException ignored) {
+                // Try explicit uuid claim before failing.
+            }
+        }
+
+        Object uuidClaim = claims.get("uuid");
+        if (uuidClaim instanceof String uuidText && !uuidText.isBlank()) {
+            try {
+                return new AuthenticatedUserRef(null, UUID.fromString(uuidText));
+            } catch (IllegalArgumentException ignored) {
+                // fall through to throw below
+            }
+        }
+
+        throw new IllegalArgumentException("Authenticated user reference is invalid");
+    }
+
+    private static Integer parsePositiveInteger(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            int parsed = number.intValue();
+            return parsed > 0 ? parsed : null;
+        }
+        if (value instanceof String text) {
+            String trimmed = text.trim();
+            if (trimmed.isEmpty()) {
+                return null;
+            }
+            try {
+                int parsed = Integer.parseInt(trimmed);
+                return parsed > 0 ? parsed : null;
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    public record AuthenticatedUserRef(Integer userId, UUID userUuid) {
     }
 
     private static String sanitizeFilenamePart(String input) {

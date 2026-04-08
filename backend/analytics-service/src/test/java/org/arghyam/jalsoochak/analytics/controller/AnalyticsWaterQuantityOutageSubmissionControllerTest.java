@@ -224,6 +224,22 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
         verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUserUuid(USER_UUID, START, END);
     }
 
+    @Test
+    void getOutageReasonsByUser_withNumericUserIdClaim_routesToUserIdService() throws Exception {
+        when(schemeRegularityService.getOutageReasonSchemeCountByUser(11, START, END))
+                .thenReturn(userOutageReasonResponse());
+
+        mockMvc.perform(get(BASE + "/outage-reasons/user")
+                        .principal(buildJwtAuthenticationWithUserIdClaim())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.userId").value(11));
+
+        verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUser(11, START, END);
+    }
+
     @ParameterizedTest
     @MethodSource("nonSubmissionValidRoutes")
     void getNonSubmissionReasons_validRoutes(String paramName, String paramValue, boolean lgdRoute) throws Exception {
@@ -283,6 +299,22 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     }
 
     @Test
+    void getNonSubmissionReasonsByUser_withNumericSubject_routesToUserIdService() throws Exception {
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(11, START, END))
+                .thenReturn(userNonSubmissionReasonResponse());
+
+        mockMvc.perform(get(BASE + "/non-submission-reasons/user")
+                        .principal(buildJwtAuthenticationWithNumericSubject())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.userId").value(11));
+
+        verify(schemeRegularityService, times(1)).getNonSubmissionReasonSchemeCountByUser(11, START, END);
+    }
+
+    @Test
     void getSubmissionStatusByUser_validRequest_routesToUserService() throws Exception {
         when(schemeRegularityService.getSubmissionStatusByUserUuid(USER_UUID, START, END))
                 .thenReturn(userSubmissionStatusResponse());
@@ -296,6 +328,22 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.data.userId").value(11));
 
         verify(schemeRegularityService, times(1)).getSubmissionStatusByUserUuid(USER_UUID, START, END);
+    }
+
+    @Test
+    void getSubmissionStatusByUser_withNumericSubject_routesToUserIdService() throws Exception {
+        when(schemeRegularityService.getSubmissionStatusByUser(11, START, END))
+                .thenReturn(userSubmissionStatusResponse());
+
+        mockMvc.perform(get(BASE + "/submission-status/user")
+                        .principal(buildJwtAuthenticationWithNumericSubject())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.userId").value(11));
+
+        verify(schemeRegularityService, times(1)).getSubmissionStatusByUser(11, START, END);
     }
 
     @Test
@@ -397,6 +445,27 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
         Jwt jwt = Jwt.withTokenValue("token")
                 .header("alg", "none")
                 .subject(USER_UUID.toString())
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
+    }
+
+    private static JwtAuthenticationToken buildJwtAuthenticationWithNumericSubject() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject("11")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
+    }
+
+    private static JwtAuthenticationToken buildJwtAuthenticationWithUserIdClaim() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject("not-a-uuid")
+                .claim("user_id", 11)
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(3600))
                 .build();
