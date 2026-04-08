@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface FactEscalationRepository extends JpaRepository<FactEscalation, Long>, JpaSpecificationExecutor<FactEscalation> {
@@ -19,4 +20,12 @@ public interface FactEscalationRepository extends JpaRepository<FactEscalation, 
     List<FactEscalation> findByTenantIdAndResolutionStatus(Integer tenantId, Integer resolutionStatus);
 
     boolean existsByCorrelationId(String correlationId);
+
+    Optional<FactEscalation> findByIdAndTenantIdAndUserId(Long id, Integer tenantId, Integer userId);
+
+    Optional<FactEscalation> findFirstByTenantIdAndUserIdAndCorrelationIdOrderByCreatedAtDesc(
+            Integer tenantId,
+            Integer userId,
+            String correlationId
+    );
 }

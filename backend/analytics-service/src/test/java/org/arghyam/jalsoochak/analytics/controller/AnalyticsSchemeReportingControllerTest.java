@@ -2,7 +2,11 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
+import org.arghyam.jalsoochak.analytics.entity.DimUser;
+import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
@@ -25,6 +29,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -34,6 +39,7 @@ import java.time.ZoneOffset;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -48,6 +54,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -77,6 +84,10 @@ class AnalyticsSchemeReportingControllerTest {
     private OperatorAttendanceQueryService operatorAttendanceQueryService;
     @MockBean
     private UserAlertTotalsService userAlertTotalsService;
+    @MockBean
+    private DimUserRepository dimUserRepository;
+    @MockBean
+    private FactEscalationRepository factEscalationRepository;
 
     @ParameterizedTest
     @MethodSource("schemeStatusValidRoutes")
@@ -451,6 +462,10 @@ class AnalyticsSchemeReportingControllerTest {
     void getEscalationsPaginated_returnsExpectedShape() throws Exception {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
+        UUID uuid = UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
 
         EscalationListItemDto e1 = EscalationListItemDto.builder()
                 .id(1L)
@@ -479,7 +494,7 @@ class AnalyticsSchemeReportingControllerTest {
 
         mockMvc.perform(get(BASE + "/escalations")
                         .param("tenant_id", "10")
-                        .param("user_id", "9001")
+                        .param("uuid", uuid.toString())
                         .param("page_number", "1")
                         .param("limit", "5")
                         .param("escalation_type", "2")
@@ -507,6 +522,10 @@ class AnalyticsSchemeReportingControllerTest {
     void getEscalationsPaginated_withoutPageAndLimit_defaultsApplied() throws Exception {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
+        UUID uuid = UUID.fromString("12121212-1212-1212-1212-121212121212");
+
+        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
 
         Page<EscalationListItemDto> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
         when(escalationQueryService.getEscalations(
@@ -523,7 +542,7 @@ class AnalyticsSchemeReportingControllerTest {
 
         mockMvc.perform(get(BASE + "/escalations")
                         .param("tenant_id", "10")
-                        .param("user_id", "9001")
+                        .param("uuid", uuid.toString())
                         .param("escalation_type", "2")
                         .param("scheme_id", "101")
                         .param("scheme_name", "Test")
@@ -542,6 +561,10 @@ class AnalyticsSchemeReportingControllerTest {
     void getAnomalies_withExplicitDatesAndType_returnsExpectedShape() throws Exception {
         LocalDate start = LocalDate.of(2026, 3, 1);
         LocalDate end = LocalDate.of(2026, 3, 31);
+        UUID uuid = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
+        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
 
         AnomalyListItemDto a1 = AnomalyListItemDto.builder()
                 .id(11L)
@@ -562,7 +585,7 @@ class AnalyticsSchemeReportingControllerTest {
 
         mockMvc.perform(get(BASE + "/anomalies")
                         .param("tenant_id", "10")
-                        .param("user_id", "9001")
+                        .param("uuid", uuid.toString())
                         .param("start_date", start.toString())
                         .param("end_date", end.toString())
                         .param("anomaly_type", "2")
@@ -635,6 +658,10 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getAnomalies_withoutDates_defaultsHandledInService() throws Exception {
+        UUID uuid = UUID.fromString("33333333-3333-3333-3333-333333333333");
+        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+
         Page<AnomalyListItemDto> empty = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
         when(anomalyQueryService.getAnomaliesForUserSchemes(
                 eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
@@ -642,7 +669,7 @@ class AnalyticsSchemeReportingControllerTest {
 
         mockMvc.perform(get(BASE + "/anomalies")
                         .param("tenant_id", "10")
-                        .param("user_id", "9001"))
+                        .param("uuid", uuid.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.page").value(1))
@@ -652,6 +679,83 @@ class AnalyticsSchemeReportingControllerTest {
 
         verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(
                 eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class));
+    }
+
+    @Test
+    void updateEscalationResolutionStatus_withEscalationId_updatesOnlyForSameUuid() throws Exception {
+        UUID uuid = UUID.fromString("44444444-4444-4444-4444-444444444444");
+        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+
+        FactEscalation escalation = FactEscalation.builder()
+                .id(77L)
+                .tenantId(10)
+                .userId(9001)
+                .schemeId(101)
+                .resolutionStatus(0)
+                .createdAt(LocalDateTime.of(2026, 2, 1, 10, 0))
+                .updatedAt(LocalDateTime.of(2026, 2, 1, 10, 0))
+                .build();
+
+        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001)))
+                .thenReturn(Optional.of(escalation));
+        when(factEscalationRepository.save(any(FactEscalation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        mockMvc.perform(put(BASE + "/escalations/status")
+                        .param("tenant_id", "10")
+                        .param("uuid", uuid.toString())
+                        .param("escalation_id", "77")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolutionStatus\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.escalation_id").value(77))
+                .andExpect(jsonPath("$.data.resolution_status").value(2));
+
+        verify(factEscalationRepository, times(1))
+                .findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001));
+        verify(factEscalationRepository, times(1)).save(any(FactEscalation.class));
+    }
+
+    @Test
+    void updateEscalationResolutionStatus_whenNotOwnedByUuid_returnsBadRequest() throws Exception {
+        UUID uuid = UUID.fromString("55555555-5555-5555-5555-555555555555");
+        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+
+        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(88L), eq(10), eq(9001)))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(put(BASE + "/escalations/status")
+                        .param("tenant_id", "10")
+                        .param("uuid", uuid.toString())
+                        .param("escalation_id", "88")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolutionStatus\":1}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
+    }
+
+    @Test
+    void updateEscalationResolutionStatus_withBothIdentifiers_returnsBadRequest() throws Exception {
+        UUID uuid = UUID.fromString("66666666-6666-6666-6666-666666666666");
+        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+
+        mockMvc.perform(put(BASE + "/escalations/status")
+                        .param("tenant_id", "10")
+                        .param("uuid", uuid.toString())
+                        .param("escalation_id", "77")
+                        .param("correlation_id", "esc-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolutionStatus\":1}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
     }
 
     @Test
