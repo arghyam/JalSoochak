@@ -1,6 +1,5 @@
 package org.arghyam.jalsoochak.analytics.dto.response;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -33,7 +32,6 @@ public class NationalDashboardResponse {
         private Integer tenantId;
         private Integer lgdId;
         private Integer tenantStatus;
-        private JsonNode boundary;
         private String stateCode;
         private String stateTitle;
         private Integer schemeCount;
@@ -52,7 +50,6 @@ public class NationalDashboardResponse {
         private Integer tenantId;
         private Integer lgdId;
         private Integer tenantStatus;
-        private JsonNode boundary;
         private String stateCode;
         private String stateTitle;
         private Integer schemeCount;
@@ -68,7 +65,6 @@ public class NationalDashboardResponse {
         private Integer tenantId;
         private Integer lgdId;
         private Integer tenantStatus;
-        private JsonNode boundary;
         private String stateCode;
         private String stateTitle;
         private Integer schemeCount;

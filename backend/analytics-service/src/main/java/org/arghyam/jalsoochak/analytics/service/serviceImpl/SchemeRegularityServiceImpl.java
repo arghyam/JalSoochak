@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
@@ -59,6 +60,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private static final String SCHEME_REGULARITY_CACHE_PREFIX = ":scheme_regularity";
     private static final String READING_SUBMISSION_RATE_CACHE_PREFIX = ":reading_submission_rate";
     private static final String NATIONAL_DASHBOARD_CACHE_PREFIX = ":national:dashboard";
+    private static final String NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY = ":national:dashboard:boundaries:v1";
     private static final String REGION_WISE_WATER_QUANTITY_CACHE_PREFIX = ":water_quantity:region_wise";
     private static final String PERIODIC_WATER_QUANTITY_CACHE_PREFIX = ":water_quantity:periodic";
     private static final String PERIODIC_SCHEME_REGULARITY_CACHE_PREFIX = ":scheme_regularity:periodic";
@@ -782,11 +784,21 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         return getNationalDashboard(startDate, endDate);
     }
 
+    @Override
+    public NationalDashboardBoundaryResponse getNationalDashboardBoundariesForApi() {
+        NationalDashboardBoundaryResponse cached =
+                readFromCache(NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY, NationalDashboardBoundaryResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+        return buildAndCacheNationalDashboardBoundaries();
+    }
+
     private String buildNationalDashboardCacheKey(LocalDate startDate, LocalDate endDate) {
         return NATIONAL_DASHBOARD_CACHE_PREFIX
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v3";
+                + ":v4";
     }
 
     private NationalDashboardResponse buildAndCacheNationalDashboard(
@@ -811,13 +823,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         List<NationalDashboardResponse.StateQuantityPerformance> stateWiseQuantityPerformance = quantityMetrics.stream()
                 .map(metric -> {
-                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata geo =
+                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata meta =
                             tenantStateMetadataByTenantId.get(metric.tenantId());
                     return NationalDashboardResponse.StateQuantityPerformance.builder()
                         .tenantId(metric.tenantId())
-                        .lgdId(geo != null ? geo.lgdId() : null)
-                        .tenantStatus(geo != null ? geo.tenantStatus() : null)
-                        .boundary(parseBoundaryGeoJson(geo != null ? geo.boundaryGeoJson() : null))
+                        .lgdId(meta != null ? meta.lgdId() : null)
+                        .tenantStatus(meta != null ? meta.tenantStatus() : null)
                         .stateCode(metric.stateCode())
                         .stateTitle(metric.title())
                         .schemeCount(metric.schemeCount())
@@ -832,7 +843,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         List<NationalDashboardResponse.StateRegularity> stateWiseRegularity = regularityMetrics.stream()
                 .map(metric -> {
-                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata geo =
+                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata meta =
                             tenantStateMetadataByTenantId.get(metric.tenantId());
                     BigDecimal averageRegularity = BigDecimal.ZERO;
                     if (metric.schemeCount() > 0 && daysInRange > 0) {
@@ -841,9 +852,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                     }
                     return NationalDashboardResponse.StateRegularity.builder()
                             .tenantId(metric.tenantId())
-                            .lgdId(geo != null ? geo.lgdId() : null)
-                            .tenantStatus(geo != null ? geo.tenantStatus() : null)
-                            .boundary(parseBoundaryGeoJson(geo != null ? geo.boundaryGeoJson() : null))
+                            .lgdId(meta != null ? meta.lgdId() : null)
+                            .tenantStatus(meta != null ? meta.tenantStatus() : null)
                             .stateCode(metric.stateCode())
                             .stateTitle(metric.title())
                             .schemeCount(metric.schemeCount())
@@ -855,7 +865,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         List<NationalDashboardResponse.StateReadingSubmissionRate> stateWiseReadingSubmissionRate = submissionMetrics.stream()
                 .map(metric -> {
-                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata geo =
+                    SchemeRegularityRepository.NationalDashboardTenantStateMetadata meta =
                             tenantStateMetadataByTenantId.get(metric.tenantId());
                     BigDecimal readingSubmissionRate = BigDecimal.ZERO;
                     if (metric.schemeCount() > 0 && daysInRange > 0) {
@@ -864,9 +874,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                     }
                     return NationalDashboardResponse.StateReadingSubmissionRate.builder()
                             .tenantId(metric.tenantId())
-                            .lgdId(geo != null ? geo.lgdId() : null)
-                            .tenantStatus(geo != null ? geo.tenantStatus() : null)
-                            .boundary(parseBoundaryGeoJson(geo != null ? geo.boundaryGeoJson() : null))
+                            .lgdId(meta != null ? meta.lgdId() : null)
+                            .tenantStatus(meta != null ? meta.tenantStatus() : null)
                             .stateCode(metric.stateCode())
                             .stateTitle(metric.title())
                             .schemeCount(metric.schemeCount())
@@ -887,6 +896,25 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .overallOutageReasonDistribution(overallOutageReasonDistribution)
                 .build();
         writeToCache(cacheKey, response);
+        return response;
+    }
+
+    private NationalDashboardBoundaryResponse buildAndCacheNationalDashboardBoundaries() {
+        List<NationalDashboardBoundaryResponse.StateBoundary> stateWiseBoundaries =
+                schemeRegularityRepository.getNationalDashboardStateBoundaries().stream()
+                        .map(row -> NationalDashboardBoundaryResponse.StateBoundary.builder()
+                                .tenantId(row.tenantId())
+                                .lgdId(row.lgdId())
+                                .tenantStatus(row.tenantStatus())
+                                .stateCode(row.stateCode())
+                                .stateTitle(row.stateTitle())
+                                .boundary(parseBoundaryGeoJson(row.boundaryGeoJson()))
+                                .build())
+                        .toList();
+        NationalDashboardBoundaryResponse response = NationalDashboardBoundaryResponse.builder()
+                .stateWiseBoundaries(stateWiseBoundaries)
+                .build();
+        writeToCache(NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY, response);
         return response;
     }
 

@@ -1042,10 +1042,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void refreshNationalDashboard_computesAndWritesCache() throws Exception {
         mockRedisValueOps();
-        String key = ":national:dashboard:start:2026-01-01:end:2026-01-03:v3";
-        String polygonGeoJson =
-                "{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}";
-        com.fasterxml.jackson.databind.JsonNode boundaryNode = new ObjectMapper().readTree(polygonGeoJson);
+        String key = ":national:dashboard:start:2026-01-01:end:2026-01-03:v4";
 
         when(schemeRegularityRepository.getAverageWaterSupplyPerNation(START, END))
                 .thenReturn(List.of(
@@ -1068,9 +1065,8 @@ class SchemeRegularityServiceImplTest {
                 ));
         when(schemeRegularityRepository.getNationalDashboardTenantStateMetadata())
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.NationalDashboardTenantStateMetadata(1, 100, 1, polygonGeoJson)
+                        new SchemeRegularityRepository.NationalDashboardTenantStateMetadata(1, 100, 1)
                 ));
-        when(objectMapper.readTree(eq(polygonGeoJson))).thenReturn(boundaryNode);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         NationalDashboardResponse response = service.refreshNationalDashboard(START, END);
@@ -1081,10 +1077,33 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getStateWiseReadingSubmissionRate()).hasSize(1);
         assertThat(response.getStateWiseQuantityPerformance().getFirst().getLgdId()).isEqualTo(100);
         assertThat(response.getStateWiseQuantityPerformance().getFirst().getTenantStatus()).isEqualTo(1);
-        assertThat(response.getStateWiseQuantityPerformance().getFirst().getBoundary().get("type").asText()).isEqualTo("Polygon");
         assertThat(response.getStateWiseRegularity().getFirst().getLgdId()).isEqualTo(100);
         assertThat(response.getStateWiseReadingSubmissionRate().getFirst().getTenantStatus()).isEqualTo(1);
         verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
+    void getNationalDashboardBoundariesForApi_computesAndWritesCacheWhenMiss() throws Exception {
+        mockRedisValueOps();
+        String polygonGeoJson =
+                "{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}";
+        com.fasterxml.jackson.databind.JsonNode boundaryNode = new ObjectMapper().readTree(polygonGeoJson);
+
+        when(valueOperations.get(":national:dashboard:boundaries:v1")).thenReturn(null);
+        when(schemeRegularityRepository.getNationalDashboardStateBoundaries())
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.NationalDashboardStateBoundary(
+                                1, 100, 1, "mp", "Madhya Pradesh", polygonGeoJson)
+                ));
+        when(objectMapper.readTree(eq(polygonGeoJson))).thenReturn(boundaryNode);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{boundary-json}");
+
+        var response = service.getNationalDashboardBoundariesForApi();
+
+        assertThat(response.getStateWiseBoundaries()).hasSize(1);
+        assertThat(response.getStateWiseBoundaries().getFirst().getBoundary().get("type").asText()).isEqualTo("Polygon");
+        verify(valueOperations, times(1)).set(
+                eq(":national:dashboard:boundaries:v1"), eq("{boundary-json}"), eq(Duration.ofHours(24)));
     }
 
     private static DimTenant tenant(Integer id, String stateCode) {

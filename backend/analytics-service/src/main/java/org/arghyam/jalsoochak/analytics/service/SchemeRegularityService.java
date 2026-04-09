@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
@@ -89,6 +90,8 @@ public interface SchemeRegularityService {
     // Endpoint-oriented wrapper (keeps controller thin; allows future shaping/versioning).
     NationalDashboardResponse getNationalDashboardForApi(
             LocalDate startDate, LocalDate endDate);
+
+    NationalDashboardBoundaryResponse getNationalDashboardBoundariesForApi();
 
     AverageWaterSupplyResponse getAverageWaterSupplyPerCurrentRegionByLgd(
             Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate);

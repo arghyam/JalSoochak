@@ -456,10 +456,6 @@ public final class SwaggerExamples {
                     "tenantId": 10,
                     "lgdId": 23001428,
                     "tenantStatus": 1,
-                    "boundary": {
-                      "type": "Polygon",
-                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
-                    },
                     "stateCode": "MP",
                     "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
@@ -475,10 +471,6 @@ public final class SwaggerExamples {
                     "tenantId": 10,
                     "lgdId": 23001428,
                     "tenantStatus": 1,
-                    "boundary": {
-                      "type": "Polygon",
-                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
-                    },
                     "stateCode": "MP",
                     "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
@@ -491,10 +483,6 @@ public final class SwaggerExamples {
                     "tenantId": 10,
                     "lgdId": 23001428,
                     "tenantStatus": 1,
-                    "boundary": {
-                      "type": "Polygon",
-                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
-                    },
                     "stateCode": "MP",
                     "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
@@ -503,6 +491,27 @@ public final class SwaggerExamples {
                   }
                 ],
                 "overallOutageReasonDistribution": {}
+              }
+            }
+            """;
+
+    public static final String NATIONAL_DASHBOARD_BOUNDARY_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "stateWiseBoundaries": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "boundary": {
+                      "type": "Polygon",
+                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                    }
+                  }
+                ]
               }
             }
             """;

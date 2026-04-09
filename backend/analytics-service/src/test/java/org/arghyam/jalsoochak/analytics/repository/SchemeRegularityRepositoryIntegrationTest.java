@@ -73,14 +73,7 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
-    void getNationalDashboardTenantStateMetadata_returnsLevelOneLgdStatusAndGeoJsonWhenGeomPresent() {
-        jdbcTemplate.update(
-                """
-                        UPDATE analytics_schema.dim_lgd_location_table
-                        SET geom = ST_SetSRID(ST_GeomFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'), 4326)
-                        WHERE lgd_id = 100
-                        """);
-
+    void getNationalDashboardTenantStateMetadata_returnsLevelOneLgdAndTenantStatus() {
         List<SchemeRegularityRepository.NationalDashboardTenantStateMetadata> rows =
                 repository.getNationalDashboardTenantStateMetadata();
 
@@ -89,14 +82,35 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(row.tenantId()).isEqualTo(1);
         assertThat(row.lgdId()).isEqualTo(100);
         assertThat(row.tenantStatus()).isEqualTo(1);
+    }
+
+    @Test
+    void getNationalDashboardStateBoundaries_returnsGeoJsonWhenGeomPresent() {
+        jdbcTemplate.update(
+                """
+                        UPDATE analytics_schema.dim_lgd_location_table
+                        SET geom = ST_SetSRID(ST_GeomFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'), 4326)
+                        WHERE lgd_id = 100
+                        """);
+
+        List<SchemeRegularityRepository.NationalDashboardStateBoundary> rows =
+                repository.getNationalDashboardStateBoundaries();
+
+        assertThat(rows).hasSize(1);
+        SchemeRegularityRepository.NationalDashboardStateBoundary row = rows.getFirst();
+        assertThat(row.tenantId()).isEqualTo(1);
+        assertThat(row.lgdId()).isEqualTo(100);
+        assertThat(row.tenantStatus()).isEqualTo(1);
+        assertThat(row.stateCode()).isEqualTo("mp");
+        assertThat(row.stateTitle()).isEqualTo("Madhya Pradesh");
         assertThat(row.boundaryGeoJson()).contains("Polygon");
         assertThat(row.boundaryGeoJson()).contains("coordinates");
     }
 
     @Test
-    void getNationalDashboardTenantStateMetadata_returnsNullBoundaryWhenGeomMissing() {
-        List<SchemeRegularityRepository.NationalDashboardTenantStateMetadata> rows =
-                repository.getNationalDashboardTenantStateMetadata();
+    void getNationalDashboardStateBoundaries_returnsNullBoundaryGeoJsonWhenGeomMissing() {
+        List<SchemeRegularityRepository.NationalDashboardStateBoundary> rows =
+                repository.getNationalDashboardStateBoundaries();
 
         assertThat(rows).hasSize(1);
         assertThat(rows.getFirst().lgdId()).isEqualTo(100);

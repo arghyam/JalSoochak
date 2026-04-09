@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
@@ -20,6 +22,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.nullValue;
@@ -131,6 +134,44 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").exists());
+    }
+
+    @Test
+    void getNationalDashboard_validDateRange_returnsOk() throws Exception {
+        when(schemeRegularityService.getNationalDashboardForApi(START, END))
+                .thenReturn(NationalDashboardResponse.builder()
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .stateWiseQuantityPerformance(List.of())
+                        .stateWiseRegularity(List.of())
+                        .stateWiseReadingSubmissionRate(List.of())
+                        .overallOutageReasonDistribution(Map.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/national/dashboard")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.startDate").value("2026-01-01"));
+
+        verify(schemeRegularityService, times(1)).getNationalDashboardForApi(START, END);
+    }
+
+    @Test
+    void getNationalDashboardBoundaries_returnsOk() throws Exception {
+        when(schemeRegularityService.getNationalDashboardBoundariesForApi())
+                .thenReturn(NationalDashboardBoundaryResponse.builder()
+                        .stateWiseBoundaries(List.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.stateWiseBoundaries").isArray());
+
+        verify(schemeRegularityService, times(1)).getNationalDashboardBoundariesForApi();
     }
 
     @Test

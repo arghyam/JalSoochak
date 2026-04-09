@@ -2005,7 +2005,31 @@ public class SchemeRegularityRepository {
                 SELECT DISTINCT ON (t.tenant_id)
                     t.tenant_id,
                     l.lgd_id,
+                    t.status AS tenant_status
+                FROM analytics_schema.dim_tenant_table t
+                LEFT JOIN analytics_schema.dim_lgd_location_table l
+                    ON l.tenant_id = t.tenant_id
+                   AND l.lgd_level = 1
+                ORDER BY t.tenant_id, l.lgd_id NULLS LAST
+                """;
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            Integer lgdId = rs.getObject("lgd_id") == null ? null : rs.getInt("lgd_id");
+            return new NationalDashboardTenantStateMetadata(
+                    rs.getInt("tenant_id"),
+                    lgdId,
+                    rs.getInt("tenant_status"));
+        });
+    }
+
+    public List<NationalDashboardStateBoundary> getNationalDashboardStateBoundaries() {
+        String sql = """
+                SELECT DISTINCT ON (t.tenant_id)
+                    t.tenant_id,
+                    l.lgd_id,
                     t.status AS tenant_status,
+                    t.state_code,
+                    t.title AS state_title,
                     CASE
                         WHEN l.geom IS NOT NULL THEN ST_AsGeoJSON(l.geom, 9, 8)
                         ELSE NULL
@@ -2019,10 +2043,12 @@ public class SchemeRegularityRepository {
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             Integer lgdId = rs.getObject("lgd_id") == null ? null : rs.getInt("lgd_id");
-            return new NationalDashboardTenantStateMetadata(
+            return new NationalDashboardStateBoundary(
                     rs.getInt("tenant_id"),
                     lgdId,
                     rs.getInt("tenant_status"),
+                    rs.getString("state_code"),
+                    rs.getString("state_title"),
                     rs.getString("boundary_geojson"));
         });
     }
@@ -3165,7 +3191,15 @@ public class SchemeRegularityRepository {
     public record NationalDashboardTenantStateMetadata(
             Integer tenantId,
             Integer lgdId,
+            Integer tenantStatus) {
+    }
+
+    public record NationalDashboardStateBoundary(
+            Integer tenantId,
+            Integer lgdId,
             Integer tenantStatus,
+            String stateCode,
+            String stateTitle,
             String boundaryGeoJson) {
     }
 
