@@ -990,7 +990,11 @@ public class GlificMeterWorkflowService {
                             LocalDate.now()
                     )
                     .map(TelemetrySchemeSelectionRecord::schemeId)
-                    .orElseThrow(() -> new IllegalStateException("Please select a scheme first."));
+                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id()
+                    ))
+                    .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             Optional<TelemetryPendingMeterChangeRecord> pendingOpt = telemetryTenantRepository.findLatestPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
