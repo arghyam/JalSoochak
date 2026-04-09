@@ -23,6 +23,7 @@ public class TelemetryTenantRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
+    private static final String SCHEME_SELECTION_CORRELATION_PREFIX = "scheme-selection-";
     private static final int OPERATOR_LOOKUP_CACHE_SIZE = 10_000;
     private final Map<String, String> phoneToSchemaCache = Collections.synchronizedMap(
             new LinkedHashMap<>(256, 0.75f, true) {
@@ -179,6 +180,101 @@ public class TelemetryTenantRepository {
                 """, schemaName);
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("scheme_id")), userId);
         return rows.stream().findFirst();
+    }
+
+    public List<TelemetrySchemeOption> findSchemesForUser(String schemaName, Long userId) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT usm.scheme_id AS id, sm.scheme_name AS name
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                ORDER BY usm.id
+                """, schemaName, schemaName);
+        return jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetrySchemeOption(
+                        toLong(rs.getObject("id")),
+                        rs.getString("name")
+                ),
+                userId
+        );
+    }
+
+    public Optional<TelemetrySchemeSelectionRecord> findLatestPendingSchemeSelectionForDate(String schemaName,
+                                                                                            Long operatorId,
+                                                                                            LocalDate readingDate) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, scheme_id, correlation_id
+                FROM %s.flow_reading_table
+                WHERE created_by = ?
+                  AND reading_date = ?
+                  AND deleted_at IS NULL
+                  AND COALESCE(extracted_reading, 0) = 0
+                  AND COALESCE(confirmed_reading, 0) = 0
+                  AND meter_change_reason IS NULL
+                  AND issue_report_reason IS NULL
+                  AND COALESCE(image_url, '') = ''
+                  AND correlation_id LIKE ?
+                ORDER BY %s DESC, id DESC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetrySchemeSelectionRecord> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetrySchemeSelectionRecord(
+                        toLong(rs.getObject("id")),
+                        toLong(rs.getObject("scheme_id")),
+                        rs.getString("correlation_id")
+                ),
+                operatorId,
+                readingDate,
+                SCHEME_SELECTION_CORRELATION_PREFIX + "%"
+        );
+        return rows.stream().findFirst();
+    }
+
+    public String upsertPendingSchemeSelectionRecord(String schemaName,
+                                                     Long schemeId,
+                                                     Long operatorId,
+                                                     LocalDateTime readingAt) {
+        validateSchemaName(schemaName);
+        LocalDate readingDate = LocalDate.from(readingAt);
+        Optional<TelemetrySchemeSelectionRecord> existing = findLatestPendingSchemeSelectionForDate(
+                schemaName,
+                operatorId,
+                readingDate
+        );
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        if (existing.isPresent()) {
+            String sql = String.format("""
+                    UPDATE %s.flow_reading_table
+                    SET scheme_id = ?,
+                        %s = ?,
+                        reading_date = ?,
+                        updated_by = ?,
+                        updated_at = NOW()
+                    WHERE id = ?
+                    """, schemaName, timeColumn);
+            jdbcTemplate.update(sql, schemeId, readingAt, readingDate, operatorId, existing.get().id());
+            return existing.get().correlationId();
+        }
+
+        String correlationId = SCHEME_SELECTION_CORRELATION_PREFIX + UUID.randomUUID();
+        createFlowReading(
+                schemaName,
+                schemeId,
+                operatorId,
+                readingAt,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                correlationId,
+                "",
+                null
+        );
+        return correlationId;
     }
 
     public Optional<Integer> findUserLanguageId(String schemaName, Long userId) {

@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import jakarta.validation.Valid;
@@ -163,6 +164,40 @@ public class GlificWebhookController {
                     IntroResponse.builder()
                             .success(false)
                             .message("Channel selection could not be saved.")
+                            .build()
+            );
+        }
+    }
+
+    @PostMapping("/schemes")
+    public ResponseEntity<IntroResponse> schemes(@RequestBody @Valid IntroRequest request) {
+        try {
+            IntroResponse response = glificWebhookService.schemeSelectionMessage(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error preparing scheme selection: {}", e.getMessage(), e);
+            log.debug("Error preparing scheme selection for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    IntroResponse.builder()
+                            .success(false)
+                            .message("Scheme selection could not be prepared.")
+                            .build()
+            );
+        }
+    }
+
+    @PostMapping("/scheme/selected")
+    public ResponseEntity<IntroResponse> selectedScheme(@RequestBody @Valid SelectedSchemeRequest request) {
+        try {
+            IntroResponse response = glificWebhookService.selectedSchemeMessage(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error processing selected scheme: {}", e.getMessage(), e);
+            log.debug("Error processing selected scheme for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    IntroResponse.builder()
+                            .success(false)
+                            .message("Scheme selection could not be saved.")
                             .build()
             );
         }

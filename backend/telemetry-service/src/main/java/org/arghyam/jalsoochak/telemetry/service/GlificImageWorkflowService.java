@@ -5,8 +5,11 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.springframework.stereotype.Service;
+
+import java.time.LocalDate;
 
 @Service
 @Slf4j
@@ -48,7 +51,16 @@ public class GlificImageWorkflowService {
             );
 
             Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
+                    .findLatestPendingSchemeSelectionForDate(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id(),
+                            LocalDate.now()
+                    )
+                    .map(TelemetrySchemeSelectionRecord::schemeId)
+                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id()
+                    ))
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
