@@ -197,6 +197,7 @@ class FactServiceImplTest {
     @Test
     void ingestTenantEscalation_happyPath_savesEscalationAndAnomaly() {
         TenantEscalationEvent event = buildEscalationEvent(buildOp(21, 5, "corr-1", "11"));
+        event.setAnomalyType("no_submission");
         when(dimTenantRepository.existsById(1)).thenReturn(true);
 
         service.ingestTenantEscalation(event);
@@ -205,6 +206,7 @@ class FactServiceImplTest {
         verify(escalationRepository, times(1)).save(escCaptor.capture());
         assertThat(escCaptor.getValue().getUserId()).isEqualTo(99); // officerId
         assertThat(escCaptor.getValue().getSchemeId()).isEqualTo(11);
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
         assertThat(escCaptor.getValue().getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_SUBMISSION, 21, 1, 11));
 
@@ -212,6 +214,42 @@ class FactServiceImplTest {
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
         assertThat(anomalyCaptor.getValue().getUserId()).isEqualTo(21); // operator userId
         assertThat(anomalyCaptor.getValue().getConsecutiveDaysMissed()).isEqualTo(5);
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+    }
+
+    @Test
+    void ingestTenantEscalation_missingAnomalyType_fallsBackToNoSubmission() {
+        TenantEscalationEvent event = buildEscalationEvent(buildOp(21, 5, "corr-fb", "11"));
+        // anomalyType not set — simulates events from older tenant-service versions
+        when(dimTenantRepository.existsById(1)).thenReturn(true);
+
+        service.ingestTenantEscalation(event);
+
+        ArgumentCaptor<FactEscalation> escCaptor = ArgumentCaptor.forClass(FactEscalation.class);
+        verify(escalationRepository, times(1)).save(escCaptor.capture());
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+
+        ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+    }
+
+    @Test
+    void ingestTenantEscalation_whitespaceOnlyAnomalyType_fallsBackToNoSubmission() {
+        TenantEscalationEvent event = buildEscalationEvent(buildOp(21, 5, "corr-ws", "11"));
+        // Set anomalyType to whitespace-only string to exercise isBlank() branch
+        event.setAnomalyType("   \t   ");
+        when(dimTenantRepository.existsById(1)).thenReturn(true);
+
+        service.ingestTenantEscalation(event);
+
+        ArgumentCaptor<FactEscalation> escCaptor = ArgumentCaptor.forClass(FactEscalation.class);
+        verify(escalationRepository, times(1)).save(escCaptor.capture());
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+
+        ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
     }
 
     @Test

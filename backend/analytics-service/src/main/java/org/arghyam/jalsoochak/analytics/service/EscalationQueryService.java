@@ -20,7 +20,12 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +38,7 @@ public class EscalationQueryService {
             Integer userId,
             String escalationType,
             Integer schemeId,
+            String schemeName,
             LocalDate startDate,
             LocalDate endDate,
             Pageable pageable
@@ -47,13 +53,87 @@ public class EscalationQueryService {
                 ? null
                 : escalationType.trim();
 
+        String schemeNameFilter = (schemeName == null || schemeName.isBlank())
+                ? null
+                : schemeName.trim();
+
         CriteriaBuilder cb = em.getCriteriaBuilder();
 
+        // "Left join" semantics:
+        // - If scheme_name filter is provided, we must join dim_scheme_table to filter, which is inner-join-like.
+        // - If scheme_name filter is NOT provided, we should not depend on dim_scheme_table; we enrich names
+        //   best-effort (scheme_name may be null if missing in dim_scheme_table).
+        if (schemeNameFilter == null) {
+            return getEscalationsWithoutSchemeJoin(cb, tenantId, userId, escalationTypeFilter, schemeId, from, to, pageable);
+        }
+
+        return getEscalationsWithSchemeNameFilter(cb, tenantId, userId, escalationTypeFilter, schemeId, schemeNameFilter, from, to, pageable);
+    }
+
+    private Page<EscalationListItemDto> getEscalationsWithoutSchemeJoin(
+            CriteriaBuilder cb,
+            Integer tenantId,
+            Integer userId,
+            String escalationType,
+            Integer schemeId,
+            LocalDateTime fromInclusive,
+            LocalDateTime toExclusive,
+            Pageable pageable
+    ) {
+        CriteriaQuery<FactEscalation> dataQuery = cb.createQuery(FactEscalation.class);
+        Root<FactEscalation> e = dataQuery.from(FactEscalation.class);
+        dataQuery.select(e);
+        dataQuery.where(buildPredicatesNoScheme(cb, e, tenantId, userId, escalationType, schemeId, fromInclusive, toExclusive));
+        dataQuery.orderBy(buildOrders(cb, e, pageable));
+
+        TypedQuery<FactEscalation> typed = em.createQuery(dataQuery);
+        typed.setFirstResult((int) pageable.getOffset());
+        typed.setMaxResults(pageable.getPageSize());
+        List<FactEscalation> rows = typed.getResultList();
+
+        CriteriaQuery<Long> countQuery = cb.createQuery(Long.class);
+        Root<FactEscalation> e2 = countQuery.from(FactEscalation.class);
+        countQuery.select(cb.count(e2.get("id")));
+        countQuery.where(buildPredicatesNoScheme(cb, e2, tenantId, userId, escalationType, schemeId, fromInclusive, toExclusive));
+        Long total = em.createQuery(countQuery).getSingleResult();
+
+        Map<Integer, String> schemeNames = loadSchemeNames(rows);
+        List<EscalationListItemDto> content = rows.stream()
+                .map(r -> EscalationListItemDto.builder()
+                        .id(r.getId())
+                        .tenantId(r.getTenantId())
+                        .schemeId(r.getSchemeId())
+                        .escalationType(r.getEscalationType())
+                        .message(r.getMessage())
+                        .correlationId(r.getCorrelationId())
+                        .userId(r.getUserId())
+                        .resolutionStatusCode(r.getResolutionStatus())
+                        .remark(r.getRemark())
+                        .createdAt(r.getCreatedAt())
+                        .updatedAt(r.getUpdatedAt())
+                        .schemeName(schemeNames.get(r.getSchemeId()))
+                        .build())
+                .toList();
+
+        return new PageImpl<>(content, pageable, total);
+    }
+
+    private Page<EscalationListItemDto> getEscalationsWithSchemeNameFilter(
+            CriteriaBuilder cb,
+            Integer tenantId,
+            Integer userId,
+            String escalationType,
+            Integer schemeId,
+            String schemeName,
+            LocalDateTime fromInclusive,
+            LocalDateTime toExclusive,
+            Pageable pageable
+    ) {
         CriteriaQuery<EscalationListItemDto> dataQuery = cb.createQuery(EscalationListItemDto.class);
         Root<FactEscalation> e = dataQuery.from(FactEscalation.class);
         Root<DimScheme> s = dataQuery.from(DimScheme.class);
 
-        Predicate[] predicates = buildPredicates(cb, e, s, tenantId, userId, escalationTypeFilter, schemeId, from, to);
+        Predicate[] predicates = buildPredicatesWithScheme(cb, e, s, tenantId, userId, escalationType, schemeId, schemeName, fromInclusive, toExclusive);
         dataQuery.select(cb.construct(
                 EscalationListItemDto.class,
                 e.get("id"),
@@ -81,14 +161,67 @@ public class EscalationQueryService {
         Root<FactEscalation> e2 = countQuery.from(FactEscalation.class);
         Root<DimScheme> s2 = countQuery.from(DimScheme.class);
         countQuery.select(cb.count(e2.get("id")));
-        countQuery.where(buildPredicates(cb, e2, s2, tenantId, userId, escalationTypeFilter, schemeId, from, to));
+        countQuery.where(buildPredicatesWithScheme(cb, e2, s2, tenantId, userId, escalationType, schemeId, schemeName, fromInclusive, toExclusive));
 
         Long total = em.createQuery(countQuery).getSingleResult();
 
         return new PageImpl<>(content, pageable, total);
     }
 
-    private static Predicate[] buildPredicates(
+    private Map<Integer, String> loadSchemeNames(List<FactEscalation> rows) {
+        Set<Integer> schemeIds = rows.stream()
+                .map(FactEscalation::getSchemeId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (schemeIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<Object[]> pairs = em.createQuery(
+                        "select s.schemeId, s.schemeName from DimScheme s where s.schemeId in :ids",
+                        Object[].class
+                )
+                .setParameter("ids", schemeIds)
+                .getResultList();
+
+        Map<Integer, String> map = new HashMap<>();
+        for (Object[] p : pairs) {
+            Integer id = (Integer) p[0];
+            String name = (String) p[1];
+            map.put(id, name);
+        }
+        return map;
+    }
+
+    private static Predicate[] buildPredicatesNoScheme(
+            CriteriaBuilder cb,
+            Root<FactEscalation> e,
+            Integer tenantId,
+            Integer userId,
+            String escalationType,
+            Integer schemeId,
+            LocalDateTime fromInclusive,
+            LocalDateTime toExclusive
+    ) {
+        List<Predicate> p = new ArrayList<>();
+        if (tenantId != null) {
+            p.add(cb.equal(e.get("tenantId"), tenantId));
+        }
+        if (userId != null) {
+            p.add(cb.equal(e.get("userId"), userId));
+        }
+        if (escalationType != null) {
+            p.add(cb.equal(e.get("escalationType"), escalationType));
+        }
+        if (schemeId != null) {
+            p.add(cb.equal(e.get("schemeId"), schemeId));
+        }
+        p.add(cb.greaterThanOrEqualTo(e.get("createdAt"), fromInclusive));
+        p.add(cb.lessThan(e.get("createdAt"), toExclusive));
+        return p.toArray(Predicate[]::new);
+    }
+
+    private static Predicate[] buildPredicatesWithScheme(
             CriteriaBuilder cb,
             Root<FactEscalation> e,
             Root<DimScheme> s,
@@ -96,6 +229,7 @@ public class EscalationQueryService {
             Integer userId,
             String escalationType,
             Integer schemeId,
+            String schemeName,
             LocalDateTime fromInclusive,
             LocalDateTime toExclusive
     ) {
@@ -113,6 +247,10 @@ public class EscalationQueryService {
         if (schemeId != null) {
             p.add(cb.equal(e.get("schemeId"), schemeId));
         }
+        p.add(cb.like(
+                cb.lower(s.get("schemeName")),
+                "%" + schemeName.toLowerCase() + "%"
+        ));
         p.add(cb.greaterThanOrEqualTo(e.get("createdAt"), fromInclusive));
         p.add(cb.lessThan(e.get("createdAt"), toExclusive));
         return p.toArray(Predicate[]::new);
