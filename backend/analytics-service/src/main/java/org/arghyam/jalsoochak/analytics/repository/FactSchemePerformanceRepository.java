@@ -11,5 +11,7 @@ public interface FactSchemePerformanceRepository extends JpaRepository<FactSchem
 
     List<FactSchemePerformance> findByTenantId(Integer tenantId);
 
+    List<FactSchemePerformance> findByTenantIdAndSchemeId(Integer tenantId, Integer schemeId);
+
     List<FactSchemePerformance> findBySchemeId(Integer schemeId);
 }

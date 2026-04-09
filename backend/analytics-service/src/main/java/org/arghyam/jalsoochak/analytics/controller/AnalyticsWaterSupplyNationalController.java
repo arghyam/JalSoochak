@@ -64,7 +64,7 @@ public class AnalyticsWaterSupplyNationalController {
             }
     )
     public ResponseEntity<ApiResponse<AverageWaterSupplyResponse>> getAverageWaterSupplyPerCurrentRegion(
-            @RequestParam(name = "tenant_id", required = false) Integer tenantId,
+            @RequestParam(name = "tenant_id", required = true) Integer tenantId,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
             @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
             @Parameter(

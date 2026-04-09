@@ -54,6 +54,42 @@ public class SchemeRegularityRepository {
         return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
     }
 
+    public SchemeRegularityMetrics getSchemeRegularityMetrics(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_lgd AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_supply_days AS (
+                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_lgd sl
+                        ON sl.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
+                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
+                """, schemeLgdColumn);
+
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, tenantId, startDate, endDate);
+        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
+        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
+
+        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
+    }
+
     public SchemeRegularityMetrics getReadingSubmissionRateMetricsByLgd(Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
         Integer lgdLevel = getLgdLevel(parentLgdId);
         if (lgdLevel == null) {
@@ -82,6 +118,43 @@ public class SchemeRegularityRepository {
                 """, schemeLgdColumn);
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, startDate, endDate);
+        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
+        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
+
+        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
+    }
+
+    public SchemeRegularityMetrics getReadingSubmissionRateMetricsByLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + parentLgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_lgd AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_submission_days AS (
+                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_lgd sl
+                        ON sl.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading >= 0
+                      AND m.tenant_id = ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
+                    COALESCE((SELECT SUM(submission_days)::int FROM scheme_submission_days), 0) AS total_supply_days
+                """, schemeLgdColumn);
+
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, tenantId, startDate, endDate, tenantId);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
         int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
 
@@ -124,6 +197,43 @@ public class SchemeRegularityRepository {
         return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
     }
 
+    public SchemeRegularityMetrics getSchemeRegularityMetricsByDepartment(
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_department AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_supply_days AS (
+                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_department sd
+                        ON sd.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
+                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
+                """, schemeDepartmentColumn);
+
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentDepartmentId, tenantId, startDate, endDate);
+        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
+        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
+
+        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
+    }
+
     public SchemeRegularityMetrics getReadingSubmissionRateMetricsByDepartment(
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
         Integer departmentLevel = getDepartmentLevel(parentDepartmentId);
@@ -154,6 +264,45 @@ public class SchemeRegularityRepository {
                 """, schemeDepartmentColumn);
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentDepartmentId, startDate, endDate);
+        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
+        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
+
+        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
+    }
+
+    public SchemeRegularityMetrics getReadingSubmissionRateMetricsByDepartment(
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_department AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_submission_days AS (
+                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_department sd
+                        ON sd.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading >= 0
+                      AND m.tenant_id = ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
+                    COALESCE((SELECT SUM(submission_days)::int FROM scheme_submission_days), 0) AS total_supply_days
+                """, schemeDepartmentColumn);
+
+        Map<String, Object> result =
+                jdbcTemplate.queryForMap(sql, parentDepartmentId, tenantId, startDate, endDate, tenantId);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
         int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
 
@@ -401,6 +550,95 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<ChildRegionReadingSubmissionMetrics> getChildReadingSubmissionRateMetricsByLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + parentLgdId);
+        }
+        if (lgdLevel >= 6) {
+            throw new IllegalArgumentException("No child LGD level available for parent_lgd_id: " + parentLgdId);
+        }
+        int childLevel = lgdLevel + 1;
+        long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        if (daysInRange <= 0) {
+            return List.of();
+        }
+
+        String parentSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
+        String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH child_regions AS (
+                    SELECT
+                        l.lgd_id AS child_lgd_id,
+                        l.title
+                    FROM analytics_schema.dim_lgd_location_table l
+                    WHERE l.lgd_level = ?
+                      AND l.%1$s = ?
+                      AND l.tenant_id = ?
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%2$s AS child_lgd_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%3$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_submission_days AS (
+                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                        ON ss.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading >= 0
+                      AND m.tenant_id = ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    c.child_lgd_id AS lgd_id,
+                    c.title,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
+                FROM child_regions c
+                LEFT JOIN schemes_in_scope s
+                    ON s.child_lgd_id = c.child_lgd_id
+                LEFT JOIN scheme_submission_days sd
+                    ON sd.scheme_id = s.scheme_id
+                GROUP BY c.child_lgd_id, c.title
+                ORDER BY c.child_lgd_id
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> {
+                    int schemeCount = rs.getInt("scheme_count");
+                    int totalSubmissionDays = rs.getInt("total_submission_days");
+                    BigDecimal readingSubmissionRate = BigDecimal.ZERO;
+                    if (schemeCount > 0) {
+                        readingSubmissionRate = BigDecimal.valueOf(totalSubmissionDays)
+                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
+                    }
+                    return new ChildRegionReadingSubmissionMetrics(
+                            rs.getInt("lgd_id"),
+                            null,
+                            rs.getString("title"),
+                            schemeCount,
+                            totalSubmissionDays,
+                            readingSubmissionRate);
+                },
+                childLevel,
+                parentLgdId,
+                tenantId,
+                parentLgdId,
+                tenantId,
+                startDate,
+                endDate,
+                tenantId);
+    }
+
     public List<ChildRegionReadingSubmissionMetrics> getChildReadingSubmissionRateMetricsByDepartment(
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
         Integer departmentLevel = getDepartmentLevel(parentDepartmentId);
@@ -485,6 +723,96 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<ChildRegionReadingSubmissionMetrics> getChildReadingSubmissionRateMetricsByDepartment(
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
+        }
+        if (departmentLevel >= 6) {
+            throw new IllegalArgumentException("No child department level available for parent_department_id: " + parentDepartmentId);
+        }
+        int childLevel = departmentLevel + 1;
+        long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        if (daysInRange <= 0) {
+            return List.of();
+        }
+
+        String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
+        String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH child_regions AS (
+                    SELECT
+                        d.department_id AS child_department_id,
+                        d.title
+                    FROM analytics_schema.dim_department_location_table d
+                    WHERE d.department_level = ?
+                      AND d.%1$s = ?
+                      AND d.tenant_id = ?
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%2$s AS child_department_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%3$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_submission_days AS (
+                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                        ON ss.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading >= 0
+                      AND m.tenant_id = ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    c.child_department_id AS department_id,
+                    c.title,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
+                FROM child_regions c
+                LEFT JOIN schemes_in_scope s
+                    ON s.child_department_id = c.child_department_id
+                LEFT JOIN scheme_submission_days sd
+                    ON sd.scheme_id = s.scheme_id
+                GROUP BY c.child_department_id, c.title
+                ORDER BY c.child_department_id
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> {
+                    int schemeCount = rs.getInt("scheme_count");
+                    int totalSubmissionDays = rs.getInt("total_submission_days");
+                    BigDecimal readingSubmissionRate = BigDecimal.ZERO;
+                    if (schemeCount > 0) {
+                        readingSubmissionRate = BigDecimal.valueOf(totalSubmissionDays)
+                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
+                    }
+                    return new ChildRegionReadingSubmissionMetrics(
+                            null,
+                            rs.getInt("department_id"),
+                            rs.getString("title"),
+                            schemeCount,
+                            totalSubmissionDays,
+                            readingSubmissionRate);
+                },
+                childLevel,
+                parentDepartmentId,
+                tenantId,
+                parentDepartmentId,
+                tenantId,
+                startDate,
+                endDate,
+                tenantId);
+    }
+
     public List<ChildRegionSchemeRegularityMetrics> getChildSchemeRegularityMetricsByLgd(
             Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
         Integer lgdLevel = getLgdLevel(parentLgdId);
@@ -564,6 +892,93 @@ public class SchemeRegularityRepository {
                 childLevel,
                 parentLgdId,
                 parentLgdId,
+                startDate,
+                endDate);
+    }
+
+    public List<ChildRegionSchemeRegularityMetrics> getChildSchemeRegularityMetricsByLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
+        }
+        if (lgdLevel >= 6) {
+            throw new IllegalArgumentException("No child LGD level available for parent_lgd_id: " + parentLgdId);
+        }
+        int childLevel = lgdLevel + 1;
+        long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        if (daysInRange <= 0) {
+            return List.of();
+        }
+
+        String parentSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
+        String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH child_regions AS (
+                    SELECT
+                        l.lgd_id AS child_lgd_id,
+                        l.title
+                    FROM analytics_schema.dim_lgd_location_table l
+                    WHERE l.lgd_level = ?
+                      AND l.%1$s = ?
+                      AND l.tenant_id = ?
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%2$s AS child_lgd_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%3$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_supply_days AS (
+                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                        ON ss.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    c.child_lgd_id AS lgd_id,
+                    c.title,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                FROM child_regions c
+                LEFT JOIN schemes_in_scope s
+                    ON s.child_lgd_id = c.child_lgd_id
+                LEFT JOIN scheme_supply_days sd
+                    ON sd.scheme_id = s.scheme_id
+                GROUP BY c.child_lgd_id, c.title
+                ORDER BY c.child_lgd_id
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> {
+                    int schemeCount = rs.getInt("scheme_count");
+                    int totalSupplyDays = rs.getInt("total_supply_days");
+                    BigDecimal averageRegularity = BigDecimal.ZERO;
+                    if (schemeCount > 0) {
+                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
+                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
+                    }
+                    return new ChildRegionSchemeRegularityMetrics(
+                            rs.getInt("lgd_id"),
+                            null,
+                            rs.getString("title"),
+                            schemeCount,
+                            totalSupplyDays,
+                            averageRegularity);
+                },
+                childLevel,
+                parentLgdId,
+                tenantId,
+                parentLgdId,
+                tenantId,
                 startDate,
                 endDate);
     }
@@ -652,6 +1067,94 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<ChildRegionSchemeRegularityMetrics> getChildSchemeRegularityMetricsByDepartment(
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
+        }
+        if (departmentLevel >= 6) {
+            throw new IllegalArgumentException("No child department level available for parent_department_id: " + parentDepartmentId);
+        }
+        int childLevel = departmentLevel + 1;
+        long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        if (daysInRange <= 0) {
+            return List.of();
+        }
+
+        String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
+        String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH child_regions AS (
+                    SELECT
+                        d.department_id AS child_department_id,
+                        d.title
+                    FROM analytics_schema.dim_department_location_table d
+                    WHERE d.department_level = ?
+                      AND d.%1$s = ?
+                      AND d.tenant_id = ?
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%2$s AS child_department_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%3$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_supply_days AS (
+                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                        ON ss.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    c.child_department_id AS department_id,
+                    c.title,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                FROM child_regions c
+                LEFT JOIN schemes_in_scope s
+                    ON s.child_department_id = c.child_department_id
+                LEFT JOIN scheme_supply_days sd
+                    ON sd.scheme_id = s.scheme_id
+                GROUP BY c.child_department_id, c.title
+                ORDER BY c.child_department_id
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> {
+                    int schemeCount = rs.getInt("scheme_count");
+                    int totalSupplyDays = rs.getInt("total_supply_days");
+                    BigDecimal averageRegularity = BigDecimal.ZERO;
+                    if (schemeCount > 0) {
+                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
+                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
+                    }
+                    return new ChildRegionSchemeRegularityMetrics(
+                            null,
+                            rs.getInt("department_id"),
+                            rs.getString("title"),
+                            schemeCount,
+                            totalSupplyDays,
+                            averageRegularity);
+                },
+                childLevel,
+                parentDepartmentId,
+                tenantId,
+                parentDepartmentId,
+                tenantId,
+                startDate,
+                endDate);
+    }
+
     public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByLgd(
             Integer lgdId, LocalDate startDate, LocalDate endDate) {
         Integer lgdLevel = getLgdLevel(lgdId);
@@ -688,6 +1191,44 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByLgd(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_lgd AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    f.outage_reason,
+                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                FROM analytics_schema.fact_water_quantity_table f
+                JOIN schemes_in_lgd sl
+                    ON sl.scheme_id = f.scheme_id
+                WHERE f.outage_reason IS NOT NULL
+                  AND f.date BETWEEN ? AND ?
+                GROUP BY f.outage_reason
+                ORDER BY f.outage_reason
+                """, schemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new OutageReasonSchemeCount(
+                        rs.getString("outage_reason"),
+                        rs.getInt("scheme_count")),
+                lgdId,
+                tenantId,
+                startDate,
+                endDate);
+    }
+
     public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByDepartment(
             Integer departmentId, LocalDate startDate, LocalDate endDate) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
@@ -720,6 +1261,44 @@ public class SchemeRegularityRepository {
                         rs.getString("outage_reason"),
                         rs.getInt("scheme_count")),
                 departmentId,
+                startDate,
+                endDate);
+    }
+
+    public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_department AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    f.outage_reason,
+                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                FROM analytics_schema.fact_water_quantity_table f
+                JOIN schemes_in_department sd
+                    ON sd.scheme_id = f.scheme_id
+                WHERE f.outage_reason IS NOT NULL
+                  AND f.date BETWEEN ? AND ?
+                GROUP BY f.outage_reason
+                ORDER BY f.outage_reason
+                """, schemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new OutageReasonSchemeCount(
+                        rs.getString("outage_reason"),
+                        rs.getInt("scheme_count")),
+                departmentId,
+                tenantId,
                 startDate,
                 endDate);
     }
@@ -836,6 +1415,46 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<NonSubmissionReasonSchemeCount> getNonSubmissionReasonSchemeCountByLgd(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_lgd AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    f.non_submission_reason,
+                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                FROM analytics_schema.fact_water_quantity_table f
+                JOIN schemes_in_lgd sl
+                    ON sl.scheme_id = f.scheme_id
+                WHERE f.non_submission_reason IS NOT NULL
+                  AND f.submission_status = ?
+                  AND f.date BETWEEN ? AND ?
+                GROUP BY f.non_submission_reason
+                ORDER BY f.non_submission_reason
+                """, schemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new NonSubmissionReasonSchemeCount(
+                        rs.getString("non_submission_reason"),
+                        rs.getInt("scheme_count")),
+                lgdId,
+                tenantId,
+                NOT_SUBMITTED_STATUS,
+                startDate,
+                endDate);
+    }
+
     public List<NonSubmissionReasonSchemeCount> getNonSubmissionReasonSchemeCountByDepartment(
             Integer departmentId, LocalDate startDate, LocalDate endDate) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
@@ -869,6 +1488,46 @@ public class SchemeRegularityRepository {
                         rs.getString("non_submission_reason"),
                         rs.getInt("scheme_count")),
                 departmentId,
+                NOT_SUBMITTED_STATUS,
+                startDate,
+                endDate);
+    }
+
+    public List<NonSubmissionReasonSchemeCount> getNonSubmissionReasonSchemeCountByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_department AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    f.non_submission_reason,
+                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                FROM analytics_schema.fact_water_quantity_table f
+                JOIN schemes_in_department sd
+                    ON sd.scheme_id = f.scheme_id
+                WHERE f.non_submission_reason IS NOT NULL
+                  AND f.submission_status = ?
+                  AND f.date BETWEEN ? AND ?
+                GROUP BY f.non_submission_reason
+                ORDER BY f.non_submission_reason
+                """, schemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new NonSubmissionReasonSchemeCount(
+                        rs.getString("non_submission_reason"),
+                        rs.getInt("scheme_count")),
+                departmentId,
+                tenantId,
                 NOT_SUBMITTED_STATUS,
                 startDate,
                 endDate);
@@ -969,6 +1628,7 @@ public class SchemeRegularityRepository {
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     WHERE usm.user_id = ?
+                      AND usm.tenant_id = ?
                 )
                 SELECT COALESCE(SUM(f.water_quantity), 0)::bigint AS total_water_supplied
                 FROM analytics_schema.fact_water_quantity_table f
@@ -978,7 +1638,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 """;
 
-        Long value = jdbcTemplate.queryForObject(sql, Long.class, userId, tenantId, startDate, endDate);
+        Long value = jdbcTemplate.queryForObject(sql, Long.class, userId, tenantId, tenantId, startDate, endDate);
         return value != null ? value : 0L;
     }
 
@@ -1030,6 +1690,23 @@ public class SchemeRegularityRepository {
         return jdbcTemplate.queryForObject(sql, Integer.class, lgdId);
     }
 
+    public Integer getSchemeCountByLgd(Integer tenantId, Integer lgdId) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                SELECT COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count
+                FROM analytics_schema.dim_scheme_table s
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                """, schemeLgdColumn);
+
+        return jdbcTemplate.queryForObject(sql, Integer.class, lgdId, tenantId);
+    }
+
     public Integer getSchemeCountByDepartment(Integer departmentId) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
         if (departmentLevel == null) {
@@ -1044,6 +1721,23 @@ public class SchemeRegularityRepository {
                 """, schemeDepartmentColumn);
 
         return jdbcTemplate.queryForObject(sql, Integer.class, departmentId);
+    }
+
+    public Integer getSchemeCountByDepartment(Integer tenantId, Integer departmentId) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                SELECT COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count
+                FROM analytics_schema.dim_scheme_table s
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                """, schemeDepartmentColumn);
+
+        return jdbcTemplate.queryForObject(sql, Integer.class, departmentId, tenantId);
     }
 
     public SubmissionStatusCount getSubmissionStatusCountByLgd(
@@ -1089,6 +1783,50 @@ public class SchemeRegularityRepository {
         return new SubmissionStatusCount(compliantSubmissionCount, anomalousSubmissionCount);
     }
 
+    public SubmissionStatusCount getSubmissionStatusCountByLgd(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    COALESCE(
+                        COUNT(*) FILTER (
+                            WHERE m.extracted_reading IS NOT NULL
+                              AND m.extracted_reading = m.confirmed_reading
+                        ),
+                        0
+                    )::int AS compliant_submission_count,
+                    COALESCE(
+                        COUNT(*) FILTER (
+                            WHERE m.extracted_reading IS NOT NULL
+                              AND m.extracted_reading IS DISTINCT FROM m.confirmed_reading
+                        ),
+                        0
+                    )::int AS anomalous_submission_count
+                FROM analytics_schema.fact_meter_reading_table m
+                JOIN schemes_in_scope ss
+                    ON ss.scheme_id = m.scheme_id
+                WHERE m.reading_date BETWEEN ? AND ?
+                """, schemeLgdColumn);
+
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId, tenantId, startDate, endDate);
+        int compliantSubmissionCount =
+                result.get("compliant_submission_count") instanceof Number value ? value.intValue() : 0;
+        int anomalousSubmissionCount =
+                result.get("anomalous_submission_count") instanceof Number value ? value.intValue() : 0;
+        return new SubmissionStatusCount(compliantSubmissionCount, anomalousSubmissionCount);
+    }
+
     public SubmissionStatusCount getSubmissionStatusCountByDepartment(
             Integer departmentId, LocalDate startDate, LocalDate endDate) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
@@ -1125,6 +1863,50 @@ public class SchemeRegularityRepository {
                 """, schemeDepartmentColumn);
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, startDate, endDate);
+        int compliantSubmissionCount =
+                result.get("compliant_submission_count") instanceof Number value ? value.intValue() : 0;
+        int anomalousSubmissionCount =
+                result.get("anomalous_submission_count") instanceof Number value ? value.intValue() : 0;
+        return new SubmissionStatusCount(compliantSubmissionCount, anomalousSubmissionCount);
+    }
+
+    public SubmissionStatusCount getSubmissionStatusCountByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    COALESCE(
+                        COUNT(*) FILTER (
+                            WHERE m.extracted_reading IS NOT NULL
+                              AND m.extracted_reading = m.confirmed_reading
+                        ),
+                        0
+                    )::int AS compliant_submission_count,
+                    COALESCE(
+                        COUNT(*) FILTER (
+                            WHERE m.extracted_reading IS NOT NULL
+                              AND m.extracted_reading IS DISTINCT FROM m.confirmed_reading
+                        ),
+                        0
+                    )::int AS anomalous_submission_count
+                FROM analytics_schema.fact_meter_reading_table m
+                JOIN schemes_in_scope ss
+                    ON ss.scheme_id = m.scheme_id
+                WHERE m.reading_date BETWEEN ? AND ?
+                """, schemeDepartmentColumn);
+
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, tenantId, startDate, endDate);
         int compliantSubmissionCount =
                 result.get("compliant_submission_count") instanceof Number value ? value.intValue() : 0;
         int anomalousSubmissionCount =
@@ -1199,6 +1981,37 @@ public class SchemeRegularityRepository {
                 lgdId);
     }
 
+    public List<ChildRegionRef> getChildRegionsByLgd(Integer tenantId, Integer lgdId) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        if (lgdLevel >= 6) {
+            return List.of();
+        }
+
+        int childLevel = lgdLevel + 1;
+        String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
+
+        String sql = String.format("""
+                SELECT
+                    l.lgd_id,
+                    l.title
+                FROM analytics_schema.dim_lgd_location_table l
+                WHERE l.lgd_level = ?
+                  AND l.%1$s = ?
+                  AND l.tenant_id = ?
+                ORDER BY l.lgd_id
+                """, childRegionParentLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ChildRegionRef(rs.getInt("lgd_id"), null, rs.getString("title")),
+                childLevel,
+                lgdId,
+                tenantId);
+    }
+
     public List<ChildRegionRef> getChildRegionsByDepartment(Integer departmentId) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
         if (departmentLevel == null) {
@@ -1226,6 +2039,37 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new ChildRegionRef(null, rs.getInt("department_id"), rs.getString("title")),
                 childLevel,
                 departmentId);
+    }
+
+    public List<ChildRegionRef> getChildRegionsByDepartment(Integer tenantId, Integer departmentId) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        if (departmentLevel >= 6) {
+            return List.of();
+        }
+
+        int childLevel = departmentLevel + 1;
+        String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
+
+        String sql = String.format("""
+                SELECT
+                    d.department_id,
+                    d.title
+                FROM analytics_schema.dim_department_location_table d
+                WHERE d.department_level = ?
+                  AND d.%1$s = ?
+                  AND d.tenant_id = ?
+                ORDER BY d.department_id
+                """, childRegionParentDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ChildRegionRef(null, rs.getInt("department_id"), rs.getString("title")),
+                childLevel,
+                departmentId,
+                tenantId);
     }
 
     public List<ChildRegionOutageReasonSchemeCount> getChildOutageReasonSchemeCountByLgd(
@@ -1270,6 +2114,54 @@ public class SchemeRegularityRepository {
                         rs.getString("outage_reason"),
                         rs.getInt("scheme_count")),
                 lgdId,
+                startDate,
+                endDate);
+    }
+
+    public List<ChildRegionOutageReasonSchemeCount> getChildOutageReasonSchemeCountByLgd(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        if (lgdLevel >= 6) {
+            return List.of();
+        }
+
+        String parentSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        String childSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel + 1);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%1$s AS child_lgd_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%2$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    ss.child_lgd_id AS lgd_id,
+                    f.outage_reason,
+                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                FROM schemes_in_scope ss
+                JOIN analytics_schema.fact_water_quantity_table f
+                    ON f.scheme_id = ss.scheme_id
+                WHERE f.outage_reason IS NOT NULL
+                  AND f.date BETWEEN ? AND ?
+                GROUP BY ss.child_lgd_id, f.outage_reason
+                ORDER BY ss.child_lgd_id, f.outage_reason
+                """, childSchemeLgdColumn, parentSchemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ChildRegionOutageReasonSchemeCount(
+                        rs.getInt("lgd_id"),
+                        null,
+                        rs.getString("outage_reason"),
+                        rs.getInt("scheme_count")),
+                lgdId,
+                tenantId,
                 startDate,
                 endDate);
     }
@@ -1320,6 +2212,54 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<ChildRegionOutageReasonSchemeCount> getChildOutageReasonSchemeCountByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        if (departmentLevel >= 6) {
+            return List.of();
+        }
+
+        String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel + 1);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%1$s AS child_department_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%2$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    ss.child_department_id AS department_id,
+                    f.outage_reason,
+                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                FROM schemes_in_scope ss
+                JOIN analytics_schema.fact_water_quantity_table f
+                    ON f.scheme_id = ss.scheme_id
+                WHERE f.outage_reason IS NOT NULL
+                  AND f.date BETWEEN ? AND ?
+                GROUP BY ss.child_department_id, f.outage_reason
+                ORDER BY ss.child_department_id, f.outage_reason
+                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ChildRegionOutageReasonSchemeCount(
+                        null,
+                        rs.getInt("department_id"),
+                        rs.getString("outage_reason"),
+                        rs.getInt("scheme_count")),
+                departmentId,
+                tenantId,
+                startDate,
+                endDate);
+    }
+
     public List<ChildRegionNonSubmissionReasonSchemeCount> getChildNonSubmissionReasonSchemeCountByLgd(
             Integer lgdId, LocalDate startDate, LocalDate endDate) {
         Integer lgdLevel = getLgdLevel(lgdId);
@@ -1363,6 +2303,56 @@ public class SchemeRegularityRepository {
                         rs.getString("non_submission_reason"),
                         rs.getInt("scheme_count")),
                 lgdId,
+                NOT_SUBMITTED_STATUS,
+                startDate,
+                endDate);
+    }
+
+    public List<ChildRegionNonSubmissionReasonSchemeCount> getChildNonSubmissionReasonSchemeCountByLgd(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        if (lgdLevel >= 6) {
+            return List.of();
+        }
+
+        String parentSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        String childSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel + 1);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%1$s AS child_lgd_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%2$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    ss.child_lgd_id AS lgd_id,
+                    f.non_submission_reason,
+                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                FROM schemes_in_scope ss
+                JOIN analytics_schema.fact_water_quantity_table f
+                    ON f.scheme_id = ss.scheme_id
+                WHERE f.non_submission_reason IS NOT NULL
+                  AND f.submission_status = ?
+                  AND f.date BETWEEN ? AND ?
+                GROUP BY ss.child_lgd_id, f.non_submission_reason
+                ORDER BY ss.child_lgd_id, f.non_submission_reason
+                """, childSchemeLgdColumn, parentSchemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ChildRegionNonSubmissionReasonSchemeCount(
+                        rs.getInt("lgd_id"),
+                        null,
+                        rs.getString("non_submission_reason"),
+                        rs.getInt("scheme_count")),
+                lgdId,
+                tenantId,
                 NOT_SUBMITTED_STATUS,
                 startDate,
                 endDate);
@@ -1416,6 +2406,56 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<ChildRegionNonSubmissionReasonSchemeCount> getChildNonSubmissionReasonSchemeCountByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        if (departmentLevel >= 6) {
+            return List.of();
+        }
+
+        String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel + 1);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%1$s AS child_department_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%2$s = ?
+                      AND s.tenant_id = ?
+                )
+                SELECT
+                    ss.child_department_id AS department_id,
+                    f.non_submission_reason,
+                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                FROM schemes_in_scope ss
+                JOIN analytics_schema.fact_water_quantity_table f
+                    ON f.scheme_id = ss.scheme_id
+                WHERE f.non_submission_reason IS NOT NULL
+                  AND f.submission_status = ?
+                  AND f.date BETWEEN ? AND ?
+                GROUP BY ss.child_department_id, f.non_submission_reason
+                ORDER BY ss.child_department_id, f.non_submission_reason
+                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ChildRegionNonSubmissionReasonSchemeCount(
+                        null,
+                        rs.getInt("department_id"),
+                        rs.getString("non_submission_reason"),
+                        rs.getInt("scheme_count")),
+                departmentId,
+                tenantId,
+                NOT_SUBMITTED_STATUS,
+                startDate,
+                endDate);
+    }
+
     public SchemeStatusCount getSchemeStatusCountByLgd(Integer lgdId) {
         Integer lgdLevel = getLgdLevel(lgdId);
         if (lgdLevel == null) {
@@ -1438,6 +2478,29 @@ public class SchemeRegularityRepository {
         return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
     }
 
+    public SchemeStatusCount getSchemeStatusCountByLgd(Integer tenantId, Integer lgdId) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                SELECT
+                    COUNT(*) FILTER (WHERE s.status = 1)::int AS active_scheme_count,
+                    COUNT(*) FILTER (WHERE s.status = 0)::int AS inactive_scheme_count
+                FROM analytics_schema.dim_scheme_table s
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                """, schemeLgdColumn);
+
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId, tenantId);
+        int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
+        int inactiveSchemeCount = result.get("inactive_scheme_count") instanceof Number value ? value.intValue() : 0;
+
+        return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
+    }
+
     public SchemeStatusCount getSchemeStatusCountByDepartment(Integer departmentId) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
         if (departmentLevel == null) {
@@ -1454,6 +2517,29 @@ public class SchemeRegularityRepository {
                 """, schemeDepartmentColumn);
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId);
+        int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
+        int inactiveSchemeCount = result.get("inactive_scheme_count") instanceof Number value ? value.intValue() : 0;
+
+        return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
+    }
+
+    public SchemeStatusCount getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                SELECT
+                    COUNT(*) FILTER (WHERE s.status = 1)::int AS active_scheme_count,
+                    COUNT(*) FILTER (WHERE s.status = 0)::int AS inactive_scheme_count
+                FROM analytics_schema.dim_scheme_table s
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                """, schemeDepartmentColumn);
+
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, tenantId);
         int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
         int inactiveSchemeCount = result.get("inactive_scheme_count") instanceof Number value ? value.intValue() : 0;
 
@@ -1760,6 +2846,61 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<SchemeRegularityListMetrics> getSchemeRegionReportByLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.scheme_name,
+                        s.status
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading >= 0 THEN m.reading_date END)::int AS submission_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                        ON ss.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    ss.scheme_id,
+                    ss.scheme_name,
+                    ss.status,
+                    COALESCE(sd.supply_days, 0)::int AS supply_days,
+                    COALESCE(sd.submission_days, 0)::int AS submission_days
+                FROM schemes_in_scope ss
+                LEFT JOIN scheme_days sd
+                    ON sd.scheme_id = ss.scheme_id
+                ORDER BY ss.scheme_id
+                """, schemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new SchemeRegularityListMetrics(
+                        rs.getInt("scheme_id"),
+                        rs.getString("scheme_name"),
+                        (Integer) rs.getObject("status"),
+                        rs.getInt("supply_days"),
+                        rs.getInt("submission_days")),
+                parentLgdId,
+                tenantId,
+                startDate,
+                endDate);
+    }
+
     public List<SchemeRegularityListMetrics> getSchemeRegionReportByDepartment(
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
         Integer departmentLevel = getDepartmentLevel(parentDepartmentId);
@@ -1814,6 +2955,62 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<SchemeRegularityListMetrics> getSchemeRegionReportByDepartment(
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.scheme_name,
+                        s.status
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading >= 0 THEN m.reading_date END)::int AS submission_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                        ON ss.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    ss.scheme_id,
+                    ss.scheme_name,
+                    ss.status,
+                    COALESCE(sd.supply_days, 0)::int AS supply_days,
+                    COALESCE(sd.submission_days, 0)::int AS submission_days
+                FROM schemes_in_scope ss
+                LEFT JOIN scheme_days sd
+                    ON sd.scheme_id = ss.scheme_id
+                ORDER BY ss.scheme_id
+                """, schemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new SchemeRegularityListMetrics(
+                        rs.getInt("scheme_id"),
+                        rs.getString("scheme_name"),
+                        (Integer) rs.getObject("status"),
+                        rs.getInt("supply_days"),
+                        rs.getInt("submission_days")),
+                parentDepartmentId,
+                tenantId,
+                startDate,
+                endDate);
+    }
+
     public String getParentLgdCNameByLgd(Integer lgdId) {
         Integer lgdLevel = getLgdLevel(lgdId);
         if (lgdLevel == null) {
@@ -1830,6 +3027,26 @@ public class SchemeRegularityRepository {
                 """, schemeLgdColumn);
 
         return jdbcTemplate.queryForObject(sql, String.class, lgdId);
+    }
+
+    public String getParentLgdCNameByLgd(Integer tenantId, Integer lgdId) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                SELECT MAX(l.lgd_c_name) AS parent_lgd_c_name
+                FROM analytics_schema.dim_scheme_table s
+                LEFT JOIN analytics_schema.dim_lgd_location_table l
+                    ON l.lgd_id = s.parent_lgd_location_id
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                  AND l.tenant_id = ?
+                """, schemeLgdColumn);
+
+        return jdbcTemplate.queryForObject(sql, String.class, lgdId, tenantId, tenantId);
     }
 
     public String getParentLgdTitleByLgd(Integer lgdId) {
@@ -1850,6 +3067,26 @@ public class SchemeRegularityRepository {
         return jdbcTemplate.queryForObject(sql, String.class, lgdId);
     }
 
+    public String getParentLgdTitleByLgd(Integer tenantId, Integer lgdId) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                SELECT MAX(l.title) AS parent_lgd_title
+                FROM analytics_schema.dim_scheme_table s
+                LEFT JOIN analytics_schema.dim_lgd_location_table l
+                    ON l.lgd_id = s.parent_lgd_location_id
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                  AND l.tenant_id = ?
+                """, schemeLgdColumn);
+
+        return jdbcTemplate.queryForObject(sql, String.class, lgdId, tenantId, tenantId);
+    }
+
     public String getParentDepartmentCNameByDepartment(Integer departmentId) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
         if (departmentLevel == null) {
@@ -1868,6 +3105,26 @@ public class SchemeRegularityRepository {
         return jdbcTemplate.queryForObject(sql, String.class, departmentId);
     }
 
+    public String getParentDepartmentCNameByDepartment(Integer tenantId, Integer departmentId) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                SELECT MAX(d.department_c_name) AS parent_department_c_name
+                FROM analytics_schema.dim_scheme_table s
+                LEFT JOIN analytics_schema.dim_department_location_table d
+                    ON d.department_id = s.parent_department_location_id
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                  AND d.tenant_id = ?
+                """, schemeDepartmentColumn);
+
+        return jdbcTemplate.queryForObject(sql, String.class, departmentId, tenantId, tenantId);
+    }
+
     public String getParentDepartmentTitleByDepartment(Integer departmentId) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
         if (departmentLevel == null) {
@@ -1884,6 +3141,26 @@ public class SchemeRegularityRepository {
                 """, schemeDepartmentColumn);
 
         return jdbcTemplate.queryForObject(sql, String.class, departmentId);
+    }
+
+    public String getParentDepartmentTitleByDepartment(Integer tenantId, Integer departmentId) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                SELECT MAX(d.title) AS parent_department_title
+                FROM analytics_schema.dim_scheme_table s
+                LEFT JOIN analytics_schema.dim_department_location_table d
+                    ON d.department_id = s.parent_department_location_id
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                  AND d.tenant_id = ?
+                """, schemeDepartmentColumn);
+
+        return jdbcTemplate.queryForObject(sql, String.class, departmentId, tenantId, tenantId);
     }
 
     public List<SchemeWaterSupplyMetrics> getAverageWaterSupplyPerCurrentRegion(
@@ -2495,6 +3772,163 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<ChildRegionWaterQuantityMetrics> getRegionWiseWaterQuantityByLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        Integer parentLgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
+        if (parentLgdLevel == null) {
+            throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
+        }
+        if (parentLgdLevel >= 6) {
+            throw new IllegalArgumentException("No child LGD level available for parent_lgd_id: " + parentLgdId);
+        }
+
+        int childLevel = parentLgdLevel + 1;
+        String parentSchemeLgdColumn = resolveSchemeLgdColumn(parentLgdLevel);
+        String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
+        String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(parentLgdLevel);
+
+        String sql = String.format("""
+                WITH tenant_cfg AS (
+                    SELECT
+                        t.tenant_id,
+                        COALESCE(t.required_lpcd, 0) AS required_lpcd,
+                        COALESCE(t.person_count_per_household, 5) AS person_count_per_household,
+                        COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
+                        COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
+                    FROM analytics_schema.dim_tenant_table t
+                    JOIN analytics_schema.dim_lgd_location_table l
+                        ON l.tenant_id = t.tenant_id
+                    WHERE l.lgd_id = ?
+                      AND l.tenant_id = ?
+                ),
+                child_regions AS (
+                    SELECT
+                        l.lgd_id AS child_lgd_id,
+                        l.title
+                    FROM analytics_schema.dim_lgd_location_table l
+                    WHERE l.lgd_level = ?
+                      AND l.%1$s = ?
+                      AND l.tenant_id = ?
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%2$s AS child_lgd_id,
+                        COALESCE(s.house_hold_count, 0) AS house_hold_count,
+                        COALESCE(s.fhtc_count, 0) AS fhtc_count,
+                        COALESCE(s.planned_fhtc, 0) AS planned_fhtc
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%3$s = ?
+                ),
+                dates_in_range AS (
+                    SELECT d.full_date AS date
+                    FROM analytics_schema.dim_date_table d
+                    WHERE d.full_date BETWEEN ? AND ?
+                ),
+                ewater_by_scheme AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS total_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.scheme_id
+                ),
+                region_scheme_agg AS (
+                    SELECT
+                        s.child_lgd_id,
+                        COALESCE(SUM(s.house_hold_count), 0)::bigint AS household_count,
+                        COALESCE(SUM(s.fhtc_count), 0)::bigint AS fhtc_count,
+                        COALESCE(SUM(s.planned_fhtc), 0)::bigint AS planned_fhtc,
+                        COALESCE(SUM(w.total_ewater_quantity), 0)::bigint AS ewater_quantity
+                    FROM schemes_in_scope s
+                    LEFT JOIN ewater_by_scheme w
+                        ON w.scheme_id = s.scheme_id
+                    GROUP BY s.child_lgd_id
+                ),
+                ewater_by_scheme_day AS (
+                    SELECT
+                        f.scheme_id,
+                        f.date,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.scheme_id, f.date
+                ),
+                region_supply_days AS (
+                    SELECT
+                        sd.child_lgd_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                     (
+                                         (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 - (tc.under_supply_range_percentage::numeric / 100))
+                                     )
+                                     AND
+                                     (
+                                         (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 + (tc.over_supply_range_percentage::numeric / 100))
+                                     )
+                                    THEN 1
+                                ELSE 0
+                            END
+                    ), 0)::bigint AS supply_days_in_efficient_range
+                    FROM (
+                        SELECT
+                            s.scheme_id,
+                            s.child_lgd_id,
+                            s.fhtc_count,
+                            dr.date
+                        FROM schemes_in_scope s
+                        CROSS JOIN dates_in_range dr
+                    ) sd
+                    LEFT JOIN ewater_by_scheme_day wd
+                        ON wd.scheme_id = sd.scheme_id
+                        AND wd.date = sd.date
+                    CROSS JOIN tenant_cfg tc
+                    GROUP BY sd.child_lgd_id
+                )
+                SELECT
+                    c.child_lgd_id AS lgd_id,
+                    c.title,
+                    COALESCE(a.household_count, 0)::bigint AS household_count,
+                    COALESCE(a.fhtc_count, 0)::bigint AS fhtc_count,
+                    COALESCE(a.planned_fhtc, 0)::bigint AS planned_fhtc,
+                    COALESCE(a.ewater_quantity, 0)::bigint AS ewater_quantity,
+                    COALESCE(ps.supply_days_in_efficient_range, 0)::bigint AS supply_days_in_efficient_range
+                FROM child_regions c
+                LEFT JOIN region_scheme_agg a
+                    ON a.child_lgd_id = c.child_lgd_id
+                LEFT JOIN region_supply_days ps
+                    ON ps.child_lgd_id = c.child_lgd_id
+                ORDER BY c.child_lgd_id
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ChildRegionWaterQuantityMetrics(
+                        rs.getInt("lgd_id"),
+                        null,
+                        rs.getString("title"),
+                        rs.getLong("ewater_quantity"),
+                        rs.getLong("household_count"),
+                        rs.getLong("fhtc_count"),
+                        rs.getLong("planned_fhtc"),
+                        rs.getLong("supply_days_in_efficient_range")),
+                parentLgdId,
+                tenantId,
+                childLevel,
+                parentLgdId,
+                tenantId,
+                parentLgdId,
+                startDate,
+                endDate,
+                startDate,
+                endDate,
+                startDate,
+                endDate);
+    }
+
     public List<ChildRegionWaterQuantityMetrics> getRegionWiseWaterQuantityByDepartment(
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
         Integer parentDepartmentLevel = getDepartmentLevel(parentDepartmentId);
@@ -2670,6 +4104,27 @@ public class SchemeRegularityRepository {
                 schemeDepartmentColumn, departmentId, startDate, endDate, scale);
     }
 
+    public List<PeriodicSchemeRegularityMetrics> getPeriodicSchemeRegularityByLgdId(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        return getPeriodicSchemeRegularityMetricsForTenant(tenantId, schemeLgdColumn, lgdId, startDate, endDate, scale);
+    }
+
+    public List<PeriodicSchemeRegularityMetrics> getPeriodicSchemeRegularityByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        return getPeriodicSchemeRegularityMetricsForTenant(
+                tenantId, schemeDepartmentColumn, departmentId, startDate, endDate, scale);
+    }
+
     public List<PeriodicSchemeRegularityMetrics> getPeriodicSchemeRegularityForNation(
             LocalDate startDate, LocalDate endDate, PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForMeterReadings(scale);
@@ -2815,6 +4270,243 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    private List<PeriodicSchemeRegularityMetrics> getPeriodicSchemeRegularityMetricsForTenant(
+            Integer tenantId,
+            String schemeLocationColumn,
+            Object locationId,
+            LocalDate startDate,
+            LocalDate endDate,
+            PeriodScale scale) {
+        PeriodSqlParts sqlParts = buildPeriodSqlPartsForMeterReadings(scale);
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                periods AS (
+                    SELECT DISTINCT
+                        %2$s AS period_start_date,
+                        %3$s AS period_end_date,
+                        %4$s AS scope
+                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                ),
+                scheme_supply_days AS (
+                    SELECT
+                        m.scheme_id,
+                        %5$s AS period_start_date,
+                        COUNT(DISTINCT m.reading_date)::int AS supply_days,
+                        COALESCE(SUM(m.confirmed_reading), 0)::bigint AS total_water_quantity
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope s
+                        ON s.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading > 0
+                      AND m.tenant_id = ?
+                    GROUP BY m.scheme_id, %5$s
+                ),
+                period_supply AS (
+                    SELECT
+                        period_start_date,
+                        COALESCE(SUM(supply_days)::int, 0) AS total_supply_days,
+                        COALESCE(SUM(total_water_quantity)::bigint, 0) AS total_water_quantity
+                    FROM scheme_supply_days
+                    GROUP BY period_start_date
+                )
+                SELECT
+                    p.period_start_date,
+                    p.period_end_date,
+                    COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
+                    COALESCE(ps.total_supply_days, 0) AS total_supply_days,
+                    COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
+                FROM periods p
+                LEFT JOIN period_supply ps
+                    ON ps.period_start_date = p.period_start_date
+                ORDER BY p.period_start_date
+                """,
+                schemeLocationColumn,
+                sqlParts.periodStartFromSeries(),
+                sqlParts.periodEndFromSeries(),
+                sqlParts.periodLabelFromSeries(),
+                sqlParts.periodStartFromFact());
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new PeriodicSchemeRegularityMetrics(
+                        rs.getObject("period_start_date", LocalDate.class),
+                        rs.getObject("period_end_date", LocalDate.class),
+                        rs.getInt("scheme_count"),
+                        rs.getInt("total_supply_days"),
+                        rs.getLong("total_water_quantity")),
+                locationId,
+                tenantId,
+                startDate,
+                endDate,
+                startDate,
+                endDate,
+                tenantId);
+    }
+
+    public List<ChildRegionWaterQuantityMetrics> getRegionWiseWaterQuantityByDepartment(
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        Integer parentDepartmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
+        if (parentDepartmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
+        }
+        if (parentDepartmentLevel >= 6) {
+            throw new IllegalArgumentException("No child department level available for parent_department_id: " + parentDepartmentId);
+        }
+
+        int childLevel = parentDepartmentLevel + 1;
+        String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(parentDepartmentLevel);
+        String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
+        String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(parentDepartmentLevel);
+
+        String sql = String.format("""
+                WITH tenant_cfg AS (
+                    SELECT
+                        t.tenant_id,
+                        COALESCE(t.required_lpcd, 0) AS required_lpcd,
+                        COALESCE(t.person_count_per_household, 5) AS person_count_per_household,
+                        COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
+                        COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
+                    FROM analytics_schema.dim_tenant_table t
+                    JOIN analytics_schema.dim_department_location_table d
+                        ON d.tenant_id = t.tenant_id
+                    WHERE d.department_id = ?
+                      AND d.tenant_id = ?
+                ),
+                child_regions AS (
+                    SELECT
+                        d.department_id AS child_department_id,
+                        d.title
+                    FROM analytics_schema.dim_department_location_table d
+                    WHERE d.department_level = ?
+                      AND d.%1$s = ?
+                      AND d.tenant_id = ?
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.%2$s AS child_department_id,
+                        COALESCE(s.house_hold_count, 0) AS house_hold_count,
+                        COALESCE(s.fhtc_count, 0) AS fhtc_count,
+                        COALESCE(s.planned_fhtc, 0) AS planned_fhtc
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%3$s = ?
+                ),
+                dates_in_range AS (
+                    SELECT d.full_date AS date
+                    FROM analytics_schema.dim_date_table d
+                    WHERE d.full_date BETWEEN ? AND ?
+                ),
+                ewater_by_scheme AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS total_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.scheme_id
+                ),
+                region_scheme_agg AS (
+                    SELECT
+                        s.child_department_id,
+                        COALESCE(SUM(s.house_hold_count), 0)::bigint AS household_count,
+                        COALESCE(SUM(s.fhtc_count), 0)::bigint AS fhtc_count,
+                        COALESCE(SUM(s.planned_fhtc), 0)::bigint AS planned_fhtc,
+                        COALESCE(SUM(w.total_ewater_quantity), 0)::bigint AS ewater_quantity
+                    FROM schemes_in_scope s
+                    LEFT JOIN ewater_by_scheme w
+                        ON w.scheme_id = s.scheme_id
+                    GROUP BY s.child_department_id
+                ),
+                ewater_by_scheme_day AS (
+                    SELECT
+                        f.scheme_id,
+                        f.date,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.scheme_id, f.date
+                ),
+                region_supply_days AS (
+                    SELECT
+                        sd.child_department_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                     (
+                                         (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 - (tc.under_supply_range_percentage::numeric / 100))
+                                     )
+                                     AND
+                                     (
+                                         (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 + (tc.over_supply_range_percentage::numeric / 100))
+                                     )
+                                    THEN 1
+                                ELSE 0
+                            END
+                    ), 0)::bigint AS supply_days_in_efficient_range
+                    FROM (
+                        SELECT
+                            s.scheme_id,
+                            s.child_department_id,
+                            s.fhtc_count,
+                            dr.date
+                        FROM schemes_in_scope s
+                        CROSS JOIN dates_in_range dr
+                    ) sd
+                    LEFT JOIN ewater_by_scheme_day wd
+                        ON wd.scheme_id = sd.scheme_id
+                        AND wd.date = sd.date
+                    CROSS JOIN tenant_cfg tc
+                    GROUP BY sd.child_department_id
+                )
+                SELECT
+                    c.child_department_id AS department_id,
+                    c.title,
+                    COALESCE(a.household_count, 0)::bigint AS household_count,
+                    COALESCE(a.fhtc_count, 0)::bigint AS fhtc_count,
+                    COALESCE(a.planned_fhtc, 0)::bigint AS planned_fhtc,
+                    COALESCE(a.ewater_quantity, 0)::bigint AS ewater_quantity,
+                    COALESCE(ps.supply_days_in_efficient_range, 0)::bigint AS supply_days_in_efficient_range
+                FROM child_regions c
+                LEFT JOIN region_scheme_agg a
+                    ON a.child_department_id = c.child_department_id
+                LEFT JOIN region_supply_days ps
+                    ON ps.child_department_id = c.child_department_id
+                ORDER BY c.child_department_id
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ChildRegionWaterQuantityMetrics(
+                        null,
+                        rs.getInt("department_id"),
+                        rs.getString("title"),
+                        rs.getLong("ewater_quantity"),
+                        rs.getLong("household_count"),
+                        rs.getLong("fhtc_count"),
+                        rs.getLong("planned_fhtc"),
+                        rs.getLong("supply_days_in_efficient_range")),
+                parentDepartmentId,
+                tenantId,
+                childLevel,
+                parentDepartmentId,
+                tenantId,
+                parentDepartmentId,
+                startDate,
+                endDate,
+                startDate,
+                endDate,
+                startDate,
+                endDate);
+    }
+
     public List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityByLgdId(
             Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
         Integer lgdLevel = getLgdLevel(lgdId);
@@ -2845,6 +4537,17 @@ public class SchemeRegularityRepository {
         return getPeriodicOutageReasonSchemeCountRows(schemeLgdColumn, lgdId, startDate, endDate, scale);
     }
 
+    public List<PeriodicOutageReasonSchemeCountRow> getPeriodicOutageReasonSchemeCountByLgdId(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        return getPeriodicOutageReasonSchemeCountRowsForTenant(
+                schemeLgdColumn, lgdId, tenantId, startDate, endDate, scale);
+    }
+
     public List<PeriodicOutageReasonSchemeCountRow> getPeriodicOutageReasonSchemeCountByDepartment(
             Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
@@ -2854,6 +4557,17 @@ public class SchemeRegularityRepository {
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
         return getPeriodicOutageReasonSchemeCountRows(
                 schemeDepartmentColumn, departmentId, startDate, endDate, scale);
+    }
+
+    public List<PeriodicOutageReasonSchemeCountRow> getPeriodicOutageReasonSchemeCountByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        return getPeriodicOutageReasonSchemeCountRowsForTenant(
+                schemeDepartmentColumn, departmentId, tenantId, startDate, endDate, scale);
     }
 
     private List<PeriodicOutageReasonSchemeCountRow> getPeriodicOutageReasonSchemeCountRows(
@@ -2919,6 +4633,78 @@ public class SchemeRegularityRepository {
                             count);
                 },
                 locationId,
+                startDate,
+                endDate,
+                startDate,
+                endDate);
+    }
+
+    private List<PeriodicOutageReasonSchemeCountRow> getPeriodicOutageReasonSchemeCountRowsForTenant(
+            String schemeLocationColumn,
+            Object locationId,
+            Integer tenantId,
+            LocalDate startDate,
+            LocalDate endDate,
+            PeriodScale scale) {
+        PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT DISTINCT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                periods AS (
+                    SELECT DISTINCT
+                        %2$s AS period_start_date,
+                        %3$s AS period_end_date,
+                        %4$s AS scope
+                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                ),
+                outage_by_period AS (
+                    SELECT
+                        %5$s AS period_start_date,
+                        f.outage_reason,
+                        COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                    FROM analytics_schema.fact_water_quantity_table f
+                    JOIN schemes_in_scope s
+                        ON s.scheme_id = f.scheme_id
+                    WHERE f.outage_reason IS NOT NULL
+                      AND f.date BETWEEN ? AND ?
+                    GROUP BY %5$s, f.outage_reason
+                )
+                SELECT
+                    p.period_start_date,
+                    p.period_end_date,
+                    o.outage_reason,
+                    o.scheme_count
+                FROM periods p
+                LEFT JOIN outage_by_period o
+                    ON o.period_start_date = p.period_start_date
+                ORDER BY p.period_start_date, o.outage_reason
+                """,
+                schemeLocationColumn,
+                sqlParts.periodStartFromSeries(),
+                sqlParts.periodEndFromSeries(),
+                sqlParts.periodLabelFromSeries(),
+                sqlParts.periodStartFromFact());
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> {
+                    String reason = rs.getString("outage_reason");
+                    Integer count = null;
+                    if (reason != null) {
+                        count = rs.getInt("scheme_count");
+                    }
+                    return new PeriodicOutageReasonSchemeCountRow(
+                            rs.getObject("period_start_date", LocalDate.class),
+                            rs.getObject("period_end_date", LocalDate.class),
+                            reason,
+                            count);
+                },
+                locationId,
+                tenantId,
                 startDate,
                 endDate,
                 startDate,
@@ -3016,6 +4802,20 @@ public class SchemeRegularityRepository {
                 .orElse(null);
     }
 
+    public Integer getLgdLevelForTenant(Integer tenantId, Integer lgdId) {
+        String sql = """
+                SELECT l.lgd_level
+                FROM analytics_schema.dim_lgd_location_table l
+                WHERE l.lgd_id = ?
+                  AND l.tenant_id = ?
+                LIMIT 1
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> (Integer) rs.getObject("lgd_level"), lgdId, tenantId)
+                .stream()
+                .findFirst()
+                .orElse(null);
+    }
+
     private PeriodSqlParts buildPeriodSqlParts(PeriodScale scale) {
         return switch (scale) {
             case DAY -> new PeriodSqlParts(
@@ -3064,6 +4864,20 @@ public class SchemeRegularityRepository {
                 LIMIT 1
                 """;
         return jdbcTemplate.query(sql, (rs, rowNum) -> (Integer) rs.getObject("department_level"), parentDepartmentId)
+                .stream()
+                .findFirst()
+                .orElse(null);
+    }
+
+    public Integer getDepartmentLevelForTenant(Integer tenantId, Integer parentDepartmentId) {
+        String sql = """
+                SELECT d.department_level
+                FROM analytics_schema.dim_department_location_table d
+                WHERE d.department_id = ?
+                  AND d.tenant_id = ?
+                LIMIT 1
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> (Integer) rs.getObject("department_level"), parentDepartmentId, tenantId)
                 .stream()
                 .findFirst()
                 .orElse(null);

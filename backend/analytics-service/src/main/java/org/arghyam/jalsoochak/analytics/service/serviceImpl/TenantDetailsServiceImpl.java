@@ -166,9 +166,9 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
 
         // Scheme regularity and reading submission are scope/period based
         AverageSchemeRegularityResponse averageRegularity =
-                schemeRegularityService.getAverageSchemeRegularity(parentLgdId, startDate, endDate);
+                schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, startDate, endDate);
         ReadingSubmissionRateResponse submissionRate =
-                schemeRegularityService.getReadingSubmissionRateByLgd(parentLgdId, startDate, endDate);
+                schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, startDate, endDate);
 
         // Performance is per child region; merge into response child rows.
         List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
@@ -210,10 +210,10 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
 
         AverageSchemeRegularityResponse averageRegularity =
                 schemeRegularityService.getAverageSchemeRegularityByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
         ReadingSubmissionRateResponse submissionRate =
                 schemeRegularityService.getReadingSubmissionRateByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
                 schemeRegularityService.getChildAveragePerformanceScoreByDepartment(

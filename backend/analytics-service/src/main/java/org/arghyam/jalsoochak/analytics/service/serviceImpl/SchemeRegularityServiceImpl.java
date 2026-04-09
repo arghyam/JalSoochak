@@ -82,7 +82,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private final ObjectMapper objectMapper;
 
     @Override
-    public AverageSchemeRegularityResponse getAverageSchemeRegularity(Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+    public AverageSchemeRegularityResponse getAverageSchemeRegularity(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
         // #region agent log
@@ -94,6 +96,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         // #endregion
 
         String cacheKey = SCHEME_REGULARITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate;
@@ -105,7 +108,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         SchemeRegularityRepository.SchemeRegularityMetrics metrics;
         try {
-            metrics = schemeRegularityRepository.getSchemeRegularityMetrics(parentLgdId, startDate, endDate);
+            metrics = schemeRegularityRepository.getSchemeRegularityMetrics(tenantId, parentLgdId, startDate, endDate);
         } catch (Exception ex) {
             // #region agent log
             appendDebugLog(
@@ -151,7 +154,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     }
 
     @Override
-    public ReadingSubmissionRateResponse getReadingSubmissionRateByLgd(Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+    public ReadingSubmissionRateResponse getReadingSubmissionRateByLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
         // #region agent log
@@ -159,10 +164,15 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 "H3",
                 "SchemeRegularityServiceImpl:getReadingSubmissionRateByLgd:entry",
                 "Submission rate request entry",
-                Map.of("parentLgdId", parentLgdId, "startDate", String.valueOf(startDate), "endDate", String.valueOf(endDate)));
+                Map.of(
+                        "tenantId", tenantId,
+                        "parentLgdId", parentLgdId,
+                        "startDate", String.valueOf(startDate),
+                        "endDate", String.valueOf(endDate)));
         // #endregion
 
         String cacheKey = READING_SUBMISSION_RATE_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
@@ -173,10 +183,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
-        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevel(parentLgdId);
+        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevelForTenant(tenantId, parentLgdId);
         SchemeRegularityRepository.SchemeRegularityMetrics metrics;
         try {
-            metrics = schemeRegularityRepository.getReadingSubmissionRateMetricsByLgd(parentLgdId, startDate, endDate);
+            metrics = schemeRegularityRepository.getReadingSubmissionRateMetricsByLgd(tenantId, parentLgdId, startDate, endDate);
         } catch (Exception ex) {
             // #region agent log
             appendDebugLog(
@@ -223,11 +233,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public AverageSchemeRegularityResponse getAverageSchemeRegularityByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
 
         String cacheKey = SCHEME_REGULARITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":department:" + parentDepartmentId
                 + ":start:" + startDate
                 + ":end:" + endDate;
@@ -238,7 +250,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
-                schemeRegularityRepository.getSchemeRegularityMetricsByDepartment(parentDepartmentId, startDate, endDate);
+                schemeRegularityRepository.getSchemeRegularityMetricsByDepartment(
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         BigDecimal averageRegularity = BigDecimal.ZERO;
         if (metrics.schemeCount() > 0 && daysInRange > 0) {
@@ -268,11 +281,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public AverageSchemeRegularityResponse getAverageSchemeRegularityForChildRegions(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
 
         String cacheKey = SCHEME_REGULARITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + parentLgdId
                 + ":scope:child"
                 + ":start:" + startDate
@@ -282,7 +297,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
 
-        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevel(parentLgdId);
+        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevelForTenant(tenantId, parentLgdId);
         if (parentLgdLevel == null) {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
@@ -292,7 +307,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> metrics =
-                schemeRegularityRepository.getChildSchemeRegularityMetricsByLgd(parentLgdId, startDate, endDate);
+                schemeRegularityRepository.getChildSchemeRegularityMetricsByLgd(
+                        tenantId, parentLgdId, startDate, endDate);
 
         List<AverageSchemeRegularityResponse.ChildRegionRegularity> childRegions = metrics.stream()
                 .map(m -> AverageSchemeRegularityResponse.ChildRegionRegularity.builder()
@@ -340,11 +356,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public AverageSchemeRegularityResponse getAverageSchemeRegularityByDepartmentForChildRegions(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
 
         String cacheKey = SCHEME_REGULARITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":department:" + parentDepartmentId
                 + ":scope:child"
                 + ":start:" + startDate
@@ -354,7 +372,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
 
-        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevel(parentDepartmentId);
+        Integer parentDepartmentLevel =
+                schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (parentDepartmentLevel == null) {
             throw new IllegalArgumentException(
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
@@ -365,7 +384,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> metrics =
-                schemeRegularityRepository.getChildSchemeRegularityMetricsByDepartment(parentDepartmentId, startDate, endDate);
+                schemeRegularityRepository.getChildSchemeRegularityMetricsByDepartment(
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         List<AverageSchemeRegularityResponse.ChildRegionRegularity> childRegions = metrics.stream()
                 .map(m -> AverageSchemeRegularityResponse.ChildRegionRegularity.builder()
@@ -413,11 +433,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public ReadingSubmissionRateResponse getReadingSubmissionRateByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
 
         String cacheKey = READING_SUBMISSION_RATE_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":department:" + parentDepartmentId
                 + ":start:" + startDate
                 + ":end:" + endDate
@@ -428,9 +450,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
-        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevel(parentDepartmentId);
+        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
-                schemeRegularityRepository.getReadingSubmissionRateMetricsByDepartment(parentDepartmentId, startDate, endDate);
+                schemeRegularityRepository.getReadingSubmissionRateMetricsByDepartment(
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         BigDecimal readingSubmissionRate = BigDecimal.ZERO;
         if (metrics.schemeCount() > 0 && daysInRange > 0) {
@@ -460,11 +483,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public ReadingSubmissionRateResponse getReadingSubmissionRateByLgdForChildRegions(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
 
         String cacheKey = READING_SUBMISSION_RATE_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + parentLgdId
                 + ":scope:child"
                 + ":start:" + startDate
@@ -475,7 +500,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
 
-        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevel(parentLgdId);
+        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevelForTenant(tenantId, parentLgdId);
         if (parentLgdLevel == null) {
             throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
@@ -485,7 +510,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionReadingSubmissionMetrics> metrics =
-                schemeRegularityRepository.getChildReadingSubmissionRateMetricsByLgd(parentLgdId, startDate, endDate);
+                schemeRegularityRepository.getChildReadingSubmissionRateMetricsByLgd(
+                        tenantId, parentLgdId, startDate, endDate);
 
         List<ReadingSubmissionRateResponse.ChildRegionReadingSubmissionRate> childRegions = metrics.stream()
                 .map(m -> ReadingSubmissionRateResponse.ChildRegionReadingSubmissionRate.builder()
@@ -533,11 +559,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public ReadingSubmissionRateResponse getReadingSubmissionRateByDepartmentForChildRegions(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
 
         String cacheKey = READING_SUBMISSION_RATE_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":department:" + parentDepartmentId
                 + ":scope:child"
                 + ":start:" + startDate
@@ -548,7 +576,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
 
-        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevel(parentDepartmentId);
+        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (parentDepartmentLevel == null) {
             throw new IllegalArgumentException(
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
@@ -560,7 +588,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionReadingSubmissionMetrics> metrics =
                 schemeRegularityRepository.getChildReadingSubmissionRateMetricsByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         List<ReadingSubmissionRateResponse.ChildRegionReadingSubmissionRate> childRegions = metrics.stream()
                 .map(m -> ReadingSubmissionRateResponse.ChildRegionReadingSubmissionRate.builder()
@@ -1119,7 +1147,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public RegionWiseWaterQuantityResponse getRegionWiseWaterQuantityByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
 
@@ -1139,7 +1168,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> metrics =
-                schemeRegularityRepository.getRegionWiseWaterQuantityByLgd(parentLgdId, startDate, endDate);
+                schemeRegularityRepository.getRegionWiseWaterQuantityByLgd(tenantId, parentLgdId, startDate, endDate);
 
         List<RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity> childRegions = metrics.stream()
                 .map(metric -> RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity.builder()
@@ -1170,7 +1199,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public RegionWiseWaterQuantityResponse getRegionWiseWaterQuantityByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
 
@@ -1192,7 +1222,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> metrics =
                 schemeRegularityRepository.getRegionWiseWaterQuantityByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         List<RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity> childRegions = metrics.stream()
                 .map(metric -> RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity.builder()
@@ -1263,12 +1293,14 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public PeriodicSchemeRegularityResponse getPeriodicSchemeRegularityByLgdId(
-            Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        validateTenantInput(tenantId);
         validateLgdInput(lgdId);
         validateDateRange(startDate, endDate);
         validateScaleInput(scale);
 
         String cacheKey = PERIODIC_SCHEME_REGULARITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + lgdId
                 + ":scale:" + scale.name().toLowerCase()
                 + ":start:" + startDate
@@ -1280,7 +1312,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> metrics =
-                schemeRegularityRepository.getPeriodicSchemeRegularityByLgdId(lgdId, startDate, endDate, scale);
+                schemeRegularityRepository.getPeriodicSchemeRegularityByLgdId(
+                        tenantId, lgdId, startDate, endDate, scale);
 
         PeriodicSchemeRegularityResponse response =
                 buildPeriodicSchemeRegularityResponse(lgdId, null, startDate, endDate, scale, metrics);
@@ -1290,13 +1323,15 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public PeriodicSchemeRegularityResponse getPeriodicSchemeRegularityByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(departmentId);
         validateDateRange(startDate, endDate);
         validateScaleInput(scale);
 
         List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> metrics =
-                schemeRegularityRepository.getPeriodicSchemeRegularityByDepartment(departmentId, startDate, endDate, scale);
+                schemeRegularityRepository.getPeriodicSchemeRegularityByDepartment(
+                        tenantId, departmentId, startDate, endDate, scale);
 
         return buildPeriodicSchemeRegularityResponse(null, departmentId, startDate, endDate, scale, metrics);
     }
@@ -1368,7 +1403,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public PeriodicOutageReasonSchemeCountResponse getPeriodicOutageReasonSchemeCountByLgdId(
-            Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        validateTenantInput(tenantId);
         validateLgdInput(lgdId);
         validateDateRange(startDate, endDate);
         validateScaleInput(scale);
@@ -1387,7 +1423,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         List<SchemeRegularityRepository.PeriodicOutageReasonSchemeCountRow> rows =
                 schemeRegularityRepository.getPeriodicOutageReasonSchemeCountByLgdId(
-                        lgdId, startDate, endDate, scale);
+                        tenantId, lgdId, startDate, endDate, scale);
 
         PeriodicOutageReasonSchemeCountResponse response =
                 buildPeriodicOutageReasonSchemeCountResponse(lgdId, null, startDate, endDate, scale, rows);
@@ -1397,21 +1433,23 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public PeriodicOutageReasonSchemeCountResponse getPeriodicOutageReasonSchemeCountByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(departmentId);
         validateDateRange(startDate, endDate);
         validateScaleInput(scale);
 
         List<SchemeRegularityRepository.PeriodicOutageReasonSchemeCountRow> rows =
                 schemeRegularityRepository.getPeriodicOutageReasonSchemeCountByDepartment(
-                        departmentId, startDate, endDate, scale);
+                        tenantId, departmentId, startDate, endDate, scale);
 
         return buildPeriodicOutageReasonSchemeCountResponse(null, departmentId, startDate, endDate, scale, rows);
     }
 
     @Override
     public OutageReasonSchemeCountResponse getOutageReasonSchemeCountByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
 
@@ -1425,17 +1463,17 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
 
-        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevel(parentLgdId);
+        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevelForTenant(tenantId, parentLgdId);
         if (parentLgdLevel == null) {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
 
         List<SchemeRegularityRepository.OutageReasonSchemeCount> rows =
-                schemeRegularityRepository.getOutageReasonSchemeCountByLgd(parentLgdId, startDate, endDate);
+                schemeRegularityRepository.getOutageReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate);
         List<SchemeRegularityRepository.ChildRegionRef> childRegions =
-                schemeRegularityRepository.getChildRegionsByLgd(parentLgdId);
+                schemeRegularityRepository.getChildRegionsByLgd(tenantId, parentLgdId);
         List<SchemeRegularityRepository.ChildRegionOutageReasonSchemeCount> childRows =
-                schemeRegularityRepository.getChildOutageReasonSchemeCountByLgd(parentLgdId, startDate, endDate);
+                schemeRegularityRepository.getChildOutageReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate);
 
         OutageReasonSchemeCountResponse response = OutageReasonSchemeCountResponse.builder()
                 .lgdId(parentLgdId)
@@ -1457,10 +1495,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public OutageReasonSchemeCountResponse getOutageReasonSchemeCountByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
-        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevel(parentDepartmentId);
+        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (parentDepartmentLevel == null) {
             throw new IllegalArgumentException(
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
@@ -1468,12 +1507,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         List<SchemeRegularityRepository.OutageReasonSchemeCount> rows =
                 schemeRegularityRepository.getOutageReasonSchemeCountByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
         List<SchemeRegularityRepository.ChildRegionRef> childRegions =
-                schemeRegularityRepository.getChildRegionsByDepartment(parentDepartmentId);
+                schemeRegularityRepository.getChildRegionsByDepartment(tenantId, parentDepartmentId);
         List<SchemeRegularityRepository.ChildRegionOutageReasonSchemeCount> childRows =
                 schemeRegularityRepository.getChildOutageReasonSchemeCountByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         return OutageReasonSchemeCountResponse.builder()
                 .lgdId(null)
@@ -1542,11 +1581,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public NonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
 
         String cacheKey = NON_SUBMISSION_REASON_SCHEME_COUNT_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
@@ -1557,19 +1598,19 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
 
-        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevel(parentLgdId);
+        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevelForTenant(tenantId, parentLgdId);
         if (parentLgdLevel == null) {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
 
         List<SchemeRegularityRepository.NonSubmissionReasonSchemeCount> rows =
                 schemeRegularityRepository.getNonSubmissionReasonSchemeCountByLgd(
-                        parentLgdId, startDate, endDate);
+                        tenantId, parentLgdId, startDate, endDate);
         List<SchemeRegularityRepository.ChildRegionRef> childRegions =
-                schemeRegularityRepository.getChildRegionsByLgd(parentLgdId);
+                schemeRegularityRepository.getChildRegionsByLgd(tenantId, parentLgdId);
         List<SchemeRegularityRepository.ChildRegionNonSubmissionReasonSchemeCount> childRows =
                 schemeRegularityRepository.getChildNonSubmissionReasonSchemeCountByLgd(
-                        parentLgdId, startDate, endDate);
+                        tenantId, parentLgdId, startDate, endDate);
 
         NonSubmissionReasonSchemeCountResponse response = NonSubmissionReasonSchemeCountResponse.builder()
                 .lgdId(parentLgdId)
@@ -1591,10 +1632,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public NonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
-        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevel(parentDepartmentId);
+        Integer parentDepartmentLevel =
+                schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (parentDepartmentLevel == null) {
             throw new IllegalArgumentException(
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
@@ -1602,12 +1645,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         List<SchemeRegularityRepository.NonSubmissionReasonSchemeCount> rows =
                 schemeRegularityRepository.getNonSubmissionReasonSchemeCountByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
         List<SchemeRegularityRepository.ChildRegionRef> childRegions =
-                schemeRegularityRepository.getChildRegionsByDepartment(parentDepartmentId);
+                schemeRegularityRepository.getChildRegionsByDepartment(tenantId, parentDepartmentId);
         List<SchemeRegularityRepository.ChildRegionNonSubmissionReasonSchemeCount> childRows =
                 schemeRegularityRepository.getChildNonSubmissionReasonSchemeCountByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         return NonSubmissionReasonSchemeCountResponse.builder()
                 .lgdId(null)
@@ -1730,7 +1773,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SubmissionStatusSummaryResponse getSubmissionStatusSummaryByLgd(
-            Integer lgdId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateLgdInput(lgdId);
         validateDateRange(startDate, endDate);
 
@@ -1745,9 +1789,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
 
-        Integer schemeCount = schemeRegularityRepository.getSchemeCountByLgd(lgdId);
+        Integer schemeCount = schemeRegularityRepository.getSchemeCountByLgd(tenantId, lgdId);
         SchemeRegularityRepository.SubmissionStatusCount submissionStatusCount =
-                schemeRegularityRepository.getSubmissionStatusCountByLgd(lgdId, startDate, endDate);
+                schemeRegularityRepository.getSubmissionStatusCountByLgd(tenantId, lgdId, startDate, endDate);
 
         SubmissionStatusSummaryResponse response = SubmissionStatusSummaryResponse.builder()
                 .schemeCount(schemeCount == null ? 0 : schemeCount)
@@ -1766,13 +1810,14 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SubmissionStatusSummaryResponse getSubmissionStatusSummaryByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(departmentId);
         validateDateRange(startDate, endDate);
 
-        Integer schemeCount = schemeRegularityRepository.getSchemeCountByDepartment(departmentId);
+        Integer schemeCount = schemeRegularityRepository.getSchemeCountByDepartment(tenantId, departmentId);
         SchemeRegularityRepository.SubmissionStatusCount submissionStatusCount =
-                schemeRegularityRepository.getSubmissionStatusCountByDepartment(departmentId, startDate, endDate);
+                schemeRegularityRepository.getSubmissionStatusCountByDepartment(tenantId, departmentId, startDate, endDate);
 
         return SubmissionStatusSummaryResponse.builder()
                 .schemeCount(schemeCount == null ? 0 : schemeCount)
@@ -1788,10 +1833,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     }
 
     @Override
-    public Map<String, Integer> getSchemeStatusCountByLgd(Integer lgdId) {
+    public Map<String, Integer> getSchemeStatusCountByLgd(Integer tenantId, Integer lgdId) {
+        validateTenantInput(tenantId);
         validateLgdInput(lgdId);
 
         String cacheKey = SCHEME_STATUS_COUNT_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + lgdId
                 + ":v1";
         @SuppressWarnings("unchecked")
@@ -1801,7 +1848,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         SchemeRegularityRepository.SchemeStatusCount count =
-                schemeRegularityRepository.getSchemeStatusCountByLgd(lgdId);
+                schemeRegularityRepository.getSchemeStatusCountByLgd(tenantId, lgdId);
         Map<String, Integer> response = Map.of(
                 SchemeStatus.ACTIVE.name().toLowerCase() + "_schemes_count",
                 count.activeSchemeCount() == null ? 0 : count.activeSchemeCount(),
@@ -1812,10 +1859,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     }
 
     @Override
-    public Map<String, Integer> getSchemeStatusCountByDepartment(Integer departmentId) {
+    public Map<String, Integer> getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(departmentId);
         SchemeRegularityRepository.SchemeStatusCount count =
-                schemeRegularityRepository.getSchemeStatusCountByDepartment(departmentId);
+                schemeRegularityRepository.getSchemeStatusCountByDepartment(tenantId, departmentId);
         return Map.of(
                 SchemeStatus.ACTIVE.name().toLowerCase() + "_schemes_count",
                 count.activeSchemeCount() == null ? 0 : count.activeSchemeCount(),
@@ -1971,12 +2019,14 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SchemeRegularityListResponse getSchemeRegionReportByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
         validatePaginationInput(pageNumber, count);
 
         String cacheKey = SCHEME_REGION_REPORT_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
                 + ":page:" + (pageNumber == null ? "all" : pageNumber)
                 + ":count:" + (count == null ? "all" : count)
@@ -1991,9 +2041,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
 
         List<SchemeRegularityRepository.SchemeRegularityListMetrics> schemes =
-                schemeRegularityRepository.getSchemeRegionReportByLgd(parentLgdId, startDate, endDate);
-        String parentLgdCName = schemeRegularityRepository.getParentLgdCNameByLgd(parentLgdId);
-        String parentLgdTitle = schemeRegularityRepository.getParentLgdTitleByLgd(parentLgdId);
+                schemeRegularityRepository.getSchemeRegionReportByLgd(tenantId, parentLgdId, startDate, endDate);
+        String parentLgdCName = schemeRegularityRepository.getParentLgdCNameByLgd(tenantId, parentLgdId);
+        String parentLgdTitle = schemeRegularityRepository.getParentLgdTitleByLgd(tenantId, parentLgdId);
 
         int activeCount = (int) schemes.stream()
                 .filter(s -> s.status() != null && s.status() == SchemeStatus.ACTIVE.getCode())
@@ -2039,18 +2089,19 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SchemeRegularityListResponse getSchemeRegionReportByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
         validatePaginationInput(pageNumber, count);
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
 
         List<SchemeRegularityRepository.SchemeRegularityListMetrics> schemes =
-                schemeRegularityRepository.getSchemeRegionReportByDepartment(parentDepartmentId, startDate, endDate);
+                schemeRegularityRepository.getSchemeRegionReportByDepartment(tenantId, parentDepartmentId, startDate, endDate);
         String parentDepartmentCName =
-                schemeRegularityRepository.getParentDepartmentCNameByDepartment(parentDepartmentId);
+                schemeRegularityRepository.getParentDepartmentCNameByDepartment(tenantId, parentDepartmentId);
         String parentDepartmentTitle =
-                schemeRegularityRepository.getParentDepartmentTitleByDepartment(parentDepartmentId);
+                schemeRegularityRepository.getParentDepartmentTitleByDepartment(tenantId, parentDepartmentId);
 
         int activeCount = (int) schemes.stream()
                 .filter(s -> s.status() != null && s.status() == SchemeStatus.ACTIVE.getCode())

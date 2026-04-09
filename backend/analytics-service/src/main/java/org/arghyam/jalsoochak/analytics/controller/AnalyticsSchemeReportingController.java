@@ -132,7 +132,6 @@ public class AnalyticsSchemeReportingController {
                     .build());
         }
     }
-
     @GetMapping("/schemes/status-count")
     @Operation(
             summary = "Get active and inactive scheme count for an LGD or department area",
@@ -167,6 +166,7 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<Map<String, Integer>>> getSchemeStatusCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "lgd_id", required = false) Integer lgdId,
             @RequestParam(name = "department_id", required = false) Integer departmentId) {
         try {
@@ -178,8 +178,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             Map<String, Integer> data = (lgdId != null)
-                    ? schemeRegularityService.getSchemeStatusCountByLgd(lgdId)
-                    : schemeRegularityService.getSchemeStatusCountByDepartment(departmentId);
+                    ? schemeRegularityService.getSchemeStatusCountByLgd(tenantId, lgdId)
+                    : schemeRegularityService.getSchemeStatusCountByDepartment(tenantId, departmentId);
 
             return ResponseEntity.ok(ApiResponse.<Map<String, Integer>>builder()
                     .success(true)
@@ -300,6 +300,7 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<?> getSchemeRegionReport(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -320,8 +321,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             SchemeRegularityListResponse reportResponse = (parentLgdId != null)
-                    ? schemeRegularityService.getSchemeRegionReportByLgd(parentLgdId, startDate, endDate, pageNumber, count)
-                    : schemeRegularityService.getSchemeRegionReportByDepartment(parentDepartmentId, startDate, endDate, pageNumber, count);
+                    ? schemeRegularityService.getSchemeRegionReportByLgd(tenantId, parentLgdId, startDate, endDate, pageNumber, count)
+                    : schemeRegularityService.getSchemeRegionReportByDepartment(tenantId, parentDepartmentId, startDate, endDate, pageNumber, count);
 
             if (!CSV_OUTPUT_FORMAT.equalsIgnoreCase(Objects.toString(outputFormat, ""))) {
                 return ResponseEntity.ok(ApiResponse.<SchemeRegularityListResponse>builder()
@@ -685,16 +686,14 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<List<FactSchemePerformance>>> getSchemePerformance(
-            @RequestParam(required = false) Integer tenantId,
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(required = false) Integer schemeId) {
         try {
             List<FactSchemePerformance> data;
             if (schemeId != null) {
-                data = schemePerformanceRepository.findBySchemeId(schemeId);
-            } else if (tenantId != null) {
-                data = schemePerformanceRepository.findByTenantId(tenantId);
+                data = schemePerformanceRepository.findByTenantIdAndSchemeId(tenantId, schemeId);
             } else {
-                data = schemePerformanceRepository.findAll();
+                data = schemePerformanceRepository.findByTenantId(tenantId);
             }
 
             return ResponseEntity.ok(ApiResponse.<List<FactSchemePerformance>>builder()

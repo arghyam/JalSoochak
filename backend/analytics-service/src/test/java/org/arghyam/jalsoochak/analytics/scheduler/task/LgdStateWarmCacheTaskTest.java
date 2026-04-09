@@ -5,7 +5,6 @@ import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentMatchers;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -35,35 +34,35 @@ class LgdStateWarmCacheTaskTest {
 
         // parent_lgd_id style
         verify(schemeRegularityService, times(1))
-                .getAverageSchemeRegularity(eq(889100), any(LocalDate.class), any(LocalDate.class));
+                .getAverageSchemeRegularity(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
-                .getAverageSchemeRegularityForChildRegions(eq(889100), any(LocalDate.class), any(LocalDate.class));
+                .getAverageSchemeRegularityForChildRegions(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
-                .getReadingSubmissionRateByLgd(eq(889100), any(LocalDate.class), any(LocalDate.class));
+                .getReadingSubmissionRateByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
-                .getReadingSubmissionRateByLgdForChildRegions(eq(889100), any(LocalDate.class), any(LocalDate.class));
+                .getReadingSubmissionRateByLgdForChildRegions(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
-                .getRegionWiseWaterQuantityByLgd(eq(889100), any(LocalDate.class), any(LocalDate.class));
+                .getRegionWiseWaterQuantityByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
-                .getOutageReasonSchemeCountByLgd(eq(889100), any(LocalDate.class), any(LocalDate.class));
+                .getOutageReasonSchemeCountByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
-                .getNonSubmissionReasonSchemeCountByLgd(eq(889100), any(LocalDate.class), any(LocalDate.class));
+                .getNonSubmissionReasonSchemeCountByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
                 .getSchemeStatusAndTopReportingByLgd(eq(889100), any(LocalDate.class), any(LocalDate.class), isNull());
         verify(schemeRegularityService, times(1))
-                .getSchemeRegionReportByLgd(eq(889100), any(LocalDate.class), any(LocalDate.class), eq(1), isNull());
+                .getSchemeRegionReportByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class), eq(1), isNull());
 
         // lgd_id style + scale=day
         verify(schemeRegularityService, times(1))
                 .getPeriodicWaterQuantityByLgdId(eq(889100), any(LocalDate.class), any(LocalDate.class), eq(PeriodScale.DAY));
         verify(schemeRegularityService, times(1))
-                .getPeriodicSchemeRegularityByLgdId(eq(889100), any(LocalDate.class), any(LocalDate.class), eq(PeriodScale.DAY));
+                .getPeriodicSchemeRegularityByLgdId(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class), eq(PeriodScale.DAY));
         verify(schemeRegularityService, times(1))
-                .getPeriodicOutageReasonSchemeCountByLgdId(eq(889100), any(LocalDate.class), any(LocalDate.class), eq(PeriodScale.DAY));
+                .getPeriodicOutageReasonSchemeCountByLgdId(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class), eq(PeriodScale.DAY));
         verify(schemeRegularityService, times(1))
-                .getSubmissionStatusSummaryByLgd(eq(889100), any(LocalDate.class), any(LocalDate.class));
+                .getSubmissionStatusSummaryByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
-                .getSchemeStatusCountByLgd(eq(889100));
+                .getSchemeStatusCountByLgd(eq(99501), eq(889100));
 
         // water-supply child scope needs tenant_id + lgd_id
         verify(schemeRegularityService, times(1))

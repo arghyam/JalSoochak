@@ -71,6 +71,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AnalyticsSchemeReportingControllerTest {
 
     private static final String BASE = "/api/v1/analytics";
+    private static final int TENANT_ID = 12;
     private static final LocalDate START = LocalDate.of(2026, 1, 1);
     private static final LocalDate END = LocalDate.of(2026, 1, 31);
 
@@ -100,23 +101,34 @@ class AnalyticsSchemeReportingControllerTest {
     @MethodSource("schemeStatusValidRoutes")
     void getSchemeStatusCount_validRoutes(String idParam, String idValue, boolean lgdRoute) throws Exception {
         if (lgdRoute) {
-            when(schemeRegularityService.getSchemeStatusCountByLgd(Integer.parseInt(idValue)))
+            when(schemeRegularityService.getSchemeStatusCountByLgd(TENANT_ID, Integer.parseInt(idValue)))
                     .thenReturn(Map.of("active_schemes_count", 5, "inactive_schemes_count", 1));
         } else {
-            when(schemeRegularityService.getSchemeStatusCountByDepartment(Integer.parseInt(idValue)))
+            when(schemeRegularityService.getSchemeStatusCountByDepartment(TENANT_ID, Integer.parseInt(idValue)))
                     .thenReturn(Map.of("active_schemes_count", 5, "inactive_schemes_count", 1));
         }
 
-        mockMvc.perform(get(BASE + "/schemes/status-count").param(idParam, idValue))
+        mockMvc.perform(get(BASE + "/schemes/status-count")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param(idParam, idValue))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.active_schemes_count").value(5))
                 .andExpect(jsonPath("$.data.inactive_schemes_count").value(1));
+
+        if (lgdRoute) {
+            verify(schemeRegularityService, times(1))
+                    .getSchemeStatusCountByLgd(TENANT_ID, Integer.parseInt(idValue));
+        } else {
+            verify(schemeRegularityService, times(1))
+                    .getSchemeStatusCountByDepartment(TENANT_ID, Integer.parseInt(idValue));
+        }
     }
 
     @Test
     void getSchemeStatusCount_withBothIds_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/schemes/status-count")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("lgd_id", "101")
                         .param("department_id", "201"))
                 .andExpect(status().isBadRequest())
@@ -126,10 +138,18 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemeStatusCount_withNoId_returnsBadRequest() throws Exception {
-        mockMvc.perform(get(BASE + "/schemes/status-count"))
+        mockMvc.perform(get(BASE + "/schemes/status-count")
+                        .param("tenant_id", String.valueOf(TENANT_ID)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getSchemeStatusCount_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/schemes/status-count")
+                        .param("lgd_id", "101"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -238,7 +258,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemeRegionReport_withParentLgdId_routesToLgdService() throws Exception {
-        when(schemeRegularityService.getSchemeRegionReportByLgd(101, START, END, null, null))
+        when(schemeRegularityService.getSchemeRegionReportByLgd(TENANT_ID, 101, START, END, null, null))
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentLgdId(101)
                         .totalSchemeCount(1)
@@ -259,6 +279,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101"))
@@ -268,13 +289,13 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.schemes[0].schemeId").value(1));
 
         verify(schemeRegularityService, times(1))
-                .getSchemeRegionReportByLgd(101, START, END, null, null);
-        verify(schemeRegularityService, never()).getSchemeRegionReportByDepartment(any(), any(), any(), any(), any());
+                .getSchemeRegionReportByLgd(TENANT_ID, 101, START, END, null, null);
+        verify(schemeRegularityService, never()).getSchemeRegionReportByDepartment(any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void getSchemeRegionReport_withParentDepartmentId_routesToDepartmentService() throws Exception {
-        when(schemeRegularityService.getSchemeRegionReportByDepartment(201, START, END, null, null))
+        when(schemeRegularityService.getSchemeRegionReportByDepartment(TENANT_ID, 201, START, END, null, null))
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentDepartmentId(201)
                         .totalSchemeCount(1)
@@ -295,6 +316,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_department_id", "201"))
@@ -304,13 +326,14 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.schemes[0].schemeId").value(2));
 
         verify(schemeRegularityService, times(1))
-                .getSchemeRegionReportByDepartment(201, START, END, null, null);
-        verify(schemeRegularityService, never()).getSchemeRegionReportByLgd(any(), any(), any(), any(), any());
+                .getSchemeRegionReportByDepartment(TENANT_ID, 201, START, END, null, null);
+        verify(schemeRegularityService, never()).getSchemeRegionReportByLgd(any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void getSchemeRegionReport_withBothParentIds_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
@@ -322,7 +345,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemeRegionReport_withPaginationParams_passesPaginationToService() throws Exception {
-        when(schemeRegularityService.getSchemeRegionReportByLgd(101, START, END, 2, 1))
+        when(schemeRegularityService.getSchemeRegionReportByLgd(TENANT_ID, 101, START, END, 2, 1))
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentLgdId(101)
                         .schemeCountInResponse(0)
@@ -330,6 +353,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
@@ -340,12 +364,12 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.parentLgdId").value(101));
 
         verify(schemeRegularityService, times(1))
-                .getSchemeRegionReportByLgd(101, START, END, 2, 1);
+                .getSchemeRegionReportByLgd(TENANT_ID, 101, START, END, 2, 1);
     }
 
     @Test
     void getSchemeRegionReport_withCsvOutputFormat_returnsCsvAttachmentForParentLgd() throws Exception {
-        when(schemeRegularityService.getSchemeRegionReportByLgd(101, START, END, null, null))
+        when(schemeRegularityService.getSchemeRegionReportByLgd(TENANT_ID, 101, START, END, null, null))
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentLgdId(101)
                         .parentLgdCName("Parent LGD Name")
@@ -363,6 +387,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
@@ -378,7 +403,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemeRegionReport_withCsvOutputFormat_returnsCsvAttachmentForParentDepartment() throws Exception {
-        when(schemeRegularityService.getSchemeRegionReportByDepartment(201, START, END, null, null))
+        when(schemeRegularityService.getSchemeRegionReportByDepartment(TENANT_ID, 201, START, END, null, null))
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentDepartmentId(201)
                         .parentDepartmentCName("Department (HQ)")
@@ -396,6 +421,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_department_id", "201")
@@ -409,13 +435,14 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemeRegionReport_withoutCsvOutputFormat_behavesAsJson() throws Exception {
-        when(schemeRegularityService.getSchemeRegionReportByLgd(101, START, END, null, null))
+        when(schemeRegularityService.getSchemeRegionReportByLgd(TENANT_ID, 101, START, END, null, null))
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentLgdId(101)
                         .schemes(List.of())
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
@@ -427,17 +454,26 @@ class AnalyticsSchemeReportingControllerTest {
     }
 
     @Test
+    void getSchemeRegionReport_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void getSchemePerformance_schemePreferredOverTenant() throws Exception {
-        when(schemePerformanceRepository.findBySchemeId(300)).thenReturn(List.of());
+        when(schemePerformanceRepository.findByTenantIdAndSchemeId(10, 300)).thenReturn(List.of());
 
         mockMvc.perform(get(BASE + "/scheme-performance")
-                        .param("tenantId", "10")
+                        .param("tenant_id", "10")
                         .param("schemeId", "300"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray());
 
-        verify(schemePerformanceRepository, times(1)).findBySchemeId(300);
+        verify(schemePerformanceRepository, times(1)).findByTenantIdAndSchemeId(10, 300);
         verify(schemePerformanceRepository, never()).findByTenantId(any());
     }
 
@@ -445,7 +481,7 @@ class AnalyticsSchemeReportingControllerTest {
     void getSchemePerformance_tenantOnly_routesToTenantBranch() throws Exception {
         when(schemePerformanceRepository.findByTenantId(10)).thenReturn(List.of());
 
-        mockMvc.perform(get(BASE + "/scheme-performance").param("tenantId", "10"))
+        mockMvc.perform(get(BASE + "/scheme-performance").param("tenant_id", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray());
@@ -454,15 +490,9 @@ class AnalyticsSchemeReportingControllerTest {
     }
 
     @Test
-    void getSchemePerformance_noFilters_returnsAll() throws Exception {
-        when(schemePerformanceRepository.findAll()).thenReturn(List.of());
-
+    void getSchemePerformance_withoutTenantId_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/scheme-performance"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").isArray());
-
-        verify(schemePerformanceRepository, times(1)).findAll();
+                .andExpect(status().isBadRequest());
     }
 
     @Test

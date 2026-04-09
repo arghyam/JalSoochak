@@ -72,6 +72,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<RegionWiseWaterQuantityResponse>> getWaterQuantityRegionWise(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -85,8 +86,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
 
             RegionWiseWaterQuantityResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getRegionWiseWaterQuantityByLgd(parentLgdId, startDate, endDate)
-                    : schemeRegularityService.getRegionWiseWaterQuantityByDepartment(parentDepartmentId, startDate, endDate);
+                    ? schemeRegularityService.getRegionWiseWaterQuantityByLgd(tenantId, parentLgdId, startDate, endDate)
+                    : schemeRegularityService.getRegionWiseWaterQuantityByDepartment(tenantId, parentDepartmentId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<RegionWiseWaterQuantityResponse>builder()
                     .success(true)
@@ -194,6 +195,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<OutageReasonSchemeCountResponse>> getOutageReasonWiseSchemeCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -207,8 +209,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
 
             OutageReasonSchemeCountResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getOutageReasonSchemeCountByLgd(parentLgdId, startDate, endDate)
-                    : schemeRegularityService.getOutageReasonSchemeCountByDepartment(parentDepartmentId, startDate, endDate);
+                    ? schemeRegularityService.getOutageReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate)
+                    : schemeRegularityService.getOutageReasonSchemeCountByDepartment(tenantId, parentDepartmentId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<OutageReasonSchemeCountResponse>builder()
                     .success(true)
@@ -252,6 +254,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<PeriodicOutageReasonSchemeCountResponse>> getPeriodicOutageReasonWiseSchemeCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @Parameter(
@@ -271,8 +274,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
 
             PeriodScale periodScale = PeriodScale.fromValue(scale);
             PeriodicOutageReasonSchemeCountResponse data = (lgdId != null)
-                    ? schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(lgdId, startDate, endDate, periodScale)
-                    : schemeRegularityService.getPeriodicOutageReasonSchemeCountByDepartment(departmentId, startDate, endDate, periodScale);
+                    ? schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(tenantId, lgdId, startDate, endDate, periodScale)
+                    : schemeRegularityService.getPeriodicOutageReasonSchemeCountByDepartment(tenantId, departmentId, startDate, endDate, periodScale);
 
             return ResponseEntity.ok(ApiResponse.<PeriodicOutageReasonSchemeCountResponse>builder()
                     .success(true)
@@ -355,6 +358,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<NonSubmissionReasonSchemeCountResponse>> getNonSubmissionReasonWiseSchemeCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -368,8 +372,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
 
             NonSubmissionReasonSchemeCountResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(parentLgdId, startDate, endDate)
-                    : schemeRegularityService.getNonSubmissionReasonSchemeCountByDepartment(parentDepartmentId, startDate, endDate);
+                    ? schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate)
+                    : schemeRegularityService.getNonSubmissionReasonSchemeCountByDepartment(tenantId, parentDepartmentId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<NonSubmissionReasonSchemeCountResponse>builder()
                     .success(true)
@@ -485,6 +489,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<SubmissionStatusSummaryResponse>> getSubmissionStatusSummary(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "lgd_id", required = false) Integer lgdId,
@@ -498,8 +503,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
 
             SubmissionStatusSummaryResponse data = (lgdId != null)
-                    ? schemeRegularityService.getSubmissionStatusSummaryByLgd(lgdId, startDate, endDate)
-                    : schemeRegularityService.getSubmissionStatusSummaryByDepartment(departmentId, startDate, endDate);
+                    ? schemeRegularityService.getSubmissionStatusSummaryByLgd(tenantId, lgdId, startDate, endDate)
+                    : schemeRegularityService.getSubmissionStatusSummaryByDepartment(tenantId, departmentId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<SubmissionStatusSummaryResponse>builder()
                     .success(true)

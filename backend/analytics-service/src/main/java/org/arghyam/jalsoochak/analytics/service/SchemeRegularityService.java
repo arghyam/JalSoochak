@@ -28,27 +28,29 @@ import java.util.Map;
 import java.util.UUID;
 public interface SchemeRegularityService {
 
-    AverageSchemeRegularityResponse getAverageSchemeRegularity(Integer parentLgdId, LocalDate startDate, LocalDate endDate);
+    AverageSchemeRegularityResponse getAverageSchemeRegularity(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate);
 
     AverageSchemeRegularityResponse getAverageSchemeRegularityForChildRegions(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate);
 
-    ReadingSubmissionRateResponse getReadingSubmissionRateByLgd(Integer parentLgdId, LocalDate startDate, LocalDate endDate);
+    ReadingSubmissionRateResponse getReadingSubmissionRateByLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate);
 
     ReadingSubmissionRateResponse getReadingSubmissionRateByLgdForChildRegions(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate);
 
     AverageSchemeRegularityResponse getAverageSchemeRegularityByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     AverageSchemeRegularityResponse getAverageSchemeRegularityByDepartmentForChildRegions(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     ReadingSubmissionRateResponse getReadingSubmissionRateByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     ReadingSubmissionRateResponse getReadingSubmissionRateByDepartmentForChildRegions(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     BigDecimal getAveragePerformanceScoreByLgd(
             Integer parentLgdId, LocalDate startDate, LocalDate endDate);
@@ -100,10 +102,10 @@ public interface SchemeRegularityService {
             Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     RegionWiseWaterQuantityResponse getRegionWiseWaterQuantityByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate);
 
     RegionWiseWaterQuantityResponse getRegionWiseWaterQuantityByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     PeriodicWaterQuantityResponse getPeriodicWaterQuantityByLgdId(
             Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
@@ -112,10 +114,10 @@ public interface SchemeRegularityService {
             Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
 
     PeriodicSchemeRegularityResponse getPeriodicSchemeRegularityByLgdId(
-            Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
 
     PeriodicSchemeRegularityResponse getPeriodicSchemeRegularityByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
 
     PeriodicSchemeRegularityResponse getPeriodicSchemeRegularityForNation(
             LocalDate startDate, LocalDate endDate, PeriodScale scale);
@@ -124,16 +126,16 @@ public interface SchemeRegularityService {
             LocalDate startDate, LocalDate endDate, PeriodScale scale);
 
     PeriodicOutageReasonSchemeCountResponse getPeriodicOutageReasonSchemeCountByLgdId(
-            Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
 
     PeriodicOutageReasonSchemeCountResponse getPeriodicOutageReasonSchemeCountByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
 
     OutageReasonSchemeCountResponse getOutageReasonSchemeCountByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate);
 
     OutageReasonSchemeCountResponse getOutageReasonSchemeCountByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     UserOutageReasonSchemeCountResponse getOutageReasonSchemeCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate);
@@ -142,10 +144,10 @@ public interface SchemeRegularityService {
             Integer tenantId, UUID userUuid, LocalDate startDate, LocalDate endDate);
 
     NonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate);
 
     NonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     UserNonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate);
@@ -160,14 +162,14 @@ public interface SchemeRegularityService {
             Integer tenantId, UUID userUuid, LocalDate startDate, LocalDate endDate);
 
     SubmissionStatusSummaryResponse getSubmissionStatusSummaryByLgd(
-            Integer lgdId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate);
 
     SubmissionStatusSummaryResponse getSubmissionStatusSummaryByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate);
 
-    Map<String, Integer> getSchemeStatusCountByLgd(Integer lgdId);
+    Map<String, Integer> getSchemeStatusCountByLgd(Integer tenantId, Integer lgdId);
 
-    Map<String, Integer> getSchemeStatusCountByDepartment(Integer departmentId);
+    Map<String, Integer> getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId);
 
     SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByLgd(
             Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount);
@@ -176,8 +178,8 @@ public interface SchemeRegularityService {
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount);
 
     SchemeRegularityListResponse getSchemeRegionReportByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count);
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count);
 
     SchemeRegularityListResponse getSchemeRegionReportByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count);
 }

@@ -88,6 +88,11 @@ class AnalyticsWaterSupplyNationalControllerTest {
                     .andExpect(status().is(expectedStatus))
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data").exists());
+        } else if (tenantId == null) {
+            // Missing required request param is rejected by Spring before controller,
+            // so response body is not our ApiResponse wrapper.
+            mockMvc.perform(request)
+                    .andExpect(status().is(expectedStatus));
         } else {
             mockMvc.perform(request)
                     .andExpect(status().is(expectedStatus))
@@ -197,7 +202,7 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 Arguments.of("current", "10", null, null, 200),
                 Arguments.of("current", null, null, null, 400),
                 Arguments.of("current", "10", "101", "201", 400),
-                Arguments.of("child", null, null, null, 200),
+                Arguments.of("child", null, null, null, 400),
                 Arguments.of("child", "10", "101", null, 200),
                 Arguments.of("child", "10", null, null, 400),
                 Arguments.of("child", "10", "101", "201", 400)

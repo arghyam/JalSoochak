@@ -235,11 +235,11 @@ class TenantDetailsServiceImplTest {
         when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
 
-        when(schemeRegularityService.getAverageSchemeRegularity(parentLgdId, start, end))
+        when(schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, start, end))
                 .thenReturn(AverageSchemeRegularityResponse.builder()
                         .averageRegularity(new BigDecimal("0.75"))
                         .build());
-        when(schemeRegularityService.getReadingSubmissionRateByLgd(parentLgdId, start, end))
+        when(schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, start, end))
                 .thenReturn(ReadingSubmissionRateResponse.builder()
                         .readingSubmissionRate(new BigDecimal("0.84"))
                         .build());
@@ -268,7 +268,7 @@ class TenantDetailsServiceImplTest {
         when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
         when(tenantBoundaryRepository.getMergedBoundaryForTenant(1))
                 .thenReturn(Map.of("boundary_count", 2, "boundary_geojson", "{}"));
-        when(schemeRegularityService.getAverageSchemeRegularity(isNull(), any(), any()))
+        when(schemeRegularityService.getAverageSchemeRegularity(any(), isNull(), any(), any()))
                 .thenThrow(new IllegalArgumentException("lgd_id must be a positive integer"));
 
         LocalDate start = LocalDate.of(2026, 1, 1);
@@ -304,11 +304,11 @@ class TenantDetailsServiceImplTest {
         when(tenantDepartmentBoundaryRepository.getMergedBoundaryByParentDepartment(tenantId, parentDepartmentId, 2))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
 
-        when(schemeRegularityService.getAverageSchemeRegularityByDepartment(parentDepartmentId, start, end))
+        when(schemeRegularityService.getAverageSchemeRegularityByDepartment(tenantId, parentDepartmentId, start, end))
                 .thenReturn(AverageSchemeRegularityResponse.builder()
                         .averageRegularity(new BigDecimal("0.66"))
                         .build());
-        when(schemeRegularityService.getReadingSubmissionRateByDepartment(parentDepartmentId, start, end))
+        when(schemeRegularityService.getReadingSubmissionRateByDepartment(tenantId, parentDepartmentId, start, end))
                 .thenReturn(ReadingSubmissionRateResponse.builder()
                         .readingSubmissionRate(new BigDecimal("0.77"))
                         .build());
@@ -367,8 +367,8 @@ class TenantDetailsServiceImplTest {
         verify(tenantDepartmentBoundaryRepository, never()).getDepartmentLevel(any(), any());
         verify(tenantDepartmentBoundaryRepository, never()).getChildDepartmentsByParent(any(), any(), any());
         verify(tenantDepartmentBoundaryRepository, never()).getMergedBoundaryByParentDepartment(any(), any(), any());
-        verify(schemeRegularityService, never()).getAverageSchemeRegularityByDepartment(any(), any(), any());
-        verify(schemeRegularityService, never()).getReadingSubmissionRateByDepartment(any(), any(), any());
+        verify(schemeRegularityService, never()).getAverageSchemeRegularityByDepartment(any(), any(), any(), any());
+        verify(schemeRegularityService, never()).getReadingSubmissionRateByDepartment(any(), any(), any(), any());
         verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByDepartment(any(), any(), any());
         verify(schemeRegularityService, never()).getAveragePerformanceScoreByDepartment(any(), any(), any());
 

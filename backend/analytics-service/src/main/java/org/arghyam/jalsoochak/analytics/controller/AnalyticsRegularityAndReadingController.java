@@ -67,6 +67,7 @@ public class AnalyticsRegularityAndReadingController {
             }
     )
     public ResponseEntity<ApiResponse<AverageSchemeRegularityResponse>> getAverageSchemeRegularity(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
             @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
             @Parameter(description = "Response scope", required = false, schema = @Schema(type = "string", allowableValues = {
@@ -84,16 +85,16 @@ public class AnalyticsRegularityAndReadingController {
             if (regularityScope == RegularityScope.CHILD) {
                 if (parentDepartmentId != null) {
                     data = schemeRegularityService.getAverageSchemeRegularityByDepartmentForChildRegions(
-                            parentDepartmentId, startDate, endDate);
+                            tenantId, parentDepartmentId, startDate, endDate);
                 } else {
-                    data = schemeRegularityService.getAverageSchemeRegularityForChildRegions(parentLgdId, startDate,
+                    data = schemeRegularityService.getAverageSchemeRegularityForChildRegions(tenantId, parentLgdId, startDate,
                             endDate);
                 }
             } else if (parentDepartmentId != null) {
-                data = schemeRegularityService.getAverageSchemeRegularityByDepartment(parentDepartmentId, startDate,
+                data = schemeRegularityService.getAverageSchemeRegularityByDepartment(tenantId, parentDepartmentId, startDate,
                         endDate);
             } else {
-                data = schemeRegularityService.getAverageSchemeRegularity(parentLgdId, startDate, endDate);
+                data = schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, startDate, endDate);
             }
 
             return ResponseEntity.ok(ApiResponse.<AverageSchemeRegularityResponse>builder()
@@ -148,6 +149,7 @@ public class AnalyticsRegularityAndReadingController {
             }
     )
     public ResponseEntity<ApiResponse<PeriodicSchemeRegularityResponse>> getPeriodicSchemeRegularity(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @Parameter(description = "Time aggregation scale", required = true, schema = @Schema(type = "string", allowableValues = {
@@ -164,8 +166,8 @@ public class AnalyticsRegularityAndReadingController {
             PeriodScale periodScale = PeriodScale.fromValue(scale);
 
             PeriodicSchemeRegularityResponse data = (lgdId != null)
-                    ? schemeRegularityService.getPeriodicSchemeRegularityByLgdId(lgdId, startDate, endDate, periodScale)
-                    : schemeRegularityService.getPeriodicSchemeRegularityByDepartment(departmentId, startDate, endDate,
+                    ? schemeRegularityService.getPeriodicSchemeRegularityByLgdId(tenantId, lgdId, startDate, endDate, periodScale)
+                    : schemeRegularityService.getPeriodicSchemeRegularityByDepartment(tenantId, departmentId, startDate, endDate,
                             periodScale);
 
             return ResponseEntity.ok(ApiResponse.<PeriodicSchemeRegularityResponse>builder()
@@ -220,6 +222,7 @@ public class AnalyticsRegularityAndReadingController {
             }
     )
     public ResponseEntity<ApiResponse<ReadingSubmissionRateResponse>> getReadingSubmissionRateByLgd(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
             @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
             @Parameter(description = "Response scope", required = false, schema = @Schema(type = "string", allowableValues = {
@@ -237,16 +240,16 @@ public class AnalyticsRegularityAndReadingController {
             if (regularityScope == RegularityScope.CHILD) {
                 if (parentDepartmentId != null) {
                     data = schemeRegularityService.getReadingSubmissionRateByDepartmentForChildRegions(
-                            parentDepartmentId, startDate, endDate);
+                            tenantId, parentDepartmentId, startDate, endDate);
                 } else {
-                    data = schemeRegularityService.getReadingSubmissionRateByLgdForChildRegions(parentLgdId, startDate,
+                    data = schemeRegularityService.getReadingSubmissionRateByLgdForChildRegions(tenantId, parentLgdId, startDate,
                             endDate);
                 }
             } else if (parentDepartmentId != null) {
-                data = schemeRegularityService.getReadingSubmissionRateByDepartment(parentDepartmentId, startDate,
+                data = schemeRegularityService.getReadingSubmissionRateByDepartment(tenantId, parentDepartmentId, startDate,
                         endDate);
             } else {
-                data = schemeRegularityService.getReadingSubmissionRateByLgd(parentLgdId, startDate, endDate);
+                data = schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, startDate, endDate);
             }
 
             return ResponseEntity.ok(ApiResponse.<ReadingSubmissionRateResponse>builder()
