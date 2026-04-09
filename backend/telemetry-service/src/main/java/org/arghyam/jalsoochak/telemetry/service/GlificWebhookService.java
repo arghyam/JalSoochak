@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -61,6 +62,14 @@ public class GlificWebhookService {
 
     public IntroResponse selectedChannelMessage(SelectedChannelRequest request) {
         return selectionService.selectedChannelMessage(request);
+    }
+
+    public IntroResponse schemeSelectionMessage(IntroRequest request) {
+        return selectionService.schemeSelectionMessage(request);
+    }
+
+    public IntroResponse selectedSchemeMessage(SelectedSchemeRequest request) {
+        return selectionService.selectedSchemeMessage(request);
     }
 
     public IntroResponse itemSelectionMessage(IntroRequest request) {
