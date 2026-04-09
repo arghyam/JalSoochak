@@ -725,12 +725,15 @@ public class SchemeRegularityRepository {
     }
 
     public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
                 )
                 SELECT
                     f.outage_reason,
@@ -739,6 +742,7 @@ public class SchemeRegularityRepository {
                 JOIN user_schemes us
                     ON us.scheme_id = f.scheme_id
                 WHERE f.outage_reason IS NOT NULL
+                  AND f.tenant_id = ?
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
@@ -750,17 +754,22 @@ public class SchemeRegularityRepository {
                         rs.getString("outage_reason"),
                         rs.getInt("scheme_count")),
                 userId,
+                tenantId,
+                tenantId,
                 startDate,
                 endDate);
     }
 
     public List<DailyOutageReasonSchemeCount> getDailyOutageReasonSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
                 )
                 SELECT
                     f.date,
@@ -770,6 +779,7 @@ public class SchemeRegularityRepository {
                 JOIN user_schemes us
                     ON us.scheme_id = f.scheme_id
                 WHERE f.outage_reason IS NOT NULL
+                  AND f.tenant_id = ?
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.date, f.outage_reason
                 ORDER BY f.date, f.outage_reason
@@ -782,6 +792,8 @@ public class SchemeRegularityRepository {
                         rs.getString("outage_reason"),
                         rs.getInt("scheme_count")),
                 userId,
+                tenantId,
+                tenantId,
                 startDate,
                 endDate);
     }
@@ -863,12 +875,15 @@ public class SchemeRegularityRepository {
     }
 
     public List<NonSubmissionReasonSchemeCount> getNonSubmissionReasonSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
                 )
                 SELECT
                     f.non_submission_reason,
@@ -878,6 +893,7 @@ public class SchemeRegularityRepository {
                     ON us.scheme_id = f.scheme_id
                 WHERE f.non_submission_reason IS NOT NULL
                   AND f.submission_status = ?
+                  AND f.tenant_id = ?
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.non_submission_reason
                 ORDER BY f.non_submission_reason
@@ -889,18 +905,23 @@ public class SchemeRegularityRepository {
                         rs.getString("non_submission_reason"),
                         rs.getInt("scheme_count")),
                 userId,
+                tenantId,
                 NOT_SUBMITTED_STATUS,
+                tenantId,
                 startDate,
                 endDate);
     }
 
     public List<DailyNonSubmissionReasonSchemeCount> getDailyNonSubmissionReasonSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
                 )
                 SELECT
                     f.date,
@@ -911,6 +932,7 @@ public class SchemeRegularityRepository {
                     ON us.scheme_id = f.scheme_id
                 WHERE f.non_submission_reason IS NOT NULL
                   AND f.submission_status = ?
+                  AND f.tenant_id = ?
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.date, f.non_submission_reason
                 ORDER BY f.date, f.non_submission_reason
@@ -923,19 +945,22 @@ public class SchemeRegularityRepository {
                         rs.getString("non_submission_reason"),
                         rs.getInt("scheme_count")),
                 userId,
+                tenantId,
                 NOT_SUBMITTED_STATUS,
+                tenantId,
                 startDate,
                 endDate);
     }
 
-    public Integer getSchemeCountByUser(Integer userId) {
+    public Integer getSchemeCountByUser(Integer tenantId, Integer userId) {
         String sql = """
                 SELECT COALESCE(COUNT(DISTINCT usm.scheme_id), 0)::int AS scheme_count
                 FROM analytics_schema.dim_user_scheme_mapping_table usm
                 WHERE usm.user_id = ?
+                  AND usm.tenant_id = ?
                 """;
 
-        return jdbcTemplate.queryForObject(sql, Integer.class, userId);
+        return jdbcTemplate.queryForObject(sql, Integer.class, userId, tenantId);
     }
 
     public long getTotalWaterSuppliedByUserSchemes(Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
@@ -958,7 +983,7 @@ public class SchemeRegularityRepository {
     }
 
     public SubmissionStatusCount getSubmissionStatusCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         String sql = """
                 SELECT
                     COALESCE(
@@ -977,10 +1002,11 @@ public class SchemeRegularityRepository {
                     )::int AS anomalous_submission_count
                 FROM analytics_schema.fact_meter_reading_table m
                 WHERE m.user_id = ?
+                  AND m.tenant_id = ?
                   AND m.reading_date BETWEEN ? AND ?
                 """;
 
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, userId, startDate, endDate);
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, userId, tenantId, startDate, endDate);
         int compliantSubmissionCount =
                 result.get("compliant_submission_count") instanceof Number value ? value.intValue() : 0;
         int anomalousSubmissionCount =
@@ -1107,12 +1133,15 @@ public class SchemeRegularityRepository {
     }
 
     public List<DailySubmissionSchemeCount> getDailySubmissionSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
                 )
                 SELECT
                     m.reading_date AS date,
@@ -1121,6 +1150,7 @@ public class SchemeRegularityRepository {
                 JOIN user_schemes us
                     ON us.scheme_id = m.scheme_id
                 WHERE m.user_id = ?
+                  AND m.tenant_id = ?
                   AND m.extracted_reading IS NOT NULL
                   AND m.reading_date BETWEEN ? AND ?
                 GROUP BY m.reading_date
@@ -1133,7 +1163,9 @@ public class SchemeRegularityRepository {
                         rs.getObject("date", LocalDate.class),
                         rs.getInt("submitted_scheme_count")),
                 userId,
+                tenantId,
                 userId,
+                tenantId,
                 startDate,
                 endDate);
     }

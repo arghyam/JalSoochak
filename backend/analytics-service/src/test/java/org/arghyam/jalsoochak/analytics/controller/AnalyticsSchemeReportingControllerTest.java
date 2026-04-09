@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
+import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
@@ -30,9 +31,13 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -84,6 +89,8 @@ class AnalyticsSchemeReportingControllerTest {
     private OperatorAttendanceQueryService operatorAttendanceQueryService;
     @MockBean
     private UserAlertTotalsService userAlertTotalsService;
+    @MockBean
+    private AuthenticatedRequestContextService authenticatedRequestContextService;
     @MockBean
     private DimUserRepository dimUserRepository;
     @MockBean
@@ -462,10 +469,8 @@ class AnalyticsSchemeReportingControllerTest {
     void getEscalationsPaginated_returnsExpectedShape() throws Exception {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
-        UUID uuid = UUID.fromString("11111111-1111-1111-1111-111111111111");
-
-        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
 
         EscalationListItemDto e1 = EscalationListItemDto.builder()
                 .id(1L)
@@ -493,8 +498,7 @@ class AnalyticsSchemeReportingControllerTest {
         )).thenReturn(page);
 
         mockMvc.perform(get(BASE + "/escalations")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
+                        .principal(buildJwtAuthentication())
                         .param("page_number", "1")
                         .param("limit", "5")
                         .param("escalation_type", "2")
@@ -522,10 +526,8 @@ class AnalyticsSchemeReportingControllerTest {
     void getEscalationsPaginated_withoutPageAndLimit_defaultsApplied() throws Exception {
         LocalDate start = LocalDate.of(2026, 2, 1);
         LocalDate end = LocalDate.of(2026, 3, 1);
-        UUID uuid = UUID.fromString("12121212-1212-1212-1212-121212121212");
-
-        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
 
         Page<EscalationListItemDto> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
         when(escalationQueryService.getEscalations(
@@ -541,8 +543,7 @@ class AnalyticsSchemeReportingControllerTest {
         )).thenReturn(page);
 
         mockMvc.perform(get(BASE + "/escalations")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
+                        .principal(buildJwtAuthentication())
                         .param("escalation_type", "2")
                         .param("scheme_id", "101")
                         .param("scheme_name", "Test")
@@ -561,10 +562,8 @@ class AnalyticsSchemeReportingControllerTest {
     void getAnomalies_withExplicitDatesAndType_returnsExpectedShape() throws Exception {
         LocalDate start = LocalDate.of(2026, 3, 1);
         LocalDate end = LocalDate.of(2026, 3, 31);
-        UUID uuid = UUID.fromString("22222222-2222-2222-2222-222222222222");
-
-        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
 
         AnomalyListItemDto a1 = AnomalyListItemDto.builder()
                 .id(11L)
@@ -584,8 +583,7 @@ class AnalyticsSchemeReportingControllerTest {
                 .thenReturn(anomalyPage);
 
         mockMvc.perform(get(BASE + "/anomalies")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
+                        .principal(buildJwtAuthentication())
                         .param("start_date", start.toString())
                         .param("end_date", end.toString())
                         .param("anomaly_type", "2")
@@ -658,9 +656,8 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getAnomalies_withoutDates_defaultsHandledInService() throws Exception {
-        UUID uuid = UUID.fromString("33333333-3333-3333-3333-333333333333");
-        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
 
         Page<AnomalyListItemDto> empty = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
         when(anomalyQueryService.getAnomaliesForUserSchemes(
@@ -668,8 +665,7 @@ class AnalyticsSchemeReportingControllerTest {
                 .thenReturn(empty);
 
         mockMvc.perform(get(BASE + "/anomalies")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString()))
+                        .principal(buildJwtAuthentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.page").value(1))
@@ -789,6 +785,16 @@ class AnalyticsSchemeReportingControllerTest {
                 Arguments.of("lgd_id", "101", true),
                 Arguments.of("department_id", "201", false)
         );
+    }
+
+    private static JwtAuthenticationToken buildJwtAuthentication() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject("9001")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
     }
 }
 

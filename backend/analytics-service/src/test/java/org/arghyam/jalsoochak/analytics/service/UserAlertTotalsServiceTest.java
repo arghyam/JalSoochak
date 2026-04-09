@@ -43,7 +43,7 @@ class UserAlertTotalsServiceTest {
         when(escalationQueryService.countEscalations(eq(10), eq(9001), eq(start), eq(end))).thenReturn(12L);
         when(anomalyRepository.countAnomaliesForMappedUserSchemesInRange(eq(10), eq(9001), eq(expectedFrom), eq(expectedTo)))
                 .thenReturn(7L);
-        when(schemeRegularityRepository.getSchemeCountByUser(eq(9001))).thenReturn(5);
+        when(schemeRegularityRepository.getSchemeCountByUser(eq(10), eq(9001))).thenReturn(5);
         when(schemeRegularityRepository.getTotalWaterSuppliedByUserSchemes(eq(10), eq(9001), eq(start), eq(end)))
                 .thenReturn(143200L);
 
@@ -56,7 +56,7 @@ class UserAlertTotalsServiceTest {
 
         verify(escalationQueryService).countEscalations(10, 9001, start, end);
         verify(anomalyRepository).countAnomaliesForMappedUserSchemesInRange(10, 9001, expectedFrom, expectedTo);
-        verify(schemeRegularityRepository).getSchemeCountByUser(9001);
+        verify(schemeRegularityRepository).getSchemeCountByUser(10, 9001);
         verify(schemeRegularityRepository).getTotalWaterSuppliedByUserSchemes(10, 9001, start, end);
     }
 

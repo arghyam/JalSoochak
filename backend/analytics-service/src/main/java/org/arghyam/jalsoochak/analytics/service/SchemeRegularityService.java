@@ -133,10 +133,10 @@ public interface SchemeRegularityService {
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     UserOutageReasonSchemeCountResponse getOutageReasonSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate);
 
     UserOutageReasonSchemeCountResponse getOutageReasonSchemeCountByUserUuid(
-            UUID userUuid, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, UUID userUuid, LocalDate startDate, LocalDate endDate);
 
     NonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByLgd(
             Integer parentLgdId, LocalDate startDate, LocalDate endDate);
@@ -145,16 +145,16 @@ public interface SchemeRegularityService {
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     UserNonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate);
 
     UserNonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByUserUuid(
-            UUID userUuid, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, UUID userUuid, LocalDate startDate, LocalDate endDate);
 
     UserSubmissionStatusResponse getSubmissionStatusByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate);
 
     UserSubmissionStatusResponse getSubmissionStatusByUserUuid(
-            UUID userUuid, LocalDate startDate, LocalDate endDate);
+            Integer tenantId, UUID userUuid, LocalDate startDate, LocalDate endDate);
 
     SubmissionStatusSummaryResponse getSubmissionStatusSummaryByLgd(
             Integer lgdId, LocalDate startDate, LocalDate endDate);

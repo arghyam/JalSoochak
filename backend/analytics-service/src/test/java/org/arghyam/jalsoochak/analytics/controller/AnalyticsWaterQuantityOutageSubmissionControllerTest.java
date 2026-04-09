@@ -10,6 +10,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.UserOutageReasonSchemeCount
 import org.arghyam.jalsoochak.analytics.dto.response.UserSubmissionStatusResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
+import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -56,6 +58,9 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
 
     @MockBean
     private SchemeRegularityService schemeRegularityService;
+
+    @MockBean
+    private AuthenticatedRequestContextService authenticatedRequestContextService;
 
     @ParameterizedTest
     @MethodSource("regionWiseValidRoutes")
@@ -210,7 +215,9 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
 
     @Test
     void getOutageReasonsByUser_validRequest_routesToUserService() throws Exception {
-        when(schemeRegularityService.getOutageReasonSchemeCountByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getOutageReasonSchemeCountByUserUuid(12, USER_UUID, START, END))
                 .thenReturn(userOutageReasonResponse());
 
         mockMvc.perform(get(BASE + "/outage-reasons/user")
@@ -221,12 +228,14 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUserUuid(USER_UUID, START, END);
+        verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUserUuid(12, USER_UUID, START, END);
     }
 
     @Test
     void getOutageReasonsByUser_withNumericUserIdClaim_routesToUserIdService() throws Exception {
-        when(schemeRegularityService.getOutageReasonSchemeCountByUser(11, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(11, null, 12));
+        when(schemeRegularityService.getOutageReasonSchemeCountByUser(12, 11, START, END))
                 .thenReturn(userOutageReasonResponse());
 
         mockMvc.perform(get(BASE + "/outage-reasons/user")
@@ -237,7 +246,7 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUser(11, START, END);
+        verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUser(12, 11, START, END);
     }
 
     @ParameterizedTest
@@ -284,7 +293,9 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
 
     @Test
     void getNonSubmissionReasonsByUser_validRequest_routesToUserService() throws Exception {
-        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(12, USER_UUID, START, END))
                 .thenReturn(userNonSubmissionReasonResponse());
 
         mockMvc.perform(get(BASE + "/non-submission-reasons/user")
@@ -295,12 +306,14 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getNonSubmissionReasonSchemeCountByUserUuid(USER_UUID, START, END);
+        verify(schemeRegularityService, times(1)).getNonSubmissionReasonSchemeCountByUserUuid(12, USER_UUID, START, END);
     }
 
     @Test
     void getNonSubmissionReasonsByUser_withNumericSubject_routesToUserIdService() throws Exception {
-        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(11, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(11, null, 12));
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(12, 11, START, END))
                 .thenReturn(userNonSubmissionReasonResponse());
 
         mockMvc.perform(get(BASE + "/non-submission-reasons/user")
@@ -311,12 +324,14 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getNonSubmissionReasonSchemeCountByUser(11, START, END);
+        verify(schemeRegularityService, times(1)).getNonSubmissionReasonSchemeCountByUser(12, 11, START, END);
     }
 
     @Test
     void getSubmissionStatusByUser_validRequest_routesToUserService() throws Exception {
-        when(schemeRegularityService.getSubmissionStatusByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getSubmissionStatusByUserUuid(12, USER_UUID, START, END))
                 .thenReturn(userSubmissionStatusResponse());
 
         mockMvc.perform(get(BASE + "/submission-status/user")
@@ -327,12 +342,14 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getSubmissionStatusByUserUuid(USER_UUID, START, END);
+        verify(schemeRegularityService, times(1)).getSubmissionStatusByUserUuid(12, USER_UUID, START, END);
     }
 
     @Test
     void getSubmissionStatusByUser_withNumericSubject_routesToUserIdService() throws Exception {
-        when(schemeRegularityService.getSubmissionStatusByUser(11, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(11, null, 12));
+        when(schemeRegularityService.getSubmissionStatusByUser(12, 11, START, END))
                 .thenReturn(userSubmissionStatusResponse());
 
         mockMvc.perform(get(BASE + "/submission-status/user")
@@ -343,12 +360,14 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getSubmissionStatusByUser(11, START, END);
+        verify(schemeRegularityService, times(1)).getSubmissionStatusByUser(12, 11, START, END);
     }
 
     @Test
     void getOutageReasonsByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
-        when(schemeRegularityService.getOutageReasonSchemeCountByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getOutageReasonSchemeCountByUserUuid(12, USER_UUID, START, END))
                 .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
 
         mockMvc.perform(get(BASE + "/outage-reasons/user")
@@ -361,7 +380,9 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
 
     @Test
     void getNonSubmissionReasonsByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
-        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(12, USER_UUID, START, END))
                 .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
 
         mockMvc.perform(get(BASE + "/non-submission-reasons/user")
@@ -374,7 +395,9 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
 
     @Test
     void getSubmissionStatusByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
-        when(schemeRegularityService.getSubmissionStatusByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getSubmissionStatusByUserUuid(12, USER_UUID, START, END))
                 .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
 
         mockMvc.perform(get(BASE + "/submission-status/user")

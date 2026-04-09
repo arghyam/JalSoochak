@@ -115,6 +115,7 @@ class AnalyticsControllerHelperTest {
 
         assertEquals(77, ref.userId());
         assertNull(ref.userUuid());
+        assertNull(ref.tenantId());
     }
 
     @Test
@@ -124,6 +125,7 @@ class AnalyticsControllerHelperTest {
 
         assertEquals(42, ref.userId());
         assertNull(ref.userUuid());
+        assertNull(ref.tenantId());
     }
 
     @Test
@@ -142,6 +144,7 @@ class AnalyticsControllerHelperTest {
 
         assertNull(ref.userId());
         assertEquals(UUID.fromString(uuid), ref.userUuid());
+        assertNull(ref.tenantId());
     }
 
     private static JwtAuthenticationToken buildAuthentication(String subject) {

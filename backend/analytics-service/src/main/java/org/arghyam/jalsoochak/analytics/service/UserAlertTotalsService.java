@@ -37,7 +37,7 @@ public class UserAlertTotalsService {
         OffsetDateTime to = safeEndDate.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
         long totalAnomalyCount = anomalyRepository.countAnomaliesForMappedUserSchemesInRange(tenantId, userId, from, to);
 
-        int totalMappedSchemeCount = schemeRegularityRepository.getSchemeCountByUser(userId);
+        int totalMappedSchemeCount = schemeRegularityRepository.getSchemeCountByUser(tenantId, userId);
         long totalWaterSupplied = schemeRegularityRepository.getTotalWaterSuppliedByUserSchemes(
                 tenantId, userId, safeStartDate, safeEndDate
         );

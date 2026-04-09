@@ -1465,15 +1465,15 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public UserOutageReasonSchemeCountResponse getOutageReasonSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         validateUserInput(userId);
         validateDateRange(startDate, endDate);
 
         List<SchemeRegularityRepository.OutageReasonSchemeCount> rows =
-                schemeRegularityRepository.getOutageReasonSchemeCountByUser(userId, startDate, endDate);
+                schemeRegularityRepository.getOutageReasonSchemeCountByUser(tenantId, userId, startDate, endDate);
         List<SchemeRegularityRepository.DailyOutageReasonSchemeCount> dailyRows =
-                schemeRegularityRepository.getDailyOutageReasonSchemeCountByUser(userId, startDate, endDate);
-        Integer schemeCount = schemeRegularityRepository.getSchemeCountByUser(userId);
+                schemeRegularityRepository.getDailyOutageReasonSchemeCountByUser(tenantId, userId, startDate, endDate);
+        Integer schemeCount = schemeRegularityRepository.getSchemeCountByUser(tenantId, userId);
 
         Map<LocalDate, Map<String, Integer>> dailyReasonCountMap = new LinkedHashMap<>();
         LocalDate currentDate = startDate;
@@ -1508,8 +1508,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public UserOutageReasonSchemeCountResponse getOutageReasonSchemeCountByUserUuid(
-            UUID userUuid, LocalDate startDate, LocalDate endDate) {
-        return getOutageReasonSchemeCountByUser(resolveUserIdByUuid(userUuid), startDate, endDate);
+            Integer tenantId, UUID userUuid, LocalDate startDate, LocalDate endDate) {
+        return getOutageReasonSchemeCountByUser(tenantId, resolveUserIdByUuid(userUuid), startDate, endDate);
     }
 
     @Override
@@ -1599,15 +1599,15 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public UserNonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         validateUserInput(userId);
         validateDateRange(startDate, endDate);
 
         List<SchemeRegularityRepository.NonSubmissionReasonSchemeCount> rows =
-                schemeRegularityRepository.getNonSubmissionReasonSchemeCountByUser(userId, startDate, endDate);
+                schemeRegularityRepository.getNonSubmissionReasonSchemeCountByUser(tenantId, userId, startDate, endDate);
         List<SchemeRegularityRepository.DailyNonSubmissionReasonSchemeCount> dailyRows =
-                schemeRegularityRepository.getDailyNonSubmissionReasonSchemeCountByUser(userId, startDate, endDate);
-        Integer schemeCount = schemeRegularityRepository.getSchemeCountByUser(userId);
+                schemeRegularityRepository.getDailyNonSubmissionReasonSchemeCountByUser(tenantId, userId, startDate, endDate);
+        Integer schemeCount = schemeRegularityRepository.getSchemeCountByUser(tenantId, userId);
 
         Map<LocalDate, Map<String, Integer>> dailyReasonCountMap = new LinkedHashMap<>();
         LocalDate currentDate = startDate;
@@ -1642,21 +1642,21 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public UserNonSubmissionReasonSchemeCountResponse getNonSubmissionReasonSchemeCountByUserUuid(
-            UUID userUuid, LocalDate startDate, LocalDate endDate) {
-        return getNonSubmissionReasonSchemeCountByUser(resolveUserIdByUuid(userUuid), startDate, endDate);
+            Integer tenantId, UUID userUuid, LocalDate startDate, LocalDate endDate) {
+        return getNonSubmissionReasonSchemeCountByUser(tenantId, resolveUserIdByUuid(userUuid), startDate, endDate);
     }
 
     @Override
     public UserSubmissionStatusResponse getSubmissionStatusByUser(
-            Integer userId, LocalDate startDate, LocalDate endDate) {
+            Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         validateUserInput(userId);
         validateDateRange(startDate, endDate);
 
-        Integer schemeCount = schemeRegularityRepository.getSchemeCountByUser(userId);
+        Integer schemeCount = schemeRegularityRepository.getSchemeCountByUser(tenantId, userId);
         SchemeRegularityRepository.SubmissionStatusCount submissionStatusCount =
-                schemeRegularityRepository.getSubmissionStatusCountByUser(userId, startDate, endDate);
+                schemeRegularityRepository.getSubmissionStatusCountByUser(tenantId, userId, startDate, endDate);
         List<SchemeRegularityRepository.DailySubmissionSchemeCount> dailyRows =
-                schemeRegularityRepository.getDailySubmissionSchemeCountByUser(userId, startDate, endDate);
+                schemeRegularityRepository.getDailySubmissionSchemeCountByUser(tenantId, userId, startDate, endDate);
 
         int totalSchemeCount = schemeCount == null ? 0 : schemeCount;
         Map<LocalDate, Integer> dailySubmittedSchemeCountMap = new LinkedHashMap<>();
@@ -1696,8 +1696,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public UserSubmissionStatusResponse getSubmissionStatusByUserUuid(
-            UUID userUuid, LocalDate startDate, LocalDate endDate) {
-        return getSubmissionStatusByUser(resolveUserIdByUuid(userUuid), startDate, endDate);
+            Integer tenantId, UUID userUuid, LocalDate startDate, LocalDate endDate) {
+        return getSubmissionStatusByUser(tenantId, resolveUserIdByUuid(userUuid), startDate, endDate);
     }
 
     @Override

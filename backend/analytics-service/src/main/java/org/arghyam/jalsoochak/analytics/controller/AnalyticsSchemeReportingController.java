@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
+import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
 import org.arghyam.jalsoochak.analytics.service.UserAlertTotalsService;
@@ -36,6 +37,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -65,6 +68,7 @@ public class AnalyticsSchemeReportingController {
     private final AnomalyQueryService anomalyQueryService;
     private final OperatorAttendanceQueryService operatorAttendanceQueryService;
     private final UserAlertTotalsService userAlertTotalsService;
+    private final AuthenticatedRequestContextService authenticatedRequestContextService;
     private final DimUserRepository dimUserRepository;
     private final FactEscalationRepository factEscalationRepository;
 
@@ -376,9 +380,9 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<EscalationPaginatedResponse> getEscalationsPaginated(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "uuid") UUID userUuid,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "escalation_type", required = false) String escalationType,
@@ -396,7 +400,16 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("limit must be >= 1");
             }
 
-            Integer userId = resolveUserIdByUuid(tenantId, userUuid);
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer userId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<EscalationListItemDto> page = escalationQueryService.getEscalations(
                     tenantId,
@@ -524,9 +537,9 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<AnomalyPaginatedResponse> getAnomalies(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "uuid") UUID userUuid,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -543,7 +556,16 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("limit must be >= 1");
             }
 
-            Integer mappedUserId = resolveUserIdByUuid(tenantId, userUuid);
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer mappedUserId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<AnomalyListItemDto> page = anomalyQueryService.getAnomaliesForUserSchemes(
                     tenantId,

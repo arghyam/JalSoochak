@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.UserSubmissionStatusRespons
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
+import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -40,6 +41,7 @@ import java.time.LocalDate;
 public class AnalyticsWaterQuantityOutageSubmissionController {
 
     private final SchemeRegularityService schemeRegularityService;
+    private final AuthenticatedRequestContextService authenticatedRequestContextService;
 
     @GetMapping("/water-quantity/region-wise")
     @Operation(
@@ -314,10 +316,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         AnalyticsControllerHelper.AuthenticatedUserRef userRef =
-                AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
+                authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
         UserOutageReasonSchemeCountResponse data = userRef.userId() != null
-                ? schemeRegularityService.getOutageReasonSchemeCountByUser(userRef.userId(), startDate, endDate)
-                : schemeRegularityService.getOutageReasonSchemeCountByUserUuid(userRef.userUuid(), startDate, endDate);
+                ? schemeRegularityService.getOutageReasonSchemeCountByUser(userRef.tenantId(), userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getOutageReasonSchemeCountByUserUuid(userRef.tenantId(), userRef.userUuid(), startDate, endDate);
         return ResponseEntity.ok(ApiResponse.<UserOutageReasonSchemeCountResponse>builder()
                 .success(true)
                 .data(data)
@@ -410,10 +412,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         AnalyticsControllerHelper.AuthenticatedUserRef userRef =
-                AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
+                authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
         UserNonSubmissionReasonSchemeCountResponse data = userRef.userId() != null
-                ? schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(userRef.userId(), startDate, endDate)
-                : schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(userRef.userUuid(), startDate, endDate);
+                ? schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(userRef.tenantId(), userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(userRef.tenantId(), userRef.userUuid(), startDate, endDate);
         return ResponseEntity.ok(ApiResponse.<UserNonSubmissionReasonSchemeCountResponse>builder()
                 .success(true)
                 .data(data)
@@ -448,10 +450,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         AnalyticsControllerHelper.AuthenticatedUserRef userRef =
-                AnalyticsControllerHelper.extractAuthenticatedUserRef(authentication);
+                authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
         UserSubmissionStatusResponse data = userRef.userId() != null
-                ? schemeRegularityService.getSubmissionStatusByUser(userRef.userId(), startDate, endDate)
-                : schemeRegularityService.getSubmissionStatusByUserUuid(userRef.userUuid(), startDate, endDate);
+                ? schemeRegularityService.getSubmissionStatusByUser(userRef.tenantId(), userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getSubmissionStatusByUserUuid(userRef.tenantId(), userRef.userUuid(), startDate, endDate);
         return ResponseEntity.ok(ApiResponse.<UserSubmissionStatusResponse>builder()
                 .success(true)
                 .data(data)

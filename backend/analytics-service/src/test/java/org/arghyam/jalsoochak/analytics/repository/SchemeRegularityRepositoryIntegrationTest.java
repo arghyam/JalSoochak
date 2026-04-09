@@ -456,15 +456,15 @@ class SchemeRegularityRepositoryIntegrationTest {
                 1, 5, 5, 5);
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_user_scheme_mapping_table
-                (uuid, user_id, scheme_id, ai_reading, created_at, updated_at, status)
-                VALUES (?::uuid, ?, ?, ?, NOW(), NOW(), ?)
-                """, "33333333-3333-3333-3333-333333333333", 11, 3, null, 1);
+                (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
+                VALUES (?::uuid, ?, ?, ?, ?, NOW(), NOW(), ?)
+                """, "33333333-3333-3333-3333-333333333333", 1, 11, 3, null, 1);
 
         List<SchemeRegularityRepository.OutageReasonSchemeCount> userCounts =
-                repository.getOutageReasonSchemeCountByUser(11, D1, D10);
+                repository.getOutageReasonSchemeCountByUser(1, 11, D1, D10);
         List<SchemeRegularityRepository.DailyOutageReasonSchemeCount> dailyUserCounts =
-                repository.getDailyOutageReasonSchemeCountByUser(11, D1, D10);
-        Integer schemeCount = repository.getSchemeCountByUser(11);
+                repository.getDailyOutageReasonSchemeCountByUser(1, 11, D1, D10);
+        Integer schemeCount = repository.getSchemeCountByUser(1, 11);
 
         assertThat(userCounts).hasSize(2);
         assertThat(dailyUserCounts).hasSize(3);
@@ -583,9 +583,9 @@ class SchemeRegularityRepositoryIntegrationTest {
     @Test
     void nonSubmissionQueriesByUser_returnMappedSchemeReasonCounts() {
         List<SchemeRegularityRepository.NonSubmissionReasonSchemeCount> userCounts =
-                repository.getNonSubmissionReasonSchemeCountByUser(11, D1, D10);
+                repository.getNonSubmissionReasonSchemeCountByUser(1, 11, D1, D10);
         List<SchemeRegularityRepository.DailyNonSubmissionReasonSchemeCount> dailyUserCounts =
-                repository.getDailyNonSubmissionReasonSchemeCountByUser(11, D1, D10);
+                repository.getDailyNonSubmissionReasonSchemeCountByUser(1, 11, D1, D10);
 
         assertThat(userCounts).hasSize(2);
         assertThat(dailyUserCounts).hasSize(3);
@@ -632,9 +632,9 @@ class SchemeRegularityRepositoryIntegrationTest {
                 """, 1, 2, 11, null, 7, 90, "x", 1, D3, 1, 0);
 
         SchemeRegularityRepository.SubmissionStatusCount statusCount =
-                repository.getSubmissionStatusCountByUser(11, D1, D3);
+                repository.getSubmissionStatusCountByUser(1, 11, D1, D3);
         List<SchemeRegularityRepository.DailySubmissionSchemeCount> dailyCounts =
-                repository.getDailySubmissionSchemeCountByUser(11, D1, D3);
+                repository.getDailySubmissionSchemeCountByUser(1, 11, D1, D3);
 
         assertThat(statusCount.compliantSubmissionCount()).isEqualTo(3);
         assertThat(statusCount.anomalousSubmissionCount()).isEqualTo(1);
@@ -855,15 +855,15 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_user_scheme_mapping_table
-                (uuid, user_id, scheme_id, ai_reading, created_at, updated_at, status)
-                VALUES (?::uuid, ?, ?, ?, NOW(), NOW(), ?)
-                """, "11111111-1111-1111-1111-111111111111", 11, 1, null, 1);
+                (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
+                VALUES (?::uuid, ?, ?, ?, ?, NOW(), NOW(), ?)
+                """, "11111111-1111-1111-1111-111111111111", 1, 11, 1, null, 1);
 
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_user_scheme_mapping_table
-                (uuid, user_id, scheme_id, ai_reading, created_at, updated_at, status)
-                VALUES (?::uuid, ?, ?, ?, NOW(), NOW(), ?)
-                """, "22222222-2222-2222-2222-222222222222", 11, 2, null, 1);
+                (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
+                VALUES (?::uuid, ?, ?, ?, ?, NOW(), NOW(), ?)
+                """, "22222222-2222-2222-2222-222222222222", 1, 11, 2, null, 1);
     }
 
     private void seedMeterReadings() {
