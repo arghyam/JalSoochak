@@ -14,6 +14,7 @@ import java.util.List;
 @AllArgsConstructor
 public class NationalDashboardBoundaryResponse {
 
+    private JsonNode nationalBoundary;
     private List<StateBoundary> stateWiseBoundaries;
 
     @Data

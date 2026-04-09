@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -43,6 +44,7 @@ class AnalyticsWaterSupplyNationalControllerTest {
     private static final String BASE = "/api/v1/analytics";
     private static final LocalDate START = LocalDate.of(2026, 1, 1);
     private static final LocalDate END = LocalDate.of(2026, 1, 31);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Autowired
     private MockMvc mockMvc;
@@ -168,12 +170,16 @@ class AnalyticsWaterSupplyNationalControllerTest {
     void getNationalDashboardBoundaries_returnsOk() throws Exception {
         when(schemeRegularityService.getNationalDashboardBoundariesForApi())
                 .thenReturn(NationalDashboardBoundaryResponse.builder()
+                        .nationalBoundary(OBJECT_MAPPER.readTree("""
+                                {"type":"Polygon","coordinates":[[[78.1,22.9],[78.2,22.9],[78.2,23.0],[78.1,22.9]]]}
+                                """))
                         .stateWiseBoundaries(List.of())
                         .build());
 
         mockMvc.perform(get(BASE + "/national/dashboard/boundary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.nationalBoundary").exists())
                 .andExpect(jsonPath("$.data.stateWiseBoundaries").isArray());
 
         verify(schemeRegularityService, times(1)).getNationalDashboardBoundariesForApi();

@@ -499,6 +499,10 @@ public final class SwaggerExamples {
             {
               "success": true,
               "data": {
+                "nationalBoundary": {
+                  "type": "Polygon",
+                  "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                },
                 "stateWiseBoundaries": [
                   {
                     "tenantId": 10,

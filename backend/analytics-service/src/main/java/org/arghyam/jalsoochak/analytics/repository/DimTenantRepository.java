@@ -13,4 +13,6 @@ public interface DimTenantRepository extends JpaRepository<DimTenant, Integer> {
     List<DimTenant> findByStatus(Integer status);
 
     Optional<DimTenant> findByStateCode(String stateCode);
+
+    List<DimTenant> findByTenantIdGreaterThan(Integer tenantId);
 }

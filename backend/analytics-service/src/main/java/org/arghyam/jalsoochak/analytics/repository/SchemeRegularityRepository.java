@@ -3255,6 +3255,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN water_by_scheme w
                     ON w.tenant_id = s.tenant_id
                     AND w.scheme_id = s.scheme_id
+                WHERE t.tenant_id > 0
                 GROUP BY t.tenant_id, t.state_code, t.title
                 ORDER BY t.tenant_id
                 """;
@@ -3287,6 +3288,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN analytics_schema.dim_lgd_location_table l
                     ON l.tenant_id = t.tenant_id
                    AND l.lgd_level = 1
+                WHERE t.tenant_id > 0
                 ORDER BY t.tenant_id, l.lgd_id NULLS LAST
                 """;
 
@@ -3315,6 +3317,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN analytics_schema.dim_lgd_location_table l
                     ON l.tenant_id = t.tenant_id
                    AND l.lgd_level = 1
+                WHERE t.tenant_id > 0
                 ORDER BY t.tenant_id, l.lgd_id NULLS LAST
                 """;
 
@@ -3328,6 +3331,24 @@ public class SchemeRegularityRepository {
                     rs.getString("state_title"),
                     rs.getString("boundary_geojson"));
         });
+    }
+
+    public String getNationalBoundaryGeoJson() {
+        String sql = """
+                SELECT
+                    CASE
+                        WHEN l.geom IS NOT NULL THEN ST_AsGeoJSON(l.geom, 9, 8)
+                        ELSE NULL
+                    END AS boundary_geojson
+                FROM analytics_schema.dim_lgd_location_table l
+                WHERE l.tenant_id = 0
+                  AND l.lgd_c_name = 'Country'
+                LIMIT 1
+                """;
+        List<String> rows = jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> rs.getString("boundary_geojson"));
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     public List<StateSchemeRegularityMetrics> getStateWiseRegularityMetrics(
@@ -3355,6 +3376,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN supply_days_by_scheme sd
                     ON sd.tenant_id = s.tenant_id
                     AND sd.scheme_id = s.scheme_id
+                WHERE t.tenant_id > 0
                 GROUP BY t.tenant_id, t.state_code, t.title
                 ORDER BY t.tenant_id
                 """;
@@ -3396,6 +3418,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN submission_days_by_scheme sd
                     ON sd.tenant_id = s.tenant_id
                     AND sd.scheme_id = s.scheme_id
+                WHERE t.tenant_id > 0
                 GROUP BY t.tenant_id, t.state_code, t.title
                 ORDER BY t.tenant_id
                 """;

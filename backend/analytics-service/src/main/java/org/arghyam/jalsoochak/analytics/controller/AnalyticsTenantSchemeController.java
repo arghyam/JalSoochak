@@ -75,7 +75,7 @@ public class AnalyticsTenantSchemeController {
         try {
             return ResponseEntity.ok(ApiResponse.<List<DimTenant>>builder()
                     .success(true)
-                    .data(dimTenantRepository.findAll())
+                    .data(dimTenantRepository.findByTenantIdGreaterThan(0))
                     .build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<DimTenant>>builder()

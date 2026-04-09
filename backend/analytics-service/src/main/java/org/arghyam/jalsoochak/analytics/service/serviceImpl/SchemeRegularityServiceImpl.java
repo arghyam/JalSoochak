@@ -928,6 +928,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     }
 
     private NationalDashboardBoundaryResponse buildAndCacheNationalDashboardBoundaries() {
+        JsonNode nationalBoundary = parseBoundaryGeoJson(schemeRegularityRepository.getNationalBoundaryGeoJson());
         List<NationalDashboardBoundaryResponse.StateBoundary> stateWiseBoundaries =
                 schemeRegularityRepository.getNationalDashboardStateBoundaries().stream()
                         .map(row -> NationalDashboardBoundaryResponse.StateBoundary.builder()
@@ -940,6 +941,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                 .build())
                         .toList();
         NationalDashboardBoundaryResponse response = NationalDashboardBoundaryResponse.builder()
+                .nationalBoundary(nationalBoundary)
                 .stateWiseBoundaries(stateWiseBoundaries)
                 .build();
         writeToCache(NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY, response);
