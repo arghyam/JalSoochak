@@ -83,6 +83,7 @@ public class SecurityConfig {
                                     // Upload endpoint is authorized via UploadAuthService (JWT validation + role check),
                                     // not via Spring Security's JwtDecoder (which may require network access to Keycloak).
                                     "/api/v1/state-admin/pump-operators/upload",
+                                    "/api/v1/state-admin/user-scheme-mappings/upload",
                                     "/error",
                                     "/actuator/health",
                                     "/actuator/info")
