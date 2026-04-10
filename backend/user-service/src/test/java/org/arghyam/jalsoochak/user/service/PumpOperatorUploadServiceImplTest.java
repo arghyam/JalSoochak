@@ -201,11 +201,10 @@ class PumpOperatorUploadServiceImplTest {
                 "text/csv",
                 ("first_name,last_name,full_name,phone_number,person_type,state_scheme_id\n" +
                  "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-1\n" +
-                 "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-2\n").getBytes(StandardCharsets.UTF_8)
+                 "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-1\n").getBytes(StandardCharsets.UTF_8)
         );
 
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
-        when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-2"), eq((String) null))).thenReturn(101);
 
         BadRequestException ex = assertThrows(
                 BadRequestException.class,
@@ -215,7 +214,41 @@ class PumpOperatorUploadServiceImplTest {
         @SuppressWarnings("unchecked")
         List<UploadErrorDTO> errors = (List<UploadErrorDTO>) ex.getErrors();
         assertThat(errors).isNotEmpty();
-        assertThat(errors.get(0).message()).contains("Duplicate phone_number in uploaded file");
+        assertThat(errors.get(0).message()).contains("Duplicate phone_number for the same state_scheme_id in uploaded file");
+        verify(chunkProcessor, never()).processChunk(anyString(), anyString(), any(), anyMap(), anyInt(), anyInt(), anyList(), any(), any());
+    }
+
+    @Test
+    void uploadUserSchemeMappings_shouldRejectDuplicatePhoneSchemePair() {
+        TenantContext.setSchema("tenant_ka");
+        when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
+        when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
+                .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
+        when(preferredLanguageService.resolvePreferredLanguageId(eq(1))).thenReturn(1);
+        when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
+        when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
+        when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "pump-operators.csv",
+                "text/csv",
+                ("first_name,last_name,full_name,phone_number,person_type,state_scheme_id\n" +
+                 "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-1\n" +
+                 "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-1\n").getBytes(StandardCharsets.UTF_8)
+        );
+
+        when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
+
+        BadRequestException ex = assertThrows(
+                BadRequestException.class,
+                () -> service.uploadUserSchemeMappings(file, "Bearer token")
+        );
+
+        @SuppressWarnings("unchecked")
+        List<UploadErrorDTO> errors = (List<UploadErrorDTO>) ex.getErrors();
+        assertThat(errors).isNotEmpty();
+        assertThat(errors.get(0).message()).contains("Duplicate phone_number for the same state_scheme_id in uploaded file");
         verify(chunkProcessor, never()).processChunk(anyString(), anyString(), any(), anyMap(), anyInt(), anyInt(), anyList(), any(), any());
     }
 

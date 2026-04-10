@@ -89,7 +89,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
 
     @Override
     public PumpOperatorUploadResponseDTO uploadUserSchemeMappings(MultipartFile file, String authorizationHeader) {
-        return uploadMappingsInternal(file, authorizationHeader, true);
+        return uploadMappingsInternal(file, authorizationHeader, false);
     }
 
     private PumpOperatorUploadResponseDTO uploadMappingsInternal(
@@ -158,11 +158,11 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             boolean allowDuplicatePhonesInFile
     ) {
         List<UploadErrorDTO> errors = new ArrayList<>();
-        Set<String> seenPhones = new java.util.HashSet<>();
+        Set<String> seenPhoneSchemePairs = new java.util.HashSet<>();
 
         int totalRows = "csv".equals(extension)
-                ? validateCsv(schemaName, file, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhones)
-                : validateXlsx(schemaName, file, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhones);
+                ? validateCsv(schemaName, file, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhoneSchemePairs)
+                : validateXlsx(schemaName, file, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhoneSchemePairs);
 
         if (!errors.isEmpty()) {
             throw new BadRequestException("Validation failed for uploaded file", errors);
@@ -197,7 +197,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             Map<String, Integer> schemeIdCache,
             List<UploadErrorDTO> errors,
             boolean allowDuplicatePhonesInFile,
-            Set<String> seenPhones
+            Set<String> seenPhoneSchemePairs
     ) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
              CSVParser parser = CSVFormat.DEFAULT.builder().setTrim(true).setIgnoreSurroundingSpaces(true).build().parse(reader)) {
@@ -222,7 +222,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 PumpOperatorUploadChunkProcessor.UploadRow row = toUploadRow((int) record.getRecordNumber(), map);
                 total++;
-                validateRow(schemaName, row, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhones);
+                validateRow(schemaName, row, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhoneSchemePairs);
                 if (errors.size() >= MAX_VALIDATION_ERRORS) {
                     errors.add(err(row.rowNumber(), "file", "Too many validation errors; showing first " + MAX_VALIDATION_ERRORS));
                     break;
@@ -244,7 +244,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             Map<String, Integer> schemeIdCache,
             List<UploadErrorDTO> errors,
             boolean allowDuplicatePhonesInFile,
-            Set<String> seenPhones
+            Set<String> seenPhoneSchemePairs
     ) {
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getNumberOfSheets() > 0 ? workbook.getSheetAt(0) : null;
@@ -276,7 +276,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 PumpOperatorUploadChunkProcessor.UploadRow uploadRow = toUploadRow(i + 1, map);
                 total++;
-                validateRow(schemaName, uploadRow, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhones);
+                validateRow(schemaName, uploadRow, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhoneSchemePairs);
                 if (errors.size() >= MAX_VALIDATION_ERRORS) {
                     errors.add(err(uploadRow.rowNumber(), "file", "Too many validation errors; showing first " + MAX_VALIDATION_ERRORS));
                     break;
@@ -425,7 +425,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             Map<String, Integer> schemeIdCache,
             List<UploadErrorDTO> errors,
             boolean allowDuplicatePhonesInFile,
-            Set<String> seenPhones
+            Set<String> seenPhoneSchemePairs
     ) {
         if (row.fullName().isBlank()) {
             errors.add(err(row.rowNumber(), "full_name", "Full name is required"));
@@ -444,11 +444,6 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             errors.add(err(row.rowNumber(), "phone_number", "Phone number must be a valid 10-digit Indian number (no country code)"));
             return;
         }
-        if (!allowDuplicatePhonesInFile && !seenPhones.add(row.phone())) {
-            errors.add(err(row.rowNumber(), "phone_number", "Duplicate phone_number in uploaded file"));
-            return;
-        }
-
         if (row.personType().isBlank()) {
             errors.add(err(row.rowNumber(), "person_type", "person_type is required"));
             return;
@@ -461,6 +456,14 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
         if (row.stateSchemeId().isBlank()) {
             errors.add(err(row.rowNumber(), "state_scheme_id", "state_scheme_id is required"));
             return;
+        }
+
+        if (!allowDuplicatePhonesInFile) {
+            String phoneSchemeKey = row.phone() + "|" + row.stateSchemeId().trim().toLowerCase(Locale.ROOT);
+            if (!seenPhoneSchemePairs.add(phoneSchemeKey)) {
+                errors.add(err(row.rowNumber(), "phone_number", "Duplicate phone_number for the same state_scheme_id in uploaded file"));
+                return;
+            }
         }
 
         String schemeKey = row.stateSchemeId();

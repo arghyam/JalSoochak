@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.event;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.telemetry.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.telemetry.kafka.KafkaProducer;
@@ -22,9 +23,11 @@ import java.util.UUID;
 public class TelemetryEventPublisher {
 
     public static final String TOPIC = "telemetry-service-topic";
+    public static final String ANOMALY_SERVICE_TOPIC = "anomaly-service-topic";
     public static final String EVENT_WATER_QUANTITY_RECORDED = "WATER_QUANTITY_RECORDED";
     public static final String EVENT_METER_READING_RECORDED = "METER_READING_RECORDED";
     public static final String EVENT_ANOMALY_RECORDED = "ANOMALY_RECORDED";
+    public static final String EVENT_ESCALATION_CREATED = "ESCALATION_CREATED";
     public static final int NOT_SUBMITTED_STATUS = 0;
 
     private final KafkaProducer kafkaProducer;
@@ -129,6 +132,34 @@ public class TelemetryEventPublisher {
         if (!ok) {
             log.warn("[telemetry-events] publish_failed type={} tenantId={} schemeId={} userId={}",
                     type, tenantId, schemeId, userId);
+        }
+    }
+
+    @Async("kafkaPublisherExecutor")
+    public void publishEscalationCreated(Integer tenantId,
+                                         Long schemeId,
+                                         Long userId,
+                                         Integer escalationType,
+                                         String message,
+                                         String correlationId,
+                                         Integer resolutionStatus,
+                                         String remark) {
+        EscalationEvent event = EscalationEvent.builder()
+                .eventType(EVENT_ESCALATION_CREATED)
+                .tenantId(tenantId)
+                .schemeId(toInt(schemeId))
+                .escalationType(escalationType)
+                .message(message)
+                .correlationId(correlationId)
+                .userId(toInt(userId))
+                .resolutionStatus(resolutionStatus)
+                .remark(remark)
+                .build();
+
+        boolean ok = kafkaProducer.publishJson(ANOMALY_SERVICE_TOPIC, event);
+        if (!ok) {
+            log.warn("[telemetry-events] publish_failed escalation_created type={} tenantId={} schemeId={} userId={}",
+                    escalationType, tenantId, schemeId, userId);
         }
     }
 

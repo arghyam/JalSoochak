@@ -808,29 +808,15 @@ public class GlificMeterWorkflowService {
                     resolvedIssueReason
             );
             int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
-            telemetryTenantRepository.createTenantAnomalyRecord(
-                    operatorWithSchema.schemaName(),
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    anomalyType,
-                    resolvedIssueReason,
-                    AnomalyConstants.STATUS_OPEN
-            );
-            telemetryEventPublisher.publishAnomalyRecorded(
+            telemetryEventPublisher.publishEscalationCreated(
                     tenantId,
-                    anomalyType,
-                    operatorWithSchema.operator().id(),
                     schemeId,
-                    null,
-                    null,
-                    null,
-                    0,
-                    null,
-                    null,
-                    0,
+                    operatorWithSchema.operator().id(),
+                    anomalyType,
                     resolvedIssueReason,
+                    correlationId,
                     AnomalyConstants.STATUS_OPEN,
-                    correlationId
+                    null
             );
             telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                     tenantId,

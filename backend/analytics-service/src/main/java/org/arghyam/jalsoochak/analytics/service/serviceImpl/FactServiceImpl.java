@@ -136,6 +136,7 @@ public class FactServiceImpl implements FactService {
                 .schemeId(event.getSchemeId())
                 .escalationType(intCodeToVarchar(event.getEscalationType()))
                 .message(event.getMessage())
+                .correlationId(event.getCorrelationId())
                 .userId(event.getUserId())
                 .resolutionStatus(event.getResolutionStatus())
                 .remark(event.getRemark())
