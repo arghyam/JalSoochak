@@ -25,12 +25,20 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Repository for tenant-schema-scoped queries.
- * <p>
- * Every method accepts the target schema name explicitly so that the
- * caller (service layer) controls which tenant's data is accessed.
- * Schema names are validated before being interpolated into SQL to
- * prevent injection.
+ *
+ * <p>Every method accepts the target schema name explicitly so that the caller (service layer)
+ * controls which tenant's data is accessed.</p>
+ *
+ * <p><b>Security note (java:S2077):</b> PostgreSQL schema and table names are SQL
+ * <em>identifiers</em>, not values, so they cannot be supplied via JDBC bind parameters
+ * ({@code ?}). Every public method calls {@link #validateSchemaName(String)} before any
+ * schema name is interpolated via {@code String.format}; the regex
+ * {@code ^tenant_[a-z0-9][a-z0-9_]{0,29}$} ensures only safe characters reach the query.
+ * Table names are resolved through {@link #locationTableFor(RegionTypeEnum)}, an exhaustive
+ * switch over a closed enum — no user input can affect the table name.
+ * All runtime data values are bound as {@code ?} parameters.</p>
  */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 @Slf4j
@@ -80,17 +88,29 @@ public class TenantSchemaRepository {
         }
 
         /**
+         * Maps a {@link RegionTypeEnum} to its corresponding table name.
+         * Using an explicit switch ensures only the finite set of known-safe table names
+         * can ever be interpolated into SQL — no user input reaches this method.
+         */
+        private String locationTableFor(RegionTypeEnum regionType) {
+                return switch (regionType) {
+                        case LGD -> "lgd_location_master_table";
+                        case DEPARTMENT -> "department_location_master_table";
+                };
+        }
+
+        /**
          * Fetches all supported languages from the specified schema.
          */
         public List<LanguageConfigDTO> getSupportedLanguages(String schemaName) {
                 validateSchemaName(schemaName);
                 String sql = String.format(
-                                "SELECT language_name, preference FROM %s.language_master_table WHERE status = %d ORDER BY preference",
-                                schemaName, StatusEnum.ACTIVE.getCode());
+                                "SELECT language_name, preference FROM %s.language_master_table WHERE status = ? ORDER BY preference",
+                                schemaName);
                 return jdbcTemplate.query(sql, (rs, rowNum) -> LanguageConfigDTO.builder()
                                 .language(rs.getString("language_name"))
                                 .preference((Integer) rs.getObject("preference"))
-                                .build());
+                                .build(), StatusEnum.ACTIVE.getCode());
         }
 
         /**
@@ -105,22 +125,23 @@ public class TenantSchemaRepository {
                 }
                 // Mark all as inactive
                 String deactivateSql = String.format(
-                                "UPDATE %s.language_master_table SET status = %d, updated_by = ?, updated_at = NOW()",
-                                schemaName, StatusEnum.INACTIVE.getCode());
-                jdbcTemplate.update(deactivateSql, currentUserId);
+                                "UPDATE %s.language_master_table SET status = ?, updated_by = ?, updated_at = NOW()",
+                                schemaName);
+                jdbcTemplate.update(deactivateSql, StatusEnum.INACTIVE.getCode(), currentUserId);
 
                 // Upsert new languages
                 String upsertSql = String.format(
                                 """
                                                 INSERT INTO %s.language_master_table (language_name, preference, status, created_by, updated_by)
-                                                VALUES (?, ?, %d, ?, ?)
-                                                ON CONFLICT (language_name) DO UPDATE SET status = %d, preference = EXCLUDED.preference, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+                                                VALUES (?, ?, ?, ?, ?)
+                                                ON CONFLICT (language_name) DO UPDATE SET status = ?, preference = EXCLUDED.preference, updated_by = EXCLUDED.updated_by, updated_at = NOW()
                                                 """,
-                                schemaName, StatusEnum.ACTIVE.getCode(), StatusEnum.ACTIVE.getCode());
+                                schemaName);
 
                 for (LanguageConfigDTO lang : languages) {
-                        jdbcTemplate.update(upsertSql, lang.getLanguage(), lang.getPreference(), currentUserId,
-                                        currentUserId);
+                        jdbcTemplate.update(upsertSql, lang.getLanguage(), lang.getPreference(),
+                                        StatusEnum.ACTIVE.getCode(), currentUserId, currentUserId,
+                                        StatusEnum.ACTIVE.getCode());
                 }
         }
 
@@ -199,10 +220,7 @@ public class TenantSchemaRepository {
          */
         public long countSeededLocationData(String schemaName, RegionTypeEnum regionType) {
                 validateSchemaName(schemaName);
-                String tableName = regionType == RegionTypeEnum.LGD
-                                ? "lgd_location_master_table"
-                                : "department_location_master_table";
-                String sql = String.format("SELECT COUNT(*) FROM %s.%s", schemaName, tableName);
+                String sql = String.format("SELECT COUNT(*) FROM %s.%s", schemaName, locationTableFor(regionType));
                 Long count = jdbcTemplate.queryForObject(sql, Long.class);
                 return count != null ? count : 0L;
         }
@@ -234,10 +252,7 @@ public class TenantSchemaRepository {
                         },
                         rs -> null);
 
-                String masterTableName = regionType == RegionTypeEnum.LGD
-                                ? "lgd_location_master_table"
-                                : "department_location_master_table";
-                String countSql = String.format("SELECT COUNT(*) FROM %s.%s", schemaName, masterTableName);
+                String countSql = String.format("SELECT COUNT(*) FROM %s.%s", schemaName, locationTableFor(regionType));
                 Long seededCount = jdbcTemplate.queryForObject(countSql, Long.class);
                 long count = seededCount != null ? seededCount : 0L;
                 if (count > 0) {
@@ -306,14 +321,14 @@ public class TenantSchemaRepository {
                 
                 if (parentId == null) {
                         sql = String.format(
-                                "SELECT * FROM %s.lgd_location_master_table WHERE parent_id IS NULL AND status = %d ORDER BY title",
-                                schemaName, StatusEnum.ACTIVE.getCode());
-                        params = new Object[]{};
+                                "SELECT * FROM %s.lgd_location_master_table WHERE parent_id IS NULL AND status = ? ORDER BY title",
+                                schemaName);
+                        params = new Object[]{StatusEnum.ACTIVE.getCode()};
                 } else {
                         sql = String.format(
-                                "SELECT * FROM %s.lgd_location_master_table WHERE parent_id = ? AND status = %d ORDER BY title",
-                                schemaName, StatusEnum.ACTIVE.getCode());
-                        params = new Object[]{parentId};
+                                "SELECT * FROM %s.lgd_location_master_table WHERE parent_id = ? AND status = ? ORDER BY title",
+                                schemaName);
+                        params = new Object[]{parentId, StatusEnum.ACTIVE.getCode()};
                 }
                 
                 log.debug("Fetching LGD locations from schema: {} with parentId: {}", schemaName, parentId);
@@ -335,14 +350,14 @@ public class TenantSchemaRepository {
                 
                 if (parentId == null) {
                         sql = String.format(
-                                "SELECT * FROM %s.department_location_master_table WHERE parent_id IS NULL AND status = %d ORDER BY title",
-                                schemaName, StatusEnum.ACTIVE.getCode());
-                        params = new Object[]{};
+                                "SELECT * FROM %s.department_location_master_table WHERE parent_id IS NULL AND status = ? ORDER BY title",
+                                schemaName);
+                        params = new Object[]{StatusEnum.ACTIVE.getCode()};
                 } else {
                         sql = String.format(
-                                "SELECT * FROM %s.department_location_master_table WHERE parent_id = ? AND status = %d ORDER BY title",
-                                schemaName, StatusEnum.ACTIVE.getCode());
-                        params = new Object[]{parentId};
+                                "SELECT * FROM %s.department_location_master_table WHERE parent_id = ? AND status = ? ORDER BY title",
+                                schemaName);
+                        params = new Object[]{parentId, StatusEnum.ACTIVE.getCode()};
                 }
                 
                 log.debug("Fetching department locations from schema: {} with parentId: {}", schemaName, parentId);

@@ -16,9 +16,16 @@ import java.util.function.Consumer;
 
 /**
  * JdbcTemplate-based repository for nudge and escalation queries.
- * All methods accept the tenant schema name explicitly and validate it
- * before interpolating into SQL to prevent injection.
+ *
+ * <p><b>Security note (java:S2077):</b> PostgreSQL schema names are SQL <em>identifiers</em>,
+ * not values, so they cannot be supplied via JDBC bind parameters ({@code ?}).
+ * Every public method calls {@link #validateSchemaName(String)} before the schema name
+ * is interpolated into SQL via {@code String.format}. The regex
+ * {@code ^[a-z_][a-z0-9_]*$} ensures only safe, lowercase alphanumeric characters
+ * reach the query. All runtime data values (dates, IDs, counts) are bound as
+ * {@code ?} parameters and never concatenated into SQL.</p>
  */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 @Slf4j
@@ -246,9 +253,8 @@ public class NudgeRepository {
      */
     public int updateWhatsAppConnectionId(String schema, long userId, long contactId) {
         validateSchemaName(schema);
-        return jdbcTemplate.update(
-                "UPDATE " + schema + ".user_table SET whatsapp_connection_id = ? WHERE id = ?",
-                contactId, userId);
+        String sql = String.format("UPDATE %s.user_table SET whatsapp_connection_id = ? WHERE id = ?", schema);
+        return jdbcTemplate.update(sql, contactId, userId);
     }
 
     /**
