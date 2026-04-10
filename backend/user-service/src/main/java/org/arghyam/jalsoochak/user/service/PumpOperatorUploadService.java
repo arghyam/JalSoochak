@@ -5,5 +5,5 @@ import org.springframework.web.multipart.MultipartFile;
 
 public interface PumpOperatorUploadService {
     PumpOperatorUploadResponseDTO uploadPumpOperatorMappings(MultipartFile file, String authorizationHeader);
+    PumpOperatorUploadResponseDTO uploadUserSchemeMappings(MultipartFile file, String authorizationHeader);
 }
-

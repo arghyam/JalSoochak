@@ -19,6 +19,7 @@ import java.util.Optional;
 import org.arghyam.jalsoochak.user.auth.UploadAuthService;
 import org.arghyam.jalsoochak.user.config.TenantContext;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorUploadResponseDTO;
+import org.arghyam.jalsoochak.user.dto.response.UploadErrorDTO;
 import org.arghyam.jalsoochak.user.event.UserEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
@@ -101,7 +102,7 @@ class PumpOperatorUploadServiceImplTest {
 
         // Service validation passes; actual skipping happens in the chunk processor.
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
-        when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
+        when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any(), any()))
                 .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(0, 1, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
@@ -136,7 +137,7 @@ class PumpOperatorUploadServiceImplTest {
         when(userTenantRepository.createUser(eq("tenant_ka"), anyString(), eq(1), anyString(), anyString(), eq(2), eq("9999999999"), anyString(), eq(10L)))
                 .thenReturn(55L);
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
-        when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
+        when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any(), any()))
                 .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
@@ -145,8 +146,77 @@ class PumpOperatorUploadServiceImplTest {
         assertThat(res.uploadedRows()).isEqualTo(1);
         assertThat(res.skippedRows()).isEqualTo(0);
 
-        verify(chunkProcessor).processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), eq(1), eq(10), uploadRowsCaptor.capture(), any());
+        verify(chunkProcessor).processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), eq(1), eq(10), uploadRowsCaptor.capture(), any(), any());
         assertThat(uploadRowsCaptor.getValue()).hasSize(1);
+    }
+
+    @Test
+    void upload_shouldAllowSamePhoneAcrossMultipleSchemes() {
+        TenantContext.setSchema("tenant_ka");
+        when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
+        when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
+                .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
+        when(preferredLanguageService.resolvePreferredLanguageId(eq(1))).thenReturn(1);
+        when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
+        when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
+        when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "pump-operators.csv",
+                "text/csv",
+                ("first_name,last_name,full_name,phone_number,person_type,state_scheme_id\n" +
+                 "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-1\n" +
+                 "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-2\n").getBytes(StandardCharsets.UTF_8)
+        );
+
+        when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
+        when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-2"), eq((String) null))).thenReturn(101);
+        when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any(), any()))
+                .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(2, 0, 0));
+
+        PumpOperatorUploadResponseDTO res = service.uploadUserSchemeMappings(file, "Bearer token");
+
+        assertThat(res.totalRows()).isEqualTo(2);
+        assertThat(res.uploadedRows()).isEqualTo(2);
+        assertThat(res.skippedRows()).isEqualTo(0);
+        verify(chunkProcessor).processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), eq(1), eq(10), uploadRowsCaptor.capture(), any(), any());
+        assertThat(uploadRowsCaptor.getValue()).hasSize(2);
+    }
+
+    @Test
+    void upload_shouldRejectDuplicatePhoneInPumpOperatorUpload() {
+        TenantContext.setSchema("tenant_ka");
+        when(uploadAuthService.requireStateAdminUserId(eq("tenant_ka"), anyString())).thenReturn(10);
+        when(userTenantRepository.findUserById(eq("tenant_ka"), eq(10L)))
+                .thenReturn(Optional.of(new TenantUserRecord(10L, 1, "9111111111", "admin@example.com", 1L, "STATE_ADMIN", "Admin", null, null, null)));
+        when(preferredLanguageService.resolvePreferredLanguageId(eq(1))).thenReturn(1);
+        when(userCommonRepository.findUserTypeIdByName(eq("PUMP_OPERATOR"))).thenReturn(Optional.of(2));
+        when(userCommonRepository.findUserTypeIdByName(eq("SECTION_OFFICER"))).thenReturn(Optional.of(3));
+        when(userCommonRepository.findUserTypeIdByName(eq("SUB_DIVISIONAL_OFFICER"))).thenReturn(Optional.of(4));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "pump-operators.csv",
+                "text/csv",
+                ("first_name,last_name,full_name,phone_number,person_type,state_scheme_id\n" +
+                 "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-1\n" +
+                 "Ram,Kumar,Ram Kumar,9999999999,pump_operator,SS-2\n").getBytes(StandardCharsets.UTF_8)
+        );
+
+        when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
+        when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-2"), eq((String) null))).thenReturn(101);
+
+        BadRequestException ex = assertThrows(
+                BadRequestException.class,
+                () -> service.uploadPumpOperatorMappings(file, "Bearer token")
+        );
+
+        @SuppressWarnings("unchecked")
+        List<UploadErrorDTO> errors = (List<UploadErrorDTO>) ex.getErrors();
+        assertThat(errors).isNotEmpty();
+        assertThat(errors.get(0).message()).contains("Duplicate phone_number in uploaded file");
+        verify(chunkProcessor, never()).processChunk(anyString(), anyString(), any(), anyMap(), anyInt(), anyInt(), anyList(), any(), any());
     }
 
     @Test
@@ -169,13 +239,13 @@ class PumpOperatorUploadServiceImplTest {
         );
 
         when(userUploadRepository.findSchemeId(eq("tenant_ka"), eq("SS-1"), eq((String) null))).thenReturn(100);
-        when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any()))
+        when(chunkProcessor.processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), anyInt(), anyInt(), anyList(), any(), any()))
                 .thenReturn(new PumpOperatorUploadChunkProcessor.ChunkResult(1, 0, 0));
 
         PumpOperatorUploadResponseDTO res = service.uploadPumpOperatorMappings(file, "Bearer token");
 
         assertThat(res.uploadedRows()).isEqualTo(1);
-        verify(chunkProcessor).processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), eq(1), eq(10), anyList(), any());
+        verify(chunkProcessor).processChunk(eq("tenant_ka"), eq("KA"), any(), anyMap(), eq(1), eq(10), anyList(), any(), any());
     }
 
     @Test
@@ -205,6 +275,6 @@ class PumpOperatorUploadServiceImplTest {
         );
         assertThat(ex.getMessage()).containsIgnoringCase("validation failed");
 
-        verify(chunkProcessor, never()).processChunk(anyString(), anyString(), any(), anyMap(), anyInt(), anyInt(), anyList(), any());
+        verify(chunkProcessor, never()).processChunk(anyString(), anyString(), any(), anyMap(), anyInt(), anyInt(), anyList(), any(), any());
     }
 }
