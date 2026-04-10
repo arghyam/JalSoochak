@@ -21,11 +21,10 @@ import java.util.function.Consumer;
  * not values, so they cannot be supplied via JDBC bind parameters ({@code ?}).
  * Every public method calls {@link #validateSchemaName(String)} before the schema name
  * is interpolated into SQL via {@code String.format}. The regex
- * {@code ^[a-z_][a-z0-9_]*$} ensures only safe, lowercase alphanumeric characters
- * reach the query. All runtime data values (dates, IDs, counts) are bound as
- * {@code ?} parameters and never concatenated into SQL.</p>
+ * {@code ^tenant_[a-z0-9][a-z0-9_]{0,29}$} ensures only valid tenant schema names
+ * reach the query, preventing access to shared/internal schemas. All runtime data values
+ * (dates, IDs, counts) are bound as {@code ?} parameters and never concatenated into SQL.</p>
  */
-@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 @Slf4j
@@ -41,6 +40,7 @@ public class NudgeRepository {
      * <p>Uses a server-side cursor (fetchSize=500) to avoid materialising the full result set
      * into heap, preventing OOM on large tenants.</p>
      */
+    @SuppressWarnings("java:S2077")
     @Transactional(readOnly = true)
     public int streamUsersWithNoUploadToday(String schema, LocalDate referenceDate,
                                             Consumer<Map<String, Object>> consumer) {
@@ -103,6 +103,7 @@ public class NudgeRepository {
      *   <li>Never uploaded → NULL → always escalated (level-2)</li>
      * </ul>
      */
+    @SuppressWarnings("java:S2077")
     @Transactional(readOnly = true)
     public int streamUsersWithMissedDays(String schema, int minMissedDays, LocalDate referenceDate,
                                          Consumer<Map<String, Object>> consumer) {
@@ -183,6 +184,7 @@ public class NudgeRepository {
      * Returns the name and phone number of the officer (by {@code userTypeName})
      * mapped to a given scheme, or {@code null} if none found.
      */
+    @SuppressWarnings("java:S2077")
     public Map<String, Object> findOfficerByUserType(String schema, Object schemeId, String userTypeName) {
         validateSchemaName(schema);
         String sql = String.format("""
@@ -220,6 +222,7 @@ public class NudgeRepository {
      * <p>When multiple officers of the same type exist for a scheme the first row encountered
      * is kept (consistent with the single-row behaviour of {@link #findOfficerByUserType}).</p>
      */
+    @SuppressWarnings("java:S2077")
     public Map<Object, Map<String, Object>> findAllOfficersByUserType(String schema, String userTypeName) {
         validateSchemaName(schema);
         String sql = String.format("""
@@ -251,6 +254,7 @@ public class NudgeRepository {
      * Persists the Glific contact ID for the given user.
      * Called by the Kafka consumer when a {@code WHATSAPP_CONTACT_REGISTERED} event arrives.
      */
+    @SuppressWarnings("java:S2077")
     public int updateWhatsAppConnectionId(String schema, long userId, long contactId) {
         validateSchemaName(schema);
         String sql = String.format("UPDATE %s.user_table SET whatsapp_connection_id = ? WHERE id = ?", schema);
@@ -290,7 +294,7 @@ public class NudgeRepository {
     }
 
     private void validateSchemaName(String schema) {
-        if (schema == null || !schema.matches("^[a-z_][a-z0-9_]*$")) {
+        if (schema == null || !schema.matches("^tenant_[a-z0-9][a-z0-9_]{0,29}$")) {
             throw new IllegalArgumentException("Invalid schema name: " + schema);
         }
     }

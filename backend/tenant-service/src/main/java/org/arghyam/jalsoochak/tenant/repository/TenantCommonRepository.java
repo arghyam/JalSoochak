@@ -421,7 +421,7 @@ public class TenantCommonRepository {
      * Validates a schema name.
      */
     private void validateSchemaName(String schemaName) {
-        if (schemaName == null || !schemaName.matches("^[a-z_][a-z0-9_]*$")) {
+        if (schemaName == null || !schemaName.matches("^tenant_[a-z0-9][a-z0-9_]{0,29}$")) {
             throw new IllegalArgumentException("Invalid schema name: " + schemaName);
         }
     }

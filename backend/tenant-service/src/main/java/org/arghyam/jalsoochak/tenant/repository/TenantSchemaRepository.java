@@ -38,7 +38,6 @@ import lombok.extern.slf4j.Slf4j;
  * switch over a closed enum — no user input can affect the table name.
  * All runtime data values are bound as {@code ?} parameters.</p>
  */
-@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 @Slf4j
@@ -102,6 +101,7 @@ public class TenantSchemaRepository {
         /**
          * Fetches all supported languages from the specified schema.
          */
+        @SuppressWarnings("java:S2077")
         public List<LanguageConfigDTO> getSupportedLanguages(String schemaName) {
                 validateSchemaName(schemaName);
                 String sql = String.format(
@@ -118,6 +118,7 @@ public class TenantSchemaRepository {
          * language_master_table.
          * mark all as inactive (status=0) and then upsert new ones.
          */
+        @SuppressWarnings("java:S2077")
         public void setSupportedLanguages(String schemaName, List<LanguageConfigDTO> languages, Integer currentUserId) {
                 validateSchemaName(schemaName);
                 if (languages == null) {
@@ -149,6 +150,7 @@ public class TenantSchemaRepository {
          * Fetches location hierarchy configuration from the specified schema for a
          * given region type.
          */
+        @SuppressWarnings("java:S2077")
         public LocationConfigDTO getLocationHierarchy(String schemaName, RegionTypeEnum regionType) {
                 validateSchemaName(schemaName);
                 String sql = String.format(
@@ -174,6 +176,7 @@ public class TenantSchemaRepository {
          * Replaces location hierarchy configuration for a given region type.
          * Deletes all existing entries for the region type, then inserts the new ones.
          */
+        @SuppressWarnings("java:S2077")
         public void setLocationHierarchy(String schemaName, RegionTypeEnum regionType,
                         List<LocationLevelConfigDTO> hierarchy,
                         Integer currentUserId) {
@@ -218,6 +221,7 @@ public class TenantSchemaRepository {
          * @param regionType LGD or DEPARTMENT
          * @return Total count of records in the corresponding master table
          */
+        @SuppressWarnings("java:S2077")
         public long countSeededLocationData(String schemaName, RegionTypeEnum regionType) {
                 validateSchemaName(schemaName);
                 String sql = String.format("SELECT COUNT(*) FROM %s.%s", schemaName, locationTableFor(regionType));
@@ -237,6 +241,7 @@ public class TenantSchemaRepository {
          * @param currentUserId Audit user ID
          * @throws LocationHierarchyStructureLockedException when seeded rows exist
          */
+        @SuppressWarnings("java:S2077")
         public void rewriteLocationHierarchyIfNoSeededData(String schemaName, RegionTypeEnum regionType,
                         List<LocationLevelConfigDTO> hierarchy, Integer currentUserId) {
                 validateSchemaName(schemaName);
@@ -272,6 +277,7 @@ public class TenantSchemaRepository {
          * @param hierarchy    New level definitions (same level numbers, updated names)
          * @param currentUserId Audit user ID
          */
+        @SuppressWarnings("java:S2077")
         public void updateLevelNames(String schemaName, RegionTypeEnum regionType,
                         List<LocationLevelConfigDTO> hierarchy, Integer currentUserId) {
                 validateSchemaName(schemaName);
@@ -313,6 +319,7 @@ public class TenantSchemaRepository {
          * @param parentId   Parent location ID (or null for root-level locations)
          * @return List of child locations ordered by title
          */
+        @SuppressWarnings("java:S2077")
         public List<LocationResponseDTO> findLgdLocationsByParentId(String schemaName, Integer parentId) {
                 validateSchemaName(schemaName);
                 
@@ -342,6 +349,7 @@ public class TenantSchemaRepository {
          * @param parentId   Parent location ID (or null for root-level locations)
          * @return List of child locations ordered by title
          */
+        @SuppressWarnings("java:S2077")
         public List<LocationResponseDTO> findDepartmentLocationsByParentId(String schemaName, Integer parentId) {
                 validateSchemaName(schemaName);
                 

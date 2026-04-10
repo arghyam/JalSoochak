@@ -461,7 +461,8 @@ class NudgeRepositoryIntegrationTest {
     void updateWhatsAppConnectionId_rejectsInvalidSchemaName() {
         assertThatThrownBy(() ->
                 nudgeRepository.updateWhatsAppConnectionId("bad-schema!", 1L, 42L))
-                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid schema name");
     }
 
@@ -482,7 +483,8 @@ class NudgeRepositoryIntegrationTest {
     @Test
     void streamUsersWithNoUploadToday_rejectsInvalidSchemaName() {
         assertThatThrownBy(() -> nudgeRepository.streamUsersWithNoUploadToday("invalid-schema!", LocalDate.now(), row -> {}))
-                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid schema name");
     }
 
@@ -490,7 +492,8 @@ class NudgeRepositoryIntegrationTest {
     void streamUsersWithMissedDays_rejectsSqlInjectionAttempt() {
         assertThatThrownBy(() ->
                 nudgeRepository.streamUsersWithMissedDays("'; DROP TABLE users; --", 3, LocalDate.now(), row -> {}))
-                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid schema name");
     }
 
@@ -498,7 +501,8 @@ class NudgeRepositoryIntegrationTest {
     void findOfficerByUserType_rejectsInvalidSchemaName() {
         assertThatThrownBy(() ->
                 nudgeRepository.findOfficerByUserType("UPPER_CASE", 1, "OPERATOR"))
-                .hasCauseInstanceOf(IllegalArgumentException.class);
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     // ────────────────────────────── helpers ────────────────────────────────────

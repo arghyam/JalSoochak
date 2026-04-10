@@ -167,7 +167,8 @@ class TenantCommonRepositoryIntegrationTest {
         @DisplayName("throws for null schema name")
         void provisionTenantSchema_throwsOnNull() {
             assertThatThrownBy(() -> repository.provisionTenantSchema(null))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .rootCause()
+                    .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Invalid schema name");
         }
 
@@ -175,21 +176,24 @@ class TenantCommonRepositoryIntegrationTest {
         @DisplayName("throws for schema name with uppercase letters")
         void provisionTenantSchema_throwsOnUppercase() {
             assertThatThrownBy(() -> repository.provisionTenantSchema("Tenant_KA"))
-                    .hasCauseInstanceOf(IllegalArgumentException.class);
+                    .rootCause()
+                    .isInstanceOf(IllegalArgumentException.class);
         }
 
         @Test
         @DisplayName("throws for schema name with SQL injection characters")
         void provisionTenantSchema_throwsOnSqlInjection() {
             assertThatThrownBy(() -> repository.provisionTenantSchema("tenant_ka; DROP TABLE users"))
-                    .hasCauseInstanceOf(IllegalArgumentException.class);
+                    .rootCause()
+                    .isInstanceOf(IllegalArgumentException.class);
         }
 
         @Test
         @DisplayName("throws for schema name starting with a digit")
         void provisionTenantSchema_throwsOnDigitStart() {
             assertThatThrownBy(() -> repository.provisionTenantSchema("1tenant"))
-                    .hasCauseInstanceOf(IllegalArgumentException.class);
+                    .rootCause()
+                    .isInstanceOf(IllegalArgumentException.class);
         }
     }
 
@@ -350,7 +354,8 @@ class TenantCommonRepositoryIntegrationTest {
         @DisplayName("throws IllegalArgumentException for limit <= 0")
         void findAll_paginated_throwsForNonPositiveLimit() {
             assertThatThrownBy(() -> repository.findAll(0, 0, null, null))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .rootCause()
+                    .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("limit must be greater than 0");
         }
 
@@ -358,7 +363,8 @@ class TenantCommonRepositoryIntegrationTest {
         @DisplayName("throws IllegalArgumentException for negative offset")
         void findAll_paginated_throwsForNegativeOffset() {
             assertThatThrownBy(() -> repository.findAll(10, -1, null, null))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .rootCause()
+                    .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("offset must be non-negative");
         }
 
@@ -605,7 +611,8 @@ class TenantCommonRepositoryIntegrationTest {
         @DisplayName("throws IllegalStateException when tenant does not exist")
         void updateTenantStatus_throwsWhenTenantNotFound() {
             assertThatThrownBy(() -> repository.updateTenantStatus(99999, TenantStatusEnum.ACTIVE, 1))
-                    .hasCauseInstanceOf(IllegalStateException.class)
+                    .rootCause()
+                    .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("No tenant found");
         }
     }
@@ -633,7 +640,8 @@ class TenantCommonRepositoryIntegrationTest {
         @DisplayName("throws IllegalArgumentException when tenant does not exist")
         void deactivateTenant_throwsWhenTenantNotFound() {
             assertThatThrownBy(() -> repository.deactivateTenant(99999, 1))
-                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .rootCause()
+                    .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("does not exist");
         }
     }

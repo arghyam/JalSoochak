@@ -2,9 +2,12 @@ package org.arghyam.jalsoochak.tenant.exception;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(MockitoExtension.class)
 @DisplayName("LocationHierarchyStructureLockedException")
 class LocationHierarchyStructureLockedExceptionTest {
 
@@ -54,7 +57,7 @@ class LocationHierarchyStructureLockedExceptionTest {
     }
 
     @Test
-    @DisplayName("seededCount of 1 is reflected in message as singular wording")
+    @DisplayName("seededCount of 1 is present in the message")
     void message_withSingleSeededRecord() {
         LocationHierarchyStructureLockedException ex =
                 new LocationHierarchyStructureLockedException("LGD", 1);

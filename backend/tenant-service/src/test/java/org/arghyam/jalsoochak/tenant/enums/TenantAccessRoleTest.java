@@ -4,7 +4,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -83,28 +87,20 @@ class TenantAccessRoleTest {
     @DisplayName("isSuperUserEquivalent")
     class IsSuperUserEquivalent {
 
-        @Test
-        @DisplayName("SUPER_USER is super-user equivalent")
-        void superUser_isSuperUserEquivalent() {
-            assertThat(TenantAccessRole.SUPER_USER.isSuperUserEquivalent()).isTrue();
+        static Stream<Arguments> cases() {
+            return Stream.of(
+                    Arguments.of(TenantAccessRole.SUPER_USER,        true),
+                    Arguments.of(TenantAccessRole.SUPER_STATE_ADMIN, true),
+                    Arguments.of(TenantAccessRole.STATE_ADMIN,       false),
+                    Arguments.of(TenantAccessRole.STAFF,             false)
+            );
         }
 
-        @Test
-        @DisplayName("SUPER_STATE_ADMIN is super-user equivalent")
-        void superStateAdmin_isSuperUserEquivalent() {
-            assertThat(TenantAccessRole.SUPER_STATE_ADMIN.isSuperUserEquivalent()).isTrue();
-        }
-
-        @Test
-        @DisplayName("STATE_ADMIN is not super-user equivalent")
-        void stateAdmin_isNotSuperUserEquivalent() {
-            assertThat(TenantAccessRole.STATE_ADMIN.isSuperUserEquivalent()).isFalse();
-        }
-
-        @Test
-        @DisplayName("STAFF is not super-user equivalent")
-        void staff_isNotSuperUserEquivalent() {
-            assertThat(TenantAccessRole.STAFF.isSuperUserEquivalent()).isFalse();
+        @ParameterizedTest(name = "{0}.isSuperUserEquivalent() == {1}")
+        @MethodSource("cases")
+        @DisplayName("returns expected boolean for each role")
+        void isSuperUserEquivalent(TenantAccessRole role, boolean expected) {
+            assertThat(role.isSuperUserEquivalent()).isEqualTo(expected);
         }
     }
 
@@ -114,28 +110,20 @@ class TenantAccessRoleTest {
     @DisplayName("isStateAdminEquivalent")
     class IsStateAdminEquivalent {
 
-        @Test
-        @DisplayName("STATE_ADMIN is state-admin equivalent")
-        void stateAdmin_isStateAdminEquivalent() {
-            assertThat(TenantAccessRole.STATE_ADMIN.isStateAdminEquivalent()).isTrue();
+        static Stream<Arguments> cases() {
+            return Stream.of(
+                    Arguments.of(TenantAccessRole.STATE_ADMIN,       true),
+                    Arguments.of(TenantAccessRole.SUPER_STATE_ADMIN, true),
+                    Arguments.of(TenantAccessRole.SUPER_USER,        false),
+                    Arguments.of(TenantAccessRole.STAFF,             false)
+            );
         }
 
-        @Test
-        @DisplayName("SUPER_STATE_ADMIN is state-admin equivalent")
-        void superStateAdmin_isStateAdminEquivalent() {
-            assertThat(TenantAccessRole.SUPER_STATE_ADMIN.isStateAdminEquivalent()).isTrue();
-        }
-
-        @Test
-        @DisplayName("SUPER_USER is not state-admin equivalent")
-        void superUser_isNotStateAdminEquivalent() {
-            assertThat(TenantAccessRole.SUPER_USER.isStateAdminEquivalent()).isFalse();
-        }
-
-        @Test
-        @DisplayName("STAFF is not state-admin equivalent")
-        void staff_isNotStateAdminEquivalent() {
-            assertThat(TenantAccessRole.STAFF.isStateAdminEquivalent()).isFalse();
+        @ParameterizedTest(name = "{0}.isStateAdminEquivalent() == {1}")
+        @MethodSource("cases")
+        @DisplayName("returns expected boolean for each role")
+        void isStateAdminEquivalent(TenantAccessRole role, boolean expected) {
+            assertThat(role.isStateAdminEquivalent()).isEqualTo(expected);
         }
     }
 
