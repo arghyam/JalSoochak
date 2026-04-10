@@ -67,12 +67,14 @@ public class TenantSchemaRepository {
         /**
          * Validates the schema name.
          * Only accepts tenant schemas in the canonical form {@code tenant_<stateCode>}
-         * where stateCode is 1–30 lowercase alphanumeric characters (no leading digit).
+         * where stateCode is 1–30 lowercase alphanumeric characters or underscores,
+         * and may start with a digit (consistent with {@link org.arghyam.jalsoochak.tenant.config.TenantInterceptor}
+         * which accepts {@code ^[A-Za-z0-9_]{1,32}$} before lowercasing and prefixing).
          * This prevents SQL injection and ensures callers cannot accidentally target
          * shared schemas (common_schema, analytics_schema, etc.).
          */
         private void validateSchemaName(String schemaName) {
-                if (schemaName == null || !schemaName.matches("^tenant_[a-z][a-z0-9_]{0,29}$")) {
+                if (schemaName == null || !schemaName.matches("^tenant_[a-z0-9][a-z0-9_]{0,29}$")) {
                         throw new IllegalArgumentException("Invalid schema name: " + schemaName);
                 }
         }

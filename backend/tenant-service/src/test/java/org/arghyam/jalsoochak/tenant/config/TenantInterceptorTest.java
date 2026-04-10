@@ -111,6 +111,18 @@ class TenantInterceptorTest {
         }
 
         @Test
+        @DisplayName("digit-prefixed tenant code is accepted and sets schema correctly")
+        void digitPrefixedTenantCode_setsSchema() throws Exception {
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            request.addHeader(TENANT_HEADER, "1MP");
+
+            boolean result = interceptor.preHandle(request, new MockHttpServletResponse(), null);
+
+            assertThat(result).isTrue();
+            assertThat(TenantContext.getSchema()).isEqualTo("tenant_1mp");
+        }
+
+        @Test
         @DisplayName("blank-only tenant code does not set schema but returns true")
         void blankOnlyTenantCode_doesNotSetSchema_returnsTrue() throws Exception {
             MockHttpServletRequest request = new MockHttpServletRequest();

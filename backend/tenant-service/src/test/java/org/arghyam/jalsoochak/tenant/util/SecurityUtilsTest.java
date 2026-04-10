@@ -4,6 +4,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
@@ -24,6 +26,7 @@ import static org.mockito.Mockito.when;
  * Sets up a mock {@link SecurityContext} with a real {@link Jwt} object
  * to verify claim extraction behaviour without requiring a full Spring context.
  */
+@ExtendWith(MockitoExtension.class)
 @DisplayName("SecurityUtils Tests")
 class SecurityUtilsTest {
 
@@ -119,6 +122,15 @@ class SecurityUtilsTest {
         @DisplayName("throws when SecurityContext has no authentication")
         void throwsAuthCredentialsNotFoundException_whenNoAuthentication() {
             SecurityContextHolder.clearContext();
+
+            assertThatThrownBy(SecurityUtils::getCurrentUserTenantStateCode)
+                    .isInstanceOf(AuthenticationCredentialsNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("throws when principal is not a JWT (e.g. anonymous token)")
+        void throwsAuthCredentialsNotFoundException_whenPrincipalIsNotJwt() {
+            setNonJwtPrincipalInContext();
 
             assertThatThrownBy(SecurityUtils::getCurrentUserTenantStateCode)
                     .isInstanceOf(AuthenticationCredentialsNotFoundException.class);

@@ -18,7 +18,7 @@ class PhoneNumberUtilTest {
     class IsValidIndianMobile {
 
         @ParameterizedTest(name = "valid mobile ''{0}''")
-        @ValueSource(strings = {"9876543210", "8000000000", "7999999999", "6000000000"})
+        @ValueSource(strings = {"9000000000", "8000000000", "7000000000", "6000000000"})
         @DisplayName("returns true for valid 10-digit Indian mobiles starting with 6-9")
         void validNumbers(String phone) {
             assertThat(PhoneNumberUtil.isValidIndianMobile(phone)).isTrue();
@@ -33,14 +33,14 @@ class PhoneNumberUtilTest {
         @ParameterizedTest(name = "invalid ''{0}''")
         @ValueSource(strings = {
                 "",            // empty
-                "987654321",   // 9 digits
-                "98765432101", // 11 digits
-                "5876543210",  // starts with 5
-                "4876543210",  // starts with 4
-                "1234567890",  // starts with 1
-                "0876543210",  // starts with 0
-                "9876 543210", // contains space
-                "+919876543210", // has country code with +
+                "900000000",   // 9 digits
+                "90000000001", // 11 digits
+                "5000000000",  // starts with 5
+                "4000000000",  // starts with 4
+                "1000000000",  // starts with 1
+                "0000000000",  // starts with 0
+                "9000 000000", // contains space
+                "+919000000000", // has country code with +
                 "abcdefghij",  // letters
         })
         @DisplayName("returns false for invalid inputs")
@@ -51,7 +51,7 @@ class PhoneNumberUtilTest {
         @Test
         @DisplayName("trims surrounding whitespace before validation")
         void trimsWhitespace() {
-            assertThat(PhoneNumberUtil.isValidIndianMobile("  9876543210  ")).isTrue();
+            assertThat(PhoneNumberUtil.isValidIndianMobile("  9000000000  ")).isTrue();
         }
     }
 
@@ -76,30 +76,30 @@ class PhoneNumberUtilTest {
         @Test
         @DisplayName("prepends '91' to a 10-digit number")
         void prependsCountryCode() {
-            assertThat(PhoneNumberUtil.normalizeIndianMobileForDb("9876543210"))
-                    .isEqualTo("919876543210");
+            assertThat(PhoneNumberUtil.normalizeIndianMobileForDb("9000000000"))
+                    .isEqualTo("919000000000");
         }
 
         @Test
         @DisplayName("keeps a 12-digit number starting with '91' unchanged")
         void alreadyNormalized() {
-            assertThat(PhoneNumberUtil.normalizeIndianMobileForDb("919876543210"))
-                    .isEqualTo("919876543210");
+            assertThat(PhoneNumberUtil.normalizeIndianMobileForDb("919000000000"))
+                    .isEqualTo("919000000000");
         }
 
         @Test
         @DisplayName("prepends '91' to a number that starts with '91' but is not 12 digits")
         void shortNumberStartingWith91() {
             // Only 11 chars starting with "91" — should still get "91" prepended
-            assertThat(PhoneNumberUtil.normalizeIndianMobileForDb("91987654321"))
-                    .isEqualTo("9191987654321");
+            assertThat(PhoneNumberUtil.normalizeIndianMobileForDb("91900000000"))
+                    .isEqualTo("9191900000000");
         }
 
         @Test
         @DisplayName("trims whitespace before normalizing")
         void trimsBeforeNormalizing() {
-            assertThat(PhoneNumberUtil.normalizeIndianMobileForDb("  9876543210  "))
-                    .isEqualTo("919876543210");
+            assertThat(PhoneNumberUtil.normalizeIndianMobileForDb("  9000000000  "))
+                    .isEqualTo("919000000000");
         }
     }
 }

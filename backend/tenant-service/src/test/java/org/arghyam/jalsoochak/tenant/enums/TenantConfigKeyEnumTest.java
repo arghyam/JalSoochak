@@ -93,6 +93,7 @@ class TenantConfigKeyEnumTest {
             assertThat(TenantConfigKeyEnum.STATE_DATA_RECONCILIATION_TIME.isMandatory()).isFalse();
             assertThat(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.isMandatory()).isFalse();
             assertThat(TenantConfigKeyEnum.MESSAGE_BROKER_CONNECTION_SETTINGS.isMandatory()).isFalse();
+            assertThat(TenantConfigKeyEnum.MESSAGE_BROKER_CONNECTION_SETTINGS.isManagedValue()).isTrue();
         }
 
         @Test
