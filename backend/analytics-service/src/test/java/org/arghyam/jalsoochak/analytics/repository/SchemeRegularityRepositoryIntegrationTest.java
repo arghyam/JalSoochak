@@ -726,8 +726,10 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(nation.get(0).tenantId()).isEqualTo(1);
         assertThat(nation.get(0).schemeCount()).isEqualTo(2);
         assertThat(nation.get(0).totalHouseholdCount()).isEqualTo(30);
-        assertThat(nation.get(0).totalWaterSuppliedLiters()).isEqualTo(15L);
-        assertThat(nation.get(0).avgWaterSupplyPerScheme()).isEqualByComparingTo("7.5000");
+        // Nation-level total water supplied comes from fact_water_quantity_table (submission_status=SUBMITTED).
+        // Seed data: only D2 has SUBMITTED water quantity for scheme 1 (200). Scheme count remains 2.
+        assertThat(nation.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
+        assertThat(nation.get(0).avgWaterSupplyPerScheme()).isEqualByComparingTo("100.0000");
 
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);

@@ -3227,13 +3227,19 @@ public class SchemeRegularityRepository {
         String sql = """
                 WITH water_by_scheme AS (
                     SELECT
-                        m.tenant_id,
-                        m.scheme_id,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
-                            AS total_water_supplied_liters
-                    FROM analytics_schema.fact_meter_reading_table m
-                    WHERE m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.tenant_id, m.scheme_id
+                        f.tenant_id,
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied_liters
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.tenant_id, f.scheme_id
                 )
                 SELECT
                     t.tenant_id,
