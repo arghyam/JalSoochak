@@ -710,7 +710,7 @@ class AnalyticsSchemeReportingControllerTest {
     @Test
     void updateEscalationResolutionStatus_withEscalationId_updatesOnlyForSameUuid() throws Exception {
         UUID uuid = UUID.fromString("44444444-4444-4444-4444-444444444444");
-        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
                 .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
 
         FactEscalation escalation = FactEscalation.builder()
@@ -746,7 +746,7 @@ class AnalyticsSchemeReportingControllerTest {
     @Test
     void updateEscalationResolutionStatus_whenNotOwnedByUuid_returnsBadRequest() throws Exception {
         UUID uuid = UUID.fromString("55555555-5555-5555-5555-555555555555");
-        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
                 .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
 
         when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(88L), eq(10), eq(9001)))
@@ -768,7 +768,7 @@ class AnalyticsSchemeReportingControllerTest {
     @Test
     void updateEscalationResolutionStatus_withBothIdentifiers_returnsBadRequest() throws Exception {
         UUID uuid = UUID.fromString("66666666-6666-6666-6666-666666666666");
-        when(dimUserRepository.findByTenantIdAndUuid(eq(10), eq(uuid)))
+        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
                 .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
 
         mockMvc.perform(put(BASE + "/escalations/status")

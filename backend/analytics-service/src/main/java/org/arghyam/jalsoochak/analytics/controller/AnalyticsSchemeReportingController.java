@@ -76,7 +76,7 @@ public class AnalyticsSchemeReportingController {
     }
 
     private Integer resolveUserIdByUuid(Integer tenantId, UUID userUuid) {
-        return dimUserRepository.findByTenantIdAndUuid(tenantId, userUuid)
+        return dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(tenantId, userUuid)
                 .map(u -> u.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("No user found for uuid: " + userUuid));
     }

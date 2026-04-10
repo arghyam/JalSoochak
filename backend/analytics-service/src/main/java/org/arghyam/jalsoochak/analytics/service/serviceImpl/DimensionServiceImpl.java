@@ -72,7 +72,8 @@ public class DimensionServiceImpl implements DimensionService {
         // since tenant-scoped ids collide across tenants.
         DimUser user;
         if (event.getUuid() != null) {
-            user = dimUserRepository.findByUuid(event.getUuid())
+            user = dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(
+                            event.getTenantId(), event.getUuid())
                     .orElse(DimUser.builder()
                             .userId(event.getUserId())
                             .createdAt(LocalDateTime.now())

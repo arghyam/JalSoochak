@@ -9,13 +9,13 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface DimUserRepository extends JpaRepository<DimUser, Integer> {
+public interface DimUserRepository extends JpaRepository<DimUser, Long> {
 
     List<DimUser> findByTenantId(Integer tenantId);
 
     Optional<DimUser> findByUuid(UUID uuid);
 
-    Optional<DimUser> findByTenantIdAndUuid(Integer tenantId, UUID uuid);
+    Optional<DimUser> findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(Integer tenantId, UUID uuid);
 
     Optional<DimUser> findByTenantIdAndUserId(Integer tenantId, Integer userId);
 }
