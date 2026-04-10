@@ -118,6 +118,18 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void getTenantWiseSupplyDaysInEfficientRange_countsSchemeDaysWithinTenantConfiguredRange() {
+        List<SchemeRegularityRepository.TenantSupplyDaysInEfficientRange> rows =
+                repository.getTenantWiseSupplyDaysInEfficientRange(D1, D3);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().tenantId()).isEqualTo(1);
+        // In this test seed, tenant config values default to 0 (via COALESCE),
+        // so only scheme-days with zero daily eWater quantity count as "efficient".
+        assertThat(rows.getFirst().supplyDaysInEfficientRange()).isEqualTo(3L);
+    }
+
+    @Test
     void getSchemeRegularityMetricsByLgd_countsOnlyPositiveConfirmedReadingDays() {
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
                 repository.getSchemeRegularityMetrics(100, D1, D3);

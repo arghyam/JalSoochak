@@ -40,6 +40,7 @@ public class NationalDashboardResponse {
         private Long totalPlannedFhtcCount;
         private Long totalWaterSuppliedLiters;
         private BigDecimal avgWaterSupplyPerScheme;
+        private Long supplyDaysInEfficientRange;
     }
 
     @Data

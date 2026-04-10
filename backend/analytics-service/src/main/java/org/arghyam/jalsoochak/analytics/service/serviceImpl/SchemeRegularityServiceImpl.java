@@ -834,6 +834,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> quantityMetrics =
                 schemeRegularityRepository.getAverageWaterSupplyPerNation(startDate, endDate);
+        Map<Integer, Long> supplyDaysInEfficientRangeByTenantId =
+                schemeRegularityRepository.getTenantWiseSupplyDaysInEfficientRange(startDate, endDate).stream()
+                        .collect(Collectors.toMap(
+                                SchemeRegularityRepository.TenantSupplyDaysInEfficientRange::tenantId,
+                                r -> r.supplyDaysInEfficientRange() != null ? r.supplyDaysInEfficientRange() : 0L,
+                                (a, b) -> a,
+                                LinkedHashMap::new));
         List<SchemeRegularityRepository.StateSchemeRegularityMetrics> regularityMetrics =
                 schemeRegularityRepository.getStateWiseRegularityMetrics(startDate, endDate);
         List<SchemeRegularityRepository.StateReadingSubmissionMetrics> submissionMetrics =
@@ -865,6 +872,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .totalPlannedFhtcCount(metric.totalPlannedFhtcCount())
                         .totalWaterSuppliedLiters(metric.totalWaterSuppliedLiters())
                         .avgWaterSupplyPerScheme(metric.avgWaterSupplyPerScheme())
+                        .supplyDaysInEfficientRange(
+                                supplyDaysInEfficientRangeByTenantId.getOrDefault(metric.tenantId(), 0L))
                         .build();
                 })
                 .toList();

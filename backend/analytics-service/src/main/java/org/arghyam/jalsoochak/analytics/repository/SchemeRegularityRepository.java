@@ -3278,6 +3278,89 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<TenantSupplyDaysInEfficientRange> getTenantWiseSupplyDaysInEfficientRange(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH tenant_cfg AS (
+                    SELECT
+                        t.tenant_id,
+                        COALESCE(t.required_lpcd, 0) AS required_lpcd,
+                        COALESCE(t.person_count_per_household, 5) AS person_count_per_household,
+                        COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
+                        COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
+                    FROM analytics_schema.dim_tenant_table t
+                    WHERE t.tenant_id > 0
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.tenant_id,
+                        s.scheme_id,
+                        COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.tenant_id > 0
+                ),
+                dates_in_range AS (
+                    SELECT d.full_date AS date
+                    FROM analytics_schema.dim_date_table d
+                    WHERE d.full_date BETWEEN ? AND ?
+                ),
+                ewater_by_scheme_day AS (
+                    SELECT
+                        f.scheme_id,
+                        f.date,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.scheme_id, f.date
+                ),
+                tenant_supply_days AS (
+                    SELECT
+                        s.tenant_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                     (
+                                         (tc.required_lpcd::numeric * (s.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 - (tc.under_supply_range_percentage::numeric / 100))
+                                     )
+                                     AND
+                                     (
+                                         (tc.required_lpcd::numeric * (s.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 + (tc.over_supply_range_percentage::numeric / 100))
+                                     )
+                                    THEN 1
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS supply_days_in_efficient_range
+                    FROM schemes_in_scope s
+                    CROSS JOIN dates_in_range dr
+                    LEFT JOIN ewater_by_scheme_day wd
+                        ON wd.scheme_id = s.scheme_id
+                        AND wd.date = dr.date
+                    JOIN tenant_cfg tc
+                        ON tc.tenant_id = s.tenant_id
+                    GROUP BY s.tenant_id
+                )
+                SELECT
+                    tc.tenant_id,
+                    COALESCE(tsd.supply_days_in_efficient_range, 0)::bigint AS supply_days_in_efficient_range
+                FROM tenant_cfg tc
+                LEFT JOIN tenant_supply_days tsd
+                    ON tsd.tenant_id = tc.tenant_id
+                ORDER BY tc.tenant_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new TenantSupplyDaysInEfficientRange(
+                        rs.getInt("tenant_id"),
+                        rs.getLong("supply_days_in_efficient_range")),
+                startDate,
+                endDate,
+                startDate,
+                endDate);
+    }
+
     public List<NationalDashboardTenantStateMetadata> getNationalDashboardTenantStateMetadata() {
         String sql = """
                 SELECT DISTINCT ON (t.tenant_id)
@@ -5023,6 +5106,11 @@ public class SchemeRegularityRepository {
             Integer lgdId,
             Integer departmentId,
             BigDecimal averagePerformanceScore) {
+    }
+
+    public record TenantSupplyDaysInEfficientRange(
+            Integer tenantId,
+            Long supplyDaysInEfficientRange) {
     }
 
     public record NationalDashboardTenantStateMetadata(

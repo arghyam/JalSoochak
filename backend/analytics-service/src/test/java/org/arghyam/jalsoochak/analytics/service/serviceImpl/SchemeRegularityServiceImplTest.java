@@ -1050,6 +1050,10 @@ class SchemeRegularityServiceImplTest {
                         new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
                                 1, "mp", null, null, "Madhya Pradesh", 120L, 110L, 140L, 64000L, 5, new BigDecimal("12800.0000"))
                 ));
+        when(schemeRegularityRepository.getTenantWiseSupplyDaysInEfficientRange(START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.TenantSupplyDaysInEfficientRange(1, 7L)
+                ));
         when(schemeRegularityRepository.getStateWiseRegularityMetrics(START, END))
                 .thenReturn(List.of(
                         new SchemeRegularityRepository.StateSchemeRegularityMetrics(
@@ -1078,6 +1082,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getStateWiseReadingSubmissionRate()).hasSize(1);
         assertThat(response.getStateWiseQuantityPerformance().getFirst().getLgdId()).isEqualTo(100);
         assertThat(response.getStateWiseQuantityPerformance().getFirst().getTenantStatus()).isEqualTo(1);
+        assertThat(response.getStateWiseQuantityPerformance().getFirst().getSupplyDaysInEfficientRange()).isEqualTo(7L);
         assertThat(response.getStateWiseRegularity().getFirst().getLgdId()).isEqualTo(100);
         assertThat(response.getStateWiseReadingSubmissionRate().getFirst().getTenantStatus()).isEqualTo(1);
         verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
