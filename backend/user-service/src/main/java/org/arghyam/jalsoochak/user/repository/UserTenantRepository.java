@@ -12,6 +12,15 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Objects;
 
+/**
+ * All SQL in this repository uses {@code String.format} solely to inject a schema name
+ * (e.g. {@code tenant_mp}) that has been validated by {@link #validateSchemaName} against
+ * the strict allowlist regex {@code ^[a-z_][a-z0-9_]*$}.  JDBC {@code PreparedStatement}
+ * parameters cannot be used for SQL identifiers (schema/table names), so format-based
+ * injection of the pre-validated identifier is the only viable approach.
+ * All user-supplied data values are bound via {@code ?} parameters — never concatenated.
+ */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 public class UserTenantRepository {
@@ -210,9 +219,9 @@ public class UserTenantRepository {
                     updated_by,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, %d, true, true, ?, NOW(), ?, NOW())
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true, true, ?, NOW(), ?, NOW())
                 RETURNING id
-                """, schemaName, TenantUserStatus.ACTIVE.code);
+                """, schemaName);
 
         Number insertedId = jdbcTemplate.queryForObject(
                 sql,
@@ -226,6 +235,7 @@ public class UserTenantRepository {
                 pii.encrypt(phoneNumber),
                 pii.hmac(phoneNumber),
                 password,
+                TenantUserStatus.ACTIVE.code,
                 createdBy,
                 createdBy
         );

@@ -18,6 +18,22 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+/**
+ * All SQL in this repository uses {@code String.format} to inject only pre-validated,
+ * internal-only values:
+ * <ul>
+ *   <li>{@code schemaName} — validated by {@link #validateSchemaName} against
+ *       {@code ^[a-z_][a-z0-9_]*$}.</li>
+ *   <li>WHERE clause fragments from {@link #buildWhere} — assembled entirely from hardcoded
+ *       string constants; user-supplied filter values are always bound as {@code ?} parameters.</li>
+ *   <li>ORDER-BY clause from {@link #orderBy} — returns only hardcoded column name literals
+ *       selected via a switch expression; user-supplied sort direction is coerced to
+ *       {@code "ASC"} or {@code "DESC"} by the method, never interpolated directly.</li>
+ *   <li>IN-clause placeholders — built as {@code "?, ?, ..."} strings from collection size.</li>
+ * </ul>
+ * No user-supplied data is ever concatenated into any query string.
+ */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 public class TenantStaffRepository {

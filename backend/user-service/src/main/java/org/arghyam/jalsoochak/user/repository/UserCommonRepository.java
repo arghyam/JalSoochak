@@ -19,6 +19,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * Dynamic SQL in this repository is built via {@link StringBuilder} with conditional
+ * {@code AND} clauses appended as hardcoded string literals only.  All user-supplied
+ * values — including status codes, tenant IDs, and UUID sets — are bound via {@code ?}
+ * parameters, never concatenated into the query string.
+ */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 public class UserCommonRepository {

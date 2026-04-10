@@ -24,6 +24,21 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * All SQL in this repository uses {@code String.format} to inject only pre-validated,
+ * internal-only values:
+ * <ul>
+ *   <li>{@code schemaName} — validated by {@link #validateSchemaName} against
+ *       {@code ^[a-z_][a-z0-9_]*$}.</li>
+ *   <li>Column name fragments ({@code timeColumn}, {@code confirmedExpr}) — returned from
+ *       internal helpers that produce only hardcoded SQL literals.</li>
+ *   <li>WHERE/ORDER-BY fragments — assembled from hardcoded string constants with
+ *       {@code ?} placeholders; user input is always bound as a parameter.</li>
+ *   <li>IN-clause placeholders — built as {@code "?, ?, ..."} strings from collection size.</li>
+ * </ul>
+ * No user-supplied data is ever concatenated into the query string.
+ */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 public class PersonSchemeRepository {
