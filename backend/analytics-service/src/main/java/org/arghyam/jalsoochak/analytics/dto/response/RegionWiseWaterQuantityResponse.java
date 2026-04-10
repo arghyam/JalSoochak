@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -35,5 +36,7 @@ public class RegionWiseWaterQuantityResponse {
         private Long householdCount;
         private Long achievedFhtcCount;
         private Long plannedFhtcCount;
+
+        private Long supplyDaysInEfficientRange;
     }
 }

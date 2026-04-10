@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.analytics.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
@@ -21,7 +23,11 @@ import java.util.UUID;
 public class DimUser {
 
     @Id
-    @Column(name = "user_id")
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
+
+    @Column(name = "user_id", nullable = false)
     private Integer userId;
 
     @Column(name = "tenant_id", nullable = false)
@@ -34,6 +40,12 @@ public class DimUser {
 
     @Column(name = "uuid")
     private UUID uuid;
+
+    @Column(name = "title")
+    private String title;
+
+    @Column(name = "status")
+    private Integer status;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

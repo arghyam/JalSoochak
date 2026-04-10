@@ -142,6 +142,23 @@ class FactServiceImplTest {
     }
 
     @Test
+    void ingestEscalation_neverSubmittedMessage_persistsNoSubmissionCode() {
+        EscalationEvent event = new EscalationEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setEscalationType(EscalationType.NO_WATER_SUPPLY.code);
+        event.setMessage("pump_operator has never submitted a reading");
+        event.setUserId(21);
+        event.setResolutionStatus(1);
+
+        service.ingestEscalation(event);
+
+        ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
+        verify(escalationRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getEscalationType()).isEqualTo("9");
+    }
+
+    @Test
     void ingestAnomalyRecorded_forWaterAnomaly_alsoSavesEscalationFact() {
         AnomalyEvent event = new AnomalyEvent();
         event.setUuid("uuid-1");
@@ -158,7 +175,7 @@ class FactServiceImplTest {
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
         FactEscalation saved = captor.getValue();
-        assertThat(saved.getEscalationType()).isEqualTo("no_supply");
+        assertThat(saved.getEscalationType()).isEqualTo("6");
         assertThat(saved.getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_WATER_SUPPLY, 21, 1, 11));
     }
@@ -332,6 +349,7 @@ class FactServiceImplTest {
         assertThat(escCaptor.getValue().getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_SUBMISSION, 21, 1, 11));
         assertThat(escCaptor.getValue().getMessage()).contains("never submitted");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("9");
 
         ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());

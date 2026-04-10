@@ -346,6 +346,13 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.upsertPendingIssueReportRecord(
+                eq("tenant_test"),
+                eq(10L),
+                eq(1L),
+                org.mockito.ArgumentMatchers.any(),
+                eq("No Water Supply")
+        )).thenReturn("corr-telemetry-1");
 
         IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -356,14 +363,15 @@ class GlificMeterWorkflowServiceIssueReportTest {
         assertEquals(true, resp.isSuccess());
         assertEquals("noWaterSupplied", resp.getSelected());
 
-        // Telemetry submit: "No Water Supply" should be tracked as an issue anomaly.
-        verify(telemetryTenantRepository).createTenantAnomalyRecord(
-                eq("tenant_test"),
-                eq(1L),
+        verify(telemetryEventPublisher).publishEscalationCreated(
+                eq(1),
                 eq(10L),
+                eq(1L),
                 eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY),
                 eq("No Water Supply"),
-                eq(AnomalyConstants.STATUS_OPEN)
+                eq("corr-telemetry-1"),
+                eq(AnomalyConstants.STATUS_OPEN),
+                isNull()
         );
         verify(telemetryEventPublisher).publishOutageOrNonSubmissionReason(
                 eq(1),
@@ -371,6 +379,14 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
                 eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY)
+        );
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt()
         );
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 org.mockito.ArgumentMatchers.anyString(),

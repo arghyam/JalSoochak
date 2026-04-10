@@ -33,6 +33,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                       AND a.createdAt < :toExclusive
                       AND (:anomalyType = '' OR a.type = :anomalyType)
                       AND (:schemeName = '' OR lower(s.schemeName) like lower(concat('%', :schemeName, '%')))
+                      AND (:status = -1 OR a.status = :status)
                     """,
             countQuery = """
                     SELECT count(distinct a.id)
@@ -45,6 +46,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                       AND a.createdAt < :toExclusive
                       AND (:anomalyType = '' OR a.type = :anomalyType)
                       AND (:schemeName = '' OR lower(s.schemeName) like lower(concat('%', :schemeName, '%')))
+                      AND (:status = -1 OR a.status = :status)
                     """)
     Page<AnomalyListItemDto> findAnomaliesForMappedUserSchemesInRange(
             @Param("tenantId") Integer tenantId,
@@ -53,6 +55,23 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
             @Param("toExclusive") OffsetDateTime toExclusive,
             @Param("anomalyType") String anomalyType,
             @Param("schemeName") String schemeName,
+            @Param("status") int status,
             Pageable pageable
+    );
+
+    @Query("""
+            SELECT count(distinct a.id)
+            FROM Anomaly a, DimUserSchemeMapping m
+            WHERE a.tenantId = :tenantId
+              AND m.schemeId = a.schemeId AND m.userId = :mappedUserId
+              AND a.deletedAt IS NULL
+              AND a.createdAt >= :fromInclusive
+              AND a.createdAt < :toExclusive
+            """)
+    long countAnomaliesForMappedUserSchemesInRange(
+            @Param("tenantId") Integer tenantId,
+            @Param("mappedUserId") Integer mappedUserId,
+            @Param("fromInclusive") OffsetDateTime fromInclusive,
+            @Param("toExclusive") OffsetDateTime toExclusive
     );
 }

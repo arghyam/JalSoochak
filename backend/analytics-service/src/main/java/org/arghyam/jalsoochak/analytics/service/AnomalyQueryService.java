@@ -24,6 +24,7 @@ public class AnomalyQueryService {
             LocalDate endDate,
             String anomalyType,
             String schemeName,
+            Integer status,
             Pageable pageable
     ) {
         LocalDate safeEndDate = (endDate != null) ? endDate : LocalDate.now();
@@ -35,6 +36,7 @@ public class AnomalyQueryService {
         // Empty string (never null) avoids PostgreSQL 42P18 on untyped NULL JDBC parameters for :anomalyType.
         String typeFilter = (anomalyType == null || anomalyType.isBlank()) ? "" : anomalyType.trim();
         String schemeNameFilter = (schemeName == null || schemeName.isBlank()) ? "" : schemeName.trim();
+        int statusFilter = (status == null) ? -1 : status;
 
         return anomalyRepository.findAnomaliesForMappedUserSchemesInRange(
                 tenantId,
@@ -43,6 +45,7 @@ public class AnomalyQueryService {
                 to,
                 typeFilter,
                 schemeNameFilter,
+                statusFilter,
                 pageable
         );
     }

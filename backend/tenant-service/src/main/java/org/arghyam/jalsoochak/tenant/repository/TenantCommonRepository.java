@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
+import org.arghyam.jalsoochak.tenant.util.TenantConstants;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -296,6 +297,22 @@ public class TenantCommonRepository {
     }
 
     /**
+     * Updates the status of a tenant without touching any other fields.
+     */
+    public void updateTenantStatus(Integer tenantId, TenantStatusEnum status, Integer updatedBy) {
+        String sql = """
+                UPDATE common_schema.tenant_master_table
+                SET status = ?, updated_at = NOW(), updated_by = ?
+                WHERE id = ?
+                """;
+        int rowsAffected = jdbcTemplate.update(sql, status.getCode(), updatedBy, tenantId);
+        if (rowsAffected == 0) {
+            throw new IllegalStateException(
+                    "No tenant found with tenantId=" + tenantId + " when updating status to " + status);
+        }
+    }
+
+    /**
      * Deactivates a tenant by setting status to INACTIVE and recording updated_at and updated_by.
      */
     public void deactivateTenant(Integer tenantId, Integer currentUserId) {
@@ -360,6 +377,18 @@ public class TenantCommonRepository {
         List<ConfigDTO> results = jdbcTemplate.query(sql, CONFIG_ROW_MAPPER,
                 tenantId, keyName, value, currentUserId, currentUserId, currentUserId);
         return results.stream().findFirst();
+    }
+
+    /**
+     * Counts the total number of non-deleted tenants (excluding the system tenant).
+     * Used for single-tenant mode enforcement.
+     *
+     * @return the count of non-deleted, non-system tenants
+     */
+    public int countNonDeletedTenants() {
+        String sql = "SELECT COUNT(*) FROM common_schema.tenant_master_table WHERE id != ? AND deleted_at IS NULL";
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, TenantConstants.SYSTEM_TENANT_ID);
+        return count != null ? count : 0;
     }
 
     /**

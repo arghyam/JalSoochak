@@ -30,6 +30,8 @@ public class NationalDashboardResponse {
     @AllArgsConstructor
     public static class StateQuantityPerformance {
         private Integer tenantId;
+        private Integer lgdId;
+        private Integer tenantStatus;
         private String stateCode;
         private String stateTitle;
         private Integer schemeCount;
@@ -38,6 +40,7 @@ public class NationalDashboardResponse {
         private Long totalPlannedFhtcCount;
         private Long totalWaterSuppliedLiters;
         private BigDecimal avgWaterSupplyPerScheme;
+        private Long supplyDaysInEfficientRange;
     }
 
     @Data
@@ -46,6 +49,8 @@ public class NationalDashboardResponse {
     @AllArgsConstructor
     public static class StateRegularity {
         private Integer tenantId;
+        private Integer lgdId;
+        private Integer tenantStatus;
         private String stateCode;
         private String stateTitle;
         private Integer schemeCount;
@@ -59,6 +64,8 @@ public class NationalDashboardResponse {
     @AllArgsConstructor
     public static class StateReadingSubmissionRate {
         private Integer tenantId;
+        private Integer lgdId;
+        private Integer tenantStatus;
         private String stateCode;
         private String stateTitle;
         private Integer schemeCount;

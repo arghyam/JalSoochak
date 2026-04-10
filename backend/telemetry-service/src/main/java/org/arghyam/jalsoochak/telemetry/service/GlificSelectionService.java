@@ -7,10 +7,12 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserLanguagePreferenceRepository;
 import org.springframework.stereotype.Service;
@@ -323,6 +325,106 @@ public class GlificSelectionService {
         }
     }
 
+    public IntroResponse schemeSelectionMessage(IntroRequest request) {
+        try {
+            if (request.getContactId() == null || request.getContactId().isBlank()) {
+                throw new IllegalStateException("contactId is required");
+            }
+
+            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
+            List<TelemetrySchemeOption> schemes = telemetryTenantRepository.findSchemesForUser(
+                    operatorWithSchema.schemaName(),
+                    operatorWithSchema.operator().id()
+            );
+            if (schemes.isEmpty()) {
+                throw new IllegalStateException("Operator is not mapped to any scheme");
+            }
+
+            StringBuilder message = new StringBuilder("Please select a scheme:");
+            for (int i = 0; i < schemes.size(); i++) {
+                String schemeName = schemes.get(i).name();
+                if (schemeName == null || schemeName.isBlank()) {
+                    schemeName = "Scheme " + schemes.get(i).id();
+                }
+                message.append("\n")
+                        .append(i + 1)
+                        .append(". ")
+                        .append(schemeName);
+            }
+
+            return IntroResponse.builder()
+                    .success(true)
+                    .message(message.toString())
+                    .build();
+        } catch (Exception e) {
+            log.error("Error building scheme selection message: {}", e.getMessage(), e);
+            log.debug("Error building scheme selection message for contactId {}: {}", request.getContactId(), e.getMessage());
+            String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
+            return IntroResponse.builder()
+                    .success(false)
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Scheme selection could not be prepared.",
+                            languageKey
+                    ))
+                    .build();
+        }
+    }
+
+    public IntroResponse selectedSchemeMessage(SelectedSchemeRequest request) {
+        try {
+            if (request.getContactId() == null || request.getContactId().isBlank()) {
+                throw new IllegalStateException("contactId is required");
+            }
+            if (request.getScheme() == null || request.getScheme().isBlank()) {
+                throw new IllegalStateException("scheme selection is required");
+            }
+
+            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(request.getContactId());
+            List<TelemetrySchemeOption> schemes = telemetryTenantRepository.findSchemesForUser(
+                    operatorWithSchema.schemaName(),
+                    operatorWithSchema.operator().id()
+            );
+            if (schemes.isEmpty()) {
+                throw new IllegalStateException("Operator is not mapped to any scheme");
+            }
+
+            TelemetrySchemeOption selectedScheme = resolveSchemeSelection(request.getScheme(), schemes)
+                    .orElseThrow(() -> new IllegalStateException("Invalid scheme selection"));
+
+            String correlationId = telemetryTenantRepository.upsertPendingSchemeSelectionRecord(
+                    operatorWithSchema.schemaName(),
+                    selectedScheme.id(),
+                    operatorWithSchema.operator().id(),
+                    java.time.LocalDateTime.now()
+            );
+
+            String schemeName = selectedScheme.name();
+            if (schemeName == null || schemeName.isBlank()) {
+                schemeName = "Scheme " + selectedScheme.id();
+            }
+
+            return IntroResponse.builder()
+                    .success(true)
+                    .message("Scheme selected: " + schemeName)
+                    .correlationId(correlationId)
+                    .selected(String.valueOf(selectedScheme.id()))
+                    .build();
+        } catch (Exception e) {
+            log.error("Error saving selected scheme: {}", e.getMessage(), e);
+            log.debug("Error saving selected scheme for contactId {}: {}", request.getContactId(), e.getMessage());
+            String languageKey = localizationService.resolveLanguageKeyForContact(request.getContactId());
+            return IntroResponse.builder()
+                    .success(false)
+                    .message(localizationService.resolveUserFacingErrorMessage(
+                            e,
+                            "Scheme selection could not be saved.",
+                            languageKey
+                    ))
+                    .build();
+        }
+    }
+
     public IntroResponse itemSelectionMessage(IntroRequest request) {
         try {
             if (request.getContactId() == null || request.getContactId().isBlank()) {
@@ -518,6 +620,27 @@ public class GlificSelectionService {
             }
         }
         return Optional.empty();
+    }
+
+    private Optional<TelemetrySchemeOption> resolveSchemeSelection(String rawSelection, List<TelemetrySchemeOption> options) {
+        String value = rawSelection.trim();
+
+        Optional<Integer> selectedIndex = resolveSelectionIndex(
+                value,
+                options.stream().map(option -> option.name() == null ? "" : option.name()).toList()
+        );
+        if (selectedIndex.isPresent()) {
+            return Optional.of(options.get(selectedIndex.get()));
+        }
+
+        if (value.matches("^\\d+$")) {
+            long selectedSchemeId = Long.parseLong(value);
+            return options.stream().filter(option -> option.id() != null && option.id() == selectedSchemeId).findFirst();
+        }
+
+        return options.stream()
+                .filter(option -> option.name() != null && option.name().equalsIgnoreCase(value))
+                .findFirst();
     }
 
     private String toWords(int number) {

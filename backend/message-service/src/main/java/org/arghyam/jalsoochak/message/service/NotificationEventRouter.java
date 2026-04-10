@@ -470,11 +470,17 @@ public class NotificationEventRouter {
 
         if ("SMS".equals(deliveryChannel)) {
             String phone = root.path("officerPhoneNumber").asText("").strip();
-            int expiryMinutes = 5; // Default OTP TTL; expiryMinutes not provided by SendLoginOtpEvent
+            int expiryMinutes = root.path("expiryMinutes").asInt(5);
 
             if (phone.isBlank()) {
                 log.warn("[Router/SEND_LOGIN_OTP/SMS] officerPhoneNumber is missing, skipping");
                 return;
+            }
+
+            // Validate expiryMinutes and default to 5 if invalid
+            if (expiryMinutes <= 0) {
+                log.warn("[Router/SEND_LOGIN_OTP/SMS] invalid expiryMinutes={}, defaulting to 5", expiryMinutes);
+                expiryMinutes = 5;
             }
 
             // Use reactive flow to avoid blocking the Kafka listener thread

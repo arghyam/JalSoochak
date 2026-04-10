@@ -74,7 +74,7 @@ class AnalyticsTenantSchemeControllerTest {
         tenant.setCreatedAt(LocalDateTime.of(2026, 4, 1, 10, 15, 30));
         tenant.setUpdatedAt(LocalDateTime.of(2026, 4, 1, 10, 15, 30));
 
-        when(dimTenantRepository.findAll()).thenReturn(List.of(tenant));
+        when(dimTenantRepository.findByTenantIdGreaterThan(0)).thenReturn(List.of(tenant));
 
         mockMvc.perform(get(BASE + "/tenants"))
                 .andExpect(status().isOk())
@@ -86,7 +86,7 @@ class AnalyticsTenantSchemeControllerTest {
 
     @Test
     void getTenants_onException_returnsFailureWrapper() throws Exception {
-        when(dimTenantRepository.findAll()).thenThrow(new RuntimeException("db down"));
+        when(dimTenantRepository.findByTenantIdGreaterThan(0)).thenThrow(new RuntimeException("db down"));
 
         mockMvc.perform(get(BASE + "/tenants"))
                 .andExpect(status().isInternalServerError())

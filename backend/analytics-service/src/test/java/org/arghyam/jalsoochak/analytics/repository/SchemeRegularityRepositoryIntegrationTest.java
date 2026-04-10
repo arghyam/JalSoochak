@@ -73,6 +73,63 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void getNationalDashboardTenantStateMetadata_returnsLevelOneLgdAndTenantStatus() {
+        List<SchemeRegularityRepository.NationalDashboardTenantStateMetadata> rows =
+                repository.getNationalDashboardTenantStateMetadata();
+
+        assertThat(rows).hasSize(1);
+        SchemeRegularityRepository.NationalDashboardTenantStateMetadata row = rows.getFirst();
+        assertThat(row.tenantId()).isEqualTo(1);
+        assertThat(row.lgdId()).isEqualTo(100);
+        assertThat(row.tenantStatus()).isEqualTo(1);
+    }
+
+    @Test
+    void getNationalDashboardStateBoundaries_returnsGeoJsonWhenGeomPresent() {
+        jdbcTemplate.update(
+                """
+                        UPDATE analytics_schema.dim_lgd_location_table
+                        SET geom = ST_SetSRID(ST_GeomFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'), 4326)
+                        WHERE lgd_id = 100
+                        """);
+
+        List<SchemeRegularityRepository.NationalDashboardStateBoundary> rows =
+                repository.getNationalDashboardStateBoundaries();
+
+        assertThat(rows).hasSize(1);
+        SchemeRegularityRepository.NationalDashboardStateBoundary row = rows.getFirst();
+        assertThat(row.tenantId()).isEqualTo(1);
+        assertThat(row.lgdId()).isEqualTo(100);
+        assertThat(row.tenantStatus()).isEqualTo(1);
+        assertThat(row.stateCode()).isEqualTo("mp");
+        assertThat(row.stateTitle()).isEqualTo("Madhya Pradesh");
+        assertThat(row.boundaryGeoJson()).contains("Polygon");
+        assertThat(row.boundaryGeoJson()).contains("coordinates");
+    }
+
+    @Test
+    void getNationalDashboardStateBoundaries_returnsNullBoundaryGeoJsonWhenGeomMissing() {
+        List<SchemeRegularityRepository.NationalDashboardStateBoundary> rows =
+                repository.getNationalDashboardStateBoundaries();
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().lgdId()).isEqualTo(100);
+        assertThat(rows.getFirst().boundaryGeoJson()).isNull();
+    }
+
+    @Test
+    void getTenantWiseSupplyDaysInEfficientRange_countsSchemeDaysWithinTenantConfiguredRange() {
+        List<SchemeRegularityRepository.TenantSupplyDaysInEfficientRange> rows =
+                repository.getTenantWiseSupplyDaysInEfficientRange(D1, D3);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().tenantId()).isEqualTo(1);
+        // In this test seed, tenant config values default to 0 (via COALESCE),
+        // so only scheme-days with zero daily eWater quantity count as "efficient".
+        assertThat(rows.getFirst().supplyDaysInEfficientRange()).isEqualTo(3L);
+    }
+
+    @Test
     void getSchemeRegularityMetricsByLgd_countsOnlyPositiveConfirmedReadingDays() {
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
                 repository.getSchemeRegularityMetrics(100, D1, D3);
@@ -425,15 +482,15 @@ class SchemeRegularityRepositoryIntegrationTest {
                 1, 5, 5, 5);
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_user_scheme_mapping_table
-                (uuid, user_id, scheme_id, ai_reading, created_at, updated_at, status)
-                VALUES (?::uuid, ?, ?, ?, NOW(), NOW(), ?)
-                """, "33333333-3333-3333-3333-333333333333", 11, 3, null, 1);
+                (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
+                VALUES (?::uuid, ?, ?, ?, ?, NOW(), NOW(), ?)
+                """, "33333333-3333-3333-3333-333333333333", 1, 11, 3, null, 1);
 
         List<SchemeRegularityRepository.OutageReasonSchemeCount> userCounts =
-                repository.getOutageReasonSchemeCountByUser(11, D1, D10);
+                repository.getOutageReasonSchemeCountByUser(1, 11, D1, D10);
         List<SchemeRegularityRepository.DailyOutageReasonSchemeCount> dailyUserCounts =
-                repository.getDailyOutageReasonSchemeCountByUser(11, D1, D10);
-        Integer schemeCount = repository.getSchemeCountByUser(11);
+                repository.getDailyOutageReasonSchemeCountByUser(1, 11, D1, D10);
+        Integer schemeCount = repository.getSchemeCountByUser(1, 11);
 
         assertThat(userCounts).hasSize(2);
         assertThat(dailyUserCounts).hasSize(3);
@@ -552,9 +609,9 @@ class SchemeRegularityRepositoryIntegrationTest {
     @Test
     void nonSubmissionQueriesByUser_returnMappedSchemeReasonCounts() {
         List<SchemeRegularityRepository.NonSubmissionReasonSchemeCount> userCounts =
-                repository.getNonSubmissionReasonSchemeCountByUser(11, D1, D10);
+                repository.getNonSubmissionReasonSchemeCountByUser(1, 11, D1, D10);
         List<SchemeRegularityRepository.DailyNonSubmissionReasonSchemeCount> dailyUserCounts =
-                repository.getDailyNonSubmissionReasonSchemeCountByUser(11, D1, D10);
+                repository.getDailyNonSubmissionReasonSchemeCountByUser(1, 11, D1, D10);
 
         assertThat(userCounts).hasSize(2);
         assertThat(dailyUserCounts).hasSize(3);
@@ -601,9 +658,9 @@ class SchemeRegularityRepositoryIntegrationTest {
                 """, 1, 2, 11, null, 7, 90, "x", 1, D3, 1, 0);
 
         SchemeRegularityRepository.SubmissionStatusCount statusCount =
-                repository.getSubmissionStatusCountByUser(11, D1, D3);
+                repository.getSubmissionStatusCountByUser(1, 11, D1, D3);
         List<SchemeRegularityRepository.DailySubmissionSchemeCount> dailyCounts =
-                repository.getDailySubmissionSchemeCountByUser(11, D1, D3);
+                repository.getDailySubmissionSchemeCountByUser(1, 11, D1, D3);
 
         assertThat(statusCount.compliantSubmissionCount()).isEqualTo(3);
         assertThat(statusCount.anomalousSubmissionCount()).isEqualTo(1);
@@ -669,8 +726,10 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(nation.get(0).tenantId()).isEqualTo(1);
         assertThat(nation.get(0).schemeCount()).isEqualTo(2);
         assertThat(nation.get(0).totalHouseholdCount()).isEqualTo(30);
-        assertThat(nation.get(0).totalWaterSuppliedLiters()).isEqualTo(15L);
-        assertThat(nation.get(0).avgWaterSupplyPerScheme()).isEqualByComparingTo("7.5000");
+        // Nation-level total water supplied comes from fact_water_quantity_table (submission_status=SUBMITTED).
+        // Seed data: only D2 has SUBMITTED water quantity for scheme 1 (200). Scheme count remains 2.
+        assertThat(nation.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
+        assertThat(nation.get(0).avgWaterSupplyPerScheme()).isEqualByComparingTo("100.0000");
 
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
@@ -824,15 +883,15 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_user_scheme_mapping_table
-                (uuid, user_id, scheme_id, ai_reading, created_at, updated_at, status)
-                VALUES (?::uuid, ?, ?, ?, NOW(), NOW(), ?)
-                """, "11111111-1111-1111-1111-111111111111", 11, 1, null, 1);
+                (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
+                VALUES (?::uuid, ?, ?, ?, ?, NOW(), NOW(), ?)
+                """, "11111111-1111-1111-1111-111111111111", 1, 11, 1, null, 1);
 
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_user_scheme_mapping_table
-                (uuid, user_id, scheme_id, ai_reading, created_at, updated_at, status)
-                VALUES (?::uuid, ?, ?, ?, NOW(), NOW(), ?)
-                """, "22222222-2222-2222-2222-222222222222", 11, 2, null, 1);
+                (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
+                VALUES (?::uuid, ?, ?, ?, ?, NOW(), NOW(), ?)
+                """, "22222222-2222-2222-2222-222222222222", 1, 11, 2, null, 1);
     }
 
     private void seedMeterReadings() {

@@ -52,6 +52,7 @@ public class FactServiceImpl implements FactService {
      * Must match the value produced by EscalationSchedulerService (tenant-service).
      */
     public static final String LAST_RECORDED_BFM_DATE_NEVER = "Never";
+    private static final String NEVER_SUBMITTED_READING_PHRASE = "has never submitted a reading";
 
     /**
      * Maximum length for anomaly type strings before persisting to database.
@@ -134,8 +135,9 @@ public class FactServiceImpl implements FactService {
         FactEscalation fact = FactEscalation.builder()
                 .tenantId(event.getTenantId())
                 .schemeId(event.getSchemeId())
-                .escalationType(intCodeToVarchar(event.getEscalationType()))
+                .escalationType(resolveEscalationTypeForPersist(event.getEscalationType(), event.getMessage()))
                 .message(event.getMessage())
+                .correlationId(event.getCorrelationId())
                 .userId(event.getUserId())
                 .resolutionStatus(event.getResolutionStatus())
                 .remark(event.getRemark())
@@ -350,11 +352,14 @@ public class FactServiceImpl implements FactService {
                 String escalationMessage = neverUploaded
                         ? op.getName() + " has never submitted a reading"
                         : op.getName() + " has not submitted for " + op.getConsecutiveDaysMissed() + " consecutive days";
+                String escalationTypeForPersist = neverUploaded
+                        ? String.valueOf(EscalationType.NO_SUBMISSION.code)
+                        : resolvedAnomalyType;
                 try {
                     FactEscalation escalationFact = FactEscalation.builder()
                             .tenantId(event.getTenantId())
                             .schemeId(schemeId)
-                            .escalationType(resolvedAnomalyType)
+                            .escalationType(escalationTypeForPersist)
                             .message(escalationMessage)
                             .correlationId(correlationId)
                             .userId(event.getOfficerId().intValue())
@@ -554,7 +559,7 @@ public class FactServiceImpl implements FactService {
             return String.valueOf(code);
         }
         return switch (type) {
-            case NO_WATER_SUPPLY -> "no_supply";
+            case NO_WATER_SUPPLY -> String.valueOf(EscalationType.NO_WATER_SUPPLY.code);
             case LOW_WATER_SUPPLY -> "under_supply";
             case OVER_WATER_SUPPLY -> "over_supply";
             default -> type.label.toLowerCase(Locale.ROOT);
@@ -582,5 +587,12 @@ public class FactServiceImpl implements FactService {
             }
         }
         return event.getUuid();
+    }
+
+    private String resolveEscalationTypeForPersist(Integer escalationType, String message) {
+        if (message != null && message.toLowerCase(Locale.ROOT).contains(NEVER_SUBMITTED_READING_PHRASE)) {
+            return String.valueOf(EscalationType.NO_SUBMISSION.code);
+        }
+        return intCodeToVarchar(escalationType);
     }
 }

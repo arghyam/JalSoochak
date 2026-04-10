@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.UserSubmissionStatusRespons
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
+import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -40,6 +41,7 @@ import java.time.LocalDate;
 public class AnalyticsWaterQuantityOutageSubmissionController {
 
     private final SchemeRegularityService schemeRegularityService;
+    private final AuthenticatedRequestContextService authenticatedRequestContextService;
 
     @GetMapping("/water-quantity/region-wise")
     @Operation(
@@ -58,6 +60,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                                     examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request"
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "500",
                             description = "Unexpected error",
                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
@@ -66,6 +72,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<RegionWiseWaterQuantityResponse>> getWaterQuantityRegionWise(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -79,8 +86,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
 
             RegionWiseWaterQuantityResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getRegionWiseWaterQuantityByLgd(parentLgdId, startDate, endDate)
-                    : schemeRegularityService.getRegionWiseWaterQuantityByDepartment(parentDepartmentId, startDate, endDate);
+                    ? schemeRegularityService.getRegionWiseWaterQuantityByLgd(tenantId, parentLgdId, startDate, endDate)
+                    : schemeRegularityService.getRegionWiseWaterQuantityByDepartment(tenantId, parentDepartmentId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<RegionWiseWaterQuantityResponse>builder()
                     .success(true)
@@ -188,6 +195,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<OutageReasonSchemeCountResponse>> getOutageReasonWiseSchemeCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -201,8 +209,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
 
             OutageReasonSchemeCountResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getOutageReasonSchemeCountByLgd(parentLgdId, startDate, endDate)
-                    : schemeRegularityService.getOutageReasonSchemeCountByDepartment(parentDepartmentId, startDate, endDate);
+                    ? schemeRegularityService.getOutageReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate)
+                    : schemeRegularityService.getOutageReasonSchemeCountByDepartment(tenantId, parentDepartmentId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<OutageReasonSchemeCountResponse>builder()
                     .success(true)
@@ -246,6 +254,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<PeriodicOutageReasonSchemeCountResponse>> getPeriodicOutageReasonWiseSchemeCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @Parameter(
@@ -265,8 +274,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
 
             PeriodScale periodScale = PeriodScale.fromValue(scale);
             PeriodicOutageReasonSchemeCountResponse data = (lgdId != null)
-                    ? schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(lgdId, startDate, endDate, periodScale)
-                    : schemeRegularityService.getPeriodicOutageReasonSchemeCountByDepartment(departmentId, startDate, endDate, periodScale);
+                    ? schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(tenantId, lgdId, startDate, endDate, periodScale)
+                    : schemeRegularityService.getPeriodicOutageReasonSchemeCountByDepartment(tenantId, departmentId, startDate, endDate, periodScale);
 
             return ResponseEntity.ok(ApiResponse.<PeriodicOutageReasonSchemeCountResponse>builder()
                     .success(true)
@@ -303,24 +312,21 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     )
             }
     )
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserOutageReasonSchemeCountResponse>> getOutageReasonWiseSchemeCountByUser(
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        try {
-            UserOutageReasonSchemeCountResponse data = schemeRegularityService.getOutageReasonSchemeCountByUserUuid(
-                    AnalyticsControllerHelper.extractAuthenticatedUserUuid(authentication), startDate, endDate);
-            return ResponseEntity.ok(ApiResponse.<UserOutageReasonSchemeCountResponse>builder()
-                    .success(true)
-                    .data(data)
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<UserOutageReasonSchemeCountResponse>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
+        AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+        UserOutageReasonSchemeCountResponse data = userRef.userId() != null
+                ? schemeRegularityService.getOutageReasonSchemeCountByUser(userRef.tenantId(), userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getOutageReasonSchemeCountByUserUuid(userRef.tenantId(), userRef.userUuid(), startDate, endDate);
+        return ResponseEntity.ok(ApiResponse.<UserOutageReasonSchemeCountResponse>builder()
+                .success(true)
+                .data(data)
+                .build());
     }
 
     @GetMapping("/non-submission-reasons")
@@ -340,6 +346,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                                     examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request"
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "500",
                             description = "Unexpected error",
                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
@@ -348,6 +358,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<NonSubmissionReasonSchemeCountResponse>> getNonSubmissionReasonWiseSchemeCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -361,8 +372,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
 
             NonSubmissionReasonSchemeCountResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(parentLgdId, startDate, endDate)
-                    : schemeRegularityService.getNonSubmissionReasonSchemeCountByDepartment(parentDepartmentId, startDate, endDate);
+                    ? schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate)
+                    : schemeRegularityService.getNonSubmissionReasonSchemeCountByDepartment(tenantId, parentDepartmentId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<NonSubmissionReasonSchemeCountResponse>builder()
                     .success(true)
@@ -399,24 +410,20 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     )
             }
     )
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserNonSubmissionReasonSchemeCountResponse>> getNonSubmissionReasonWiseSchemeCountByUser(
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        try {
-            UserNonSubmissionReasonSchemeCountResponse data = schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(
-                    AnalyticsControllerHelper.extractAuthenticatedUserUuid(authentication), startDate, endDate);
-            return ResponseEntity.ok(ApiResponse.<UserNonSubmissionReasonSchemeCountResponse>builder()
-                    .success(true)
-                    .data(data)
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<UserNonSubmissionReasonSchemeCountResponse>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
+        AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+        UserNonSubmissionReasonSchemeCountResponse data = userRef.userId() != null
+                ? schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(userRef.tenantId(), userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(userRef.tenantId(), userRef.userUuid(), startDate, endDate);
+        return ResponseEntity.ok(ApiResponse.<UserNonSubmissionReasonSchemeCountResponse>builder()
+                .success(true)
+                .data(data)
+                .build());
     }
 
     @GetMapping("/submission-status/user")
@@ -430,6 +437,10 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                                     examples = @ExampleObject(name = "success", value = SwaggerExamples.SUBMISSION_STATUS_USER_SUCCESS))
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request"
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "500",
                             description = "Unexpected error",
                             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
@@ -437,24 +448,20 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     )
             }
     )
-    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserSubmissionStatusResponse>> getSubmissionStatusByUser(
             JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        try {
-            UserSubmissionStatusResponse data = schemeRegularityService.getSubmissionStatusByUserUuid(
-                    AnalyticsControllerHelper.extractAuthenticatedUserUuid(authentication), startDate, endDate);
-            return ResponseEntity.ok(ApiResponse.<UserSubmissionStatusResponse>builder()
-                    .success(true)
-                    .data(data)
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<UserSubmissionStatusResponse>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
+        AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+        UserSubmissionStatusResponse data = userRef.userId() != null
+                ? schemeRegularityService.getSubmissionStatusByUser(userRef.tenantId(), userRef.userId(), startDate, endDate)
+                : schemeRegularityService.getSubmissionStatusByUserUuid(userRef.tenantId(), userRef.userUuid(), startDate, endDate);
+        return ResponseEntity.ok(ApiResponse.<UserSubmissionStatusResponse>builder()
+                .success(true)
+                .data(data)
+                .build());
     }
 
     @GetMapping("/submission-status")
@@ -482,6 +489,7 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
     )
     public ResponseEntity<ApiResponse<SubmissionStatusSummaryResponse>> getSubmissionStatusSummary(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "lgd_id", required = false) Integer lgdId,
@@ -495,8 +503,8 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
             }
 
             SubmissionStatusSummaryResponse data = (lgdId != null)
-                    ? schemeRegularityService.getSubmissionStatusSummaryByLgd(lgdId, startDate, endDate)
-                    : schemeRegularityService.getSubmissionStatusSummaryByDepartment(departmentId, startDate, endDate);
+                    ? schemeRegularityService.getSubmissionStatusSummaryByLgd(tenantId, lgdId, startDate, endDate)
+                    : schemeRegularityService.getSubmissionStatusSummaryByDepartment(tenantId, departmentId, startDate, endDate);
 
             return ResponseEntity.ok(ApiResponse.<SubmissionStatusSummaryResponse>builder()
                     .success(true)
@@ -515,4 +523,3 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
         }
     }
 }
-

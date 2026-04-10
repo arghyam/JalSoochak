@@ -33,12 +33,34 @@ public class EscalationQueryService {
 
     private final EntityManager em;
 
+    public long countEscalations(
+            Integer tenantId,
+            Integer userId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        LocalDate safeEndDate = (endDate != null) ? endDate : LocalDate.now();
+        LocalDate safeStartDate = (startDate != null) ? startDate : safeEndDate.minusDays(30);
+
+        LocalDateTime from = safeStartDate.atStartOfDay();
+        LocalDateTime to = safeEndDate.plusDays(1).atStartOfDay();
+
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+        CriteriaQuery<Long> countQuery = cb.createQuery(Long.class);
+        Root<FactEscalation> e = countQuery.from(FactEscalation.class);
+        countQuery.select(cb.count(e.get("id")));
+        countQuery.where(buildPredicatesNoScheme(cb, e, tenantId, userId, null, null, null, from, to));
+        Long total = em.createQuery(countQuery).getSingleResult();
+        return total != null ? total : 0L;
+    }
+
     public Page<EscalationListItemDto> getEscalations(
             Integer tenantId,
             Integer userId,
             String escalationType,
             Integer schemeId,
             String schemeName,
+            Integer resolutionStatus,
             LocalDate startDate,
             LocalDate endDate,
             Pageable pageable
@@ -64,10 +86,10 @@ public class EscalationQueryService {
         // - If scheme_name filter is NOT provided, we should not depend on dim_scheme_table; we enrich names
         //   best-effort (scheme_name may be null if missing in dim_scheme_table).
         if (schemeNameFilter == null) {
-            return getEscalationsWithoutSchemeJoin(cb, tenantId, userId, escalationTypeFilter, schemeId, from, to, pageable);
+            return getEscalationsWithoutSchemeJoin(cb, tenantId, userId, escalationTypeFilter, schemeId, resolutionStatus, from, to, pageable);
         }
 
-        return getEscalationsWithSchemeNameFilter(cb, tenantId, userId, escalationTypeFilter, schemeId, schemeNameFilter, from, to, pageable);
+        return getEscalationsWithSchemeNameFilter(cb, tenantId, userId, escalationTypeFilter, schemeId, schemeNameFilter, resolutionStatus, from, to, pageable);
     }
 
     private Page<EscalationListItemDto> getEscalationsWithoutSchemeJoin(
@@ -76,6 +98,7 @@ public class EscalationQueryService {
             Integer userId,
             String escalationType,
             Integer schemeId,
+            Integer resolutionStatus,
             LocalDateTime fromInclusive,
             LocalDateTime toExclusive,
             Pageable pageable
@@ -83,7 +106,7 @@ public class EscalationQueryService {
         CriteriaQuery<FactEscalation> dataQuery = cb.createQuery(FactEscalation.class);
         Root<FactEscalation> e = dataQuery.from(FactEscalation.class);
         dataQuery.select(e);
-        dataQuery.where(buildPredicatesNoScheme(cb, e, tenantId, userId, escalationType, schemeId, fromInclusive, toExclusive));
+        dataQuery.where(buildPredicatesNoScheme(cb, e, tenantId, userId, escalationType, schemeId, resolutionStatus, fromInclusive, toExclusive));
         dataQuery.orderBy(buildOrders(cb, e, pageable));
 
         TypedQuery<FactEscalation> typed = em.createQuery(dataQuery);
@@ -94,7 +117,7 @@ public class EscalationQueryService {
         CriteriaQuery<Long> countQuery = cb.createQuery(Long.class);
         Root<FactEscalation> e2 = countQuery.from(FactEscalation.class);
         countQuery.select(cb.count(e2.get("id")));
-        countQuery.where(buildPredicatesNoScheme(cb, e2, tenantId, userId, escalationType, schemeId, fromInclusive, toExclusive));
+        countQuery.where(buildPredicatesNoScheme(cb, e2, tenantId, userId, escalationType, schemeId, resolutionStatus, fromInclusive, toExclusive));
         Long total = em.createQuery(countQuery).getSingleResult();
 
         Map<Integer, String> schemeNames = loadSchemeNames(rows);
@@ -125,6 +148,7 @@ public class EscalationQueryService {
             String escalationType,
             Integer schemeId,
             String schemeName,
+            Integer resolutionStatus,
             LocalDateTime fromInclusive,
             LocalDateTime toExclusive,
             Pageable pageable
@@ -133,7 +157,7 @@ public class EscalationQueryService {
         Root<FactEscalation> e = dataQuery.from(FactEscalation.class);
         Root<DimScheme> s = dataQuery.from(DimScheme.class);
 
-        Predicate[] predicates = buildPredicatesWithScheme(cb, e, s, tenantId, userId, escalationType, schemeId, schemeName, fromInclusive, toExclusive);
+        Predicate[] predicates = buildPredicatesWithScheme(cb, e, s, tenantId, userId, escalationType, schemeId, schemeName, resolutionStatus, fromInclusive, toExclusive);
         dataQuery.select(cb.construct(
                 EscalationListItemDto.class,
                 e.get("id"),
@@ -161,7 +185,7 @@ public class EscalationQueryService {
         Root<FactEscalation> e2 = countQuery.from(FactEscalation.class);
         Root<DimScheme> s2 = countQuery.from(DimScheme.class);
         countQuery.select(cb.count(e2.get("id")));
-        countQuery.where(buildPredicatesWithScheme(cb, e2, s2, tenantId, userId, escalationType, schemeId, schemeName, fromInclusive, toExclusive));
+        countQuery.where(buildPredicatesWithScheme(cb, e2, s2, tenantId, userId, escalationType, schemeId, schemeName, resolutionStatus, fromInclusive, toExclusive));
 
         Long total = em.createQuery(countQuery).getSingleResult();
 
@@ -200,6 +224,7 @@ public class EscalationQueryService {
             Integer userId,
             String escalationType,
             Integer schemeId,
+            Integer resolutionStatus,
             LocalDateTime fromInclusive,
             LocalDateTime toExclusive
     ) {
@@ -216,6 +241,9 @@ public class EscalationQueryService {
         if (schemeId != null) {
             p.add(cb.equal(e.get("schemeId"), schemeId));
         }
+        if (resolutionStatus != null) {
+            p.add(cb.equal(e.get("resolutionStatus"), resolutionStatus));
+        }
         p.add(cb.greaterThanOrEqualTo(e.get("createdAt"), fromInclusive));
         p.add(cb.lessThan(e.get("createdAt"), toExclusive));
         return p.toArray(Predicate[]::new);
@@ -230,6 +258,7 @@ public class EscalationQueryService {
             String escalationType,
             Integer schemeId,
             String schemeName,
+            Integer resolutionStatus,
             LocalDateTime fromInclusive,
             LocalDateTime toExclusive
     ) {
@@ -246,6 +275,9 @@ public class EscalationQueryService {
         }
         if (schemeId != null) {
             p.add(cb.equal(e.get("schemeId"), schemeId));
+        }
+        if (resolutionStatus != null) {
+            p.add(cb.equal(e.get("resolutionStatus"), resolutionStatus));
         }
         p.add(cb.like(
                 cb.lower(s.get("schemeName")),

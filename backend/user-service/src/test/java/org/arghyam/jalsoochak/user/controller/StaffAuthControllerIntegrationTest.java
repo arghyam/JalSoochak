@@ -4,6 +4,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -94,12 +95,12 @@ class StaffAuthControllerIntegrationTest {
         lenient().when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
         lenient().when(keycloakProvider.getRealm()).thenReturn("jalsoochak-realm");
 
-        // Seed an active staff user
+        // Seed an active staff user (user_type=3 is SECTION_OFFICER)
         Number id = jdbcTemplate.queryForObject("""
                 INSERT INTO tenant_mp.user_table
                     (tenant_id, user_type, title, phone_number, phone_number_hash,
                      password, status, whatsapp_connection_id)
-                VALUES (1, 1, ?, ?, ?, 'CSV_ONBOARDED', 1, 99001)
+                VALUES (1, 3, ?, ?, ?, 'CSV_ONBOARDED', 1, 99001)
                 RETURNING id
                 """, Number.class,
                 piiEncryptionService.encrypt("Test Officer"),
@@ -114,7 +115,7 @@ class StaffAuthControllerIntegrationTest {
     class RequestOtp {
 
         @Test
-        @DisplayName("returns 200 for a valid registered phone")
+        @DisplayName("returns 200 with otpLength for a valid registered phone")
         void returns200ForRegisteredPhone() throws Exception {
             mockMvc.perform(post("/api/v1/auth/staff/otp")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -122,7 +123,8 @@ class StaffAuthControllerIntegrationTest {
                                     {"phoneNumber":"919876543210","tenantCode":"MP"}
                                     """))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status", is(200)));
+                    .andExpect(jsonPath("$.status", is(200)))
+                    .andExpect(jsonPath("$.data.otpLength", is(6))); // Verify OTP length is returned
 
             // OTP row must be created
             Integer count = jdbcTemplate.queryForObject(
@@ -132,7 +134,7 @@ class StaffAuthControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("returns 200 even for an unregistered phone (anti-enumeration)")
+        @DisplayName("returns 200 with otpLength even for an unregistered phone (anti-enumeration)")
         void returns200ForUnknownPhone() throws Exception {
             MvcResult knownResult = mockMvc.perform(post("/api/v1/auth/staff/otp")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -140,6 +142,7 @@ class StaffAuthControllerIntegrationTest {
                                     {"phoneNumber":"919876543210","tenantCode":"MP"}
                                     """))
                     .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.otpLength", is(6)))
                     .andReturn();
 
             MvcResult unknownResult = mockMvc.perform(post("/api/v1/auth/staff/otp")
@@ -148,8 +151,10 @@ class StaffAuthControllerIntegrationTest {
                                     {"phoneNumber":"911111111111","tenantCode":"MP"}
                                     """))
                     .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.otpLength", is(6)))
                     .andReturn();
 
+            // Response bodies must be identical (same otpLength, same message)
             assertThat(unknownResult.getResponse().getContentAsString())
                     .isEqualTo(knownResult.getResponse().getContentAsString());
         }
@@ -163,6 +168,98 @@ class StaffAuthControllerIntegrationTest {
                                     {"tenantCode":"MP"}
                                     """))
                     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 400 when phone belongs to SUPER_USER (intentional anti-enumeration break)")
+        void returns400ForSuperUser() throws Exception {
+            // Insert a SUPER_USER (user_type=1)
+            long superUserId = jdbcTemplate.queryForObject("""
+                    INSERT INTO tenant_mp.user_table
+                        (tenant_id, user_type, title, phone_number, phone_number_hash,
+                         password, status, whatsapp_connection_id)
+                    VALUES (1, 1, ?, ?, ?, 'CSV_ONBOARDED', 1, 99001)
+                    RETURNING id
+                    """, Long.class,
+                    piiEncryptionService.encrypt("Super Admin"),
+                    piiEncryptionService.encrypt("919999999999"),
+                    piiEncryptionService.hmac("919999999999"));
+
+            mockMvc.perform(post("/api/v1/auth/staff/otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"phoneNumber":"919999999999","tenantCode":"MP"}
+                                    """))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message", containsString("staff users")))
+                    .andExpect(jsonPath("$.message", containsString("email and password")));
+
+            // No OTP should be created
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM common_schema.otp_table WHERE user_id = ?",
+                    Integer.class, superUserId);
+            assertThat(count).isZero();
+        }
+
+        @Test
+        @DisplayName("returns 400 when phone belongs to STATE_ADMIN (intentional anti-enumeration break)")
+        void returns400ForStateAdmin() throws Exception {
+            // Insert a STATE_ADMIN (user_type=2)
+            long adminUserId = jdbcTemplate.queryForObject("""
+                    INSERT INTO tenant_mp.user_table
+                        (tenant_id, user_type, title, phone_number, phone_number_hash,
+                         password, status, whatsapp_connection_id)
+                    VALUES (1, 2, ?, ?, ?, 'CSV_ONBOARDED', 1, 99001)
+                    RETURNING id
+                    """, Long.class,
+                    piiEncryptionService.encrypt("State Admin"),
+                    piiEncryptionService.encrypt("918888888888"),
+                    piiEncryptionService.hmac("918888888888"));
+
+            mockMvc.perform(post("/api/v1/auth/staff/otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"phoneNumber":"918888888888","tenantCode":"MP"}
+                                    """))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message", containsString("staff users")))
+                    .andExpect(jsonPath("$.message", containsString("email and password")));
+
+            // No OTP should be created
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM common_schema.otp_table WHERE user_id = ?",
+                    Integer.class, adminUserId);
+            assertThat(count).isZero();
+        }
+
+        @Test
+        @DisplayName("returns 200 silently when phone belongs to PUMP_OPERATOR (anti-enumeration preserved)")
+        void returns200ForPumpOperator() throws Exception {
+            // Insert a PUMP_OPERATOR (user_type=4)
+            long pumpOpId = jdbcTemplate.queryForObject("""
+                    INSERT INTO tenant_mp.user_table
+                        (tenant_id, user_type, title, phone_number, phone_number_hash,
+                         password, status, whatsapp_connection_id)
+                    VALUES (1, 4, ?, ?, ?, 'CSV_ONBOARDED', 1, 99001)
+                    RETURNING id
+                    """, Long.class,
+                    piiEncryptionService.encrypt("Pump Operator"),
+                    piiEncryptionService.encrypt("917777777777"),
+                    piiEncryptionService.hmac("917777777777"));
+
+            mockMvc.perform(post("/api/v1/auth/staff/otp")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"phoneNumber":"917777777777","tenantCode":"MP"}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.otpLength", is(6)));
+
+            // No OTP should be created (silent failure)
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM common_schema.otp_table WHERE user_id = ?",
+                    Integer.class, pumpOpId);
+            assertThat(count).isZero();
         }
     }
 

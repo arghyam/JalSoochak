@@ -38,6 +38,12 @@ public class DimTenant {
     @Column(name = "required_lpcd")
     private Integer requiredLpcd;
 
+    @Column(name = "over_supply_range_percentage")
+    private Integer overSupplyRangePercentage;
+
+    @Column(name = "under_supply_range_percentage")
+    private Integer underSupplyRangePercentage;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

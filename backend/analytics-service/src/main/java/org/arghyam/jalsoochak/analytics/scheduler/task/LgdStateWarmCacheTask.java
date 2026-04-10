@@ -52,36 +52,36 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
             try {
                 // parent_lgd_id style APIs
                 // Warm-cache: average scheme regularity for this state LGD (scope=current, last 30 days).
-                schemeRegularityService.getAverageSchemeRegularity(lgdId, startDate, endDate);
+                schemeRegularityService.getAverageSchemeRegularity(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: average scheme regularity for this state's immediate child regions (scope=child, last 30 days).
-                schemeRegularityService.getAverageSchemeRegularityForChildRegions(lgdId, startDate, endDate);
+                schemeRegularityService.getAverageSchemeRegularityForChildRegions(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: reading submission rate for this state LGD (scope=current, last 30 days).
-                schemeRegularityService.getReadingSubmissionRateByLgd(lgdId, startDate, endDate);
+                schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: reading submission rate for this state's immediate child regions (scope=child, last 30 days).
-                schemeRegularityService.getReadingSubmissionRateByLgdForChildRegions(lgdId, startDate, endDate);
+                schemeRegularityService.getReadingSubmissionRateByLgdForChildRegions(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: child-region-wise water quantity and household metrics under this state (last 30 days).
-                schemeRegularityService.getRegionWiseWaterQuantityByLgd(lgdId, startDate, endDate);
+                schemeRegularityService.getRegionWiseWaterQuantityByLgd(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: outage reason distribution (overall + child regions) under this state (last 30 days).
-                schemeRegularityService.getOutageReasonSchemeCountByLgd(lgdId, startDate, endDate);
+                schemeRegularityService.getOutageReasonSchemeCountByLgd(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: non-submission reason distribution (overall + child regions) under this state (last 30 days).
-                schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(lgdId, startDate, endDate);
+                schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: schemes dashboard (active/inactive counts + top schemes by reporting rate) for this state (last 30 days).
                 schemeRegularityService.getSchemeStatusAndTopReportingByLgd(lgdId, startDate, endDate, null);
                 // Warm the common paginated view (page 1, default count).
                 // Warm-cache: schemes region report (page 1, default count) for this state (last 30 days).
-                schemeRegularityService.getSchemeRegionReportByLgd(lgdId, startDate, endDate, 1, null);
+                schemeRegularityService.getSchemeRegionReportByLgd(tenantId, lgdId, startDate, endDate, 1, null);
 
                 // lgd_id style APIs
                 // Warm-cache: periodic water quantity time series for this state (last 30 days).
                 schemeRegularityService.getPeriodicWaterQuantityByLgdId(lgdId, startDate, endDate, scale);
                 // Warm-cache: periodic scheme regularity time series for this state (last 30 days).
-                schemeRegularityService.getPeriodicSchemeRegularityByLgdId(lgdId, startDate, endDate, scale);
+                schemeRegularityService.getPeriodicSchemeRegularityByLgdId(tenantId, lgdId, startDate, endDate, scale);
                 // Warm-cache: periodic outage reason time series for this state (last 30 days).
-                schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(lgdId, startDate, endDate, scale);
+                schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(tenantId, lgdId, startDate, endDate, scale);
                 // Warm-cache: submission status summary (scheme count + compliant/anomalous submissions) for this state (last 30 days).
-                schemeRegularityService.getSubmissionStatusSummaryByLgd(lgdId, startDate, endDate);
+                schemeRegularityService.getSubmissionStatusSummaryByLgd(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: scheme status counts (active/inactive) for this state (not date-ranged).
-                schemeRegularityService.getSchemeStatusCountByLgd(lgdId);
+                schemeRegularityService.getSchemeStatusCountByLgd(tenantId, lgdId);
 
                 // water-supply requires tenant_id + parent_lgd_id for child scope
                 // Warm-cache: average water-supply per child region under this state (scope=child, last 30 days).

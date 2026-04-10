@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.user.clients.KeycloakTokenResponse;
 import org.arghyam.jalsoochak.user.dto.internal.AuthResult;
 import org.arghyam.jalsoochak.user.dto.request.StaffOtpRequestDTO;
 import org.arghyam.jalsoochak.user.dto.request.StaffOtpVerifyDTO;
+import org.arghyam.jalsoochak.user.dto.response.OtpRequestResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.TokenResponseDTO;
 import org.arghyam.jalsoochak.user.enums.OtpType;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
@@ -26,7 +27,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -35,6 +35,10 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class StaffAuthServiceImpl implements StaffAuthService {
+
+    private static final String ROLE_SUPER_USER = "SUPER_USER";
+    private static final String ROLE_STATE_ADMIN = "STATE_ADMIN";
+    private static final String ROLE_PUMP_OPERATOR = "PUMP_OPERATOR";
 
     private final UserCommonRepository userCommonRepository;
     private final UserTenantRepository userTenantRepository;
@@ -47,12 +51,15 @@ public class StaffAuthServiceImpl implements StaffAuthService {
 
     @Override
     @Transactional
-    public void requestOtp(StaffOtpRequestDTO request) {
+    public OtpRequestResponseDTO requestOtp(StaffOtpRequestDTO request) {
         String tenantCode = request.getTenantCode().trim().toUpperCase();
+        String phone = request.getPhoneNumber().trim();
 
         Optional<Integer> tenantIdOpt = userCommonRepository.findTenantIdByStateCode(tenantCode);
         if (tenantIdOpt.isEmpty()) {
-            return; // Anti-enumeration: don't reveal whether tenant exists
+            // Log at INFO for production visibility, but without sensitive data
+            log.info("OTP_REQUEST_DENIED reason=tenant_not_found");
+            return new OtpRequestResponseDTO(otpProperties.otpLength()); // Anti-enumeration: don't reveal whether tenant exists
         }
         int tenantId = tenantIdOpt.get();
         String schema = "tenant_" + tenantCode.toLowerCase();
@@ -60,18 +67,39 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         // Validate tenant status for staff user access (ACTIVE or DEGRADED only)
         Optional<Integer> tenantStatusOpt = userCommonRepository.findTenantStatusByTenantId(tenantId);
         if (tenantStatusOpt.isEmpty() || !TenantAccessValidator.isAccessibleToStaff(tenantStatusOpt.get())) {
-            return; // Anti-enumeration: don't reveal whether tenant is accessible
+            // Log at INFO for production visibility, but without sensitive data
+            log.info("OTP_REQUEST_DENIED reason=tenant_not_accessible");
+            return new OtpRequestResponseDTO(otpProperties.otpLength()); // Anti-enumeration: don't reveal whether tenant is accessible
         }
 
-        Optional<TenantUserRecord> userOpt =
-                userTenantRepository.findUserByPhone(schema, request.getPhoneNumber().trim());
+        Optional<TenantUserRecord> userOpt = userTenantRepository.findUserByPhone(schema, phone);
         if (userOpt.isEmpty()) {
-            return; // Anti-enumeration: don't reveal whether phone is registered
+            // Log at INFO for production visibility, but without sensitive data
+            log.info("OTP_REQUEST_DENIED reason=phone_not_registered");
+            return new OtpRequestResponseDTO(otpProperties.otpLength()); // Anti-enumeration: don't reveal whether phone is registered
         }
         TenantUserRecord user = userOpt.get();
 
+        // System users (Super User, State Admin) must use email/password login.
+        // This intentionally breaks anti-enumeration for these roles to provide clear UX guidance.
+        if (isSystemAdminRole(user.cName())) {
+            // Log at WARN for security-relevant event (system user misusing endpoint)
+            log.warn("OTP_REQUEST_REJECTED reason=system_user_attempted_staff_login role={}", user.cName());
+            throw new BadRequestException(
+                    "This login is for staff users. Please sign in with your email and password.");
+        }
+
+        // Pump operators do not have OTP login access — silently ignore to preserve anti-enumeration.
+        if (ROLE_PUMP_OPERATOR.equalsIgnoreCase(user.cName())) {
+            // Log at INFO for production visibility, but without sensitive data
+            log.info("OTP_REQUEST_DENIED reason=pump_operator_role_not_eligible");
+            return new OtpRequestResponseDTO(otpProperties.otpLength());
+        }
+
         if (user.status() == null || user.status() != TenantUserStatus.ACTIVE.code) {
-            return; // Anti-enumeration: don't reveal whether account is inactive
+            // Log at INFO for production visibility, but without sensitive data
+            log.info("OTP_REQUEST_DENIED reason=user_inactive");
+            return new OtpRequestResponseDTO(otpProperties.otpLength()); // Anti-enumeration
         }
 
         String rawOtp;
@@ -80,28 +108,31 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         } catch (BadRequestException e) {
             // Swallow to preserve anti-enumeration: exposing cooldown/errors would confirm the phone is registered.
             log.debug("OTP request suppressed for staffUserId={} tenantCode={}: {}", user.id(), tenantCode, e.getMessage());
-            return;
+            // Log at INFO for production visibility, but without sensitive data
+            log.info("OTP_REQUEST_DENIED reason=cooldown_active");
+            return new OtpRequestResponseDTO(otpProperties.otpLength());
         } catch (Exception e) {
-            log.error("OTP infrastructure failure for staffUserId={} tenantCode={}", user.id(), tenantCode, e);
-            return;
+            // Log infrastructure errors at ERROR level for alerting, but without sensitive data
+            log.error("OTP_REQUEST_FAILED reason=infrastructure_error", e);
+            return new OtpRequestResponseDTO(otpProperties.otpLength());
         }
 
-        String deliveryChannel = otpProperties.deliveryChannel();
-
+        boolean isWhatsapp = "WHATSAPP".equalsIgnoreCase(otpProperties.deliveryChannel());
         SendLoginOtpEvent event = SendLoginOtpEvent.builder()
                 .eventType("SEND_LOGIN_OTP")
-                .tenantCode(tenantCode)
-                .tenantId(tenantId)
-                .triggeredAt(Instant.now().toString())
-                .glificId(user.whatsappConnectionId())
-                .officerName(user.title())
                 .officerPhoneNumber(user.phoneNumber())
+                .glificId(isWhatsapp ? user.whatsappConnectionId() : null)
                 .otp(rawOtp)
-                .deliveryChannel(deliveryChannel)
+                .expiryMinutes(otpProperties.expiryMinutes())
+                .deliveryChannel(otpProperties.deliveryChannel())
                 .build();
 
-        eventPublisher.publishLoginOtpAfterCommit(event);
-        log.info("OTP requested for staffUserId={} tenantCode={}", user.id(), tenantCode);
+        eventPublisher.publishLoginOtpAfterCommit(event, user.id(), tenantCode);
+        return new OtpRequestResponseDTO(otpProperties.otpLength());
+    }
+
+    private static boolean isSystemAdminRole(String cName) {
+        return ROLE_SUPER_USER.equalsIgnoreCase(cName) || ROLE_STATE_ADMIN.equalsIgnoreCase(cName);
     }
 
     @Override

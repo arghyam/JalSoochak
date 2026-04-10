@@ -85,6 +85,8 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
             response = TenantDetailsResponse.builder()
                     .tenantId(tenant.getTenantId())
                     .stateCode(tenant.getStateCode())
+                    .parentLgdLevel(null)
+                    .parentDepartmentLevel(null)
                     .childBoundaryCount(boundaryCount)
                     .boundaryGeoJson(boundaryGeoJson)
                     .childRegions(List.of())
@@ -145,6 +147,8 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         TenantDetailsResponse response = TenantDetailsResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
+                .parentLgdLevel(null)
+                .parentDepartmentLevel(parentLevel)
                 .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
                 .boundaryGeoJson((String) mergedBoundaryResult.get("boundary_geojson"))
                 .childRegions(childRegions)
@@ -162,9 +166,9 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
 
         // Scheme regularity and reading submission are scope/period based
         AverageSchemeRegularityResponse averageRegularity =
-                schemeRegularityService.getAverageSchemeRegularity(parentLgdId, startDate, endDate);
+                schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, startDate, endDate);
         ReadingSubmissionRateResponse submissionRate =
-                schemeRegularityService.getReadingSubmissionRateByLgd(parentLgdId, startDate, endDate);
+                schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, startDate, endDate);
 
         // Performance is per child region; merge into response child rows.
         List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
@@ -206,10 +210,10 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
 
         AverageSchemeRegularityResponse averageRegularity =
                 schemeRegularityService.getAverageSchemeRegularityByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
         ReadingSubmissionRateResponse submissionRate =
                 schemeRegularityService.getReadingSubmissionRateByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
                 schemeRegularityService.getChildAveragePerformanceScoreByDepartment(
@@ -270,6 +274,8 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         return TenantDetailsResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
+                .parentLgdLevel(parentLevel)
+                .parentDepartmentLevel(null)
                 .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
                 .boundaryGeoJson((String) mergedBoundaryResult.get("boundary_geojson"))
                 .childRegions(childRegions)

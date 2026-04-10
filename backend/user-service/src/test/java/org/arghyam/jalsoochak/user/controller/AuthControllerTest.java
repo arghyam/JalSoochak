@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.arghyam.jalsoochak.user.config.properties.AppProperties;
 import org.arghyam.jalsoochak.user.config.properties.CookieProperties;
 import org.arghyam.jalsoochak.user.dto.internal.AuthResult;
 import org.arghyam.jalsoochak.user.dto.response.InviteInfoResponseDTO;
@@ -66,6 +67,9 @@ class AuthControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @MockBean
+    private AppProperties appProperties;
 
     @MockBean
     private AuthService authService;

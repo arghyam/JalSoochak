@@ -29,7 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.arghyam.jalsoochak.tenant.config.TenantDefaultsProperties;
+import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
+import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
@@ -107,6 +108,9 @@ class TenantManagementServiceImplTest {
     private TenantSchemaRepository tenantSchemaRepository;
 
     @Mock
+    private AppProperties appProperties;
+
+    @Mock
     private TenantDefaultsProperties tenantDefaults;
 
     @Mock
@@ -141,6 +145,7 @@ class TenantManagementServiceImplTest {
             tenantCommonRepository,
             tenantSchemaRepository,
             objectMapper,
+            appProperties, 
             tenantDefaults,
             eventPublisher,
             schedulerManager,
@@ -720,7 +725,8 @@ class TenantManagementServiceImplTest {
         void testSetTenantConfigs_Success() throws Exception {
             // Arrange
             Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
             Map<TenantConfigKeyEnum, JsonNode> newConfigs = new HashMap<>();
             // Input should be JSON that matches SimpleConfigValueDTO structure with "value" field
             newConfigs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON, objectMapper.readTree("{\"value\": \"{\\\"welcome\\\": \\\"...\\\"}\"}"));
@@ -801,7 +807,7 @@ class TenantManagementServiceImplTest {
             // Arrange
             Integer tenantId = 1;
             TenantResponseDTO tenant = TenantResponseDTO.builder()
-                    .id(tenantId).stateCode("MP").build();
+                    .id(tenantId).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
             Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
             configs.put(TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME,
                     objectMapper.readTree("{\"nudge\":{\"schedule\":{\"hour\":8,\"minute\":0}}}"));
@@ -855,7 +861,8 @@ class TenantManagementServiceImplTest {
         void setTenantConfigs_ValidChannels_SavesSuccessfully() throws Exception {
             // Arrange
             Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
 
             Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
             configs.put(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS,
@@ -938,7 +945,8 @@ class TenantManagementServiceImplTest {
         void setTenantConfigs_TransientChannelFieldsStripped_BeforePersisting() throws Exception {
             // Arrange: client sends degraded + removedChannels in request — both must be stripped before DB write
             Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
 
             Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
             configs.put(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS,
@@ -968,6 +976,279 @@ class TenantManagementServiceImplTest {
             String persisted = serializedCaptor.getValue();
             assertFalse(persisted.contains("degraded"), "degraded must not be persisted");
             assertFalse(persisted.contains("removedChannels"), "removedChannels must not be persisted");
+        }
+
+        @Test
+        @DisplayName("Should auto-transition ONBOARDED tenant to CONFIGURED when all mandatory keys are set")
+        void setTenantConfigs_allMandatoryKeysPresent_transitionsToConfigured() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ONBOARDED.name()).build();
+
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON,
+                    objectMapper.readTree("{\"value\":\"template\"}"));
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"template\"}")
+                    .build();
+
+            // All GENERIC mandatory keys already in DB
+            List<ConfigDTO> allGenericConfigs = Arrays.stream(TenantConfigKeyEnum.values())
+                    .filter(k -> k.getType() == TenantConfigKeyEnum.ConfigType.GENERIC && k.isMandatory())
+                    .map(k -> ConfigDTO.builder().configKey(k.name()).build())
+                    .toList();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+            when(tenantCommonRepository.findConfigsByTenantId(tenantId)).thenReturn(allGenericConfigs);
+            when(tenantSchemaRepository.getSupportedLanguages("tenant_tn"))
+                    .thenReturn(List.of(LanguageConfigDTO.builder().language("english").preference(1).build()));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(tenantCommonRepository).updateTenantStatus(tenantId, TenantStatusEnum.CONFIGURED, 100);
+        }
+
+        @Test
+        @DisplayName("Should not auto-transition when tenant is ONBOARDED but some mandatory keys are missing")
+        void setTenantConfigs_someMandatoryKeysMissing_doesNotTransition() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ONBOARDED.name()).build();
+
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON,
+                    objectMapper.readTree("{\"value\":\"template\"}"));
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"template\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+            // Only one key configured — not all mandatory
+            when(tenantCommonRepository.findConfigsByTenantId(tenantId))
+                    .thenReturn(List.of(ConfigDTO.builder().configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()).build()));
+            when(tenantSchemaRepository.getSupportedLanguages("tenant_tn")).thenReturn(Collections.emptyList());
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(tenantCommonRepository, never()).updateTenantStatus(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should not transition when all mandatory keys are set but tenant status is not ONBOARDED")
+        void setTenantConfigs_allMandatoryKeysPresent_nonOnboardedStatus_doesNotTransition() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON,
+                    objectMapper.readTree("{\"value\":\"template\"}"));
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"template\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(tenantCommonRepository, never()).updateTenantStatus(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Should publish WaterNormUpdatedEvent when WATER_NORM key is set")
+        void setTenantConfigs_withWaterNorm_publishesWaterNormUpdatedEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.WATER_NORM, objectMapper.readTree("{\"value\": \"70\"}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.WATER_NORM.name())
+                    .configValue("{\"value\":\"70\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.WATER_NORM.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            assertInstanceOf(org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent.class, captor.getValue());
+            org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent event =
+                    (org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent) captor.getValue();
+            assertEquals(tenantId, event.getTenantId());
+            assertEquals("MP", event.getStateCode());
+            assertEquals(70, event.getWaterNorm());
+        }
+
+        @Test
+        @DisplayName("Should not publish WaterNormUpdatedEvent when WATER_NORM key is absent")
+        void setTenantConfigs_withoutWaterNorm_doesNotPublishWaterNormUpdatedEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON, objectMapper.readTree("{\"value\": \"tmpl\"}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"tmpl\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(eventPublisher, never()).publishEvent(
+                    any(org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent.class));
+        }
+
+        @Test
+        @DisplayName("Should publish WaterSupplyThresholdUpdatedEvent when TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD key is set")
+        void setTenantConfigs_withWaterSupplyThreshold_publishesWaterSupplyThresholdUpdatedEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD,
+                    objectMapper.readTree("{\"undersupplyThresholdPercent\": 20.0, \"oversupplyThresholdPercent\": 30.0}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.name())
+                    .configValue("{\"undersupplyThresholdPercent\":20.0,\"oversupplyThresholdPercent\":30.0}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            assertInstanceOf(org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent.class, captor.getValue());
+            org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent event =
+                    (org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent) captor.getValue();
+            assertEquals(tenantId, event.getTenantId());
+            assertEquals("MP", event.getStateCode());
+            assertEquals(20, event.getUnderSupplyThresholdPercent());
+            assertEquals(30, event.getOverSupplyThresholdPercent());
+        }
+
+        @Test
+        @DisplayName("Should not publish WaterSupplyThresholdUpdatedEvent when undersupplyThresholdPercent is null in saved config")
+        void setTenantConfigs_withNullUndersupplyThreshold_doesNotPublishEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD,
+                    objectMapper.readTree("{\"undersupplyThresholdPercent\": 20.0, \"oversupplyThresholdPercent\": 30.0}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.name())
+                    .configValue("{\"undersupplyThresholdPercent\":null,\"oversupplyThresholdPercent\":30.0}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(eventPublisher, never()).publishEvent(
+                    any(org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent.class));
+        }
+
+        @Test
+        @DisplayName("Should not publish WaterSupplyThresholdUpdatedEvent when oversupplyThresholdPercent is null in saved config")
+        void setTenantConfigs_withNullOversupplyThreshold_doesNotPublishEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD,
+                    objectMapper.readTree("{\"undersupplyThresholdPercent\": 20.0, \"oversupplyThresholdPercent\": 30.0}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.name())
+                    .configValue("{\"undersupplyThresholdPercent\":20.0,\"oversupplyThresholdPercent\":null}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(eventPublisher, never()).publishEvent(
+                    any(org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent.class));
+        }
+
+        @Test
+        @DisplayName("Should not publish WaterSupplyThresholdUpdatedEvent when threshold key is absent")
+        void setTenantConfigs_withoutWaterSupplyThreshold_doesNotPublishWaterSupplyThresholdUpdatedEvent() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("MP")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON, objectMapper.readTree("{\"value\": \"tmpl\"}"));
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name())
+                    .configValue("{\"value\":\"tmpl\"}")
+                    .build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.name()), anyString(), eq(100)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            tenantManagementService.setTenantConfigs(tenantId, request(configs));
+
+            verify(eventPublisher, never()).publishEvent(
+                    any(org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent.class));
+        }
+
+        private SetTenantConfigRequestDTO request(Map<TenantConfigKeyEnum, JsonNode> configs) {
+            return SetTenantConfigRequestDTO.builder().configs(configs).build();
         }
     }
 
@@ -1032,6 +1313,15 @@ class TenantManagementServiceImplTest {
             assertEquals(1, result.getSummary().getConfigured());
             assertEquals(total - 1, result.getSummary().getPending());
             assertEquals(ConfigStatusEnum.CONFIGURED, result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).getStatus());
+            assertTrue(result.getConfigs().get(TenantConfigKeyEnum.TENANT_LOGO).isMandatory());
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.GLIFIC_MESSAGE_TEMPLATES).isMandatory(),
+                    "GLIFIC_MESSAGE_TEMPLATES is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_IT_SYSTEM_CONNECTION).isMandatory(),
+                    "STATE_IT_SYSTEM_CONNECTION is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.STATE_DATA_RECONCILIATION_TIME).isMandatory(),
+                    "STATE_DATA_RECONCILIATION_TIME is optional");
+            assertFalse(result.getConfigs().get(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON).isMandatory(),
+                    "EMAIL_TEMPLATE_JSON is optional");
             verify(tenantCommonRepository).findById(tenantId);
             verify(tenantCommonRepository).findConfigsByTenantId(tenantId);
         }
@@ -1512,6 +1802,68 @@ class TenantManagementServiceImplTest {
             InvalidConfigValueException ex = assertThrows(InvalidConfigValueException.class,
                     () -> tenantManagementService.updateLocationHierarchy(tenantId, "LGD", levelsWithDuplicates));
             assertTrue(ex.getMessage().contains("unique"));
+        }
+
+        @Test
+        @DisplayName("Should publish TenantLocationHierarchyUpdatedEvent on name-only change")
+        void updateLocationHierarchy_nameOnlyChange_publishesHierarchyUpdatedEvent() {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("mp").build();
+            List<LocationLevelConfigDTO> existingLevels = List.of(
+                    LocationLevelConfigDTO.builder().level(1)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("State").build())).build(),
+                    LocationLevelConfigDTO.builder().level(2)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("District").build())).build());
+            List<LocationLevelConfigDTO> renamedLevels = List.of(
+                    LocationLevelConfigDTO.builder().level(1)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("Rajya").build())).build(),
+                    LocationLevelConfigDTO.builder().level(2)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("Zila").build())).build());
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantSchemaRepository.getLocationHierarchy("tenant_mp", RegionTypeEnum.LGD))
+                    .thenReturn(LocationConfigDTO.builder().locationHierarchy(existingLevels).build());
+
+            tenantManagementService.updateLocationHierarchy(tenantId, "LGD", renamedLevels);
+
+            ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            assertInstanceOf(org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent.class, captor.getValue());
+            org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent event =
+                    (org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent) captor.getValue();
+            assertEquals(tenantId, event.getTenantId());
+            assertEquals("mp", event.getStateCode());
+            assertEquals("LGD", event.getHierarchyType());
+            assertEquals(renamedLevels, event.getLevels());
+        }
+
+        @Test
+        @DisplayName("Should not publish TenantLocationHierarchyUpdatedEvent on structural change")
+        void updateLocationHierarchy_structuralChange_doesNotPublishHierarchyUpdatedEvent() {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("mp").build();
+            List<LocationLevelConfigDTO> existingLevels = List.of(
+                    LocationLevelConfigDTO.builder().level(1)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("State").build())).build());
+            // Different level number — structural change
+            List<LocationLevelConfigDTO> newLevels = List.of(
+                    LocationLevelConfigDTO.builder().level(1)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("State").build())).build(),
+                    LocationLevelConfigDTO.builder().level(2)
+                            .levelName(List.of(LocationLevelNameDTO.builder().title("District").build())).build());
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantSchemaRepository.getLocationHierarchy("tenant_mp", RegionTypeEnum.LGD))
+                    .thenReturn(LocationConfigDTO.builder().locationHierarchy(existingLevels).build());
+
+            tenantManagementService.updateLocationHierarchy(tenantId, "LGD", newLevels);
+
+            verify(eventPublisher, never()).publishEvent(
+                    any(org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent.class));
         }
     }
 

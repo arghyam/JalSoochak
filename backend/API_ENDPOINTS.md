@@ -73,6 +73,7 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance` | Compliance grouped by scheme |
 | GET | `/api/v1/pumpoperator/pump-operators/by-scheme` | Operators grouped by scheme |
 | POST | `/api/v1/state-admin/pump-operators/upload` | Bulk upload pump operators (CSV) |
+| POST | `/api/v1/state-admin/user-scheme-mappings/upload` | Bulk upload user-scheme mappings (CSV/XLSX) |
 
 ---
 

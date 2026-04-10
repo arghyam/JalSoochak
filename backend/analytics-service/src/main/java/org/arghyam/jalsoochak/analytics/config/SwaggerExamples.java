@@ -27,6 +27,8 @@ public final class SwaggerExamples {
               "data": {
                 "tenantId": 10,
                 "stateCode": "MP",
+                "parentLgdLevel": 1,
+                "parentDepartmentLevel": null,
                 "childBoundaryCount": 2,
                 "boundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}",
                 "averageSchemeRegularity": 0.75,
@@ -175,6 +177,7 @@ public final class SwaggerExamples {
                 "parentLgdId": 101,
                 "parentLgdCName": "Parent",
                 "parentLgdTitle": "Parent LGD",
+                "parentLgdLevel": 2,
                 "activeSchemeCount": 1,
                 "inactiveSchemeCount": 1,
                 "topSchemeCount": 1,
@@ -189,7 +192,24 @@ public final class SwaggerExamples {
                     "totalWaterSupplied": 150,
                     "immediateParentLgdId": 100,
                     "immediateParentLgdCName": "Parent",
-                    "immediateParentLgdTitle": "Parent LGD"
+                    "immediateParentLgdTitle": "Parent LGD",
+                    "immediateParentLgdLevel": 3,
+                    "lgdLadder": {
+                      "level_1": 10,
+                      "level_2": 50,
+                      "level_3": 100,
+                      "level_4": 101,
+                      "level_5": null,
+                      "level_6": null
+                    },
+                    "departmentLadder": {
+                      "level_1": 2001,
+                      "level_2": 2002,
+                      "level_3": null,
+                      "level_4": null,
+                      "level_5": null,
+                      "level_6": null
+                    }
                   }
                 ]
               }
@@ -248,7 +268,8 @@ public final class SwaggerExamples {
                     "childLgdTitle": "Child Region Title",
                     "schemeCount": 2,
                     "householdCount": 150,
-                    "totalWaterQuantity": 8200
+                    "totalWaterQuantity": 8200,
+                    "supplyDaysInEfficientRange": 45
                   }
                 ]
               }
@@ -427,19 +448,74 @@ public final class SwaggerExamples {
             {
               "success": true,
               "data": {
-                "stateCount": 0,
-                "states": [
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "stateWiseQuantityPerformance": [
                   {
                     "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
                     "stateCode": "MP",
-                    "title": "Madhya Pradesh",
+                    "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
-                    "averageRegularity": 0.74,
-                    "readingSubmissionRate": 0.83,
-                    "averageWaterSupply": 55.2
+                    "totalHouseholdCount": 1000,
+                    "totalAchievedFhtcCount": 900,
+                    "totalPlannedFhtcCount": 950,
+                    "totalWaterSuppliedLiters": 500000,
+                    "avgWaterSupplyPerScheme": 12800.0
+                  }
+                ],
+                "stateWiseRegularity": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "schemeCount": 12,
+                    "totalSupplyDays": 275,
+                    "averageRegularity": 0.74
+                  }
+                ],
+                "stateWiseReadingSubmissionRate": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "schemeCount": 12,
+                    "totalSubmissionDays": 310,
+                    "readingSubmissionRate": 0.83
                   }
                 ],
                 "overallOutageReasonDistribution": {}
+              }
+            }
+            """;
+
+    public static final String NATIONAL_DASHBOARD_BOUNDARY_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "nationalBoundary": {
+                  "type": "Polygon",
+                  "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                },
+                "stateWiseBoundaries": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "boundary": {
+                      "type": "Polygon",
+                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                    }
+                  }
+                ]
               }
             }
             """;

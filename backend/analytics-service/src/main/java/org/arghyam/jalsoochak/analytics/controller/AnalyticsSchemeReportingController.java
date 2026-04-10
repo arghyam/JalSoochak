@@ -6,16 +6,22 @@ import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationPaginatedResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
+import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
+import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
+import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
+import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
+import org.arghyam.jalsoochak.analytics.service.UserAlertTotalsService;
 import org.arghyam.jalsoochak.analytics.dto.response.OperatorAttendanceDayItemDto;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyPaginatedResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.UserAlertTotalsResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -31,13 +37,18 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -56,7 +67,71 @@ public class AnalyticsSchemeReportingController {
     private final EscalationQueryService escalationQueryService;
     private final AnomalyQueryService anomalyQueryService;
     private final OperatorAttendanceQueryService operatorAttendanceQueryService;
+    private final UserAlertTotalsService userAlertTotalsService;
+    private final AuthenticatedRequestContextService authenticatedRequestContextService;
+    private final DimUserRepository dimUserRepository;
+    private final FactEscalationRepository factEscalationRepository;
 
+    public record UpdateEscalationResolutionStatusRequest(Integer resolutionStatus) {
+    }
+
+    private Integer resolveUserIdByUuid(Integer tenantId, UUID userUuid) {
+        return dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(tenantId, userUuid)
+                .map(u -> u.getUserId())
+                .orElseThrow(() -> new IllegalArgumentException("No user found for uuid: " + userUuid));
+    }
+
+    @PutMapping("/escalations/status")
+    @Operation(summary = "Update escalation resolution status (UUID-scoped)")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateEscalationResolutionStatus(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "uuid") UUID userUuid,
+            @RequestParam(name = "escalation_id", required = false) Long escalationId,
+            @RequestParam(name = "correlation_id", required = false) String correlationId,
+            @RequestBody UpdateEscalationResolutionStatusRequest request
+    ) {
+        try {
+            if (request == null || request.resolutionStatus() == null) {
+                throw new IllegalArgumentException("resolutionStatus is required");
+            }
+            boolean hasEscalationId = escalationId != null;
+            boolean hasCorrelationId = correlationId != null && !correlationId.isBlank();
+            if (hasEscalationId == hasCorrelationId) {
+                throw new IllegalArgumentException("Provide exactly one of escalation_id or correlation_id");
+            }
+
+            Integer userId = resolveUserIdByUuid(tenantId, userUuid);
+
+            java.util.Optional<FactEscalation> opt = hasEscalationId
+                    ? factEscalationRepository.findByIdAndTenantIdAndUserId(escalationId, tenantId, userId)
+                    : factEscalationRepository.findFirstByTenantIdAndUserIdAndCorrelationIdOrderByCreatedAtDesc(
+                    tenantId, userId, correlationId.trim());
+
+            FactEscalation escalation = opt.orElseThrow(() -> new IllegalArgumentException("Escalation not found for the given user/identifier"));
+
+            escalation.setResolutionStatus(request.resolutionStatus());
+            escalation.setUpdatedAt(LocalDateTime.now());
+            FactEscalation saved = factEscalationRepository.save(escalation);
+
+            return ResponseEntity.ok(ApiResponse.<Map<String, Object>>builder()
+                    .success(true)
+                    .data(Map.of(
+                            "escalation_id", saved.getId(),
+                            "resolution_status", saved.getResolutionStatus()
+                    ))
+                    .build());
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(ApiResponse.<Map<String, Object>>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<Map<String, Object>>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
     @GetMapping("/schemes/status-count")
     @Operation(
             summary = "Get active and inactive scheme count for an LGD or department area",
@@ -91,6 +166,7 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<Map<String, Integer>>> getSchemeStatusCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "lgd_id", required = false) Integer lgdId,
             @RequestParam(name = "department_id", required = false) Integer departmentId) {
         try {
@@ -102,8 +178,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             Map<String, Integer> data = (lgdId != null)
-                    ? schemeRegularityService.getSchemeStatusCountByLgd(lgdId)
-                    : schemeRegularityService.getSchemeStatusCountByDepartment(departmentId);
+                    ? schemeRegularityService.getSchemeStatusCountByLgd(tenantId, lgdId)
+                    : schemeRegularityService.getSchemeStatusCountByDepartment(tenantId, departmentId);
 
             return ResponseEntity.ok(ApiResponse.<Map<String, Integer>>builder()
                     .success(true)
@@ -224,6 +300,7 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<?> getSchemeRegionReport(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -244,8 +321,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             SchemeRegularityListResponse reportResponse = (parentLgdId != null)
-                    ? schemeRegularityService.getSchemeRegionReportByLgd(parentLgdId, startDate, endDate, pageNumber, count)
-                    : schemeRegularityService.getSchemeRegionReportByDepartment(parentDepartmentId, startDate, endDate, pageNumber, count);
+                    ? schemeRegularityService.getSchemeRegionReportByLgd(tenantId, parentLgdId, startDate, endDate, pageNumber, count)
+                    : schemeRegularityService.getSchemeRegionReportByDepartment(tenantId, parentDepartmentId, startDate, endDate, pageNumber, count);
 
             if (!CSV_OUTPUT_FORMAT.equalsIgnoreCase(Objects.toString(outputFormat, ""))) {
                 return ResponseEntity.ok(ApiResponse.<SchemeRegularityListResponse>builder()
@@ -304,14 +381,15 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<EscalationPaginatedResponse> getEscalationsPaginated(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "user_id") Integer userId,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "escalation_type", required = false) String escalationType,
             @RequestParam(name = "scheme_id", required = false) Integer schemeId,
             @RequestParam(name = "scheme_name", required = false) String schemeName,
+            @RequestParam(name = "resolution_status", required = false) Integer resolutionStatus,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
@@ -323,6 +401,16 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("limit must be >= 1");
             }
 
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer userId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<EscalationListItemDto> page = escalationQueryService.getEscalations(
                     tenantId,
@@ -330,6 +418,7 @@ public class AnalyticsSchemeReportingController {
                     escalationType,
                     schemeId,
                     schemeName,
+                    resolutionStatus,
                     startDate,
                     endDate,
                     pageable
@@ -449,15 +538,16 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<AnomalyPaginatedResponse> getAnomalies(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "user_id") Integer mappedUserId,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "anomaly_type", required = false) String anomalyType,
-            @RequestParam(name = "scheme_name", required = false) String schemeName
+            @RequestParam(name = "scheme_name", required = false) String schemeName,
+            @RequestParam(name = "status", required = false) Integer status
     ) {
         try {
             if (pageNumber < 1) {
@@ -467,6 +557,16 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("limit must be >= 1");
             }
 
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer mappedUserId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<AnomalyListItemDto> page = anomalyQueryService.getAnomaliesForUserSchemes(
                     tenantId,
@@ -475,6 +575,7 @@ public class AnalyticsSchemeReportingController {
                     endDate,
                     anomalyType,
                     schemeName,
+                    status,
                     pageable
             );
 
@@ -504,6 +605,62 @@ public class AnalyticsSchemeReportingController {
         }
     }
 
+    @GetMapping("/officer/dashboard")
+    @Operation(
+            summary = "Get totals for escalations, anomalies, mapped schemes and water supplied for a user",
+            description = "Escalations are counted where fact_escalation_table.user_id = user_id. Anomalies/scheme/water totals are scoped to schemes mapped to the user via dim_user_scheme_mapping_table. Date range defaults: end_date=today, start_date=end_date-30 days.",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Totals fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<UserAlertTotalsResponse>> getUserAlertTotals(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "user_id") Integer userId,
+            @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    ) {
+        try {
+            UserAlertTotalsResponse data = userAlertTotalsService.getTotals(tenantId, userId, startDate, endDate);
+            return ResponseEntity.ok(ApiResponse.<UserAlertTotalsResponse>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<UserAlertTotalsResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<UserAlertTotalsResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
     @GetMapping("/scheme-performance")
     @Operation(
             summary = "Query scheme performance data",
@@ -529,16 +686,14 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<List<FactSchemePerformance>>> getSchemePerformance(
-            @RequestParam(required = false) Integer tenantId,
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(required = false) Integer schemeId) {
         try {
             List<FactSchemePerformance> data;
             if (schemeId != null) {
-                data = schemePerformanceRepository.findBySchemeId(schemeId);
-            } else if (tenantId != null) {
-                data = schemePerformanceRepository.findByTenantId(tenantId);
+                data = schemePerformanceRepository.findByTenantIdAndSchemeId(tenantId, schemeId);
             } else {
-                data = schemePerformanceRepository.findAll();
+                data = schemePerformanceRepository.findByTenantId(tenantId);
             }
 
             return ResponseEntity.ok(ApiResponse.<List<FactSchemePerformance>>builder()

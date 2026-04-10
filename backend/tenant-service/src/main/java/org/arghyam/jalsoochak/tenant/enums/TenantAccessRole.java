@@ -3,40 +3,44 @@ package org.arghyam.jalsoochak.tenant.enums;
 /**
  * Represents a user's role in the context of tenant access validation.
  *
- * <p>Maps from the DB {@code admin_level} integer:
- * <ul>
- *   <li>{@code 1}    → {@link #SUPER_USER}</li>
- *   <li>{@code 2}    → {@link #STATE_ADMIN}</li>
- *   <li>any other value (including {@code null}) → throws {@link IllegalArgumentException}</li>
- * </ul>
+ * <p>Maps from the DB {@code user_type_master_table.c_name} string (case-insensitive).
  */
 public enum TenantAccessRole {
     SUPER_USER,
     STATE_ADMIN,
+    SUPER_STATE_ADMIN,
     STAFF;
 
+    /** Returns {@code true} if this role carries SUPER_USER-level privileges. */
+    public boolean isSuperUserEquivalent() {
+        return this == SUPER_USER || this == SUPER_STATE_ADMIN;
+    }
+
+    /** Returns {@code true} if this role carries STATE_ADMIN-level privileges. */
+    public boolean isStateAdminEquivalent() {
+        return this == STATE_ADMIN || this == SUPER_STATE_ADMIN;
+    }
+
     /**
-     * Derives the access role from a DB {@code admin_level} value.
+     * Derives the access role from the {@code c_name} column of {@code user_type_master_table}.
+     * Matching is case-insensitive so that variations like {@code "Super User"} or
+     * {@code "super_user"} are accepted alongside the canonical {@code "SUPER_USER"}.
      *
-     * <p>Mapping:
-     * <ul>
-     *   <li>{@code 1}    → {@link #SUPER_USER}</li>
-     *   <li>{@code 2}    → {@link #STATE_ADMIN}</li>
-     *   <li>{@code null} or any other non-null value → throws {@link IllegalArgumentException}</li>
-     * </ul>
-     *
-     * @param adminLevel the {@code admin_level} column value from {@code admin_user_master_table}
+     * @param cName the {@code c_name} value joined from {@code user_type_master_table}
      * @return the corresponding {@code TenantAccessRole}
-     * @throws IllegalArgumentException if adminLevel is null or not a recognised system-user level
+     * @throws IllegalArgumentException if {@code cName} is {@code null} or has no matching constant
      */
-    public static TenantAccessRole fromAdminLevel(Integer adminLevel) {
-        if (adminLevel == null) {
-            throw new IllegalArgumentException("Unrecognised admin_level: null");
+    public static TenantAccessRole fromCName(String cName) {
+        if (cName == null) {
+            throw new IllegalArgumentException("Unrecognised user type c_name: null");
         }
-        return switch (adminLevel) {
-            case 1 -> SUPER_USER;
-            case 2 -> STATE_ADMIN;
-            default -> throw new IllegalArgumentException("Unrecognised admin_level: " + adminLevel);
-        };
+        // Normalize: trim, replace whitespace with underscore, uppercase — so "Super User" and "super_user" both match SUPER_USER
+        String normalized = cName.trim().replaceAll("\\s+", "_").toUpperCase(java.util.Locale.ROOT);
+        for (TenantAccessRole role : values()) {
+            if (role.name().equals(normalized)) {
+                return role;
+            }
+        }
+        throw new IllegalArgumentException("Unrecognised user type c_name: " + cName);
     }
 }

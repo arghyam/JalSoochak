@@ -124,6 +124,24 @@ class TenantAccessValidatorTest {
         }
 
         @Test
+        @DisplayName("SUPER_STATE_ADMIN can access ONBOARDED tenant")
+        void superStateAdminCanAccessOnboarded() {
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.ONBOARDED, TenantAccessRole.SUPER_STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN can access ACTIVE tenant")
+        void superStateAdminCanAccessActive() {
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.ACTIVE, TenantAccessRole.SUPER_STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN can access ARCHIVED tenant")
+        void superStateAdminCanAccessArchived() {
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.ARCHIVED, TenantAccessRole.SUPER_STATE_ADMIN));
+        }
+
+        @Test
         @DisplayName("STAFF role throws ForbiddenAccessException")
         void staffRoleThrowsForbiddenAccess() {
             ForbiddenAccessException exception = assertThrows(
@@ -389,6 +407,18 @@ class TenantAccessValidatorTest {
         @DisplayName("isAccessibleToSystemUser returns false for STAFF accessing ACTIVE")
         void isAccessibleToSystemUserStaffActive() {
             assertFalse(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.ACTIVE, TenantAccessRole.STAFF));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns true for SUPER_STATE_ADMIN accessing ACTIVE")
+        void isAccessibleToSystemUserSuperStateAdminActive() {
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.ACTIVE, TenantAccessRole.SUPER_STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns true for SUPER_STATE_ADMIN accessing ARCHIVED")
+        void isAccessibleToSystemUserSuperStateAdminArchived() {
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.ARCHIVED, TenantAccessRole.SUPER_STATE_ADMIN));
         }
     }
 }

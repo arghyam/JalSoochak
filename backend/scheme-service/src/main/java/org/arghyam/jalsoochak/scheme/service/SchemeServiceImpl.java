@@ -21,6 +21,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
+import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.scheme.repository.SchemeCreateRecord;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.arghyam.jalsoochak.scheme.repository.SchemeLgdMappingCreateRecord;
@@ -54,6 +55,7 @@ public class SchemeServiceImpl implements SchemeService {
 
     private static final int MAX_VALIDATION_ERRORS = 1000;
     private static final int CHUNK_SIZE = 1000;
+    private static final String SCHEME_TOPIC = "scheme-service-topic";
 
     // New upload contract:
     // - `center_scheme_id` (CSV) maps to DB `centre_scheme_id`
@@ -128,6 +130,7 @@ public class SchemeServiceImpl implements SchemeService {
 
     private final SchemeDbRepository schemeDbRepository;
     private final SchemeUploadChunkProcessor chunkProcessor;
+    private final KafkaProducer kafkaProducer;
 
     @Override
     public PageResponseDTO<SchemeDTO> listSchemes(
@@ -244,13 +247,14 @@ public class SchemeServiceImpl implements SchemeService {
     public SchemeUploadResponseDTO uploadSchemes(MultipartFile file) {
         String schemaName = requireTenantSchema();
         int actorUserId = resolveCurrentUserId(schemaName);
+        Integer tenantId = schemeDbRepository.findTenantIdByUserId(schemaName, actorUserId);
         validateFile(file);
 
         String extension = extractExtension(file.getOriginalFilename());
         List<String> activeHeaders = resolveHeaders(file, extension, List.of(SCHEME_HEADERS_V3, SCHEME_HEADERS_V3_LEGACY_CENTRE));
 
         int totalRows = validateSchemes(schemaName, file, extension, activeHeaders);
-        ProcessResult processed = processSchemes(schemaName, file, extension, activeHeaders, actorUserId);
+        ProcessResult processed = processSchemes(schemaName, file, extension, activeHeaders, actorUserId, tenantId);
         if (processed.uploadedRows() == 0 && processed.unchangedRows() == totalRows) {
             throw new FileValidationException("Duplicate upload", List.of(
                     error(0, "file", "No changes detected; uploaded file matches existing records")
@@ -268,13 +272,14 @@ public class SchemeServiceImpl implements SchemeService {
     public SchemeUploadResponseDTO uploadSchemeMappings(MultipartFile file) {
         String schemaName = requireTenantSchema();
         int actorUserId = resolveCurrentUserId(schemaName);
+        Integer tenantId = schemeDbRepository.findTenantIdByUserId(schemaName, actorUserId);
         validateFile(file);
 
         String extension = extractExtension(file.getOriginalFilename());
         List<String> activeHeaders = resolveHeaders(file, extension, List.of(MAPPING_HEADERS_V4));
 
         int totalRows = validateMappings(schemaName, file, extension, activeHeaders);
-        MappingProcessResult processed = processMappings(schemaName, file, extension, activeHeaders, actorUserId);
+        MappingProcessResult processed = processMappings(schemaName, file, extension, activeHeaders, actorUserId, tenantId);
         if (processed.uploadedRows() == 0 && processed.unchangedRows() == totalRows) {
             throw new FileValidationException("Duplicate upload", List.of(
                     error(0, "file", "No changes detected; uploaded file matches existing records")
@@ -500,7 +505,14 @@ public class SchemeServiceImpl implements SchemeService {
         return total[0];
     }
 
-    private ProcessResult processSchemes(String schemaName, MultipartFile file, String extension, List<String> activeHeaders, int actorUserId) {
+    private ProcessResult processSchemes(
+            String schemaName,
+            MultipartFile file,
+            String extension,
+            List<String> activeHeaders,
+            int actorUserId,
+            Integer tenantId
+    ) {
         List<SchemeCreateRecord> chunk = new ArrayList<>(CHUNK_SIZE);
         final int[] uploaded = {0};
         final int[] unchanged = {0};
@@ -548,7 +560,7 @@ public class SchemeServiceImpl implements SchemeService {
                 if (chunk.size() >= CHUNK_SIZE) {
                     // Upsert and clear.
                     // Use a copy so the chunk processor can safely retain the list if needed.
-                    UpsertResult result = upsertSchemesChunk(schemaName, new ArrayList<>(chunk), actorUserId);
+                    UpsertResult result = upsertSchemesChunk(schemaName, new ArrayList<>(chunk), actorUserId, tenantId);
                     uploaded[0] += result.uploaded();
                     unchanged[0] += result.unchanged();
                     chunk.clear();
@@ -562,14 +574,19 @@ public class SchemeServiceImpl implements SchemeService {
         }
 
         if (!chunk.isEmpty()) {
-            UpsertResult result = upsertSchemesChunk(schemaName, chunk, actorUserId);
+            UpsertResult result = upsertSchemesChunk(schemaName, chunk, actorUserId, tenantId);
             uploaded[0] += result.uploaded();
             unchanged[0] += result.unchanged();
         }
         return new ProcessResult(uploaded[0], unchanged[0]);
     }
 
-    private UpsertResult upsertSchemesChunk(String schemaName, List<SchemeCreateRecord> rows, int actorUserId) {
+    private UpsertResult upsertSchemesChunk(
+            String schemaName,
+            List<SchemeCreateRecord> rows,
+            int actorUserId,
+            Integer tenantId
+    ) {
         if (rows == null || rows.isEmpty()) {
             return new UpsertResult(0, 0);
         }
@@ -619,6 +636,16 @@ public class SchemeServiceImpl implements SchemeService {
         }
         if (!updates.isEmpty()) {
             uploaded += chunkProcessor.updateSchemesChunk(schemaName, updates);
+        }
+        if (uploaded > 0) {
+            List<String> changedStateSchemeIds = new ArrayList<>(inserts.size() + updates.size());
+            for (SchemeCreateRecord row : inserts) {
+                changedStateSchemeIds.add(row.stateSchemeId());
+            }
+            for (SchemeUpdateRecord row : updates) {
+                changedStateSchemeIds.add(row.stateSchemeId());
+            }
+            publishSchemeDimensionEvents(schemaName, tenantId, changedStateSchemeIds);
         }
         return new UpsertResult(uploaded, unchanged);
     }
@@ -748,7 +775,8 @@ public class SchemeServiceImpl implements SchemeService {
             MultipartFile file,
             String extension,
             List<String> activeHeaders,
-            int actorUserId
+            int actorUserId,
+            Integer tenantId
     ) {
         List<MappingRow> rows = new ArrayList<>(CHUNK_SIZE);
 
@@ -855,6 +883,13 @@ public class SchemeServiceImpl implements SchemeService {
             schemeDbRepository.clearSchemeMappingsForSchemes(schemaName, schemesToClear, actorUserId);
         }
         insertMappingsInChunks(schemaName, lgd, dept);
+        if (!schemesToClear.isEmpty()) {
+            List<SchemeDbRepository.SchemeAnalyticsRow> updatedSchemes =
+                    schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, new ArrayList<>(rowsByScheme.keySet()));
+            if (!updatedSchemes.isEmpty()) {
+                publishSchemeDimensionEventsFromRows(tenantId, updatedSchemes);
+            }
+        }
 
         return new MappingProcessResult(uploaded, unchanged);
     }
@@ -879,6 +914,62 @@ public class SchemeServiceImpl implements SchemeService {
             if (!lgdChunk.isEmpty() || !deptChunk.isEmpty()) {
                 chunkProcessor.insertMappingsChunk(schemaName, lgdChunk, deptChunk);
             }
+        }
+    }
+
+    private void publishSchemeDimensionEvents(String schemaName, Integer tenantId, List<String> stateSchemeIds) {
+        if (tenantId == null || stateSchemeIds == null || stateSchemeIds.isEmpty()) {
+            return;
+        }
+        List<SchemeDbRepository.SchemeAnalyticsRow> rows =
+                schemeDbRepository.findSchemeAnalyticsRowsByStateSchemeIds(schemaName, stateSchemeIds);
+        publishSchemeDimensionEventsFromRows(tenantId, rows);
+    }
+
+    private void publishSchemeDimensionEventsFromRows(Integer tenantId, List<SchemeDbRepository.SchemeAnalyticsRow> rows) {
+        if (tenantId == null || rows == null || rows.isEmpty()) {
+            return;
+        }
+        for (SchemeDbRepository.SchemeAnalyticsRow row : rows) {
+            Integer parentLgd = row.parentLgdId() != null ? row.parentLgdId() : 0;
+            Integer parentDept = row.parentDepartmentId();
+            int deptLevelFallback = parentDept != null ? parentDept : 0;
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("eventType", "SCHEME_UPDATED");
+            payload.put("schemeId", row.schemeId());
+            payload.put("tenantId", tenantId);
+            payload.put("schemeName", row.schemeName());
+            payload.put("stateSchemeId", safeParseInt(row.stateSchemeId()));
+            payload.put("centreSchemeId", safeParseInt(row.centreSchemeId()));
+            payload.put("longitude", row.longitude());
+            payload.put("latitude", row.latitude());
+            payload.put("parentLgdLocationId", parentLgd);
+            payload.put("level1LgdId", parentLgd);
+            payload.put("level2LgdId", parentLgd);
+            payload.put("level3LgdId", parentLgd);
+            payload.put("level4LgdId", parentLgd);
+            payload.put("level5LgdId", parentLgd);
+            payload.put("level6LgdId", parentLgd);
+            payload.put("parentDepartmentLocationId", parentDept);
+            payload.put("level1DeptId", deptLevelFallback);
+            payload.put("level2DeptId", deptLevelFallback);
+            payload.put("level3DeptId", deptLevelFallback);
+            payload.put("level4DeptId", deptLevelFallback);
+            payload.put("level5DeptId", deptLevelFallback);
+            payload.put("level6DeptId", deptLevelFallback);
+            payload.put("status", row.operatingStatus());
+            kafkaProducer.publishJson(SCHEME_TOPIC, payload);
+        }
+    }
+
+    private Integer safeParseInt(String value) {
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ex) {
+            return 0;
         }
     }
 

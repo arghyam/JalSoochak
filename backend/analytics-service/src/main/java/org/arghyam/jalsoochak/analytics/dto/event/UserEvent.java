@@ -17,4 +17,6 @@ public class UserEvent {
     private String email;
     private Integer userType;
     private UUID uuid;
+    private String title;
+    private Integer status;
 }

@@ -9,9 +9,11 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AnalyticsControllerHelperTest {
@@ -96,6 +98,53 @@ class AnalyticsControllerHelperTest {
 
         assertEquals("Authenticated user UUID is required", missingSubject.getMessage());
         assertEquals("Authenticated user UUID is invalid", invalidSubject.getMessage());
+    }
+
+    @Test
+    void extractAuthenticatedUserRef_prefersNumericUserIdClaim() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject("not-a-uuid")
+                .claim("user_id", 77)
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+
+        AnalyticsControllerHelper.AuthenticatedUserRef ref =
+                AnalyticsControllerHelper.extractAuthenticatedUserRef(new JwtAuthenticationToken(jwt));
+
+        assertEquals(77, ref.userId());
+        assertNull(ref.userUuid());
+        assertNull(ref.tenantId());
+    }
+
+    @Test
+    void extractAuthenticatedUserRef_acceptsNumericSubject() {
+        AnalyticsControllerHelper.AuthenticatedUserRef ref =
+                AnalyticsControllerHelper.extractAuthenticatedUserRef(buildAuthentication("42"));
+
+        assertEquals(42, ref.userId());
+        assertNull(ref.userUuid());
+        assertNull(ref.tenantId());
+    }
+
+    @Test
+    void extractAuthenticatedUserRef_fallsBackToUuidClaim() {
+        String uuid = "22222222-2222-2222-2222-222222222222";
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject("not-a-uuid")
+                .claims(claims -> claims.putAll(Map.of("uuid", uuid)))
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+
+        AnalyticsControllerHelper.AuthenticatedUserRef ref =
+                AnalyticsControllerHelper.extractAuthenticatedUserRef(new JwtAuthenticationToken(jwt));
+
+        assertNull(ref.userId());
+        assertEquals(UUID.fromString(uuid), ref.userUuid());
+        assertNull(ref.tenantId());
     }
 
     private static JwtAuthenticationToken buildAuthentication(String subject) {

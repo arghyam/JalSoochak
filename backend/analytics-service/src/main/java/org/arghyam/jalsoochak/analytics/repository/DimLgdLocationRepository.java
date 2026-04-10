@@ -15,4 +15,6 @@ public interface DimLgdLocationRepository extends JpaRepository<DimLgdLocation, 
     List<DimLgdLocation> findByLgdLevel(Integer lgdLevel);
 
     Optional<DimLgdLocation> findFirstByTenantIdAndLgdLevelOrderByLgdIdAsc(Integer tenantId, Integer lgdLevel);
+
+    List<DimLgdLocation> findByTenantIdAndLgdLevel(Integer tenantId, Integer lgdLevel);
 }

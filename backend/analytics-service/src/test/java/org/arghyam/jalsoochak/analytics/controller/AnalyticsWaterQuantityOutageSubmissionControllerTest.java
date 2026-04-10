@@ -10,6 +10,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.UserOutageReasonSchemeCount
 import org.arghyam.jalsoochak.analytics.dto.response.UserSubmissionStatusResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
+import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -48,6 +50,7 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
 
     private static final String BASE = "/api/v1/analytics";
     private static final UUID USER_UUID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    private static final int TENANT_ID = 12;
     private static final LocalDate START = LocalDate.of(2026, 1, 1);
     private static final LocalDate END = LocalDate.of(2026, 1, 31);
 
@@ -57,18 +60,22 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     @MockBean
     private SchemeRegularityService schemeRegularityService;
 
+    @MockBean
+    private AuthenticatedRequestContextService authenticatedRequestContextService;
+
     @ParameterizedTest
     @MethodSource("regionWiseValidRoutes")
     void getWaterQuantityRegionWise_validRoutes(String paramName, String paramValue, boolean lgdRoute) throws Exception {
         if (lgdRoute) {
-            when(schemeRegularityService.getRegionWiseWaterQuantityByLgd(Integer.parseInt(paramValue), START, END))
+            when(schemeRegularityService.getRegionWiseWaterQuantityByLgd(TENANT_ID, Integer.parseInt(paramValue), START, END))
                     .thenReturn(regionWiseWaterQuantityResponse());
         } else {
-            when(schemeRegularityService.getRegionWiseWaterQuantityByDepartment(Integer.parseInt(paramValue), START, END))
+            when(schemeRegularityService.getRegionWiseWaterQuantityByDepartment(TENANT_ID, Integer.parseInt(paramValue), START, END))
                     .thenReturn(regionWiseWaterQuantityResponse());
         }
 
         mockMvc.perform(get(BASE + "/water-quantity/region-wise")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param(paramName, paramValue))
@@ -78,16 +85,17 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
 
         if (lgdRoute) {
             verify(schemeRegularityService, times(1))
-                    .getRegionWiseWaterQuantityByLgd(Integer.parseInt(paramValue), START, END);
+                    .getRegionWiseWaterQuantityByLgd(TENANT_ID, Integer.parseInt(paramValue), START, END);
         } else {
             verify(schemeRegularityService, times(1))
-                    .getRegionWiseWaterQuantityByDepartment(Integer.parseInt(paramValue), START, END);
+                    .getRegionWiseWaterQuantityByDepartment(TENANT_ID, Integer.parseInt(paramValue), START, END);
         }
     }
 
     @Test
     void getWaterQuantityRegionWise_withBothParentIds_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/water-quantity/region-wise")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
@@ -100,11 +108,21 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     @Test
     void getWaterQuantityRegionWise_withNoParentId_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/water-quantity/region-wise")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getWaterQuantityRegionWise_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/water-quantity/region-wise")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isBadRequest());
     }
 
     @ParameterizedTest
@@ -170,25 +188,35 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     @MethodSource("outageValidRoutes")
     void getOutageReasons_validRoutes(String paramName, String paramValue, boolean lgdRoute) throws Exception {
         if (lgdRoute) {
-            when(schemeRegularityService.getOutageReasonSchemeCountByLgd(Integer.parseInt(paramValue), START, END))
+            when(schemeRegularityService.getOutageReasonSchemeCountByLgd(TENANT_ID, Integer.parseInt(paramValue), START, END))
                     .thenReturn(outageReasonResponse());
         } else {
-            when(schemeRegularityService.getOutageReasonSchemeCountByDepartment(Integer.parseInt(paramValue), START, END))
+            when(schemeRegularityService.getOutageReasonSchemeCountByDepartment(TENANT_ID, Integer.parseInt(paramValue), START, END))
                     .thenReturn(outageReasonResponse());
         }
 
         mockMvc.perform(get(BASE + "/outage-reasons")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param(paramName, paramValue))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").exists());
+
+        if (lgdRoute) {
+            verify(schemeRegularityService, times(1))
+                    .getOutageReasonSchemeCountByLgd(TENANT_ID, Integer.parseInt(paramValue), START, END);
+        } else {
+            verify(schemeRegularityService, times(1))
+                    .getOutageReasonSchemeCountByDepartment(TENANT_ID, Integer.parseInt(paramValue), START, END);
+        }
     }
 
     @Test
     void getOutageReasons_withBothIds_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/outage-reasons")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
@@ -201,6 +229,7 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     @Test
     void getOutageReasons_withNoId_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/outage-reasons")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString()))
                 .andExpect(status().isBadRequest())
@@ -209,8 +238,19 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     }
 
     @Test
+    void getOutageReasons_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/outage-reasons")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void getOutageReasonsByUser_validRequest_routesToUserService() throws Exception {
-        when(schemeRegularityService.getOutageReasonSchemeCountByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getOutageReasonSchemeCountByUserUuid(12, USER_UUID, START, END))
                 .thenReturn(userOutageReasonResponse());
 
         mockMvc.perform(get(BASE + "/outage-reasons/user")
@@ -221,32 +261,60 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUserUuid(USER_UUID, START, END);
+        verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUserUuid(12, USER_UUID, START, END);
+    }
+
+    @Test
+    void getOutageReasonsByUser_withNumericUserIdClaim_routesToUserIdService() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(11, null, 12));
+        when(schemeRegularityService.getOutageReasonSchemeCountByUser(12, 11, START, END))
+                .thenReturn(userOutageReasonResponse());
+
+        mockMvc.perform(get(BASE + "/outage-reasons/user")
+                        .principal(buildJwtAuthenticationWithUserIdClaim())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.userId").value(11));
+
+        verify(schemeRegularityService, times(1)).getOutageReasonSchemeCountByUser(12, 11, START, END);
     }
 
     @ParameterizedTest
     @MethodSource("nonSubmissionValidRoutes")
     void getNonSubmissionReasons_validRoutes(String paramName, String paramValue, boolean lgdRoute) throws Exception {
         if (lgdRoute) {
-            when(schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(Integer.parseInt(paramValue), START, END))
+            when(schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(TENANT_ID, Integer.parseInt(paramValue), START, END))
                     .thenReturn(nonSubmissionReasonResponse());
         } else {
-            when(schemeRegularityService.getNonSubmissionReasonSchemeCountByDepartment(Integer.parseInt(paramValue), START, END))
+            when(schemeRegularityService.getNonSubmissionReasonSchemeCountByDepartment(TENANT_ID, Integer.parseInt(paramValue), START, END))
                     .thenReturn(nonSubmissionReasonResponse());
         }
 
         mockMvc.perform(get(BASE + "/non-submission-reasons")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param(paramName, paramValue))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").exists());
+
+        if (lgdRoute) {
+            verify(schemeRegularityService, times(1))
+                    .getNonSubmissionReasonSchemeCountByLgd(TENANT_ID, Integer.parseInt(paramValue), START, END);
+        } else {
+            verify(schemeRegularityService, times(1))
+                    .getNonSubmissionReasonSchemeCountByDepartment(TENANT_ID, Integer.parseInt(paramValue), START, END);
+        }
     }
 
     @Test
     void getNonSubmissionReasons_withBothIds_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/non-submission-reasons")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
@@ -259,6 +327,7 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     @Test
     void getNonSubmissionReasons_withNoId_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/non-submission-reasons")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString()))
                 .andExpect(status().isBadRequest())
@@ -267,8 +336,19 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     }
 
     @Test
+    void getNonSubmissionReasons_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/non-submission-reasons")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void getNonSubmissionReasonsByUser_validRequest_routesToUserService() throws Exception {
-        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(12, USER_UUID, START, END))
                 .thenReturn(userNonSubmissionReasonResponse());
 
         mockMvc.perform(get(BASE + "/non-submission-reasons/user")
@@ -279,12 +359,32 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getNonSubmissionReasonSchemeCountByUserUuid(USER_UUID, START, END);
+        verify(schemeRegularityService, times(1)).getNonSubmissionReasonSchemeCountByUserUuid(12, USER_UUID, START, END);
+    }
+
+    @Test
+    void getNonSubmissionReasonsByUser_withNumericSubject_routesToUserIdService() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(11, null, 12));
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUser(12, 11, START, END))
+                .thenReturn(userNonSubmissionReasonResponse());
+
+        mockMvc.perform(get(BASE + "/non-submission-reasons/user")
+                        .principal(buildJwtAuthenticationWithNumericSubject())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.userId").value(11));
+
+        verify(schemeRegularityService, times(1)).getNonSubmissionReasonSchemeCountByUser(12, 11, START, END);
     }
 
     @Test
     void getSubmissionStatusByUser_validRequest_routesToUserService() throws Exception {
-        when(schemeRegularityService.getSubmissionStatusByUserUuid(USER_UUID, START, END))
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getSubmissionStatusByUserUuid(12, USER_UUID, START, END))
                 .thenReturn(userSubmissionStatusResponse());
 
         mockMvc.perform(get(BASE + "/submission-status/user")
@@ -295,12 +395,75 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(11));
 
-        verify(schemeRegularityService, times(1)).getSubmissionStatusByUserUuid(USER_UUID, START, END);
+        verify(schemeRegularityService, times(1)).getSubmissionStatusByUserUuid(12, USER_UUID, START, END);
+    }
+
+    @Test
+    void getSubmissionStatusByUser_withNumericSubject_routesToUserIdService() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(11, null, 12));
+        when(schemeRegularityService.getSubmissionStatusByUser(12, 11, START, END))
+                .thenReturn(userSubmissionStatusResponse());
+
+        mockMvc.perform(get(BASE + "/submission-status/user")
+                        .principal(buildJwtAuthenticationWithNumericSubject())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.userId").value(11));
+
+        verify(schemeRegularityService, times(1)).getSubmissionStatusByUser(12, 11, START, END);
+    }
+
+    @Test
+    void getOutageReasonsByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getOutageReasonSchemeCountByUserUuid(12, USER_UUID, START, END))
+                .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
+
+        mockMvc.perform(get(BASE + "/outage-reasons/user")
+                        .principal(buildJwtAuthentication())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("No user found for uuid: " + USER_UUID));
+    }
+
+    @Test
+    void getNonSubmissionReasonsByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByUserUuid(12, USER_UUID, START, END))
+                .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
+
+        mockMvc.perform(get(BASE + "/non-submission-reasons/user")
+                        .principal(buildJwtAuthentication())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("No user found for uuid: " + USER_UUID));
+    }
+
+    @Test
+    void getSubmissionStatusByUser_whenServiceThrowsIllegalArgument_returnsBadRequestWithMessage() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new AnalyticsControllerHelper.AuthenticatedUserRef(null, USER_UUID, 12));
+        when(schemeRegularityService.getSubmissionStatusByUserUuid(12, USER_UUID, START, END))
+                .thenThrow(new IllegalArgumentException("No user found for uuid: " + USER_UUID));
+
+        mockMvc.perform(get(BASE + "/submission-status/user")
+                        .principal(buildJwtAuthentication())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("No user found for uuid: " + USER_UUID));
     }
 
     @Test
     void getSubmissionStatusSummary_withLgdId_routesToLgdService() throws Exception {
-        when(schemeRegularityService.getSubmissionStatusSummaryByLgd(100, START, END))
+        when(schemeRegularityService.getSubmissionStatusSummaryByLgd(TENANT_ID, 100, START, END))
                 .thenReturn(SubmissionStatusSummaryResponse.builder()
                         .schemeCount(2)
                         .compliantSubmissionCount(5)
@@ -308,6 +471,7 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/submission-status")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("lgd_id", "100"))
@@ -317,12 +481,12 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(jsonPath("$.data.compliantSubmissionCount").value(5))
                 .andExpect(jsonPath("$.data.anomalousSubmissionCount").value(0));
 
-        verify(schemeRegularityService, times(1)).getSubmissionStatusSummaryByLgd(100, START, END);
+        verify(schemeRegularityService, times(1)).getSubmissionStatusSummaryByLgd(TENANT_ID, 100, START, END);
     }
 
     @Test
     void getSubmissionStatusSummary_withDepartmentId_routesToDepartmentService() throws Exception {
-        when(schemeRegularityService.getSubmissionStatusSummaryByDepartment(200, START, END))
+        when(schemeRegularityService.getSubmissionStatusSummaryByDepartment(TENANT_ID, 200, START, END))
                 .thenReturn(SubmissionStatusSummaryResponse.builder()
                         .schemeCount(2)
                         .compliantSubmissionCount(5)
@@ -330,18 +494,20 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/submission-status")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("department_id", "200"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
-        verify(schemeRegularityService, times(1)).getSubmissionStatusSummaryByDepartment(200, START, END);
+        verify(schemeRegularityService, times(1)).getSubmissionStatusSummaryByDepartment(TENANT_ID, 200, START, END);
     }
 
     @Test
     void getSubmissionStatusSummary_withBothIds_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/submission-status")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("lgd_id", "100")
@@ -354,11 +520,21 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
     @Test
     void getSubmissionStatusSummary_withNoScopeId_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/submission-status")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getSubmissionStatusSummary_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/submission-status")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("lgd_id", "100"))
+                .andExpect(status().isBadRequest());
     }
 
     private static Stream<Arguments> regionWiseValidRoutes() {
@@ -400,7 +576,28 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(3600))
                 .build();
-        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_SUPER_USER")));
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
+    }
+
+    private static JwtAuthenticationToken buildJwtAuthenticationWithNumericSubject() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject("11")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
+    }
+
+    private static JwtAuthenticationToken buildJwtAuthenticationWithUserIdClaim() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject("not-a-uuid")
+                .claim("user_id", 11)
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .build();
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
     }
 
     private static RegionWiseWaterQuantityResponse regionWiseWaterQuantityResponse() {
@@ -480,4 +677,3 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .build();
     }
 }
-

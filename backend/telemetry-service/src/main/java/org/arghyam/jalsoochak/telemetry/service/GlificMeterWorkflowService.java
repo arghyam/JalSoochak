@@ -18,6 +18,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.springframework.stereotype.Service;
 
@@ -807,29 +808,15 @@ public class GlificMeterWorkflowService {
                     resolvedIssueReason
             );
             int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
-            telemetryTenantRepository.createTenantAnomalyRecord(
-                    operatorWithSchema.schemaName(),
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    anomalyType,
-                    resolvedIssueReason,
-                    AnomalyConstants.STATUS_OPEN
-            );
-            telemetryEventPublisher.publishAnomalyRecorded(
+            telemetryEventPublisher.publishEscalationCreated(
                     tenantId,
-                    anomalyType,
-                    operatorWithSchema.operator().id(),
                     schemeId,
-                    null,
-                    null,
-                    null,
-                    0,
-                    null,
-                    null,
-                    0,
+                    operatorWithSchema.operator().id(),
+                    anomalyType,
                     resolvedIssueReason,
+                    correlationId,
                     AnomalyConstants.STATUS_OPEN,
-                    correlationId
+                    null
             );
             telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                     tenantId,
@@ -983,7 +970,16 @@ public class GlificMeterWorkflowService {
             String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
 
             Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
+                    .findLatestPendingSchemeSelectionForDate(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id(),
+                            LocalDate.now()
+                    )
+                    .map(TelemetrySchemeSelectionRecord::schemeId)
+                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id()
+                    ))
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             Optional<TelemetryPendingMeterChangeRecord> pendingOpt = telemetryTenantRepository.findLatestPendingMeterChangeRecord(

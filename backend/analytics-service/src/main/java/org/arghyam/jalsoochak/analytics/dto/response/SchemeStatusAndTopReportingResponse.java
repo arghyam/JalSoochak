@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -21,6 +22,8 @@ public class SchemeStatusAndTopReportingResponse {
     private String parentDepartmentCName;
     private String parentLgdTitle;
     private String parentDepartmentTitle;
+    private Integer parentLgdLevel;
+    private Integer parentDepartmentLevel;
     private LocalDate startDate;
     private LocalDate endDate;
     private Integer daysInRange;
@@ -44,8 +47,12 @@ public class SchemeStatusAndTopReportingResponse {
         private Integer immediateParentLgdId;
         private String immediateParentLgdCName;
         private String immediateParentLgdTitle;
+        private Integer immediateParentLgdLevel;
         private Integer immediateParentDepartmentId;
         private String immediateParentDepartmentCName;
         private String immediateParentDepartmentTitle;
+        private Integer immediateParentDepartmentLevel;
+        private Map<String, Integer> lgdLadder;
+        private Map<String, Integer> departmentLadder;
     }
 }

@@ -56,7 +56,7 @@ public class TenantAccessValidator {
      * @throws ForbiddenAccessException if role is null, STAFF, or if the tenant status does not permit access
      */
     public static void validateSystemUserAccess(TenantStatusEnum tenantStatus, TenantAccessRole role) {
-        if (role == null || (role != TenantAccessRole.SUPER_USER && role != TenantAccessRole.STATE_ADMIN)) {
+        if (role == null || (!role.isSuperUserEquivalent() && !role.isStateAdminEquivalent())) {
             throw new ForbiddenAccessException("Access denied: invalid user role.");
         }
         if (tenantStatus == TenantStatusEnum.ARCHIVED && role == TenantAccessRole.STATE_ADMIN) {
@@ -137,18 +137,18 @@ public class TenantAccessValidator {
      */
     public static boolean isAccessibleToSystemUser(TenantStatusEnum tenantStatus, TenantAccessRole role) {
         // Validate role is a system user role (explicit allowlist)
-        if (role == null || (role != TenantAccessRole.SUPER_USER && role != TenantAccessRole.STATE_ADMIN)) {
+        if (role == null || (!role.isSuperUserEquivalent() && !role.isStateAdminEquivalent())) {
             return false;
         }
-        
+
         // Validate tenant status is one of the allowed values
         if (tenantStatus == null) {
             return false;
         }
-        
-        // ARCHIVED is only accessible to SUPER_USER
+
+        // ARCHIVED is only accessible to SUPER_USER-equivalent roles
         if (tenantStatus == TenantStatusEnum.ARCHIVED) {
-            return role == TenantAccessRole.SUPER_USER;
+            return role.isSuperUserEquivalent();
         }
         
         // All other valid statuses are accessible to SUPER_USER and STATE_ADMIN

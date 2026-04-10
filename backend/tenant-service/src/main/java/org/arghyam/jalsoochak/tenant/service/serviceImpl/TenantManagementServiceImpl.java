@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -17,19 +16,23 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import org.arghyam.jalsoochak.tenant.config.TenantDefaultsProperties;
+import org.springframework.dao.DataIntegrityViolationException;
+
+import org.arghyam.jalsoochak.tenant.config.properties.AppProperties;
+import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
-import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
-import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
+import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
@@ -47,19 +50,21 @@ import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum.ConfigType;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.event.TenantCreatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantDeactivatedEvent;
+import org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.ConfigurationException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigKeyException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
 import org.arghyam.jalsoochak.tenant.exception.StorageException;
-import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
-import org.springframework.web.multipart.MultipartFile;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
+import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
 import org.springframework.context.ApplicationEventPublisher;
@@ -67,6 +72,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -83,21 +89,32 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final TenantCommonRepository tenantCommonRepository;
     private final TenantSchemaRepository tenantSchemaRepository;
     private final ObjectMapper objectMapper;
+    private final AppProperties appProperties;
     private final TenantDefaultsProperties tenantDefaults;
     private final ApplicationEventPublisher eventPublisher;
     private final TenantSchedulerManager schedulerManager;
     private final ObjectStorageService objectStorageService;
     private final SystemManagementService systemManagementService;
 
-
-    // TODO: Re-enable "image/svg+xml" only after implementing SVG sanitization and serving from an isolated origin.
-    private static final Map<String, String> ALLOWED_LOGO_TYPES =
-            Map.of("image/png", "png", "image/jpeg", "jpg", "image/webp", "webp");
+    // TODO: Re-enable "image/svg+xml" only after implementing SVG sanitization and
+    // serving from an isolated origin.
+    private static final Map<String, String> ALLOWED_LOGO_TYPES = Map.of("image/png", "png", "image/jpeg", "jpg",
+            "image/webp", "webp");
 
     @Override
     @Transactional
     public TenantResponseDTO createTenant(CreateTenantRequestDTO request) {
         log.info("Creating tenant – stateCode: {}, name: {}", request.getStateCode(), request.getName());
+
+        // Single Tenant Mode: fast-fail before insert. DataIntegrityViolationException is caught
+        // below to convert any concurrent-insert race into a clear error.
+        if (appProperties.isSingleTenantMode()) {
+            int count = tenantCommonRepository.countNonDeletedTenants();
+            if (count > 0) {
+                throw new IllegalStateException(
+                        "A tenant already exists. Only one tenant is allowed in Single Tenant Mode.");
+            }
+        }
 
         tenantCommonRepository.findByStateCode(request.getStateCode()).ifPresent(existing -> {
             throw new IllegalStateException(
@@ -106,8 +123,18 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         Integer currentUserId = resolveCurrentUserId();
 
-        TenantResponseDTO tenant = tenantCommonRepository.createTenant(request, currentUserId)
-                .orElseThrow(() -> new RuntimeException("Tenant creation failed – no record returned"));
+        TenantResponseDTO tenant;
+        try {
+            tenant = tenantCommonRepository.createTenant(request, currentUserId)
+                    .orElseThrow(() -> new RuntimeException("Tenant creation failed – no record returned"));
+        } catch (DataIntegrityViolationException e) {
+            if (appProperties.isSingleTenantMode()) {
+                throw new IllegalStateException(
+                        "A tenant already exists. Only one tenant is allowed in Single Tenant Mode.", e);
+            }
+            throw new IllegalStateException(
+                    "Tenant with state code '" + request.getStateCode() + "' already exists", e);
+        }
         log.info("Tenant record created in common_schema with id: {}", tenant.getId());
 
         String schemaName = "tenant_" + request.getStateCode().toLowerCase();
@@ -165,7 +192,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     }
 
     @Override
-    public PageResponseDTO<TenantResponseDTO> getAllTenants(int page, int size, TenantStatusEnum status, String search) {
+    public PageResponseDTO<TenantResponseDTO> getAllTenants(int page, int size, TenantStatusEnum status,
+            String search) {
         String normalizedSearch = (search == null || search.isBlank()) ? null : search.trim();
         long offset = (long) page * size;
         List<TenantResponseDTO> tenants = tenantCommonRepository.findAll(size, offset, status, normalizedSearch);
@@ -220,9 +248,11 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         }
 
         if (configMap.containsKey(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS)) {
-            ChannelListConfigDTO stored = (ChannelListConfigDTO) configMap.get(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS);
+            ChannelListConfigDTO stored = (ChannelListConfigDTO) configMap
+                    .get(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS);
             if (stored == null || stored.getChannels() == null) {
-                throw new InvalidConfigValueException("Stored TENANT_SUPPORTED_CHANNELS config is missing channels field");
+                throw new InvalidConfigValueException(
+                        "Stored TENANT_SUPPORTED_CHANNELS config is missing channels field");
             }
             Set<String> systemChannels = new HashSet<>(fetchSystemSupportedChannels());
             List<String> effective = stored.getChannels().stream()
@@ -346,6 +376,55 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         }
 
+        // Auto-transition ONBOARDED → CONFIGURED once all mandatory keys are present
+        TenantStatusEnum currentStatus = TenantStatusEnum.valueOf(tenant.getStatus());
+        if (currentStatus == TenantStatusEnum.ONBOARDED) {
+            EnumSet<TenantConfigKeyEnum> mandatoryKeys = TenantConfigKeyEnum.getMandatoryKeys();
+            Set<TenantConfigKeyEnum> configuredKeys = fetchConfiguredKeys(tenantId, tenant.getStateCode());
+            if (configuredKeys.containsAll(mandatoryKeys)) {
+                tenantCommonRepository.updateTenantStatus(tenantId, TenantStatusEnum.CONFIGURED, currentUserId);
+                log.info("Tenant [id={}] auto-transitioned to CONFIGURED status", tenantId);
+            }
+        }
+
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.WATER_NORM)) {
+            SimpleConfigValueDTO dto = (SimpleConfigValueDTO) results.get(TenantConfigKeyEnum.WATER_NORM);
+            try {
+                int waterNorm = Integer.parseInt(dto.getValue());
+                eventPublisher.publishEvent(new WaterNormUpdatedEvent(tenantId, tenant.getStateCode(), waterNorm));
+            } catch (NumberFormatException e) {
+                log.error("Invalid WATER_NORM value '{}' for tenantId={}, stateCode={} — skipping event publish",
+                        dto.getValue(), tenantId, tenant.getStateCode());
+            }
+        }
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD)) {
+            WaterSupplyThresholdConfigDTO dto = (WaterSupplyThresholdConfigDTO) results
+                    .get(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD);
+            if (dto == null) {
+                log.error("TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD config resolved to null for tenantId={} — skipping event publish", tenantId);
+            } else {
+                Double undersupplyRaw = dto.getUndersupplyThresholdPercent();
+                Double oversupplyRaw = dto.getOversupplyThresholdPercent();
+                if (undersupplyRaw == null || oversupplyRaw == null) {
+                    log.error("TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD has null value — undersupply='{}', oversupply='{}' for tenantId={}, stateCode={} — skipping event publish",
+                            undersupplyRaw, oversupplyRaw, tenantId, tenant.getStateCode());
+                } else {
+                    try {
+                        int undersupplyThreshold = undersupplyRaw.intValue();
+                        int oversupplyThreshold = oversupplyRaw.intValue();
+                        eventPublisher.publishEvent(new WaterSupplyThresholdUpdatedEvent(
+                                tenantId,
+                                tenant.getStateCode(),
+                                undersupplyThreshold,
+                                oversupplyThreshold));
+                    } catch (Exception e) {
+                        log.error("Invalid TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD values '{}', '{}' for tenantId={}, stateCode={} — skipping event publish",
+                                undersupplyRaw, oversupplyRaw, tenantId, tenant.getStateCode(), e);
+                    }
+                }
+            }
+        }
+
         return TenantConfigResponseDTO.builder()
                 .tenantId(tenantId)
                 .configs(results)
@@ -361,30 +440,19 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Tenant with tenantId " + tenantId + " does not exist"));
 
-        // Collect configured GENERIC keys from DB
-        Set<String> configuredKeys = tenantCommonRepository.findConfigsByTenantId(tenantId)
-                .stream()
-                .map(ConfigDTO::getConfigKey)
-                .collect(Collectors.toSet());
-
-        // Check SPECIALIZED key: SUPPORTED_LANGUAGES
-        String schemaName = "tenant_" + tenant.getStateCode().toLowerCase();
-        List<LanguageConfigDTO> langs = tenantSchemaRepository.getSupportedLanguages(schemaName);
-        boolean languagesConfigured = langs != null && !langs.isEmpty();
+        Set<TenantConfigKeyEnum> configuredKeys = fetchConfiguredKeys(tenantId, tenant.getStateCode());
 
         Map<TenantConfigKeyEnum, TenantConfigStatusResponseDTO.ConfigEntry> configs = new LinkedHashMap<>();
         int configuredCount = 0;
 
         for (TenantConfigKeyEnum key : TenantConfigKeyEnum.values()) {
-            boolean configured = key.getType() == TenantConfigKeyEnum.ConfigType.SPECIALIZED
-                    ? languagesConfigured
-                    : configuredKeys.contains(key.name());
-
+            boolean configured = configuredKeys.contains(key);
             configs.put(key, TenantConfigStatusResponseDTO.ConfigEntry.builder()
                     .status(configured ? ConfigStatusEnum.CONFIGURED : ConfigStatusEnum.PENDING)
+                    .mandatory(key.isMandatory())
                     .build());
-
-            if (configured) configuredCount++;
+            if (configured)
+                configuredCount++;
         }
 
         int total = TenantConfigKeyEnum.values().length;
@@ -397,6 +465,32 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                         .build())
                 .configs(configs)
                 .build();
+    }
+
+    /**
+     * Returns the set of {@link TenantConfigKeyEnum} values that have been
+     * configured
+     * for the given tenant, covering both GENERIC (KV store) and SPECIALIZED keys.
+     */
+    private Set<TenantConfigKeyEnum> fetchConfiguredKeys(Integer tenantId, String stateCode) {
+        Set<String> genericConfiguredKeyNames = tenantCommonRepository.findConfigsByTenantId(tenantId)
+                .stream()
+                .map(ConfigDTO::getConfigKey)
+                .collect(Collectors.toSet());
+
+        String schemaName = "tenant_" + stateCode.toLowerCase();
+        List<LanguageConfigDTO> langs = tenantSchemaRepository.getSupportedLanguages(schemaName);
+        boolean languagesConfigured = langs != null && !langs.isEmpty();
+
+        Set<TenantConfigKeyEnum> configured = EnumSet.noneOf(TenantConfigKeyEnum.class);
+        for (TenantConfigKeyEnum key : TenantConfigKeyEnum.values()) {
+            boolean isConfigured = key.getType() == ConfigType.SPECIALIZED
+                    ? languagesConfigured
+                    : genericConfiguredKeyNames.contains(key.name());
+            if (isConfigured)
+                configured.add(key);
+        }
+        return configured;
     }
 
     private void handleSpecializedConfig(String schemaName, TenantConfigKeyEnum key, ConfigValueDTO dto,
@@ -414,7 +508,6 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         }
     }
 
-
     @Override
     public LocationHierarchyResponseDTO getLocationHierarchy(Integer tenantId, String hierarchyType) {
         log.info("Fetching location hierarchy [id={}, hierarchyType={}]", tenantId, hierarchyType);
@@ -429,27 +522,30 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         try {
             RegionTypeEnum regionType = RegionTypeEnum.valueOf(hierarchyType.toUpperCase());
             LocationConfigDTO hierarchyConfig = tenantSchemaRepository.getLocationHierarchy(schemaName, regionType);
-            
+
             if (hierarchyConfig == null || hierarchyConfig.getLocationHierarchy() == null) {
                 throw new ResourceNotFoundException(
-                        "Hierarchy configuration not found for type: " + hierarchyType + " in tenant [id=" + tenantId + "]");
+                        "Hierarchy configuration not found for type: " + hierarchyType + " in tenant [id=" + tenantId
+                                + "]");
             }
 
             log.info("Location hierarchy retrieved successfully [id={}, hierarchyType={}]", tenantId, hierarchyType);
-            
+
             return LocationHierarchyResponseDTO.builder()
                     .hierarchyType(hierarchyType)
                     .levels(hierarchyConfig.getLocationHierarchy())
                     .build();
         } catch (IllegalArgumentException e) {
             log.error("Invalid hierarchy type [id={}, hierarchyType={}]", tenantId, hierarchyType, e);
-            throw new IllegalArgumentException("Invalid hierarchy type: " + hierarchyType + ". Valid values: LGD, DEPARTMENT", e);
+            throw new IllegalArgumentException(
+                    "Invalid hierarchy type: " + hierarchyType + ". Valid values: LGD, DEPARTMENT", e);
         }
     }
 
     @Override
     public List<LocationResponseDTO> getLocationChildren(Integer tenantId, String hierarchyType, Integer parentId) {
-        log.info("Fetching location children [id={}, hierarchyType={}, parentId={}]", tenantId, hierarchyType, parentId);
+        log.info("Fetching location children [id={}, hierarchyType={}, parentId={}]", tenantId, hierarchyType,
+                parentId);
         validateNotSystemTenant(tenantId);
 
         TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
@@ -460,7 +556,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         try {
             RegionTypeEnum regionType = RegionTypeEnum.valueOf(hierarchyType.toUpperCase());
-            
+
             List<LocationResponseDTO> children;
             if (RegionTypeEnum.LGD.equals(regionType)) {
                 children = tenantSchemaRepository.findLgdLocationsByParentId(schemaName, parentId);
@@ -470,16 +566,16 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 throw new IllegalArgumentException("Unknown hierarchy type: " + hierarchyType);
             }
 
-            log.info("Location children retrieved successfully [id={}, hierarchyType={}, count={}]", 
+            log.info("Location children retrieved successfully [id={}, hierarchyType={}, count={}]",
                     tenantId, hierarchyType, children.size());
-            
+
             return children;
         } catch (IllegalArgumentException e) {
             log.error("Invalid hierarchy type [id={}, hierarchyType={}]", tenantId, hierarchyType, e);
-            throw new IllegalArgumentException("Invalid hierarchy type: " + hierarchyType + ". Valid values: LGD, DEPARTMENT", e);
+            throw new IllegalArgumentException(
+                    "Invalid hierarchy type: " + hierarchyType + ". Valid values: LGD, DEPARTMENT", e);
         }
     }
-
 
     @Override
     public LocationHierarchyEditConstraintsResponseDTO getLocationHierarchyEditConstraints(
@@ -534,17 +630,20 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         Integer currentUserId = resolveCurrentUserId();
 
         LocationConfigDTO existing = tenantSchemaRepository.getLocationHierarchy(schemaName, regionType);
-        List<LocationLevelConfigDTO> existingLevels =
-                existing != null && existing.getLocationHierarchy() != null
-                        ? existing.getLocationHierarchy()
-                        : List.of();
+        List<LocationLevelConfigDTO> existingLevels = existing != null && existing.getLocationHierarchy() != null
+                ? existing.getLocationHierarchy()
+                : List.of();
 
         boolean isStructuralChange = isStructuralChange(existingLevels, levels);
 
         if (isStructuralChange) {
-            tenantSchemaRepository.rewriteLocationHierarchyIfNoSeededData(schemaName, regionType, levels, currentUserId);
+            tenantSchemaRepository.rewriteLocationHierarchyIfNoSeededData(schemaName, regionType, levels,
+                    currentUserId);
         } else {
             tenantSchemaRepository.updateLevelNames(schemaName, regionType, levels, currentUserId);
+            eventPublisher.publishEvent(
+                    new TenantLocationHierarchyUpdatedEvent(
+                            tenantId, tenant.getStateCode(), hierarchyType.toUpperCase(), levels));
         }
 
         log.info("Location hierarchy updated successfully [id={}, hierarchyType={}, structuralChange={}]",
@@ -557,7 +656,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     }
 
     /**
-     * Returns true if the incoming level list differs structurally from the existing one.
+     * Returns true if the incoming level list differs structurally from the
+     * existing one.
      * A structural change means the number of levels or any level number differs.
      * Pure name changes within the same level numbers are not structural.
      */
@@ -630,10 +730,13 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         };
 
-        // Register S3 side-effect cleanup immediately after upload, before any subsequent call can
+        // Register S3 side-effect cleanup immediately after upload, before any
+        // subsequent call can
         // fail and orphan the uploaded object:
-        //  - afterCommit: delete the old logo object (we own it; external URLs are skipped).
-        //  - afterCompletion on rollback: delete the newly uploaded object to avoid orphaned storage.
+        // - afterCommit: delete the old logo object (we own it; external URLs are
+        // skipped).
+        // - afterCompletion on rollback: delete the newly uploaded object to avoid
+        // orphaned storage.
         final String uploadedKey = (source instanceof LogoSource.FileSource) ? newValue : null;
         final String prevKey = (oldValue != null && !isExternalUrl(oldValue)) ? oldValue : null;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -659,7 +762,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                         log.warn("Transaction rolled back — cleaning up uploaded logo [key={}]", uploadedKey);
                         objectStorageService.delete(uploadedKey);
                     } catch (Exception e) {
-                        log.warn("Failed to clean up uploaded logo after rollback [key={}]: {}", uploadedKey, e.getMessage());
+                        log.warn("Failed to clean up uploaded logo after rollback [key={}]: {}", uploadedKey,
+                                e.getMessage());
                     }
                 }
             }
@@ -707,9 +811,12 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
     private static String resolveLogoContentType(String objectKey) {
         String lower = objectKey.toLowerCase();
-        if (lower.endsWith(".png")) return "image/png";
-        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".png"))
+            return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+            return "image/jpeg";
+        if (lower.endsWith(".webp"))
+            return "image/webp";
         return "application/octet-stream";
     }
 
@@ -755,7 +862,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         try {
             return objectMapper.readValue(configJson, SimpleConfigValueDTO.class).getValue();
         } catch (JsonProcessingException e) {
-            log.warn("[TenantManagementService] Failed to parse logo config JSON: {} | raw={}", e.getMessage(), configJson);
+            log.warn("[TenantManagementService] Failed to parse logo config JSON: {} | raw={}", e.getMessage(),
+                    configJson);
             return null;
         }
     }
@@ -791,7 +899,8 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                     TenantConfigKeyEnum.METER_CHANGE_REASONS.name(),
                     objectMapper.writeValueAsString(reasons), currentUserId)
                     .orElseThrow(() -> new ConfigurationException(
-                            "Failed to seed METER_CHANGE_REASONS for tenant [id=" + tenant.getId() + ", userId=" + currentUserId + "]"));
+                            "Failed to seed METER_CHANGE_REASONS for tenant [id=" + tenant.getId() + ", userId="
+                                    + currentUserId + "]"));
 
             ReasonListConfigDTO supplyOutageReasons = ReasonListConfigDTO.builder()
                     .reasons(tenantDefaults.getSupplyOutageReasons())
@@ -800,13 +909,15 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                     TenantConfigKeyEnum.SUPPLY_OUTAGE_REASONS.name(),
                     objectMapper.writeValueAsString(supplyOutageReasons), currentUserId)
                     .orElseThrow(() -> new ConfigurationException(
-                            "Failed to seed SUPPLY_OUTAGE_REASONS for tenant [id=" + tenant.getId() + ", userId=" + currentUserId + "]"));
+                            "Failed to seed SUPPLY_OUTAGE_REASONS for tenant [id=" + tenant.getId() + ", userId="
+                                    + currentUserId + "]"));
 
             tenantCommonRepository.upsertConfig(tenant.getId(),
                     TenantConfigKeyEnum.LOCATION_CHECK_REQUIRED.name(),
                     objectMapper.writeValueAsString(new SimpleConfigValueDTO("NO")), currentUserId)
                     .orElseThrow(() -> new ConfigurationException(
-                            "Failed to seed LOCATION_CHECK_REQUIRED for tenant [id=" + tenant.getId() + ", userId=" + currentUserId + "]"));
+                            "Failed to seed LOCATION_CHECK_REQUIRED for tenant [id=" + tenant.getId() + ", userId="
+                                    + currentUserId + "]"));
         } catch (JsonProcessingException e) {
             throw new InvalidConfigValueException("Failed to serialize default tenant configs", e);
         }

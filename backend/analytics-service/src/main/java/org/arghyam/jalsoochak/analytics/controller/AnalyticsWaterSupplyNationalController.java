@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
@@ -63,7 +64,7 @@ public class AnalyticsWaterSupplyNationalController {
             }
     )
     public ResponseEntity<ApiResponse<AverageWaterSupplyResponse>> getAverageWaterSupplyPerCurrentRegion(
-            @RequestParam(name = "tenant_id", required = false) Integer tenantId,
+            @RequestParam(name = "tenant_id", required = true) Integer tenantId,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
             @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
             @Parameter(
@@ -115,6 +116,38 @@ public class AnalyticsWaterSupplyNationalController {
                     .build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<AverageWaterSupplyResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
+    @GetMapping("/national/dashboard/boundary")
+    @Operation(
+            summary = "Get state-wise boundaries for the national dashboard map (GeoJSON per tenant)",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "State boundaries fetched successfully",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.NATIONAL_DASHBOARD_BOUNDARY_SUCCESS))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<NationalDashboardBoundaryResponse>> getNationalDashboardBoundaries() {
+        try {
+            return ResponseEntity.ok(ApiResponse.<NationalDashboardBoundaryResponse>builder()
+                    .success(true)
+                    .data(schemeRegularityService.getNationalDashboardBoundariesForApi())
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardBoundaryResponse>builder()
                     .success(false)
                     .data(null)
                     .build());

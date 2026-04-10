@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.user.dto.request.UpdateStaffRoleRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
@@ -41,6 +42,7 @@ public class TenantStaffServiceImpl implements TenantStaffService {
     private final UserCommonRepository userCommonRepository;
     private final KeycloakAdminHelper keycloakAdminHelper;
     private final KeycloakProvider keycloakProvider;
+    private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
 
     @Value("${staff.allowed-update-roles:SECTION_OFFICER,DISTRICT_OFFICER}")
     private List<String> allowedUpdateRoles;
@@ -127,6 +129,15 @@ public class TenantStaffServiceImpl implements TenantStaffService {
             int rowsAffected = userTenantRepository.updateUserRole(schema, id, newUserTypeId);
             if (rowsAffected == 0) {
                 throw new ResourceNotFoundException("User not found during role update: " + id);
+            }
+
+            Integer tenantId = userCommonRepository.findTenantIdByStateCode(request.tenantCode())
+                    .orElse(null);
+            if (tenantId == null) {
+                log.warn("Cannot publish staff user analytics event: tenantId not found for stateCode={}", request.tenantCode());
+            } else {
+                userAnalyticsEventPublisher.publishStaffUserUpdatedAfterCommit(
+                        id, tenantId, newUserTypeId.intValue(), keycloakUuid, user.email(), 1);
             }
 
             return tenantStaffRepository.findStaffById(schema, id)

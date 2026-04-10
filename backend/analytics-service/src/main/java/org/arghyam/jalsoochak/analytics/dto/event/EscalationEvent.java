@@ -14,6 +14,7 @@ public class EscalationEvent {
     private Integer schemeId;
     private Integer escalationType;
     private String message;
+    private String correlationId;
     private Integer userId;
     private Integer resolutionStatus;
     private String remark;

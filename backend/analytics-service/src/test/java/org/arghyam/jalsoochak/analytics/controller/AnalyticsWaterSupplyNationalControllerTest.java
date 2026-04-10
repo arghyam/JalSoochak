@@ -1,11 +1,14 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -20,6 +23,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.nullValue;
@@ -40,6 +44,7 @@ class AnalyticsWaterSupplyNationalControllerTest {
     private static final String BASE = "/api/v1/analytics";
     private static final LocalDate START = LocalDate.of(2026, 1, 1);
     private static final LocalDate END = LocalDate.of(2026, 1, 31);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Autowired
     private MockMvc mockMvc;
@@ -85,6 +90,11 @@ class AnalyticsWaterSupplyNationalControllerTest {
                     .andExpect(status().is(expectedStatus))
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data").exists());
+        } else if (tenantId == null) {
+            // Missing required request param is rejected by Spring before controller,
+            // so response body is not our ApiResponse wrapper.
+            mockMvc.perform(request)
+                    .andExpect(status().is(expectedStatus));
         } else {
             mockMvc.perform(request)
                     .andExpect(status().is(expectedStatus))
@@ -134,6 +144,48 @@ class AnalyticsWaterSupplyNationalControllerTest {
     }
 
     @Test
+    void getNationalDashboard_validDateRange_returnsOk() throws Exception {
+        when(schemeRegularityService.getNationalDashboardForApi(START, END))
+                .thenReturn(NationalDashboardResponse.builder()
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .stateWiseQuantityPerformance(List.of())
+                        .stateWiseRegularity(List.of())
+                        .stateWiseReadingSubmissionRate(List.of())
+                        .overallOutageReasonDistribution(Map.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/national/dashboard")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.startDate").value("2026-01-01"));
+
+        verify(schemeRegularityService, times(1)).getNationalDashboardForApi(START, END);
+    }
+
+    @Test
+    void getNationalDashboardBoundaries_returnsOk() throws Exception {
+        when(schemeRegularityService.getNationalDashboardBoundariesForApi())
+                .thenReturn(NationalDashboardBoundaryResponse.builder()
+                        .nationalBoundary(OBJECT_MAPPER.readTree("""
+                                {"type":"Polygon","coordinates":[[[78.1,22.9],[78.2,22.9],[78.2,23.0],[78.1,22.9]]]}
+                                """))
+                        .stateWiseBoundaries(List.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.nationalBoundary").exists())
+                .andExpect(jsonPath("$.data.stateWiseBoundaries").isArray());
+
+        verify(schemeRegularityService, times(1)).getNationalDashboardBoundariesForApi();
+    }
+
+    @Test
     void getPeriodicNationalSchemeRegularity_withUnsupportedScale_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
                         .param("start_date", START.toString())
@@ -156,7 +208,7 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 Arguments.of("current", "10", null, null, 200),
                 Arguments.of("current", null, null, null, 400),
                 Arguments.of("current", "10", "101", "201", 400),
-                Arguments.of("child", null, null, null, 200),
+                Arguments.of("child", null, null, null, 400),
                 Arguments.of("child", "10", "101", null, 200),
                 Arguments.of("child", "10", null, null, 400),
                 Arguments.of("child", "10", "101", "201", 400)

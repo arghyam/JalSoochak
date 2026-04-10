@@ -1,6 +1,9 @@
 server:
   port: 8081
 
+app:
+  deployment-mode: ${APP_DEPLOYMENT_MODE:MULTI_TENANT}
+
 spring:
   config:
     import: optional:file:./tenant-service/.env[.properties],optional:file:.env[.properties]

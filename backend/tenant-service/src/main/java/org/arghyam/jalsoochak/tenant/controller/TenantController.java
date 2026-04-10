@@ -136,7 +136,7 @@ public class TenantController {
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Tenant updated successfully", updated));
         }
 
-        @Operation(summary = "Deactivate (soft-delete) a tenant", description = "Sets the tenant status to INACTIVE for the given tenantId.")
+        @Operation(summary = "Deactivate a tenant", description = "Sets the tenant status to INACTIVE for the given tenantId.")
         @ApiResponses({
                         @ApiResponse(responseCode = "200", description = "Tenant deactivated successfully"),
                         @ApiResponse(responseCode = "400", description = "Tenant deactivation failed",

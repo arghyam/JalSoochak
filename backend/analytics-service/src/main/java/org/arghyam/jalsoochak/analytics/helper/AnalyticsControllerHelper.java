@@ -4,10 +4,12 @@ import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListRespons
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
 public final class AnalyticsControllerHelper {
+
     private static final Pattern NON_FILENAME_SAFE_CHARS = Pattern.compile("[^a-zA-Z0-9._-]");
     private static final Pattern MULTIPLE_UNDERSCORES = Pattern.compile("_+");
 
@@ -54,6 +56,94 @@ public final class AnalyticsControllerHelper {
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("Authenticated user UUID is invalid");
         }
+    }
+
+    public static AuthenticatedUserRef extractAuthenticatedUserRef(JwtAuthenticationToken authentication) {
+        if (authentication == null || authentication.getToken() == null) {
+            throw new IllegalArgumentException("Authenticated user details are required");
+        }
+
+        Map<String, Object> claims = authentication.getToken().getClaims();
+        Integer userIdFromClaim = parsePositiveInteger(claims.get("user_id"));
+        if (userIdFromClaim != null) {
+            return new AuthenticatedUserRef(userIdFromClaim, null, null);
+        }
+
+        String subject = authentication.getToken().getSubject();
+        Integer userIdFromSubject = parsePositiveInteger(subject);
+        if (userIdFromSubject != null) {
+            return new AuthenticatedUserRef(userIdFromSubject, null, null);
+        }
+
+        if (subject != null && !subject.isBlank()) {
+            try {
+                return new AuthenticatedUserRef(null, UUID.fromString(subject), null);
+            } catch (IllegalArgumentException ignored) {
+                // Try explicit uuid claim before failing.
+            }
+        }
+
+        Object uuidClaim = claims.get("uuid");
+        if (uuidClaim instanceof String uuidText && !uuidText.isBlank()) {
+            try {
+                return new AuthenticatedUserRef(null, UUID.fromString(uuidText), null);
+            } catch (IllegalArgumentException ignored) {
+                // fall through to throw below
+            }
+        }
+
+        throw new IllegalArgumentException("Authenticated user reference is invalid");
+    }
+
+    /**
+     * Gets the current user's tenant state code from the JWT
+     * {@code tenant_state_code} claim. Returns {@code null} if the claim is
+     * absent (e.g. for SUPER_USER tokens that carry no tenant). Throws if
+     * called outside an authenticated request context.
+     */
+    /**
+     * Gets the current user's tenant state code from the JWT
+     * {@code tenant_state_code} claim. Returns {@code null} if the claim is
+     * absent (e.g. for SUPER_USER tokens that carry no tenant). Throws if
+     * called outside an authenticated request context.
+     */
+    public static String getCurrentUserTenantStateCode(JwtAuthenticationToken authentication) {
+        if (authentication == null || authentication.getToken() == null) {
+            throw new IllegalArgumentException("getCurrentUserTenantStateCode() called outside an authenticated request context");
+        }
+        Map<String, Object> claims = authentication.getToken().getClaims();
+        Object tenantStateCode = claims.get("tenant_state_code");
+        if (tenantStateCode instanceof String s && !s.isBlank()) {
+            return s;
+        }
+        return null; // explicitly allow null for cases where the claim isn't present
+    }
+
+    private static Integer parsePositiveInteger(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            int parsed = number.intValue();
+            return parsed > 0 ? parsed : null;
+        }
+        if (value instanceof String text) {
+            String trimmed = text.trim();
+            if (trimmed.isEmpty()) {
+                return null;
+            }
+            try {
+                int parsed = Integer.parseInt(trimmed);
+                return parsed > 0 ? parsed : null;
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    public record AuthenticatedUserRef(Integer userId, UUID userUuid, Integer tenantId) {
+
     }
 
     private static String sanitizeFilenamePart(String input) {
