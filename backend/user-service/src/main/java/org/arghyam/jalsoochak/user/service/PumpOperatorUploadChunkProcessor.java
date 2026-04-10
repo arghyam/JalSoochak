@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.user.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserEventPublisher;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserSchemeMappingCreateRow;
@@ -16,6 +18,7 @@ import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Processes uploads in small transactions so very large CSVs don't create a single massive transaction
@@ -29,6 +32,7 @@ public class PumpOperatorUploadChunkProcessor {
     private final UserTenantRepository userTenantRepository;
     private final UserUploadRepository userUploadRepository;
     private final UserEventPublisher userEventPublisher;
+    private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
 
     public record UploadRow(
             int rowNumber,
@@ -41,6 +45,16 @@ public class PumpOperatorUploadChunkProcessor {
     ) {}
 
     public record ChunkResult(int uploadedRows, int skippedRows, int unchangedRows) {}
+
+    private record UploadUserSnapshot(
+            Long userId,
+            Integer tenantId,
+            Integer userType,
+            UUID uuid,
+            String email,
+            String title,
+            Integer status
+    ) {}
 
     @Transactional
     public ChunkResult processChunk(
@@ -58,9 +72,11 @@ public class PumpOperatorUploadChunkProcessor {
         }
 
         List<UserSchemeMappingCreateRow> insertRows = new ArrayList<>(rows.size());
+        List<Long> userIdsForInsertRows = new ArrayList<>(rows.size());
         List<String> phonesForInsertRows = new ArrayList<>(rows.size());
         List<String> typesForInsertRows = new ArrayList<>(rows.size());
         Set<Long> userIdsToReplace = new LinkedHashSet<>();
+        Map<Long, UploadUserSnapshot> userSnapshots = new java.util.LinkedHashMap<>();
         int uploaded = 0;
         int skipped = 0;
         int unchanged = 0;
@@ -83,14 +99,18 @@ public class PumpOperatorUploadChunkProcessor {
                 String normalizedPhone = PhoneNumberUtil.normalizeIndianMobileForDb(row.phone());
                 TenantUserRecord user = userTenantRepository.findUserByPhone(schemaName, normalizedPhone).orElse(null);
                 Long userId;
+                UUID userUuid;
+                String userEmail;
                 String title = resolveTitle(row, typeKey, normalizedPhone);
                 if (user == null) {
+                    String newUuid = java.util.UUID.randomUUID().toString();
+                    String newEmail = uniqueEmail(schemaName, normalizedPhone, typeKey);
                     userId = userTenantRepository.createUser(
                             schemaName,
-                            java.util.UUID.randomUUID().toString(),
+                            newUuid,
                             actor.tenantId(),
                             title,
-                            uniqueEmail(schemaName, normalizedPhone, typeKey),
+                            newEmail,
                             userTypeId,
                             normalizedPhone,
                             "CSV_ONBOARDED",
@@ -101,6 +121,8 @@ public class PumpOperatorUploadChunkProcessor {
                         continue;
                     }
                     userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
+                    userUuid = UUID.fromString(newUuid);
+                    userEmail = newEmail;
                 } else {
                     // If an existing user isn't the requested type, skip to avoid mutating unrelated user types.
                     if (user.cName() == null || !user.cName().equalsIgnoreCase(typeKey.toUpperCase(java.util.Locale.ROOT))) {
@@ -114,11 +136,30 @@ public class PumpOperatorUploadChunkProcessor {
                     }
                     userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
                     userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
+                    userUuid = null;
+                    if (user.keycloakUuid() != null && !user.keycloakUuid().isBlank()) {
+                        try {
+                            userUuid = UUID.fromString(user.keycloakUuid());
+                        } catch (IllegalArgumentException ignored) {
+                            // keep null when UUID is malformed
+                        }
+                    }
+                    userEmail = user.email();
                 }
+                userSnapshots.put(userId, new UploadUserSnapshot(
+                        userId,
+                        actor.tenantId(),
+                        userTypeId,
+                        userUuid,
+                        userEmail,
+                        title,
+                        TenantUserStatus.ACTIVE.code
+                ));
 
                 // Replace existing mappings so the upload overwrites prior assignments.
                 userIdsToReplace.add(userId);
                 insertRows.add(new UserSchemeMappingCreateRow(userId, schemeId));
+                userIdsForInsertRows.add(userId);
                 phonesForInsertRows.add(normalizedPhone);
                 typesForInsertRows.add(typeKey);
 
@@ -137,15 +178,41 @@ public class PumpOperatorUploadChunkProcessor {
         }
         int[] insertCounts = userUploadRepository.insertUserSchemeMappings(schemaName, insertRows, actorUserId);
         Set<String> phonesToNotify = new LinkedHashSet<>();
+        Map<Long, Set<Integer>> schemeIdsByUser = new java.util.LinkedHashMap<>();
         int inserted = 0;
         int n = Math.min(insertCounts.length, phonesForInsertRows.size());
         for (int i = 0; i < n; i++) {
             if (insertCounts[i] > 0) {
                 inserted++;
+                Long uid = userIdsForInsertRows.get(i);
+                Integer sid = insertRows.get(i).schemeId();
+                schemeIdsByUser.computeIfAbsent(uid, k -> new LinkedHashSet<>()).add(sid);
                 if ("pump_operator".equals(typesForInsertRows.get(i))) {
                     phonesToNotify.add(phonesForInsertRows.get(i));
                 }
             }
+        }
+
+        for (Map.Entry<Long, Set<Integer>> entry : schemeIdsByUser.entrySet()) {
+            UploadUserSnapshot snapshot = userSnapshots.get(entry.getKey());
+            if (snapshot == null) {
+                continue;
+            }
+            userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(
+                    snapshot.userId(),
+                    snapshot.tenantId(),
+                    snapshot.userType(),
+                    snapshot.uuid(),
+                    snapshot.email(),
+                    snapshot.title(),
+                    snapshot.status()
+            );
+            userAnalyticsEventPublisher.publishUserSchemeMappingsReplacedAfterCommit(
+                    snapshot.userId(),
+                    snapshot.tenantId(),
+                    snapshot.uuid(),
+                    new ArrayList<>(entry.getValue())
+            );
         }
 
         if (!phonesToNotify.isEmpty()) {

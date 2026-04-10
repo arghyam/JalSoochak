@@ -55,6 +55,18 @@ public class SchemeDbRepository {
             Integer operatingStatus
     ) {}
 
+    public record SchemeAnalyticsRow(
+            Integer schemeId,
+            String stateSchemeId,
+            String centreSchemeId,
+            String schemeName,
+            Double latitude,
+            Double longitude,
+            Integer operatingStatus,
+            Integer parentLgdId,
+            Integer parentDepartmentId
+    ) {}
+
     public List<SchemeDTO> findAllSchemes(String schemaName) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -560,6 +572,143 @@ public class SchemeDbRepository {
             ));
         }, args.toArray());
         return out;
+    }
+
+    public List<SchemeAnalyticsRow> findSchemeAnalyticsRowsByStateSchemeIds(String schemaName, List<String> stateSchemeIds) {
+        validateSchemaName(schemaName);
+        if (stateSchemeIds == null || stateSchemeIds.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> uniq = new HashSet<>(Math.max(16, stateSchemeIds.size()));
+        for (String value : stateSchemeIds) {
+            if (value != null && !value.isBlank()) {
+                uniq.add(value.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        if (uniq.isEmpty()) {
+            return List.of();
+        }
+
+        String placeholders = String.join(",", java.util.Collections.nCopies(uniq.size(), "?"));
+        String sql = String.format("""
+                SELECT sm.id AS scheme_id,
+                       sm.state_scheme_id,
+                       sm.centre_scheme_id,
+                       sm.scheme_name,
+                       sm.latitude,
+                       sm.longitude,
+                       sm.operating_status,
+                       slm.parent_lgd_id,
+                       sdm.parent_department_id
+                FROM %s.scheme_master_table sm
+                LEFT JOIN LATERAL (
+                    SELECT parent_lgd_id
+                    FROM %s.scheme_lgd_mapping_table
+                    WHERE scheme_id = sm.id
+                      AND deleted_at IS NULL
+                    ORDER BY id
+                    LIMIT 1
+                ) slm ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT parent_department_id
+                    FROM %s.scheme_department_mapping_table
+                    WHERE scheme_id = sm.id
+                      AND deleted_at IS NULL
+                    ORDER BY id
+                    LIMIT 1
+                ) sdm ON TRUE
+                WHERE sm.deleted_at IS NULL
+                  AND lower(sm.state_scheme_id) IN (%s)
+                """, schemaName, schemaName, schemaName, placeholders);
+
+        List<Object> args = new ArrayList<>(uniq);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new SchemeAnalyticsRow(
+                (Integer) rs.getObject("scheme_id"),
+                rs.getString("state_scheme_id"),
+                rs.getString("centre_scheme_id"),
+                rs.getString("scheme_name"),
+                (Double) rs.getObject("latitude"),
+                (Double) rs.getObject("longitude"),
+                (Integer) rs.getObject("operating_status"),
+                (Integer) rs.getObject("parent_lgd_id"),
+                (Integer) rs.getObject("parent_department_id")
+        ), args.toArray());
+    }
+
+    public List<SchemeAnalyticsRow> findSchemeAnalyticsRowsBySchemeIds(String schemaName, List<Integer> schemeIds) {
+        validateSchemaName(schemaName);
+        if (schemeIds == null || schemeIds.isEmpty()) {
+            return List.of();
+        }
+        Set<Integer> uniq = new HashSet<>(schemeIds);
+        if (uniq.isEmpty()) {
+            return List.of();
+        }
+
+        String placeholders = String.join(",", java.util.Collections.nCopies(uniq.size(), "?"));
+        String sql = String.format("""
+                SELECT sm.id AS scheme_id,
+                       sm.state_scheme_id,
+                       sm.centre_scheme_id,
+                       sm.scheme_name,
+                       sm.latitude,
+                       sm.longitude,
+                       sm.operating_status,
+                       slm.parent_lgd_id,
+                       sdm.parent_department_id
+                FROM %s.scheme_master_table sm
+                LEFT JOIN LATERAL (
+                    SELECT parent_lgd_id
+                    FROM %s.scheme_lgd_mapping_table
+                    WHERE scheme_id = sm.id
+                      AND deleted_at IS NULL
+                    ORDER BY id
+                    LIMIT 1
+                ) slm ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT parent_department_id
+                    FROM %s.scheme_department_mapping_table
+                    WHERE scheme_id = sm.id
+                      AND deleted_at IS NULL
+                    ORDER BY id
+                    LIMIT 1
+                ) sdm ON TRUE
+                WHERE sm.deleted_at IS NULL
+                  AND sm.id IN (%s)
+                """, schemaName, schemaName, schemaName, placeholders);
+
+        List<Object> args = new ArrayList<>(uniq);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new SchemeAnalyticsRow(
+                (Integer) rs.getObject("scheme_id"),
+                rs.getString("state_scheme_id"),
+                rs.getString("centre_scheme_id"),
+                rs.getString("scheme_name"),
+                (Double) rs.getObject("latitude"),
+                (Double) rs.getObject("longitude"),
+                (Integer) rs.getObject("operating_status"),
+                (Integer) rs.getObject("parent_lgd_id"),
+                (Integer) rs.getObject("parent_department_id")
+        ), args.toArray());
+    }
+
+    public Integer findTenantIdByUserId(String schemaName, Integer userId) {
+        validateSchemaName(schemaName);
+        if (userId == null) {
+            return null;
+        }
+        String sql = String.format("""
+                SELECT tenant_id
+                FROM %s.user_table
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """, schemaName);
+        try {
+            return jdbcTemplate.queryForObject(sql, Integer.class, userId);
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
     }
 
     /**
