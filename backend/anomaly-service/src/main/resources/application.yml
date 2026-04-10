@@ -2,13 +2,20 @@ server:
   port: 8083
 
 spring:
+  config:
+    import: optional:file:./anomaly-service/.env[.properties],optional:file:.env[.properties]
+
   application:
     name: anomaly-service
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/shared_db
-    username: YOUR_USERNAME
-    password: YOUR_PASSWORD
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      initialization-fail-timeout: -1
+      connection-init-sql: SET search_path TO analytics_schema, public
 
   jpa:
     hibernate:
@@ -18,9 +25,9 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
-      group-id: anomaly-service-group
+      group-id: ${SPRING_KAFKA_CONSUMER_GROUP_ID:anomaly-service-group}
       auto-offset-reset: earliest
 
   security:
