@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -186,7 +187,25 @@ public class TenantCommonRepository {
         return jdbcTemplate.queryForObject(sql, Long.class, filter.params());
     }
 
-    private record FilterClause(String whereClause, Object[] params) {}
+    private record FilterClause(String whereClause, Object[] params) {
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof FilterClause other)) return false;
+            return Objects.equals(whereClause, other.whereClause)
+                    && Arrays.equals(params, other.params);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(whereClause, Arrays.hashCode(params));
+        }
+
+        @Override
+        public String toString() {
+            return "FilterClause[whereClause=" + whereClause + ", params=" + Arrays.toString(params) + "]";
+        }
+    }
 
     private FilterClause buildTenantFilterClause(TenantStatusEnum status, String search) {
         List<Object> params = new ArrayList<>();
