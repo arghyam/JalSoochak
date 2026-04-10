@@ -1,12 +1,14 @@
-package org.arghyam.jalsoochak.analytics.dto.event;
+package org.arghyam.jalsoochak.telemetry.dto.event;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Data
+@Builder
 @NoArgsConstructor
-@JsonIgnoreProperties(ignoreUnknown = true)
+@AllArgsConstructor
 public class EscalationEvent {
 
     private String eventType;
