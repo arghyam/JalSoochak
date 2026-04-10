@@ -114,7 +114,7 @@ class CreateTenantRequestDTOValidationTest {
         }
 
         @ParameterizedTest(name = "\"{0}\" is a valid stateCode")
-        @ValueSource(strings = {"KA", "MH", "TN", "UP", "ABCDEF", "Maharashtra"})
+        @ValueSource(strings = {"KA", "MH", "TN", "UP", "ABCDEF", "Maharasht"})
         @DisplayName("stateCode with 2-10 alphabetic chars passes all constraints")
         void validStateCode_passesValidation(String stateCode) {
             CreateTenantRequestDTO dto = validRequest();
