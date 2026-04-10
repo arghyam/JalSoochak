@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -106,21 +107,12 @@ public class TenantCommonRepository {
         validateSchemaName(schemaName);
         log.info("Provisioning tenant schema: {}", schemaName);
 
+        // create_tenant_schema() creates user_table with password nullable (V17+).
+        // Explicitly cast to text to match PostgreSQL function signature.
         jdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
-            // Explicitly cast to text to match PostgreSQL function signature
             try (PreparedStatement ps = connection.prepareStatement(
                     "SELECT common_schema.create_tenant_schema(?::text)")) {
                 ps.setString(1, schemaName);
-                ps.execute();
-            }
-            return null;
-        });
-
-        // Make password nullable (Keycloak owns credentials). No IF EXISTS: missing table
-        // indicates a provisioning failure that should surface immediately.
-        jdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
-            try (PreparedStatement ps = connection.prepareStatement(
-                    "ALTER TABLE " + schemaName + ".user_table ALTER COLUMN password DROP NOT NULL")) {
                 ps.execute();
             }
             return null;
@@ -150,11 +142,16 @@ public class TenantCommonRepository {
      * Lists all non-system tenants with pagination and optional filters.
      * The system tenant (id = 0) is excluded from results.
      *
+     * <p>The WHERE clause is assembled by {@link #buildTenantFilterClause}: only static SQL
+     * fragments ({@code "AND status = ?"}, {@code "AND title ILIKE ?"}) are concatenated —
+     * never user-supplied strings. All user values are bound as {@code ?} parameters.</p>
+     *
      * @param limit   Page size.
      * @param offset  Row offset.
      * @param status  Optional status filter; {@code null} means all statuses.
      * @param search  Optional case-insensitive partial match on tenant name; {@code null} or blank means no filter.
      */
+    @SuppressWarnings("java:S2077")
     public List<TenantResponseDTO> findAll(int limit, long offset, TenantStatusEnum status, String search) {
         if (limit <= 0) {
             throw new IllegalArgumentException("limit must be greater than 0");
@@ -177,16 +174,38 @@ public class TenantCommonRepository {
      * Counts the total number of non-system tenants with optional filters.
      * The system tenant (id = 0) and soft-deleted tenants are excluded from the count.
      *
+     * <p>See {@link #findAll(int, long, TenantStatusEnum, String)} for the WHERE-clause
+     * safety rationale — same {@link #buildTenantFilterClause} pattern applies.</p>
+     *
      * @param status  Optional status filter; {@code null} means all statuses.
      * @param search  Optional case-insensitive partial match on tenant name; {@code null} or blank means no filter.
      */
+    @SuppressWarnings("java:S2077")
     public long countAllTenants(TenantStatusEnum status, String search) {
         FilterClause filter = buildTenantFilterClause(status, search);
         String sql = "SELECT COUNT(*) FROM common_schema.tenant_master_table " + filter.whereClause();
         return jdbcTemplate.queryForObject(sql, Long.class, filter.params());
     }
 
-    private record FilterClause(String whereClause, Object[] params) {}
+    private record FilterClause(String whereClause, Object[] params) {
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof FilterClause other)) return false;
+            return Objects.equals(whereClause, other.whereClause)
+                    && Arrays.equals(params, other.params);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(whereClause, Arrays.hashCode(params));
+        }
+
+        @Override
+        public String toString() {
+            return "FilterClause[whereClause=" + whereClause + ", params=" + Arrays.toString(params) + "]";
+        }
+    }
 
     private FilterClause buildTenantFilterClause(TenantStatusEnum status, String search) {
         List<Object> params = new ArrayList<>();
@@ -264,8 +283,15 @@ public class TenantCommonRepository {
     }
 
     /**
-     * Updates tenant status. Only non-null fields are applied.
+     * Updates tenant fields. Only non-null request fields are applied.
+     *
+     * <p>The UPDATE statement is assembled by appending static SQL fragments
+     * ({@code ", status = ?"}) — never user-supplied strings. All user values
+     * (status code, user ID, tenant ID) are bound as {@code ?} parameters.
+     * The status string from the request is resolved through {@link TenantStatusEnum#valueOf}
+     * before any SQL is constructed, so invalid values throw before touching JDBC.</p>
      */
+    @SuppressWarnings("java:S2077")
     public Optional<TenantResponseDTO> updateTenant(Integer tenantId, UpdateTenantRequestDTO request,
             Integer currentUserId) {
         List<Object> params = new ArrayList<>();
@@ -395,7 +421,7 @@ public class TenantCommonRepository {
      * Validates a schema name.
      */
     private void validateSchemaName(String schemaName) {
-        if (schemaName == null || !schemaName.matches("^[a-z_][a-z0-9_]*$")) {
+        if (schemaName == null || !schemaName.matches("^tenant_[a-z0-9][a-z0-9_]{0,29}$")) {
             throw new IllegalArgumentException("Invalid schema name: " + schemaName);
         }
     }

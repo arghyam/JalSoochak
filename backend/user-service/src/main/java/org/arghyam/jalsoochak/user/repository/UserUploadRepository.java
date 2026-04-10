@@ -12,6 +12,14 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.regex.Pattern;
 
+/**
+ * All SQL in this repository uses {@code String.format} solely to inject the schema name
+ * (e.g. {@code tenant_mp}), which is validated by {@link #validateSchemaName} against the
+ * strict allowlist regex {@code ^[a-z_][a-z0-9_]*$}.  JDBC {@code PreparedStatement}
+ * parameters cannot be used for SQL identifiers, so pre-validated identifier injection is
+ * the only viable approach.  All user-supplied data values are bound via {@code ?} parameters.
+ */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 public class UserUploadRepository {

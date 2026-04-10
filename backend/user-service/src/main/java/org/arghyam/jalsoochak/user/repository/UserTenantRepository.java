@@ -12,6 +12,15 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Objects;
 
+/**
+ * All SQL in this repository uses {@code String.format} solely to inject a schema name
+ * (e.g. {@code tenant_mp}) that has been validated by {@link #validateSchemaName} against
+ * the canonical tenant schema regex {@code ^tenant_[a-z0-9][a-z0-9_]{0,29}$}. JDBC
+ * {@code PreparedStatement} parameters cannot be used for SQL identifiers (schema/table
+ * names), so format-based injection of the pre-validated identifier is the only viable
+ * approach. All user-supplied data values are bound via {@code ?} parameters — never
+ * concatenated.
+ */
 @Repository
 @RequiredArgsConstructor
 public class UserTenantRepository {
@@ -20,11 +29,12 @@ public class UserTenantRepository {
     private final PiiEncryptionService pii;
 
     private void validateSchemaName(String schemaName) {
-        if (schemaName == null || !schemaName.matches("^[a-z_][a-z0-9_]*$")) {
+        if (schemaName == null || !schemaName.matches("^tenant_[a-z0-9][a-z0-9_]{0,29}$")) {
             throw new IllegalArgumentException("Invalid schema name: " + schemaName);
         }
     }
 
+    @SuppressWarnings("java:S2077")
     public Optional<TenantUserRecord> findUserById(String schemaName, Long userId) {
         validateSchemaName(schemaName);
 
@@ -62,6 +72,7 @@ public class UserTenantRepository {
         return rows.stream().findFirst();
     }
 
+    @SuppressWarnings("java:S2077")
     public Optional<TenantUserRecord> findUserByEmail(String schemaName, String email) {
         validateSchemaName(schemaName);
 
@@ -99,6 +110,7 @@ public class UserTenantRepository {
         return rows.stream().findFirst();
     }
 
+    @SuppressWarnings("java:S2077")
     public Optional<TenantUserRecord> findUserByKeycloakUuid(String schemaName, String keycloakUuid) {
         validateSchemaName(schemaName);
         if (keycloakUuid == null || keycloakUuid.isBlank()) {
@@ -139,6 +151,7 @@ public class UserTenantRepository {
         return rows.stream().findFirst();
     }
 
+    @SuppressWarnings("java:S2077")
     public Optional<TenantUserRecord> findUserByPhone(String schemaName, String phoneNumber) {
         validateSchemaName(schemaName);
         if (phoneNumber == null || phoneNumber.isBlank()) {
@@ -180,6 +193,7 @@ public class UserTenantRepository {
         return rows.stream().findFirst();
     }
 
+    @SuppressWarnings("java:S2077")
     public Long createUser(String schemaName,
                            String uuid,
                            Integer tenantId,
@@ -210,9 +224,9 @@ public class UserTenantRepository {
                     updated_by,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, %d, true, true, ?, NOW(), ?, NOW())
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true, true, ?, NOW(), ?, NOW())
                 RETURNING id
-                """, schemaName, TenantUserStatus.ACTIVE.code);
+                """, schemaName);
 
         Number insertedId = jdbcTemplate.queryForObject(
                 sql,
@@ -226,12 +240,14 @@ public class UserTenantRepository {
                 pii.encrypt(phoneNumber),
                 pii.hmac(phoneNumber),
                 password,
+                TenantUserStatus.ACTIVE.code,
                 createdBy,
                 createdBy
         );
         return insertedId != null ? insertedId.longValue() : null;
     }
 
+    @SuppressWarnings("java:S2077")
     public void updateUserProfile(String schemaName, Long id, String title, String phoneNumber) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -245,6 +261,7 @@ public class UserTenantRepository {
                 id);
     }
 
+    @SuppressWarnings("java:S2077")
     public int updateUserRole(String schemaName, Long userId, Long newUserTypeId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -255,6 +272,7 @@ public class UserTenantRepository {
         return jdbcTemplate.update(sql, newUserTypeId, userId);
     }
 
+    @SuppressWarnings("java:S2077")
     public void updateUserLanguageId(String schemaName, Long userId, Integer languageId) {
         validateSchemaName(schemaName);
         if (userId == null) {
@@ -272,6 +290,7 @@ public class UserTenantRepository {
      * Streams phone numbers for users with the given roles and optional onboarding time window.
      * The RowCallbackHandler is invoked for each row to avoid loading everything into memory.
      */
+    @SuppressWarnings("java:S2077")
     public void streamPhonesByRolesAndOnboardingWindow(
             String schemaName,
             List<String> roles,
@@ -329,6 +348,7 @@ public class UserTenantRepository {
      * Sets the Keycloak UUID and stores an AES-encrypted managed password for a staff user.
      * Called by {@code StaffKeycloakService} on first successful OTP login (lazy provisioning).
      */
+    @SuppressWarnings("java:S2077")
     public void updateKeycloakUuidAndPassword(String schemaName, Long userId,
                                               String keycloakUuid, String encryptedPassword) {
         validateSchemaName(schemaName);
@@ -344,6 +364,7 @@ public class UserTenantRepository {
      * Returns UUIDs of users in the given tenant schema whose {@code title_hash} matches
      * the provided HMAC-SHA256 hex value. Used for exact case-insensitive name search.
      */
+    @SuppressWarnings("java:S2077")
     public List<String> findUuidsByTitleHash(String schemaName, String titleHash) {
         validateSchemaName(schemaName);
         String sql = String.format("SELECT uuid FROM %s.user_table WHERE title_hash = ?", schemaName);
@@ -355,6 +376,7 @@ public class UserTenantRepository {
      * Used by {@code StaffKeycloakService} to determine whether a managed password
      * has already been set (non-placeholder value → decrypt with {@code PasswordCipher}).
      */
+    @SuppressWarnings("java:S2077")
     public Optional<String> findPasswordByUserId(String schemaName, Long userId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
