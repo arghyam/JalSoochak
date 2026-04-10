@@ -1164,10 +1164,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDateRange(startDate, endDate);
 
         String cacheKey = REGION_WISE_WATER_QUANTITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v4";
+                + ":v5";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1216,10 +1217,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDateRange(startDate, endDate);
 
         String cacheKey = REGION_WISE_WATER_QUANTITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":parent_department:" + parentDepartmentId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v2";
+                + ":v3";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1822,10 +1824,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDateRange(startDate, endDate);
 
         String cacheKey = SUBMISSION_STATUS_SUMMARY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + lgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v2";
         SubmissionStatusSummaryResponse cached =
                 readFromCache(cacheKey, SubmissionStatusSummaryResponse.class);
         if (cached != null) {

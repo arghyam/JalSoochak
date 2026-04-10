@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeC
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicWaterQuantityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
@@ -548,6 +549,44 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
+    void getRegionWiseWaterQuantityByLgd_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
+        mockRedisValueOps();
+        String cacheKey = ":water_quantity:region_wise:tenant:1:parent_lgd:101:start:2026-01-01:end:2026-01-03:v5";
+        when(valueOperations.get(cacheKey)).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        when(schemeRegularityRepository.getLgdLevel(101)).thenReturn(2);
+        when(schemeRegularityRepository.getRegionWiseWaterQuantityByLgd(1, 101, START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(401, null, "LGD-A", 120L, 10L, 9L, 12L, 5L)
+                ));
+
+        RegionWiseWaterQuantityResponse response = service.getRegionWiseWaterQuantityByLgd(1, 101, START, END);
+
+        assertThat(response.getParentLgdId()).isEqualTo(101);
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
+    void getRegionWiseWaterQuantityByDepartment_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
+        mockRedisValueOps();
+        String cacheKey = ":water_quantity:region_wise:tenant:1:parent_department:201:start:2026-01-01:end:2026-01-03:v3";
+        when(valueOperations.get(cacheKey)).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        when(schemeRegularityRepository.getDepartmentLevel(201)).thenReturn(2);
+        when(schemeRegularityRepository.getRegionWiseWaterQuantityByDepartment(1, 201, START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(null, 501, "Dept-A", 150L, 11L, 10L, 13L, 6L)
+                ));
+
+        RegionWiseWaterQuantityResponse response = service.getRegionWiseWaterQuantityByDepartment(1, 201, START, END);
+
+        assertThat(response.getParentDepartmentId()).isEqualTo(201);
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
     void getPeriodicWaterQuantityByDepartment_withNullScale_throws() {
         assertThatThrownBy(() -> service.getPeriodicWaterQuantityByDepartment(201, START, END, null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -1035,6 +1074,22 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isEqualTo(2);
         assertThat(response.getCompliantSubmissionCount()).isEqualTo(5);
         assertThat(response.getAnomalousSubmissionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void getSubmissionStatusSummaryByLgd_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
+        mockRedisValueOps();
+        String cacheKey = ":submission_status:summary:tenant:1:lgd:100:start:2026-01-01:end:2026-01-03:v2";
+        when(valueOperations.get(cacheKey)).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+        when(schemeRegularityRepository.getSchemeCountByLgd(1, 100)).thenReturn(2);
+        when(schemeRegularityRepository.getSubmissionStatusCountByLgd(1, 100, START, END))
+                .thenReturn(new SchemeRegularityRepository.SubmissionStatusCount(5, 1));
+
+        SubmissionStatusSummaryResponse response = service.getSubmissionStatusSummaryByLgd(1, 100, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(2);
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
