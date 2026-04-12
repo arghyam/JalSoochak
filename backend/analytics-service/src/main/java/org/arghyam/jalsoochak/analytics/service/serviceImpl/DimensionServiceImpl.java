@@ -67,24 +67,14 @@ public class DimensionServiceImpl implements DimensionService {
             return;
         }
 
-        // Prefer UUID-based lookup (globally unique across tenants). Fall back to
-        // (tenantId, userId) composite when uuid is absent — never userId alone,
-        // since tenant-scoped ids collide across tenants.
-        DimUser user;
-        if (event.getUuid() != null) {
-            user = dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(
-                            event.getTenantId(), event.getUuid())
-                    .orElse(DimUser.builder()
-                            .userId(event.getUserId())
-                            .createdAt(LocalDateTime.now())
-                            .build());
-        } else {
-            user = dimUserRepository.findByTenantIdAndUserId(event.getTenantId(), event.getUserId())
-                    .orElse(DimUser.builder()
-                            .userId(event.getUserId())
-                            .createdAt(LocalDateTime.now())
-                            .build());
-        }
+        // Tenant-scoped key is the source of truth for user upsert.
+        // Use top-by-updated ordering to avoid crashes when legacy duplicates exist.
+        DimUser user = dimUserRepository.findTopByTenantIdAndUserIdOrderByUpdatedAtDescCreatedAtDesc(
+                        event.getTenantId(), event.getUserId())
+                .orElse(DimUser.builder()
+                        .userId(event.getUserId())
+                        .createdAt(LocalDateTime.now())
+                        .build());
 
         user.setTenantId(event.getTenantId());
         user.setEmail(event.getEmail());
@@ -103,7 +93,8 @@ public class DimensionServiceImpl implements DimensionService {
     @Override
     @Transactional
     public void upsertScheme(SchemeEvent event) {
-        DimScheme scheme = dimSchemeRepository.findById(event.getSchemeId())
+        DimScheme scheme = dimSchemeRepository.findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc(
+                        event.getTenantId(), event.getSchemeId())
                 .orElse(DimScheme.builder()
                         .schemeId(event.getSchemeId())
                         .createdAt(LocalDateTime.now())

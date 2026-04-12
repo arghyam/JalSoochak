@@ -82,8 +82,8 @@ class DimensionServiceImplTest {
         event.setUuid(UUID.fromString("11111111-1111-1111-1111-111111111111"));
         event.setTitle("First Last");
         event.setStatus(1);
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(
-                event.getTenantId(), event.getUuid()))
+        when(dimUserRepository.findTopByTenantIdAndUserIdOrderByUpdatedAtDescCreatedAtDesc(
+                event.getTenantId(), event.getUserId()))
                 .thenReturn(Optional.of(DimUser.builder().userId(11).build()));
 
         service.upsertUser(event);
@@ -135,8 +135,8 @@ class DimensionServiceImplTest {
         event.setStatus(0);
 
         DimUser existing = DimUser.builder().userId(11).title("Preserved Title").build();
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(
-                event.getTenantId(), event.getUuid()))
+        when(dimUserRepository.findTopByTenantIdAndUserIdOrderByUpdatedAtDescCreatedAtDesc(
+                event.getTenantId(), event.getUserId()))
                 .thenReturn(Optional.of(existing));
 
         service.upsertUser(event);
@@ -162,7 +162,8 @@ class DimensionServiceImplTest {
         event.setLevel1DeptId(200);
         event.setLevel2DeptId(201);
         event.setStatus(1);
-        when(dimSchemeRepository.findById(1001)).thenReturn(Optional.empty());
+        when(dimSchemeRepository.findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc(1, 1001))
+                .thenReturn(Optional.empty());
 
         service.upsertScheme(event);
 
