@@ -18,4 +18,6 @@ public interface DimUserRepository extends JpaRepository<DimUser, Long> {
     Optional<DimUser> findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(Integer tenantId, UUID uuid);
 
     Optional<DimUser> findByTenantIdAndUserId(Integer tenantId, Integer userId);
+
+    Optional<DimUser> findTopByTenantIdAndUserIdOrderByUpdatedAtDescCreatedAtDesc(Integer tenantId, Integer userId);
 }
