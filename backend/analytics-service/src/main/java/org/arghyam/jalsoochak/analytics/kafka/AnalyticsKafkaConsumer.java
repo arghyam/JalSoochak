@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
@@ -73,6 +74,11 @@ public class AnalyticsKafkaConsumer {
                 case "USER_CREATED", "USER_UPDATED" -> {
                     UserEvent event = objectMapper.readValue(message, UserEvent.class);
                     dimensionService.upsertUser(event);
+                }
+                case "USER_SCHEME_MAPPINGS_REPLACED" -> {
+                    UserSchemeMappingsReplacedEvent event =
+                            objectMapper.readValue(message, UserSchemeMappingsReplacedEvent.class);
+                    dimensionService.replaceUserSchemeMappings(event);
                 }
                 default -> log.debug("Ignoring user event type: {}", eventType);
             }

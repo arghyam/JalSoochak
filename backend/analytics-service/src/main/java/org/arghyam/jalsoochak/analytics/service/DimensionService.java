@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 
@@ -14,6 +15,8 @@ public interface DimensionService {
     void upsertTenant(TenantEvent event);
 
     void upsertUser(UserEvent event);
+
+    void replaceUserSchemeMappings(UserSchemeMappingsReplacedEvent event);
 
     void upsertScheme(SchemeEvent event);
 
