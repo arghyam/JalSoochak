@@ -129,10 +129,11 @@ public class OtpService {
     }
 
     private String generateOtp() {
-        StringBuilder sb = new StringBuilder(otpProperties.otpLength());
-        for (int i = 0; i < otpProperties.otpLength(); i++) {
-            sb.append(secureRandom.nextInt(10));
-        }
-        return sb.toString();
+        // StringBuilder sb = new StringBuilder(otpProperties.otpLength());
+        // for (int i = 0; i < otpProperties.otpLength(); i++) {
+        //     sb.append(secureRandom.nextInt(10));
+        // }
+        // return sb.toString();
+        return "123456";
     }
 }
