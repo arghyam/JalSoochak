@@ -113,7 +113,7 @@ public class StaffKeycloakService {
                     // the managed password to DB) — find it by username, reset the password, and re-sync DB.
                     log.warn("Keycloak 409 for userId={}: no concurrent password found — attempting orphan recovery",
                             user.id());
-                    return recoverOrphanedKeycloakAccount(usersResource, user, schema);
+                    return recoverOrphanedKeycloakAccount(usersResource, user, tenantCode, schema);
                 }
                 if (createResponse.getStatus() != 201) {
                     String body = createResponse.hasEntity()
@@ -161,12 +161,17 @@ public class StaffKeycloakService {
 
     /**
      * Recovers a Keycloak account that was created in a prior provisioning attempt but whose
-     * managed password was never written to the DB (e.g. the service crashed between Keycloak
-     * creation and the DB update). Looks up the orphaned user by username (phone number),
-     * generates a fresh managed password, resets it in Keycloak, and persists the result.
+     * managed password was never written to the DB. Looks up the orphaned user by username
+     * (phone number), verifies ownership before touching credentials, generates a fresh managed
+     * password, resets it in Keycloak, and conditionally persists the result.
+     *
+     * <p>The DB write uses a conditional update (placeholder-guarded) so a concurrent caller's
+     * already-written managed password is never overwritten. If 0 rows are affected, the
+     * concurrent winner's password is read back and returned instead.
      */
     private String recoverOrphanedKeycloakAccount(UsersResource usersResource,
                                                    TenantUserRecord user,
+                                                   String tenantCode,
                                                    String schema) {
         List<UserRepresentation> existing = usersResource.searchByUsername(user.phoneNumber(), true);
         if (existing.size() != 1) {
@@ -174,24 +179,11 @@ public class StaffKeycloakService {
                     user.id(), existing.size());
             throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
         }
+
         String orphanUuid = existing.get(0).getId();
 
-        // Verify the orphaned account actually belongs to this tenant/user before resetting credentials
         UserRepresentation orphanRep = usersResource.get(orphanUuid).toRepresentation();
-        Map<String, List<String>> attributes = orphanRep.getAttributes();
-        if (attributes == null || !attributes.containsKey("database_user_id")) {
-            log.error("Orphan recovery failed for userId={}: Keycloak user {} missing database_user_id attribute",
-                    user.id(), orphanUuid);
-            throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
-        }
-
-        List<String> userIdAttr = attributes.get("database_user_id");
-        String expectedUserId = String.valueOf(user.id());
-        if (userIdAttr.isEmpty() || !expectedUserId.equals(userIdAttr.get(0))) {
-            log.error("Orphan recovery failed for userId={}: database_user_id mismatch (expected={}, found={})",
-                    user.id(), expectedUserId, userIdAttr.isEmpty() ? "empty" : userIdAttr.get(0));
-            throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
-        }
+        verifyOrphanOwnership(user, tenantCode, orphanUuid, orphanRep.getAttributes());
 
         String managedPassword = generateManagedPassword();
 
@@ -202,10 +194,68 @@ public class StaffKeycloakService {
         usersResource.get(orphanUuid).resetPassword(cred);
 
         String encryptedPassword = passwordCipher.encrypt(managedPassword);
-        userTenantRepository.updateKeycloakUuidAndPassword(schema, user.id(), orphanUuid, encryptedPassword);
+        int affected = userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
+                schema, user.id(), orphanUuid, encryptedPassword);
 
-        log.info("Orphan Keycloak account recovered for staffUserId={}", user.id());
+        if (affected == 0) {
+            // A concurrent caller already wrote a managed password to the DB.
+            // Read and return it; the caller will succeed on the token exchange if they also
+            // won the Keycloak reset race. If we reset Keycloak after them, this attempt will
+            // fail the token exchange but the next login will take the fast path and succeed.
+            String concurrentPassword = userTenantRepository.findPasswordByUserId(schema, user.id()).orElse(null);
+            if (concurrentPassword != null && !concurrentPassword.isBlank()
+                    && !PLACEHOLDER_PASSWORDS.contains(concurrentPassword)) {
+                try {
+                    log.info("Orphan recovery: concurrent writer won DB race for staffUserId={}", user.id());
+                    return passwordCipher.decrypt(concurrentPassword);
+                } catch (IllegalStateException e) {
+                    log.warn("Orphan recovery: failed to decrypt concurrent managed password for userId={}", user.id());
+                }
+            }
+            log.error("Orphan recovery: conditional DB update returned 0 rows and no usable concurrent password for userId={}",
+                    user.id());
+            throw new KeycloakOperationException("Failed to sync orphan recovery to DB for staffUserId=" + user.id());
+        }
+
+        log.info("Orphan Keycloak account recovered for staffUserId={} tenantCode={}", user.id(), tenantCode);
         return managedPassword;
+    }
+
+    /**
+     * Verifies that the Keycloak user identified by {@code orphanUuid} belongs to the expected
+     * staff user and tenant before any credentials are reset.
+     *
+     * <p>{@code tenant_state_code} is always required — it establishes the tenant boundary and
+     * prevents cross-tenant password reset in a shared Keycloak realm. If {@code database_user_id}
+     * is also present (users provisioned after the attribute was introduced), it is checked as an
+     * additional per-user constraint. User IDs are scoped to a tenant schema and are not globally
+     * unique, so {@code database_user_id} alone is insufficient without the tenant check.
+     */
+    private void verifyOrphanOwnership(TenantUserRecord user, String tenantCode,
+                                        String orphanUuid, Map<String, List<String>> attributes) {
+        boolean ownedByTenant = attributes != null
+                && attributes.containsKey("tenant_state_code")
+                && attributes.get("tenant_state_code").stream().anyMatch(tenantCode::equalsIgnoreCase);
+        if (!ownedByTenant) {
+            log.error("Orphan recovery ownership check failed: keycloakUuid={} tenant_state_code does not match "
+                            + "expected={} for userId={}",
+                    orphanUuid, tenantCode, user.id());
+            throw new KeycloakOperationException(
+                    "Orphan recovery aborted: Keycloak user does not belong to expected tenant");
+        }
+
+        if (attributes != null && attributes.containsKey("database_user_id")) {
+            List<String> userIdAttr = attributes.get("database_user_id");
+            String expectedUserId = String.valueOf(user.id());
+            if (userIdAttr.isEmpty() || !expectedUserId.equals(userIdAttr.get(0))) {
+                log.error("Orphan recovery ownership check failed: keycloakUuid={} database_user_id mismatch "
+                                + "(expected={}, found={}) for userId={}",
+                        orphanUuid, expectedUserId,
+                        userIdAttr.isEmpty() ? "empty" : userIdAttr.get(0), user.id());
+                throw new KeycloakOperationException(
+                        "Orphan recovery aborted: Keycloak user does not match expected database user");
+            }
+        }
     }
 
     /** Returns [firstName, lastName]. If title has no space, lastName is empty string. */

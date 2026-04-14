@@ -225,21 +225,150 @@ class StaffKeycloakServiceTest {
             verify(keycloakAdminHelper, never()).deleteUser(anyString());
         }
 
-        @Test
-        @DisplayName("throws KeycloakOperationException on 409 when no concurrent password and Keycloak search finds nothing")
-        void throwsOn409WhenNoPasswordInDbAndOrphanSearchEmpty() {
-            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L))
-                    .thenReturn(Optional.empty());
+        // ── helpers ──────────────────────────────────────────────────────────────
 
+        private UsersResource stubKeycloakAdmin() {
             Keycloak mockAdmin = mock(Keycloak.class, Answers.RETURNS_DEEP_STUBS);
             UsersResource usersResource = mock(UsersResource.class, Answers.RETURNS_DEEP_STUBS);
             when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
             when(keycloakProvider.getRealm()).thenReturn("realm");
             when(mockAdmin.realm("realm").users()).thenReturn(usersResource);
+            return usersResource;
+        }
 
-            Response response = mock(Response.class);
-            when(response.getStatus()).thenReturn(409);
-            when(usersResource.create(any())).thenReturn(response);
+        private void stubKeycloak409(UsersResource usersResource) {
+            Response createResponse = mock(Response.class);
+            when(createResponse.getStatus()).thenReturn(409);
+            when(usersResource.create(any())).thenReturn(createResponse);
+        }
+
+        private UserResource stubOrphan(UsersResource usersResource, Map<String, List<String>> attrs) {
+            UserRepresentation searchResult = new UserRepresentation();
+            searchResult.setId("orphan-uuid");
+            when(usersResource.searchByUsername(USER.phoneNumber(), true)).thenReturn(List.of(searchResult));
+
+            UserRepresentation fullRep = new UserRepresentation();
+            fullRep.setId("orphan-uuid");
+            fullRep.setAttributes(attrs);
+
+            UserResource orphanResource = mock(UserResource.class);
+            when(usersResource.get("orphan-uuid")).thenReturn(orphanResource);
+            when(orphanResource.toRepresentation()).thenReturn(fullRep);
+            return orphanResource;
+        }
+
+        // ── orphan recovery – ownership checks ───────────────────────────────────
+
+        @Test
+        @DisplayName("recovers orphaned account when both tenant_state_code and database_user_id match")
+        void recoversOrphanedKeycloakAccountOn409() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
+            UsersResource usersResource = stubKeycloakAdmin();
+            stubKeycloak409(usersResource);
+            UserResource orphanResource = stubOrphan(usersResource, Map.of(
+                    "tenant_state_code", List.of("MP"),
+                    "database_user_id", List.of("10")));
+            doNothing().when(orphanResource).resetPassword(any());
+            when(passwordCipher.encrypt(anyString())).thenReturn("encrypted-recovered");
+            when(userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
+                    eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"))).thenReturn(1);
+
+            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+
+            assertThat(result).isNotBlank();
+            verify(orphanResource).resetPassword(any());
+            verify(userTenantRepository).updateKeycloakUuidAndPasswordIfUnmanaged(
+                    eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"));
+        }
+
+        @Test
+        @DisplayName("recovers orphaned account via tenant_state_code fallback when database_user_id is absent (pre-fix users)")
+        void recoversOrphanedAccountViaFallbackWhenDatabaseUserIdAbsent() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
+            UsersResource usersResource = stubKeycloakAdmin();
+            stubKeycloak409(usersResource);
+            // Pre-fix user: only tenant_state_code, no database_user_id
+            UserResource orphanResource = stubOrphan(usersResource, Map.of("tenant_state_code", List.of("MP")));
+            doNothing().when(orphanResource).resetPassword(any());
+            when(passwordCipher.encrypt(anyString())).thenReturn("encrypted-recovered");
+            when(userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
+                    eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"))).thenReturn(1);
+
+            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+
+            assertThat(result).isNotBlank();
+            verify(orphanResource).resetPassword(any());
+            verify(userTenantRepository).updateKeycloakUuidAndPasswordIfUnmanaged(
+                    eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"));
+        }
+
+        @Test
+        @DisplayName("throws on orphan recovery when tenant_state_code does not match — prevents cross-tenant reset")
+        void throwsOnOrphanRecoveryWhenTenantStateCodeMismatch() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
+            UsersResource usersResource = stubKeycloakAdmin();
+            stubKeycloak409(usersResource);
+            // Keycloak user belongs to a different tenant
+            UserResource orphanResource = stubOrphan(usersResource, Map.of("tenant_state_code", List.of("TR")));
+
+            assertThatThrownBy(() -> service.ensureKeycloakAccount(USER, "MP", "tenant_mp"))
+                    .isInstanceOf(KeycloakOperationException.class)
+                    .hasMessageContaining("tenant");
+            verify(orphanResource, never()).resetPassword(any());
+        }
+
+        @Test
+        @DisplayName("throws on orphan recovery when database_user_id is present but belongs to a different user in the same tenant")
+        void throwsOnOrphanRecoveryWhenDatabaseUserIdMismatch() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
+            UsersResource usersResource = stubKeycloakAdmin();
+            stubKeycloak409(usersResource);
+            // Tenant matches but database_user_id belongs to a different user (id=99, not 10)
+            UserResource orphanResource = stubOrphan(usersResource, Map.of(
+                    "tenant_state_code", List.of("MP"),
+                    "database_user_id", List.of("99")));
+
+            assertThatThrownBy(() -> service.ensureKeycloakAccount(USER, "MP", "tenant_mp"))
+                    .isInstanceOf(KeycloakOperationException.class)
+                    .hasMessageContaining("database user");
+            verify(orphanResource, never()).resetPassword(any());
+        }
+
+        // ── orphan recovery – conditional DB write ───────────────────────────────
+
+        @Test
+        @DisplayName("orphan recovery returns concurrent winner's password when conditional DB update finds 0 rows")
+        void orphanRecoveryReturnsConcurrentPasswordWhenDbUpdateFinds0Rows() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L))
+                    .thenReturn(Optional.empty())   // 1st call: fast path — no password yet
+                    .thenReturn(Optional.empty())   // 2nd call: Path 1 concurrent check — still empty, falls through to orphan recovery
+                    // 3rd call: inside affected==0 handler — concurrent writer stored a password
+                    .thenReturn(Optional.of("encrypted-concurrent"));
+            when(passwordCipher.decrypt("encrypted-concurrent")).thenReturn("plain-concurrent");
+
+            UsersResource usersResource = stubKeycloakAdmin();
+            stubKeycloak409(usersResource);
+            UserResource orphanResource = stubOrphan(usersResource, Map.of(
+                    "tenant_state_code", List.of("MP"),
+                    "database_user_id", List.of("10")));
+            doNothing().when(orphanResource).resetPassword(any());
+            when(passwordCipher.encrypt(anyString())).thenReturn("encrypted-this-thread");
+            when(userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
+                    eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-this-thread"))).thenReturn(0);
+
+            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+
+            assertThat(result).isEqualTo("plain-concurrent");
+        }
+
+        // ── orphan recovery – search result count ────────────────────────────────
+
+        @Test
+        @DisplayName("throws KeycloakOperationException on 409 when orphan search finds nothing")
+        void throwsOn409WhenNoPasswordInDbAndOrphanSearchEmpty() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
+            UsersResource usersResource = stubKeycloakAdmin();
+            stubKeycloak409(usersResource);
             when(usersResource.searchByUsername(USER.phoneNumber(), true)).thenReturn(List.of());
 
             assertThatThrownBy(() -> service.ensureKeycloakAccount(USER, "MP", "tenant_mp"))
@@ -248,60 +377,11 @@ class StaffKeycloakServiceTest {
         }
 
         @Test
-        @DisplayName("recovers orphaned Keycloak account on 409 when search finds the user")
-        void recoversOrphanedKeycloakAccountOn409() {
-            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L))
-                    .thenReturn(Optional.empty());
-
-            Keycloak mockAdmin = mock(Keycloak.class, Answers.RETURNS_DEEP_STUBS);
-            UsersResource usersResource = mock(UsersResource.class, Answers.RETURNS_DEEP_STUBS);
-            when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
-            when(keycloakProvider.getRealm()).thenReturn("realm");
-            when(mockAdmin.realm("realm").users()).thenReturn(usersResource);
-
-            Response createResponse = mock(Response.class);
-            when(createResponse.getStatus()).thenReturn(409);
-            when(usersResource.create(any())).thenReturn(createResponse);
-
-            UserRepresentation orphanRep = new UserRepresentation();
-            orphanRep.setId("orphan-uuid");
-            when(usersResource.searchByUsername(USER.phoneNumber(), true)).thenReturn(List.of(orphanRep));
-
-            UserRepresentation orphanRepWithAttrs = new UserRepresentation();
-            orphanRepWithAttrs.setId("orphan-uuid");
-            orphanRepWithAttrs.setAttributes(Map.of("database_user_id", List.of("10")));
-
-            UserResource orphanResource = mock(UserResource.class);
-            when(usersResource.get("orphan-uuid")).thenReturn(orphanResource);
-            when(orphanResource.toRepresentation()).thenReturn(orphanRepWithAttrs);
-            doNothing().when(orphanResource).resetPassword(any());
-
-            when(passwordCipher.encrypt(anyString())).thenReturn("encrypted-recovered");
-
-            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
-
-            assertThat(result).isNotBlank();
-            verify(orphanResource).resetPassword(any());
-            verify(userTenantRepository).updateKeycloakUuidAndPassword(
-                    eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"));
-        }
-
-        @Test
         @DisplayName("throws KeycloakOperationException on 409 when orphan search returns multiple users")
         void throwsOn409WhenOrphanSearchReturnsMultiple() {
-            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L))
-                    .thenReturn(Optional.empty());
-
-            Keycloak mockAdmin = mock(Keycloak.class, Answers.RETURNS_DEEP_STUBS);
-            UsersResource usersResource = mock(UsersResource.class, Answers.RETURNS_DEEP_STUBS);
-            when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
-            when(keycloakProvider.getRealm()).thenReturn("realm");
-            when(mockAdmin.realm("realm").users()).thenReturn(usersResource);
-
-            Response createResponse = mock(Response.class);
-            when(createResponse.getStatus()).thenReturn(409);
-            when(usersResource.create(any())).thenReturn(createResponse);
-
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
+            UsersResource usersResource = stubKeycloakAdmin();
+            stubKeycloak409(usersResource);
             UserRepresentation rep1 = new UserRepresentation();
             rep1.setId("uuid-1");
             UserRepresentation rep2 = new UserRepresentation();
