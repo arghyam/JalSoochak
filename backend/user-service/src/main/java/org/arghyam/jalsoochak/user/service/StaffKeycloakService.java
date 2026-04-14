@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.user.exceptions.KeycloakOperationException;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.util.PasswordCipher;
+import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Service;
@@ -98,8 +99,7 @@ public class StaffKeycloakService {
 
             try (Response createResponse = usersResource.create(userRep)) {
                 if (createResponse.getStatus() == 409) {
-                    // A concurrent caller may have just provisioned this user — re-read and return the password
-                    // it wrote rather than failing with a duplicate-user error.
+                    // Path 1: concurrent caller may have just provisioned this user — re-read their password.
                     String concurrentPassword = userTenantRepository.findPasswordByUserId(schema, user.id()).orElse(null);
                     if (concurrentPassword != null && !concurrentPassword.isBlank()
                             && !PLACEHOLDER_PASSWORDS.contains(concurrentPassword)) {
@@ -109,8 +109,11 @@ public class StaffKeycloakService {
                             log.warn("Failed to decrypt concurrent managed password for userId={}", user.id());
                         }
                     }
-                    log.error("Keycloak user creation failed: HTTP 409 (duplicate) for userId={}", user.id());
-                    throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
+                    // Path 2: orphaned Keycloak user (created in a prior attempt that crashed before writing
+                    // the managed password to DB) — find it by username, reset the password, and re-sync DB.
+                    log.warn("Keycloak 409 for userId={}: no concurrent password found — attempting orphan recovery",
+                            user.id());
+                    return recoverOrphanedKeycloakAccount(usersResource, user, schema);
                 }
                 if (createResponse.getStatus() != 201) {
                     String body = createResponse.hasEntity()
@@ -154,6 +157,37 @@ public class StaffKeycloakService {
             }
             throw new KeycloakOperationException("Failed to provision staff Keycloak account", e);
         }
+    }
+
+    /**
+     * Recovers a Keycloak account that was created in a prior provisioning attempt but whose
+     * managed password was never written to the DB (e.g. the service crashed between Keycloak
+     * creation and the DB update). Looks up the orphaned user by username (phone number),
+     * generates a fresh managed password, resets it in Keycloak, and persists the result.
+     */
+    private String recoverOrphanedKeycloakAccount(UsersResource usersResource,
+                                                   TenantUserRecord user,
+                                                   String schema) {
+        List<UserRepresentation> existing = usersResource.searchByUsername(user.phoneNumber(), true);
+        if (existing.size() != 1) {
+            log.error("Orphan recovery failed: expected 1 Keycloak user for userId={}, found={}",
+                    user.id(), existing.size());
+            throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
+        }
+        String orphanUuid = existing.get(0).getId();
+        String managedPassword = generateManagedPassword();
+
+        CredentialRepresentation cred = new CredentialRepresentation();
+        cred.setType(CredentialRepresentation.PASSWORD);
+        cred.setValue(managedPassword);
+        cred.setTemporary(false);
+        usersResource.get(orphanUuid).resetPassword(cred);
+
+        String encryptedPassword = passwordCipher.encrypt(managedPassword);
+        userTenantRepository.updateKeycloakUuidAndPassword(schema, user.id(), orphanUuid, encryptedPassword);
+
+        log.info("Orphan Keycloak account recovered for staffUserId={}", user.id());
+        return managedPassword;
     }
 
     /** Returns [firstName, lastName]. If title has no space, lastName is empty string. */

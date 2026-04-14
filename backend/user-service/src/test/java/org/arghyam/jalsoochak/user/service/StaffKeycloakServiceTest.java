@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Optional;
 
 import org.arghyam.jalsoochak.user.config.KeycloakProvider;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.admin.client.resource.UsersResource;
+import org.keycloak.representations.idm.UserRepresentation;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -223,8 +225,8 @@ class StaffKeycloakServiceTest {
         }
 
         @Test
-        @DisplayName("throws KeycloakOperationException on 409 when no concurrent password is found in DB")
-        void throwsOn409WhenNoPasswordInDb() {
+        @DisplayName("throws KeycloakOperationException on 409 when no concurrent password and Keycloak search finds nothing")
+        void throwsOn409WhenNoPasswordInDbAndOrphanSearchEmpty() {
             when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L))
                     .thenReturn(Optional.empty());
 
@@ -237,6 +239,68 @@ class StaffKeycloakServiceTest {
             Response response = mock(Response.class);
             when(response.getStatus()).thenReturn(409);
             when(usersResource.create(any())).thenReturn(response);
+            when(usersResource.searchByUsername(USER.phoneNumber(), true)).thenReturn(List.of());
+
+            assertThatThrownBy(() -> service.ensureKeycloakAccount(USER, "MP", "tenant_mp"))
+                    .isInstanceOf(KeycloakOperationException.class)
+                    .hasMessageContaining("409");
+        }
+
+        @Test
+        @DisplayName("recovers orphaned Keycloak account on 409 when search finds the user")
+        void recoversOrphanedKeycloakAccountOn409() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L))
+                    .thenReturn(Optional.empty());
+
+            Keycloak mockAdmin = mock(Keycloak.class, Answers.RETURNS_DEEP_STUBS);
+            UsersResource usersResource = mock(UsersResource.class, Answers.RETURNS_DEEP_STUBS);
+            when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
+            when(keycloakProvider.getRealm()).thenReturn("realm");
+            when(mockAdmin.realm("realm").users()).thenReturn(usersResource);
+
+            Response createResponse = mock(Response.class);
+            when(createResponse.getStatus()).thenReturn(409);
+            when(usersResource.create(any())).thenReturn(createResponse);
+
+            UserRepresentation orphanRep = new UserRepresentation();
+            orphanRep.setId("orphan-uuid");
+            when(usersResource.searchByUsername(USER.phoneNumber(), true)).thenReturn(List.of(orphanRep));
+
+            UserResource orphanResource = mock(UserResource.class);
+            when(usersResource.get("orphan-uuid")).thenReturn(orphanResource);
+            doNothing().when(orphanResource).resetPassword(any());
+
+            when(passwordCipher.encrypt(anyString())).thenReturn("encrypted-recovered");
+
+            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+
+            assertThat(result).isNotBlank();
+            verify(orphanResource).resetPassword(any());
+            verify(userTenantRepository).updateKeycloakUuidAndPassword(
+                    eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"));
+        }
+
+        @Test
+        @DisplayName("throws KeycloakOperationException on 409 when orphan search returns multiple users")
+        void throwsOn409WhenOrphanSearchReturnsMultiple() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L))
+                    .thenReturn(Optional.empty());
+
+            Keycloak mockAdmin = mock(Keycloak.class, Answers.RETURNS_DEEP_STUBS);
+            UsersResource usersResource = mock(UsersResource.class, Answers.RETURNS_DEEP_STUBS);
+            when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
+            when(keycloakProvider.getRealm()).thenReturn("realm");
+            when(mockAdmin.realm("realm").users()).thenReturn(usersResource);
+
+            Response createResponse = mock(Response.class);
+            when(createResponse.getStatus()).thenReturn(409);
+            when(usersResource.create(any())).thenReturn(createResponse);
+
+            UserRepresentation rep1 = new UserRepresentation();
+            rep1.setId("uuid-1");
+            UserRepresentation rep2 = new UserRepresentation();
+            rep2.setId("uuid-2");
+            when(usersResource.searchByUsername(USER.phoneNumber(), true)).thenReturn(List.of(rep1, rep2));
 
             assertThatThrownBy(() -> service.ensureKeycloakAccount(USER, "MP", "tenant_mp"))
                     .isInstanceOf(KeycloakOperationException.class)
