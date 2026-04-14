@@ -50,6 +50,10 @@ public class GlificMeterWorkflowService {
             "Please type your issue in a few words.";
     private static final String LEGACY_ISSUE_PROMPT_HINDI =
             "कृपया अपनी समस्या संक्षेप में लिखें।";
+    private static final String TELEMETRY_ISSUE_PROMPT_ENGLISH =
+            "Please select your issue.";
+    private static final String TELEMETRY_ISSUE_PROMPT_HINDI =
+            "कृपया अपनी समस्या चुनें।";
     private static final String DEFAULT_METER_CHANGE_PROMPT_ENGLISH =
             "Please select the no submission reasons by typing any of the number";
     private static final String DEFAULT_METER_CHANGE_PROMPT_HINDI =
@@ -337,7 +341,7 @@ public class GlificMeterWorkflowService {
                 b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
         ));
 
-        String prompt = "hindi".equals(languageKey) ? LEGACY_ISSUE_PROMPT_HINDI : LEGACY_ISSUE_PROMPT_ENGLISH;
+        String prompt = "hindi".equals(languageKey) ? TELEMETRY_ISSUE_PROMPT_HINDI : TELEMETRY_ISSUE_PROMPT_ENGLISH;
         StringBuilder message = new StringBuilder(localizationService.localizeMessage(prompt, languageKey));
         for (int i = 0; i < reasons.size(); i++) {
             String name = reasons.get(i).path("name").asText();
