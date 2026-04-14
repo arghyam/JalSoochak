@@ -21,6 +21,7 @@ import org.arghyam.jalsoochak.user.config.KeycloakProvider;
 import org.arghyam.jalsoochak.user.exceptions.KeycloakOperationException;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
+import org.arghyam.jalsoochak.user.service.StaffKeycloakService.ProvisionResult;
 import org.arghyam.jalsoochak.user.util.PasswordCipher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -69,9 +70,9 @@ class StaffKeycloakServiceTest {
                     .thenReturn(Optional.of("encrypted-pw"));
             when(passwordCipher.decrypt("encrypted-pw")).thenReturn("plain-pw");
 
-            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+            ProvisionResult result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
 
-            assertThat(result).isEqualTo("plain-pw");
+            assertThat(result.managedPassword()).isEqualTo("plain-pw");
             verify(keycloakProvider, never()).getAdminInstance();
         }
 
@@ -219,9 +220,9 @@ class StaffKeycloakServiceTest {
             when(response.getStatus()).thenReturn(409);
             when(usersResource.create(any())).thenReturn(response);
 
-            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+            ProvisionResult result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
 
-            assertThat(result).isEqualTo("concurrent-plain-pw");
+            assertThat(result.managedPassword()).isEqualTo("concurrent-plain-pw");
             verify(keycloakAdminHelper, never()).deleteUser(anyString());
         }
 
@@ -273,9 +274,9 @@ class StaffKeycloakServiceTest {
             when(userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
                     eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"))).thenReturn(1);
 
-            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+            ProvisionResult result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
 
-            assertThat(result).isNotBlank();
+            assertThat(result.managedPassword()).isNotBlank();
             verify(orphanResource).resetPassword(any());
             verify(userTenantRepository).updateKeycloakUuidAndPasswordIfUnmanaged(
                     eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"));
@@ -294,9 +295,9 @@ class StaffKeycloakServiceTest {
             when(userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
                     eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"))).thenReturn(1);
 
-            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+            ProvisionResult result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
 
-            assertThat(result).isNotBlank();
+            assertThat(result.managedPassword()).isNotBlank();
             verify(orphanResource).resetPassword(any());
             verify(userTenantRepository).updateKeycloakUuidAndPasswordIfUnmanaged(
                     eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-recovered"));
@@ -356,9 +357,9 @@ class StaffKeycloakServiceTest {
             when(userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
                     eq("tenant_mp"), eq(10L), eq("orphan-uuid"), eq("encrypted-this-thread"))).thenReturn(0);
 
-            String result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+            ProvisionResult result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
 
-            assertThat(result).isEqualTo("plain-concurrent");
+            assertThat(result.managedPassword()).isEqualTo("plain-concurrent");
         }
 
         // ── orphan recovery – search result count ────────────────────────────────
