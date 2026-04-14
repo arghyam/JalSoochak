@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.arghyam.jalsoochak.user.config.KeycloakProvider;
@@ -266,8 +267,13 @@ class StaffKeycloakServiceTest {
             orphanRep.setId("orphan-uuid");
             when(usersResource.searchByUsername(USER.phoneNumber(), true)).thenReturn(List.of(orphanRep));
 
+            UserRepresentation orphanRepWithAttrs = new UserRepresentation();
+            orphanRepWithAttrs.setId("orphan-uuid");
+            orphanRepWithAttrs.setAttributes(Map.of("database_user_id", List.of("10")));
+
             UserResource orphanResource = mock(UserResource.class);
             when(usersResource.get("orphan-uuid")).thenReturn(orphanResource);
+            when(orphanResource.toRepresentation()).thenReturn(orphanRepWithAttrs);
             doNothing().when(orphanResource).resetPassword(any());
 
             when(passwordCipher.encrypt(anyString())).thenReturn("encrypted-recovered");
