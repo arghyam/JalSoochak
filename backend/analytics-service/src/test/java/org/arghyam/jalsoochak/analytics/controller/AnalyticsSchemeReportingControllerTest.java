@@ -154,7 +154,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemesDashboard_withParentLgdId_returnsParentLgdCName() throws Exception {
-        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 5))
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 1, 5))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentLgdId(101)
                         .parentLgdCName("Parent")
@@ -162,6 +162,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentLgdLevel(2)
                         .activeSchemeCount(1)
                         .inactiveSchemeCount(1)
+                        .totalCount(42L)
                         .topSchemeCount(1)
                         .topSchemes(List.of(SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(1)
@@ -193,9 +194,11 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
-                        .param("scheme_count", "5"))
+                        .param("page_number", "1")
+                        .param("limit", "5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.totalCount").value(42))
                 .andExpect(jsonPath("$.data.parentLgdId").value(101))
                 .andExpect(jsonPath("$.data.parentLgdCName").value("Parent"))
                 .andExpect(jsonPath("$.data.parentLgdTitle").value("Parent LGD"))
@@ -211,7 +214,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemesDashboard_withParentDepartmentId_returnsParentDepartmentCName() throws Exception {
-        when(schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(TENANT_ID, 201, START, END, 5))
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(TENANT_ID, 201, START, END, 1, 5))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentDepartmentId(201)
                         .parentDepartmentCName("Parent Dept")
@@ -219,6 +222,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentDepartmentLevel(4)
                         .activeSchemeCount(1)
                         .inactiveSchemeCount(1)
+                        .totalCount(7L)
                         .topSchemeCount(1)
                         .topSchemes(List.of(SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(2)
@@ -242,9 +246,11 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_department_id", "201")
-                        .param("scheme_count", "5"))
+                        .param("page_number", "1")
+                        .param("limit", "5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.totalCount").value(7))
                 .andExpect(jsonPath("$.data.parentDepartmentId").value(201))
                 .andExpect(jsonPath("$.data.parentDepartmentCName").value("Parent Dept"))
                 .andExpect(jsonPath("$.data.parentDepartmentTitle").value("Parent Dept"))

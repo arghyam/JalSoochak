@@ -29,6 +29,7 @@ public class SchemeStatusAndTopReportingResponse {
     private Integer daysInRange;
     private Integer activeSchemeCount;
     private Integer inactiveSchemeCount;
+    private Long totalCount;
     private Integer topSchemeCount;
     private List<TopReportingScheme> topSchemes;
 

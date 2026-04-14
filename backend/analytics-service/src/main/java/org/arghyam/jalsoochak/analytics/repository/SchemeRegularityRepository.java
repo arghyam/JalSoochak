@@ -2546,6 +2546,42 @@ public class SchemeRegularityRepository {
         return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
     }
 
+    public long getSchemeCountByLgdInScope(Integer tenantId, Integer lgdId) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                SELECT COUNT(*)::bigint AS total_count
+                FROM analytics_schema.dim_scheme_table s
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                """, schemeLgdColumn);
+
+        Long count = jdbcTemplate.queryForObject(sql, Long.class, lgdId, tenantId);
+        return count == null ? 0L : count;
+    }
+
+    public long getSchemeCountByDepartmentInScope(Integer tenantId, Integer departmentId) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                SELECT COUNT(*)::bigint AS total_count
+                FROM analytics_schema.dim_scheme_table s
+                WHERE s.%1$s = ?
+                  AND s.tenant_id = ?
+                """, schemeDepartmentColumn);
+
+        Long count = jdbcTemplate.queryForObject(sql, Long.class, departmentId, tenantId);
+        return count == null ? 0L : count;
+    }
+
     public List<SchemeSubmissionMetrics> getTopSchemeSubmissionMetricsByLgd(
             Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
         Integer lgdLevel = getLgdLevel(parentLgdId);
@@ -2670,7 +2706,12 @@ public class SchemeRegularityRepository {
     }
 
     public List<SchemeSubmissionMetrics> getTopSchemeSubmissionMetricsByLgd(
-            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
+            Integer tenantId,
+            Integer parentLgdId,
+            LocalDate startDate,
+            LocalDate endDate,
+            Integer limit,
+            Integer offset) {
         Integer lgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
         if (lgdLevel == null) {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
@@ -2757,6 +2798,7 @@ public class SchemeRegularityRepository {
                     (COALESCE(sd.submission_days, 0)::numeric / ?) DESC,
                     ss.scheme_id ASC
                 LIMIT ?
+                OFFSET ?
                 """, schemeLgdColumn);
 
         return jdbcTemplate.query(
@@ -2793,7 +2835,8 @@ public class SchemeRegularityRepository {
                 endDate,
                 tenantId,
                 ChronoUnit.DAYS.between(startDate, endDate) + 1,
-                topSchemeCount);
+                limit,
+                offset);
     }
 
     public List<SchemeSubmissionMetrics> getTopSchemeSubmissionMetricsByDepartment(
@@ -2921,7 +2964,12 @@ public class SchemeRegularityRepository {
     }
 
     public List<SchemeSubmissionMetrics> getTopSchemeSubmissionMetricsByDepartment(
-            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
+            Integer tenantId,
+            Integer parentDepartmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            Integer limit,
+            Integer offset) {
         Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (departmentLevel == null) {
             throw new IllegalArgumentException(
@@ -3009,6 +3057,7 @@ public class SchemeRegularityRepository {
                     (COALESCE(sd.submission_days, 0)::numeric / ?) DESC,
                     ss.scheme_id ASC
                 LIMIT ?
+                OFFSET ?
                 """, schemeDepartmentColumn);
 
         return jdbcTemplate.query(
@@ -3045,7 +3094,8 @@ public class SchemeRegularityRepository {
                 endDate,
                 tenantId,
                 ChronoUnit.DAYS.between(startDate, endDate) + 1,
-                topSchemeCount);
+                limit,
+                offset);
     }
 
     public List<SchemeRegularityListMetrics> getSchemeRegionReportByLgd(

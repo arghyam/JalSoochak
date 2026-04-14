@@ -239,7 +239,8 @@ public class AnalyticsSchemeReportingController {
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
             @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
-            @RequestParam(name = "scheme_count", required = false, defaultValue = "10") Integer schemeCount) {
+            @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
+            @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit) {
         try {
             if (parentLgdId != null && parentDepartmentId != null) {
                 throw new IllegalArgumentException("Provide either parent_lgd_id or parent_department_id, not both");
@@ -249,8 +250,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             SchemeStatusAndTopReportingResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(tenantId, parentLgdId, startDate, endDate, schemeCount)
-                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(tenantId, parentDepartmentId, startDate, endDate, schemeCount);
+                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(tenantId, parentLgdId, startDate, endDate, pageNumber, limit)
+                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(tenantId, parentDepartmentId, startDate, endDate, pageNumber, limit);
 
             return ResponseEntity.ok(ApiResponse.<SchemeStatusAndTopReportingResponse>builder()
                     .success(true)

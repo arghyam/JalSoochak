@@ -1919,17 +1919,23 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByLgd(
-            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer limit) {
         validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
-        topSchemeCount = topSchemeCount == null ? DEFAULT_TOP_SCHEME_COUNT : topSchemeCount;
-        validateTopSchemeCount(topSchemeCount);
+        pageNumber = pageNumber == null ? 1 : pageNumber;
+        limit = limit == null ? DEFAULT_TOP_SCHEME_COUNT : limit;
+        if (pageNumber < 1) {
+            throw new IllegalArgumentException("page_number must be >= 1");
+        }
+        validateTopSchemeCount(limit);
+        int offset = (pageNumber - 1) * limit;
 
         String cacheKey = SCHEME_STATUS_TOP_REPORTING_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
-                + ":scheme_count:" + topSchemeCount
+                + ":page:" + pageNumber
+                + ":limit:" + limit
                 + ":start:" + startDate
                 + ":end:" + endDate
                 + ":v1";
@@ -1943,11 +1949,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         SchemeRegularityRepository.SchemeStatusCount statusCount =
                 schemeRegularityRepository.getSchemeStatusCountByLgd(tenantId, parentLgdId);
+        long totalCount = schemeRegularityRepository.getSchemeCountByLgdInScope(tenantId, parentLgdId);
         String parentLgdCName = schemeRegularityRepository.getParentLgdCNameByLgd(tenantId, parentLgdId);
         String parentLgdTitle = schemeRegularityRepository.getParentLgdTitleByLgd(tenantId, parentLgdId);
         List<SchemeRegularityRepository.SchemeSubmissionMetrics> topSchemes =
                 schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(
-                        tenantId, parentLgdId, startDate, endDate, topSchemeCount);
+                        tenantId, parentLgdId, startDate, endDate, limit, offset);
 
         SchemeStatusAndTopReportingResponse response = SchemeStatusAndTopReportingResponse.builder()
                 .parentLgdId(parentLgdId)
@@ -1963,6 +1970,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .daysInRange(daysInRange)
                 .activeSchemeCount(statusCount.activeSchemeCount() == null ? 0 : statusCount.activeSchemeCount())
                 .inactiveSchemeCount(statusCount.inactiveSchemeCount() == null ? 0 : statusCount.inactiveSchemeCount())
+                .totalCount(totalCount)
                 .topSchemeCount(topSchemes.size())
                 .topSchemes(topSchemes.stream()
                         .map(metric -> SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
@@ -1994,24 +2002,30 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByDepartment(
-            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer limit) {
         validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
-        topSchemeCount = topSchemeCount == null ? DEFAULT_TOP_SCHEME_COUNT : topSchemeCount;
-        validateTopSchemeCount(topSchemeCount);
+        pageNumber = pageNumber == null ? 1 : pageNumber;
+        limit = limit == null ? DEFAULT_TOP_SCHEME_COUNT : limit;
+        if (pageNumber < 1) {
+            throw new IllegalArgumentException("page_number must be >= 1");
+        }
+        validateTopSchemeCount(limit);
+        int offset = (pageNumber - 1) * limit;
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
 
         SchemeRegularityRepository.SchemeStatusCount statusCount =
                 schemeRegularityRepository.getSchemeStatusCountByDepartment(tenantId, parentDepartmentId);
+        long totalCount = schemeRegularityRepository.getSchemeCountByDepartmentInScope(tenantId, parentDepartmentId);
         String parentDepartmentCName =
                 schemeRegularityRepository.getParentDepartmentCNameByDepartment(tenantId, parentDepartmentId);
         String parentDepartmentTitle =
                 schemeRegularityRepository.getParentDepartmentTitleByDepartment(tenantId, parentDepartmentId);
         List<SchemeRegularityRepository.SchemeSubmissionMetrics> topSchemes =
                 schemeRegularityRepository.getTopSchemeSubmissionMetricsByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate, topSchemeCount);
+                        tenantId, parentDepartmentId, startDate, endDate, limit, offset);
 
         return SchemeStatusAndTopReportingResponse.builder()
                 .parentLgdId(null)
@@ -2027,6 +2041,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .daysInRange(daysInRange)
                 .activeSchemeCount(statusCount.activeSchemeCount() == null ? 0 : statusCount.activeSchemeCount())
                 .inactiveSchemeCount(statusCount.inactiveSchemeCount() == null ? 0 : statusCount.inactiveSchemeCount())
+                .totalCount(totalCount)
                 .topSchemeCount(topSchemes.size())
                 .topSchemes(topSchemes.stream()
                         .map(metric -> SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
