@@ -29,6 +29,7 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -58,6 +59,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/analytics")
 @RequiredArgsConstructor
 @Tag(name = "Analytics - Scheme Reporting", description = "Scheme dashboards, region reports (CSV/JSON), escalations, and scheme performance queries")
+@Slf4j
 public class AnalyticsSchemeReportingController {
 
     private static final String CSV_OUTPUT_FORMAT = "csv";
@@ -403,6 +405,20 @@ public class AnalyticsSchemeReportingController {
 
             AnalyticsControllerHelper.AuthenticatedUserRef userRef =
                     authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            log.info(
+                    "Escalations request: extracted tenantId={}, userId={}, userUuid={}, page_number={}, limit={}, escalation_type={}, scheme_id={}, scheme_name_present={}, resolution_status={}, start_date={}, end_date={}",
+                    userRef != null ? userRef.tenantId() : null,
+                    userRef != null ? userRef.userId() : null,
+                    userRef != null ? userRef.userUuid() : null,
+                    pageNumber,
+                    limit,
+                    escalationType,
+                    schemeId,
+                    schemeName != null && !schemeName.isBlank(),
+                    resolutionStatus,
+                    startDate,
+                    endDate
+            );
             Integer tenantId = userRef.tenantId();
             if (tenantId == null || tenantId <= 0) {
                 throw new IllegalArgumentException("tenant_id is required");
