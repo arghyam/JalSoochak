@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.user.dto.response.TokenResponseDTO;
 import org.arghyam.jalsoochak.user.enums.OtpType;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.event.SendLoginOtpEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.config.properties.OtpProperties;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
@@ -29,6 +30,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 
 @Slf4j
@@ -47,6 +49,7 @@ public class StaffAuthServiceImpl implements StaffAuthService {
     private final StaffKeycloakService staffKeycloakService;
     private final KeycloakClient keycloakClient;
     private final UserNotificationEventPublisher eventPublisher;
+    private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final TransactionTemplate transactionTemplate;
 
     @Override
@@ -178,7 +181,7 @@ public class StaffAuthServiceImpl implements StaffAuthService {
 
         // Keycloak provisioning and token exchange run outside the DB transaction.
         // If they fail, revert OTP consumption so the user can retry without requesting a new OTP.
-        String managedPassword;
+        StaffKeycloakService.ProvisionResult provisionResult = null;
         KeycloakTokenResponse token;
         try {
             // Re-validate tenant status post-OTP consumption to prevent concurrent tenant suspend/archive
@@ -187,12 +190,28 @@ public class StaffAuthServiceImpl implements StaffAuthService {
             if (!TenantAccessValidator.isAccessibleToStaff(freshTenantStatus)) {
                 throw new BadRequestException("Invalid or expired OTP");
             }
-            
-            managedPassword = staffKeycloakService.ensureKeycloakAccount(freshUser, tenantCode, schema);
-            token = keycloakClient.obtainToken(freshUser.phoneNumber(), managedPassword);
+
+            provisionResult = staffKeycloakService.ensureKeycloakAccount(freshUser, tenantCode, schema);
+            token = keycloakClient.obtainToken(freshUser.phoneNumber(), provisionResult.managedPassword());
         } catch (RuntimeException e) {
             otpService.revertOtpConsumption(consumedOtpId);
             throw e;
+        } finally {
+            // Sync the newly-provisioned Keycloak UUID to analytics_schema.dim_user_table.
+            // The DB write in updateKeycloakUuidAndPassword is permanent (not rolled back even if the
+            // token exchange fails), so we publish here unconditionally whenever a new account was created.
+            // keycloakUuid is null on the fast path (existing account), so this is a no-op in that case.
+            if (provisionResult != null && provisionResult.keycloakUuid() != null) {
+                userAnalyticsEventPublisher.publishUserUpdatedAfterCommit(
+                        freshUser.id(),
+                        freshUser.tenantId(),
+                        freshUser.userTypeId() != null ? freshUser.userTypeId().intValue() : null,
+                        UUID.fromString(provisionResult.keycloakUuid()),
+                        freshUser.email(),
+                        freshUser.title(),
+                        freshUser.status()
+                );
+            }
         }
 
         TokenResponseDTO resp = new TokenResponseDTO();

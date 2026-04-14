@@ -291,7 +291,7 @@ class StaffAuthControllerIntegrationTest {
 
             Response createResponse = mock(Response.class);
             when(createResponse.getStatus()).thenReturn(201);
-            when(createResponse.getLocation()).thenReturn(URI.create("http://keycloak/users/new-kc-id"));
+            when(createResponse.getLocation()).thenReturn(URI.create("http://keycloak/users/00000000-0000-0000-0000-000000000001"));
             // Note: Mock Response doesn't require close(); production code handles real Response via try-with-resources
             when(usersResource.create(any())).thenReturn(createResponse);
 
