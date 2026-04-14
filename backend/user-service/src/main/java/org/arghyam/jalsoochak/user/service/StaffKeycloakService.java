@@ -95,7 +95,7 @@ public class StaffKeycloakService {
             String[] nameParts = splitName(user.title());
             userRep.setFirstName(nameParts[0]);
             userRep.setLastName(nameParts[1]);
-            userRep.setAttributes(buildAttributes(tenantCode, user.cName()));
+            userRep.setAttributes(buildAttributes(tenantCode, user.cName(), user.id()));
 
             try (Response createResponse = usersResource.create(userRep)) {
                 if (createResponse.getStatus() == 409) {
@@ -175,6 +175,24 @@ public class StaffKeycloakService {
             throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
         }
         String orphanUuid = existing.get(0).getId();
+
+        // Verify the orphaned account actually belongs to this tenant/user before resetting credentials
+        UserRepresentation orphanRep = usersResource.get(orphanUuid).toRepresentation();
+        Map<String, List<String>> attributes = orphanRep.getAttributes();
+        if (attributes == null || !attributes.containsKey("database_user_id")) {
+            log.error("Orphan recovery failed for userId={}: Keycloak user {} missing database_user_id attribute",
+                    user.id(), orphanUuid);
+            throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
+        }
+
+        List<String> userIdAttr = attributes.get("database_user_id");
+        String expectedUserId = String.valueOf(user.id());
+        if (userIdAttr.isEmpty() || !expectedUserId.equals(userIdAttr.get(0))) {
+            log.error("Orphan recovery failed for userId={}: database_user_id mismatch (expected={}, found={})",
+                    user.id(), expectedUserId, userIdAttr.isEmpty() ? "empty" : userIdAttr.get(0));
+            throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
+        }
+
         String managedPassword = generateManagedPassword();
 
         CredentialRepresentation cred = new CredentialRepresentation();
@@ -202,10 +220,11 @@ public class StaffKeycloakService {
         return new String[]{title.substring(0, idx), title.substring(idx + 1)};
     }
 
-    private Map<String, List<String>> buildAttributes(String tenantCode, String userType) {
+    private Map<String, List<String>> buildAttributes(String tenantCode, String userType, Long userId) {
         Map<String, List<String>> attrs = new HashMap<>();
         attrs.put("tenant_state_code", List.of(tenantCode.toUpperCase()));
         attrs.put("user_type", List.of(userType));
+        attrs.put("database_user_id", List.of(String.valueOf(userId)));
         return attrs;
     }
 
