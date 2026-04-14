@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.arghyam.jalsoochak.user.service.StaffKeycloakService.ProvisionResult;
@@ -277,8 +278,7 @@ class StaffAuthServiceImplTest {
             assertThat(result.tokenResponse().getTenantCode()).isEqualTo("MP");
             assertThat(result.tokenResponse().getRole()).isEqualTo("SECTION_OFFICER");
             assertThat(result.refreshToken()).isEqualTo("rt");
-            verify(userAnalyticsEventPublisher, never()).publishUserUpdatedAfterCommit(
-                    any(), any(), any(), any(UUID.class), any(), any(), any());
+            verifyNoInteractions(userAnalyticsEventPublisher);
         }
 
         @Test
@@ -292,7 +292,7 @@ class StaffAuthServiceImplTest {
             when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
             // Slow path: new account provisioned — keycloakUuid is set
             when(staffKeycloakService.ensureKeycloakAccount(ACTIVE_USER, "MP", "tenant_mp"))
-                    .thenReturn(new ProvisionResult("managed-pw", newKeycloakUuid));
+                    .thenReturn(new ProvisionResult("managed-pw", UUID.fromString(newKeycloakUuid)));
             when(keycloakClient.obtainToken("919876543210", "managed-pw"))
                     .thenReturn(TOKEN_RESPONSE);
 
@@ -319,7 +319,7 @@ class StaffAuthServiceImplTest {
                     .thenReturn(Optional.of(ACTIVE_USER));
             when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
             when(staffKeycloakService.ensureKeycloakAccount(ACTIVE_USER, "MP", "tenant_mp"))
-                    .thenReturn(new ProvisionResult("managed-pw", newKeycloakUuid));
+                    .thenReturn(new ProvisionResult("managed-pw", UUID.fromString(newKeycloakUuid)));
             doThrow(new RuntimeException("token exchange failed"))
                     .when(keycloakClient).obtainToken("919876543210", "managed-pw");
 

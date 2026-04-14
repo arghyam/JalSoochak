@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Lazily provisions Keycloak accounts for staff users on their first successful OTP login.
@@ -44,7 +45,7 @@ public class StaffKeycloakService {
      * should use this to trigger downstream sync (e.g. analytics). On the fast path (existing
      * account), {@code keycloakUuid} is {@code null}.
      */
-    public record ProvisionResult(String managedPassword, String keycloakUuid) {}
+    public record ProvisionResult(String managedPassword, UUID keycloakUuid) {}
 
     /** Placeholder values set when the user was created without a Keycloak account. */
     private static final Set<String> PLACEHOLDER_PASSWORDS = Set.of("CSV_ONBOARDED", "KEYCLOAK_MANAGED");
@@ -92,7 +93,7 @@ public class StaffKeycloakService {
     }
 
     private ProvisionResult provisionKeycloakAccount(TenantUserRecord user, String tenantCode, String schema) {
-        String keycloakUuid = null;
+        UUID keycloakUuid = null;
         try {
             var usersResource = keycloakProvider.getAdminInstance()
                     .realm(keycloakProvider.getRealm()).users();
@@ -139,7 +140,7 @@ public class StaffKeycloakService {
                             "Keycloak returned 201 but no Location header — cannot extract user UUID");
                 }
                 String location = locationUri.toString();
-                keycloakUuid = location.substring(location.lastIndexOf('/') + 1);
+                keycloakUuid = UUID.fromString(location.substring(location.lastIndexOf('/') + 1));
             }
 
             String managedPassword = generateManagedPassword();
@@ -148,22 +149,22 @@ public class StaffKeycloakService {
             cred.setType(CredentialRepresentation.PASSWORD);
             cred.setValue(managedPassword);
             cred.setTemporary(false);
-            usersResource.get(keycloakUuid).resetPassword(cred);
+            usersResource.get(keycloakUuid.toString()).resetPassword(cred);
 
             String encryptedPassword = passwordCipher.encrypt(managedPassword);
-            userTenantRepository.updateKeycloakUuidAndPassword(schema, user.id(), keycloakUuid, encryptedPassword);
+            userTenantRepository.updateKeycloakUuidAndPassword(schema, user.id(), keycloakUuid.toString(), encryptedPassword);
 
             log.info("Keycloak account provisioned for staffUserId={} tenantCode={}", user.id(), tenantCode);
             return new ProvisionResult(managedPassword, keycloakUuid);
 
         } catch (RuntimeException e) {
             if (keycloakUuid != null) {
-                keycloakAdminHelper.deleteUser(keycloakUuid);
+                keycloakAdminHelper.deleteUser(keycloakUuid.toString());
             }
             throw e;
         } catch (Exception e) {
             if (keycloakUuid != null) {
-                keycloakAdminHelper.deleteUser(keycloakUuid);
+                keycloakAdminHelper.deleteUser(keycloakUuid.toString());
             }
             throw new KeycloakOperationException("Failed to provision staff Keycloak account", e);
         }
@@ -190,10 +191,10 @@ public class StaffKeycloakService {
             throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
         }
 
-        String orphanUuid = existing.get(0).getId();
+        UUID orphanUuid = UUID.fromString(existing.get(0).getId());
 
-        UserRepresentation orphanRep = usersResource.get(orphanUuid).toRepresentation();
-        verifyOrphanOwnership(user, tenantCode, orphanUuid, orphanRep.getAttributes());
+        UserRepresentation orphanRep = usersResource.get(orphanUuid.toString()).toRepresentation();
+        verifyOrphanOwnership(user, tenantCode, orphanUuid.toString(), orphanRep.getAttributes());
 
         String managedPassword = generateManagedPassword();
 
@@ -201,11 +202,11 @@ public class StaffKeycloakService {
         cred.setType(CredentialRepresentation.PASSWORD);
         cred.setValue(managedPassword);
         cred.setTemporary(false);
-        usersResource.get(orphanUuid).resetPassword(cred);
+        usersResource.get(orphanUuid.toString()).resetPassword(cred);
 
         String encryptedPassword = passwordCipher.encrypt(managedPassword);
         int affected = userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
-                schema, user.id(), orphanUuid, encryptedPassword);
+                schema, user.id(), orphanUuid.toString(), encryptedPassword);
 
         if (affected == 0) {
             // A concurrent caller already wrote a managed password to the DB.

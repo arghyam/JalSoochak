@@ -30,7 +30,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 
 @Slf4j
@@ -206,7 +205,7 @@ public class StaffAuthServiceImpl implements StaffAuthService {
                         freshUser.id(),
                         freshUser.tenantId(),
                         freshUser.userTypeId() != null ? freshUser.userTypeId().intValue() : null,
-                        UUID.fromString(provisionResult.keycloakUuid()),
+                        provisionResult.keycloakUuid(),
                         freshUser.email(),
                         freshUser.title(),
                         freshUser.status()
