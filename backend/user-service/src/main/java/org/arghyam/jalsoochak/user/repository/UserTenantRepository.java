@@ -361,6 +361,28 @@ public class UserTenantRepository {
     }
 
     /**
+     * Conditionally sets the Keycloak UUID and managed password only when the row still holds
+     * a placeholder value (NULL, empty, {@code CSV_ONBOARDED}, or {@code KEYCLOAK_MANAGED}).
+     * Used by {@code StaffKeycloakService} during orphan recovery to avoid overwriting a
+     * valid managed password that a concurrent caller may have just written.
+     *
+     * @return number of rows updated: 1 if the write succeeded, 0 if a managed password was
+     *         already present (written by a concurrent caller)
+     */
+    @SuppressWarnings("java:S2077")
+    public int updateKeycloakUuidAndPasswordIfUnmanaged(String schemaName, Long userId,
+                                                        String keycloakUuid, String encryptedPassword) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                UPDATE %s.user_table
+                SET uuid = ?, password = ?, updated_at = NOW()
+                WHERE id = ?
+                  AND (password IS NULL OR password = '' OR password = 'CSV_ONBOARDED' OR password = 'KEYCLOAK_MANAGED')
+                """, schemaName);
+        return jdbcTemplate.update(sql, keycloakUuid, encryptedPassword, userId);
+    }
+
+    /**
      * Returns UUIDs of users in the given tenant schema whose {@code title_hash} matches
      * the provided HMAC-SHA256 hex value. Used for exact case-insensitive name search.
      */
