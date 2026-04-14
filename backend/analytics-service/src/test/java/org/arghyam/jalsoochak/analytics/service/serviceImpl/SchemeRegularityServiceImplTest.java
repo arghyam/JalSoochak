@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeC
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicWaterQuantityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
@@ -326,6 +327,31 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
+    void getPeriodicOutageReasonSchemeCountByDepartment_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
+        mockRedisValueOps();
+        LocalDate requestedEnd = LocalDate.of(2026, 1, 10);
+        String cacheKey = ":outage_reasons:periodic:tenant:1:department:201:scale:week:start:2026-01-01:end:2026-01-10:v1";
+        when(valueOperations.get(cacheKey)).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        when(schemeRegularityRepository.getPeriodicOutageReasonSchemeCountByDepartment(
+                        1, 201, START, requestedEnd, PeriodScale.WEEK))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.PeriodicOutageReasonSchemeCountRow(
+                                LocalDate.of(2025, 12, 29),
+                                LocalDate.of(2026, 1, 4),
+                                "draught",
+                                1)));
+
+        PeriodicOutageReasonSchemeCountResponse response =
+                service.getPeriodicOutageReasonSchemeCountByDepartment(1, 201, START, requestedEnd, PeriodScale.WEEK);
+
+        assertThat(response.getScale()).isEqualTo("week");
+        assertThat(response.getDepartmentId()).isEqualTo(201);
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
     void getOutageReasonSchemeCountByLgd_usesTableReasonValues() {
         when(schemeRegularityRepository.getLgdLevelForTenant(1, 101)).thenReturn(3);
         when(schemeRegularityRepository.getOutageReasonSchemeCountByLgd(1, 101, START, END))
@@ -351,6 +377,43 @@ class SchemeRegularityServiceImplTest {
                 .containsExactlyEntriesOf(Map.of("draught", 2));
         assertThat(response.getChildRegions().get(1).getOutageReasonSchemeCount())
                 .isEmpty();
+    }
+
+    @Test
+    void getOutageReasonSchemeCountByLgd_cacheKeyIncludesTenantId_avoidsTenantCollision() throws Exception {
+        mockRedisValueOps();
+        LocalDate start = LocalDate.of(2026, 3, 12);
+        LocalDate end = LocalDate.of(2026, 4, 10);
+        int parentLgdId = 1;
+
+        String keyTenant17 = ":outage_reasons:tenant:17:parent_lgd:1:start:2026-03-12:end:2026-04-10:v2";
+        String keyTenant79 = ":outage_reasons:tenant:79:parent_lgd:1:start:2026-03-12:end:2026-04-10:v2";
+
+        OutageReasonSchemeCountResponse cachedTenant17 = OutageReasonSchemeCountResponse.builder()
+                .lgdId(parentLgdId)
+                .startDate(start)
+                .endDate(end)
+                .outageReasonSchemeCount(Map.of("no_water_supply", 1))
+                .childRegionCount(0)
+                .childRegions(List.of())
+                .build();
+
+        when(valueOperations.get(keyTenant17)).thenReturn("cached-17");
+        when(objectMapper.readValue("cached-17", OutageReasonSchemeCountResponse.class)).thenReturn(cachedTenant17);
+        when(valueOperations.get(keyTenant79)).thenReturn(null);
+        when(schemeRegularityRepository.getLgdLevelForTenant(79, parentLgdId)).thenReturn(1);
+        when(schemeRegularityRepository.getOutageReasonSchemeCountByLgd(79, parentLgdId, start, end)).thenReturn(List.of());
+        when(schemeRegularityRepository.getChildRegionsByLgd(79, parentLgdId)).thenReturn(List.of());
+        when(schemeRegularityRepository.getChildOutageReasonSchemeCountByLgd(79, parentLgdId, start, end)).thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        OutageReasonSchemeCountResponse fromCache = service.getOutageReasonSchemeCountByLgd(17, parentLgdId, start, end);
+        assertThat(fromCache.getOutageReasonSchemeCount()).containsEntry("no_water_supply", 1);
+        verify(schemeRegularityRepository, never()).getLgdLevelForTenant(17, parentLgdId);
+
+        service.getOutageReasonSchemeCountByLgd(79, parentLgdId, start, end);
+        verify(valueOperations, times(1)).get(keyTenant17);
+        verify(valueOperations, times(1)).get(keyTenant79);
     }
 
     @Test
@@ -483,6 +546,44 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getChildRegionCount()).isEqualTo(1);
         verify(schemeRegularityRepository, never()).getAverageWaterSupplyPerNation(any(), any());
+    }
+
+    @Test
+    void getRegionWiseWaterQuantityByLgd_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
+        mockRedisValueOps();
+        String cacheKey = ":water_quantity:region_wise:tenant:1:parent_lgd:101:start:2026-01-01:end:2026-01-03:v5";
+        when(valueOperations.get(cacheKey)).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        when(schemeRegularityRepository.getLgdLevel(101)).thenReturn(2);
+        when(schemeRegularityRepository.getRegionWiseWaterQuantityByLgd(1, 101, START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(401, null, "LGD-A", 120L, 10L, 9L, 12L, 5L)
+                ));
+
+        RegionWiseWaterQuantityResponse response = service.getRegionWiseWaterQuantityByLgd(1, 101, START, END);
+
+        assertThat(response.getParentLgdId()).isEqualTo(101);
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
+    void getRegionWiseWaterQuantityByDepartment_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
+        mockRedisValueOps();
+        String cacheKey = ":water_quantity:region_wise:tenant:1:parent_department:201:start:2026-01-01:end:2026-01-03:v3";
+        when(valueOperations.get(cacheKey)).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        when(schemeRegularityRepository.getDepartmentLevel(201)).thenReturn(2);
+        when(schemeRegularityRepository.getRegionWiseWaterQuantityByDepartment(1, 201, START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(null, 501, "Dept-A", 150L, 11L, 10L, 13L, 6L)
+                ));
+
+        RegionWiseWaterQuantityResponse response = service.getRegionWiseWaterQuantityByDepartment(1, 201, START, END);
+
+        assertThat(response.getParentDepartmentId()).isEqualTo(201);
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -745,6 +846,45 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
+    void getOutageReasonSchemeCountByDepartment_cacheKeyIncludesTenantId_avoidsTenantCollision() throws Exception {
+        mockRedisValueOps();
+        LocalDate start = LocalDate.of(2026, 3, 12);
+        LocalDate end = LocalDate.of(2026, 4, 10);
+        int parentDepartmentId = 1;
+
+        String keyTenant17 = ":outage_reasons:tenant:17:parent_department:1:start:2026-03-12:end:2026-04-10:v1";
+        String keyTenant79 = ":outage_reasons:tenant:79:parent_department:1:start:2026-03-12:end:2026-04-10:v1";
+
+        OutageReasonSchemeCountResponse cachedTenant17 = OutageReasonSchemeCountResponse.builder()
+                .departmentId(parentDepartmentId)
+                .startDate(start)
+                .endDate(end)
+                .outageReasonSchemeCount(Map.of("no_water_supply", 1))
+                .childRegionCount(0)
+                .childRegions(List.of())
+                .build();
+
+        when(valueOperations.get(keyTenant17)).thenReturn("cached-17");
+        when(objectMapper.readValue("cached-17", OutageReasonSchemeCountResponse.class)).thenReturn(cachedTenant17);
+
+        when(valueOperations.get(keyTenant79)).thenReturn(null);
+        when(schemeRegularityRepository.getDepartmentLevelForTenant(79, parentDepartmentId)).thenReturn(1);
+        when(schemeRegularityRepository.getOutageReasonSchemeCountByDepartment(79, parentDepartmentId, start, end)).thenReturn(List.of());
+        when(schemeRegularityRepository.getChildRegionsByDepartment(79, parentDepartmentId)).thenReturn(List.of());
+        when(schemeRegularityRepository.getChildOutageReasonSchemeCountByDepartment(79, parentDepartmentId, start, end)).thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        OutageReasonSchemeCountResponse fromCache =
+                service.getOutageReasonSchemeCountByDepartment(17, parentDepartmentId, start, end);
+        assertThat(fromCache.getOutageReasonSchemeCount()).containsEntry("no_water_supply", 1);
+        verify(schemeRegularityRepository, never()).getDepartmentLevelForTenant(17, parentDepartmentId);
+
+        service.getOutageReasonSchemeCountByDepartment(79, parentDepartmentId, start, end);
+        verify(valueOperations, times(1)).get(keyTenant17);
+        verify(valueOperations, times(1)).get(keyTenant79);
+    }
+
+    @Test
     void getOutageReasonSchemeCountByUser_returnsReasonCountsFromTableValues() {
         when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(1, 11, START, END))
                 .thenReturn(List.of(new SchemeRegularityRepository.OutageReasonSchemeCount("motor_burnt", 2)));
@@ -934,6 +1074,22 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isEqualTo(2);
         assertThat(response.getCompliantSubmissionCount()).isEqualTo(5);
         assertThat(response.getAnomalousSubmissionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void getSubmissionStatusSummaryByLgd_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
+        mockRedisValueOps();
+        String cacheKey = ":submission_status:summary:tenant:1:lgd:100:start:2026-01-01:end:2026-01-03:v2";
+        when(valueOperations.get(cacheKey)).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+        when(schemeRegularityRepository.getSchemeCountByLgd(1, 100)).thenReturn(2);
+        when(schemeRegularityRepository.getSubmissionStatusCountByLgd(1, 100, START, END))
+                .thenReturn(new SchemeRegularityRepository.SubmissionStatusCount(5, 1));
+
+        SubmissionStatusSummaryResponse response = service.getSubmissionStatusSummaryByLgd(1, 100, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(2);
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test

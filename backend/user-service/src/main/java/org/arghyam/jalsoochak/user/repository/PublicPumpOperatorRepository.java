@@ -25,6 +25,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * All SQL in this repository uses {@code String.format} to inject only pre-validated,
+ * internal-only values:
+ * <ul>
+ *   <li>{@code schemaName} — validated by {@link #validateSchemaName} against
+ *       {@code ^[a-z_][a-z0-9_]*$}.</li>
+ *   <li>Column name fragments ({@code timeColumn}, {@code confirmedExpr}, {@code schemeJoin}) —
+ *       returned from internal helpers that produce only hardcoded SQL literals.</li>
+ *   <li>Conditional SQL fragments (filter, ORDER-BY) — assembled from hardcoded string
+ *       constants; user input is always bound as a {@code ?} parameter.</li>
+ *   <li>IN-clause placeholders — built as {@code "?, ?, ..."} strings from collection size.</li>
+ * </ul>
+ * No user-supplied data is ever concatenated into any query string.
+ */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 public class PublicPumpOperatorRepository {

@@ -1164,10 +1164,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDateRange(startDate, endDate);
 
         String cacheKey = REGION_WISE_WATER_QUANTITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v4";
+                + ":v5";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1216,10 +1217,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDateRange(startDate, endDate);
 
         String cacheKey = REGION_WISE_WATER_QUANTITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":parent_department:" + parentDepartmentId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v2";
+                + ":v3";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1421,11 +1423,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateScaleInput(scale);
 
         String cacheKey = PERIODIC_OUTAGE_REASON_SCHEME_COUNT_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + lgdId
                 + ":scale:" + scale.name().toLowerCase()
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v2";
         PeriodicOutageReasonSchemeCountResponse cached =
                 readFromCache(cacheKey, PeriodicOutageReasonSchemeCountResponse.class);
         if (cached != null) {
@@ -1450,11 +1453,27 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDateRange(startDate, endDate);
         validateScaleInput(scale);
 
+        String cacheKey = PERIODIC_OUTAGE_REASON_SCHEME_COUNT_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":department:" + departmentId
+                + ":scale:" + scale.name().toLowerCase()
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v1";
+        PeriodicOutageReasonSchemeCountResponse cached =
+                readFromCache(cacheKey, PeriodicOutageReasonSchemeCountResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
         List<SchemeRegularityRepository.PeriodicOutageReasonSchemeCountRow> rows =
                 schemeRegularityRepository.getPeriodicOutageReasonSchemeCountByDepartment(
                         tenantId, departmentId, startDate, endDate, scale);
 
-        return buildPeriodicOutageReasonSchemeCountResponse(null, departmentId, startDate, endDate, scale, rows);
+        PeriodicOutageReasonSchemeCountResponse response =
+                buildPeriodicOutageReasonSchemeCountResponse(null, departmentId, startDate, endDate, scale, rows);
+        writeToCache(cacheKey, response);
+        return response;
     }
 
     @Override
@@ -1465,10 +1484,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDateRange(startDate, endDate);
 
         String cacheKey = OUTAGE_REASON_SCHEME_COUNT_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v2";
         OutageReasonSchemeCountResponse cached = readFromCache(cacheKey, OutageReasonSchemeCountResponse.class);
         if (cached != null) {
             return cached;
@@ -1510,6 +1530,18 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
+
+        String cacheKey = OUTAGE_REASON_SCHEME_COUNT_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":parent_department:" + parentDepartmentId
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v1";
+        OutageReasonSchemeCountResponse cached = readFromCache(cacheKey, OutageReasonSchemeCountResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
         Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (parentDepartmentLevel == null) {
             throw new IllegalArgumentException(
@@ -1525,7 +1557,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 schemeRegularityRepository.getChildOutageReasonSchemeCountByDepartment(
                         tenantId, parentDepartmentId, startDate, endDate);
 
-        return OutageReasonSchemeCountResponse.builder()
+        OutageReasonSchemeCountResponse response = OutageReasonSchemeCountResponse.builder()
                 .lgdId(null)
                 .departmentId(parentDepartmentId)
                 .startDate(startDate)
@@ -1539,6 +1571,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         childRows,
                         SchemeRegularityRepository.ChildRegionOutageReasonSchemeCount::departmentId))
                 .build();
+        writeToCache(cacheKey, response);
+        return response;
     }
 
     @Override
@@ -1790,10 +1824,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateDateRange(startDate, endDate);
 
         String cacheKey = SUBMISSION_STATUS_SUMMARY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + lgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v2";
         SubmissionStatusSummaryResponse cached =
                 readFromCache(cacheKey, SubmissionStatusSummaryResponse.class);
         if (cached != null) {

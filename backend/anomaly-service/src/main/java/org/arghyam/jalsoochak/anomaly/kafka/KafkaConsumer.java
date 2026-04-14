@@ -29,7 +29,6 @@ public class KafkaConsumer {
             String eventType = node.path("eventType").asText("UNKNOWN");
             switch (eventType) {
                 case "USER_CREATED", "USER_UPDATED" -> analyticsDimensionSyncService.upsertUser(node);
-                case "USER_SCHEME_MAPPINGS_REPLACED" -> analyticsDimensionSyncService.replaceUserSchemeMappings(node);
                 default -> log.debug("[anomaly-service] Ignoring user event type: {}", eventType);
             }
         } catch (Exception e) {

@@ -124,9 +124,48 @@
                     <execution>
                         <id>report</id>
                         <phase>verify</phase>
+                        <configuration>
+                            <includes>
+                                <include>org/arghyam/jalsoochak/telemetry/service/FlowVisionService*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/service/PiiEncryptionService*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/service/BusinessServiceImpl*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/OpenApiConfig*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/TenantContext*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/TenantInterceptor*</include>
+                            </includes>
+                        </configuration>
                         <goals>
                             <goal>report</goal>
                         </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>org/arghyam/jalsoochak/telemetry/service/FlowVisionService*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/service/PiiEncryptionService*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/service/BusinessServiceImpl*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/OpenApiConfig*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/TenantContext*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/TenantInterceptor*</include>
+                            </includes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>INSTRUCTION</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

@@ -301,12 +301,7 @@ public class FactServiceImpl implements FactService {
 
         String resolvedAnomalyType;
         if (event.getAnomalyType() != null && !event.getAnomalyType().isBlank()) {
-            // Normalize: trim whitespace and convert to lowercase
-            String normalized = event.getAnomalyType().trim().toLowerCase(Locale.ROOT);
-            // Truncate to maximum allowed length
-            resolvedAnomalyType = normalized.length() > MAX_ANOMALY_TYPE_LENGTH
-                    ? normalized.substring(0, MAX_ANOMALY_TYPE_LENGTH)
-                    : normalized;
+            resolvedAnomalyType = normalizeAnomalyTypeForPersist(event.getAnomalyType().trim());
         } else {
             // Fall back to NO_SUBMISSION when null or blank
             resolvedAnomalyType = intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
@@ -353,7 +348,7 @@ public class FactServiceImpl implements FactService {
                         ? op.getName() + " has never submitted a reading"
                         : op.getName() + " has not submitted for " + op.getConsecutiveDaysMissed() + " consecutive days";
                 String escalationTypeForPersist = neverUploaded
-                        ? String.valueOf(EscalationType.NO_SUBMISSION.code)
+                        ? intCodeToVarchar(EscalationType.NO_SUBMISSION.code)
                         : resolvedAnomalyType;
                 try {
                     FactEscalation escalationFact = FactEscalation.builder()
@@ -558,12 +553,7 @@ public class FactServiceImpl implements FactService {
         if (type == null) {
             return String.valueOf(code);
         }
-        return switch (type) {
-            case NO_WATER_SUPPLY -> String.valueOf(EscalationType.NO_WATER_SUPPLY.code);
-            case LOW_WATER_SUPPLY -> "under_supply";
-            case OVER_WATER_SUPPLY -> "over_supply";
-            default -> type.label.toLowerCase(Locale.ROOT);
-        };
+        return type.label;
     }
 
     private boolean isWaterAnomaly(Integer type) {
@@ -591,8 +581,39 @@ public class FactServiceImpl implements FactService {
 
     private String resolveEscalationTypeForPersist(Integer escalationType, String message) {
         if (message != null && message.toLowerCase(Locale.ROOT).contains(NEVER_SUBMITTED_READING_PHRASE)) {
-            return String.valueOf(EscalationType.NO_SUBMISSION.code);
+            return intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
         }
         return intCodeToVarchar(escalationType);
+    }
+
+    private String normalizeAnomalyTypeForPersist(String rawType) {
+        if (rawType == null || rawType.isBlank()) {
+            return intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
+        }
+
+        String normalized = rawType.trim();
+        try {
+            return intCodeToVarchar(Integer.parseInt(normalized));
+        } catch (NumberFormatException ignored) {
+            // Ignore non-numeric values and continue with text normalization.
+        }
+
+        String upper = normalized.toUpperCase(Locale.ROOT);
+        if ("UNDER_SUPPLY".equals(upper)) {
+            return EscalationType.LOW_WATER_SUPPLY.label;
+        }
+        if ("OVER_SUPPLY".equals(upper)) {
+            return EscalationType.OVER_WATER_SUPPLY.label;
+        }
+
+        try {
+            return EscalationType.valueOf(upper).label;
+        } catch (IllegalArgumentException ignored) {
+            // Keep unknown values as-is while preserving max-length protection.
+        }
+
+        return normalized.length() > MAX_ANOMALY_TYPE_LENGTH
+                ? normalized.substring(0, MAX_ANOMALY_TYPE_LENGTH)
+                : normalized;
     }
 }

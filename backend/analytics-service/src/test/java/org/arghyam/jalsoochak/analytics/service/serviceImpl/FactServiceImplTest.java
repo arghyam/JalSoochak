@@ -137,12 +137,12 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getEscalationType()).isEqualTo("consecutive_override_5_days");
+        assertThat(captor.getValue().getEscalationType()).isEqualTo("CONSECUTIVE_OVERRIDE_5_DAYS");
         assertThat(captor.getValue().getResolutionStatus()).isEqualTo(0);
     }
 
     @Test
-    void ingestEscalation_neverSubmittedMessage_persistsNoSubmissionCode() {
+    void ingestEscalation_neverSubmittedMessage_persistsNoSubmissionLabel() {
         EscalationEvent event = new EscalationEvent();
         event.setTenantId(1);
         event.setSchemeId(11);
@@ -155,7 +155,7 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getEscalationType()).isEqualTo("9");
+        assertThat(captor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
     }
 
     @Test
@@ -175,7 +175,7 @@ class FactServiceImplTest {
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
         FactEscalation saved = captor.getValue();
-        assertThat(saved.getEscalationType()).isEqualTo("6");
+        assertThat(saved.getEscalationType()).isEqualTo("NO_WATER_SUPPLY");
         assertThat(saved.getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_WATER_SUPPLY, 21, 1, 11));
     }
@@ -223,7 +223,7 @@ class FactServiceImplTest {
         verify(escalationRepository, times(1)).save(escCaptor.capture());
         assertThat(escCaptor.getValue().getUserId()).isEqualTo(99); // officerId
         assertThat(escCaptor.getValue().getSchemeId()).isEqualTo(11);
-        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
         assertThat(escCaptor.getValue().getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_SUBMISSION, 21, 1, 11));
 
@@ -231,7 +231,7 @@ class FactServiceImplTest {
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
         assertThat(anomalyCaptor.getValue().getUserId()).isEqualTo(21); // operator userId
         assertThat(anomalyCaptor.getValue().getConsecutiveDaysMissed()).isEqualTo(5);
-        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("NO_SUBMISSION");
     }
 
     @Test
@@ -244,11 +244,11 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> escCaptor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(escCaptor.capture());
-        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
 
         ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
-        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("NO_SUBMISSION");
     }
 
     @Test
@@ -262,11 +262,11 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> escCaptor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(escCaptor.capture());
-        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
 
         ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
-        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("NO_SUBMISSION");
     }
 
     @Test
@@ -349,7 +349,7 @@ class FactServiceImplTest {
         assertThat(escCaptor.getValue().getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_SUBMISSION, 21, 1, 11));
         assertThat(escCaptor.getValue().getMessage()).contains("never submitted");
-        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("9");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
 
         ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());

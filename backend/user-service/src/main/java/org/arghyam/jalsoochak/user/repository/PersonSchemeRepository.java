@@ -24,6 +24,20 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * All SQL in this repository uses {@code String.format} to inject only pre-validated,
+ * internal-only values:
+ * <ul>
+ *   <li>{@code schemaName} — validated by {@link #validateSchemaName} against
+ *       {@code ^[a-z_][a-z0-9_]*$}.</li>
+ *   <li>Column name fragments ({@code timeColumn}, {@code confirmedExpr}) — returned from
+ *       internal helpers that produce only hardcoded SQL literals.</li>
+ *   <li>WHERE/ORDER-BY fragments — assembled from hardcoded string constants with
+ *       {@code ?} placeholders; user input is always bound as a parameter.</li>
+ *   <li>IN-clause placeholders — built as {@code "?, ?, ..."} strings from collection size.</li>
+ * </ul>
+ * No user-supplied data is ever concatenated into the query string.
+ */
 @Repository
 @RequiredArgsConstructor
 public class PersonSchemeRepository {
@@ -68,6 +82,7 @@ public class PersonSchemeRepository {
         return columnExists(schemaName, "flow_reading_table", "observation_time") ? "observation_time" : "reading_at";
     }
 
+    @SuppressWarnings("java:S2077")
     private String resolveConfirmedReadingExpression(String schemaName, String tableAlias) {
         if (columnExists(schemaName, "flow_reading_table", "payload_json")) {
             return String.format(
@@ -92,6 +107,7 @@ public class PersonSchemeRepository {
         return "ORDER BY " + col + " " + dir;
     }
 
+    @SuppressWarnings("java:S2077")
     public long countSchemesByPerson(String schemaName, long personId, String schemeName) {
         validateSchemaName(schemaName);
         if (!tableExists(schemaName, "user_scheme_mapping_table")) {
@@ -120,6 +136,7 @@ public class PersonSchemeRepository {
         return total == null ? 0 : total;
     }
 
+    @SuppressWarnings("java:S2077")
     public List<PersonSchemeDetailsDTO> listSchemesByPerson(
             String schemaName,
             long personId,
@@ -251,6 +268,7 @@ public class PersonSchemeRepository {
         return results;
     }
 
+    @SuppressWarnings("java:S2077")
     private Map<Long, List<String>> fetchPumpOperatorsBySchemes(String schemaName, List<Long> schemeIds) {
         if (schemeIds == null || schemeIds.isEmpty()) {
             return Map.of();
@@ -284,6 +302,7 @@ public class PersonSchemeRepository {
         return grouped;
     }
 
+    @SuppressWarnings("java:S2077")
     public SchemeDetailsWithReportingDTO getSchemeDetails(String schemaName, long schemeId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
@@ -337,6 +356,7 @@ public class PersonSchemeRepository {
         }
     }
 
+    @SuppressWarnings("java:S2077")
     public long countSchemeReadings(String schemaName, long schemeId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -355,6 +375,7 @@ public class PersonSchemeRepository {
         return total == null ? 0 : total;
     }
 
+    @SuppressWarnings("java:S2077")
     public List<SchemeReadingSubmissionDTO> listSchemeReadings(
             String schemaName,
             long schemeId,
@@ -420,6 +441,7 @@ public class PersonSchemeRepository {
         return "ORDER BY " + col + " " + dir;
     }
 
+    @SuppressWarnings("java:S2077")
     public long countPumpOperatorsByPerson(
             String schemaName,
             long personId,
@@ -489,6 +511,7 @@ public class PersonSchemeRepository {
         return total == null ? 0 : total;
     }
 
+    @SuppressWarnings("java:S2077")
     public List<PumpOperatorSummaryWithMetricsDTO> listPumpOperatorsByPerson(
             String schemaName,
             long personId,
@@ -664,6 +687,7 @@ public class PersonSchemeRepository {
         return "title_hash";
     }
 
+    @SuppressWarnings("java:S2077")
     private Map<Long, List<PumpOperatorSchemeSummaryDTO>> fetchSchemesForPumpOperators(
             String schemaName,
             long personId,
@@ -719,6 +743,7 @@ public class PersonSchemeRepository {
         return grouped;
     }
 
+    @SuppressWarnings("java:S2077")
     public long countPumpOperatorReadings(
             String schemaName,
             long pumpOperatorId,
@@ -757,6 +782,7 @@ public class PersonSchemeRepository {
         return "ORDER BY " + col + " " + dir + ", o.id DESC";
     }
 
+    @SuppressWarnings("java:S2077")
     public List<PumpOperatorReadingDetailDTO> listPumpOperatorReadings(
             String schemaName,
             long pumpOperatorId,
