@@ -172,10 +172,10 @@ public interface SchemeRegularityService {
     Map<String, Integer> getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId);
 
     SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount);
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount);
 
     SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount);
 
     SchemeRegularityListResponse getSchemeRegionReportByLgd(
             Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count);

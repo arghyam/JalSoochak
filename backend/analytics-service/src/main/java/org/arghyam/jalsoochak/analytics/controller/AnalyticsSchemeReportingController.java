@@ -234,6 +234,7 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<SchemeStatusAndTopReportingResponse>> getSchemeStatusAndTopReportingRate(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -248,8 +249,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             SchemeStatusAndTopReportingResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(parentLgdId, startDate, endDate, schemeCount)
-                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(parentDepartmentId, startDate, endDate, schemeCount);
+                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(tenantId, parentLgdId, startDate, endDate, schemeCount)
+                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(tenantId, parentDepartmentId, startDate, endDate, schemeCount);
 
             return ResponseEntity.ok(ApiResponse.<SchemeStatusAndTopReportingResponse>builder()
                     .success(true)

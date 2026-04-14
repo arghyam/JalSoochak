@@ -154,7 +154,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemesDashboard_withParentLgdId_returnsParentLgdCName() throws Exception {
-        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(101, START, END, 5))
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 5))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentLgdId(101)
                         .parentLgdCName("Parent")
@@ -189,6 +189,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
@@ -210,7 +211,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemesDashboard_withParentDepartmentId_returnsParentDepartmentCName() throws Exception {
-        when(schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(201, START, END, 5))
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(TENANT_ID, 201, START, END, 5))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentDepartmentId(201)
                         .parentDepartmentCName("Parent Dept")
@@ -237,6 +238,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_department_id", "201")
@@ -254,6 +256,15 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.topSchemes[0].immediateParentDepartmentLevel").value(5))
                 .andExpect(jsonPath("$.data.topSchemes[0].lgdLadder.level_2").value(22))
                 .andExpect(jsonPath("$.data.topSchemes[0].departmentLadder.level_4").value(903));
+    }
+
+    @Test
+    void getSchemesDashboard_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

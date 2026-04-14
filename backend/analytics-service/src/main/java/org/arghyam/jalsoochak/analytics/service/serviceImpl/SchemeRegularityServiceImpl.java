@@ -1919,13 +1919,15 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByLgd(
-            Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
+        validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
         topSchemeCount = topSchemeCount == null ? DEFAULT_TOP_SCHEME_COUNT : topSchemeCount;
         validateTopSchemeCount(topSchemeCount);
 
         String cacheKey = SCHEME_STATUS_TOP_REPORTING_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
                 + ":scheme_count:" + topSchemeCount
                 + ":start:" + startDate
@@ -1937,15 +1939,15 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
-        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevel(parentLgdId);
+        Integer parentLgdLevel = schemeRegularityRepository.getLgdLevelForTenant(tenantId, parentLgdId);
 
         SchemeRegularityRepository.SchemeStatusCount statusCount =
-                schemeRegularityRepository.getSchemeStatusCountByLgd(parentLgdId);
-        String parentLgdCName = schemeRegularityRepository.getParentLgdCNameByLgd(parentLgdId);
-        String parentLgdTitle = schemeRegularityRepository.getParentLgdTitleByLgd(parentLgdId);
+                schemeRegularityRepository.getSchemeStatusCountByLgd(tenantId, parentLgdId);
+        String parentLgdCName = schemeRegularityRepository.getParentLgdCNameByLgd(tenantId, parentLgdId);
+        String parentLgdTitle = schemeRegularityRepository.getParentLgdTitleByLgd(tenantId, parentLgdId);
         List<SchemeRegularityRepository.SchemeSubmissionMetrics> topSchemes =
                 schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(
-                        parentLgdId, startDate, endDate, topSchemeCount);
+                        tenantId, parentLgdId, startDate, endDate, topSchemeCount);
 
         SchemeStatusAndTopReportingResponse response = SchemeStatusAndTopReportingResponse.builder()
                 .parentLgdId(parentLgdId)
@@ -1992,23 +1994,24 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByDepartment(
-            Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer topSchemeCount) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
         topSchemeCount = topSchemeCount == null ? DEFAULT_TOP_SCHEME_COUNT : topSchemeCount;
         validateTopSchemeCount(topSchemeCount);
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
-        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevel(parentDepartmentId);
+        Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
 
         SchemeRegularityRepository.SchemeStatusCount statusCount =
-                schemeRegularityRepository.getSchemeStatusCountByDepartment(parentDepartmentId);
+                schemeRegularityRepository.getSchemeStatusCountByDepartment(tenantId, parentDepartmentId);
         String parentDepartmentCName =
-                schemeRegularityRepository.getParentDepartmentCNameByDepartment(parentDepartmentId);
+                schemeRegularityRepository.getParentDepartmentCNameByDepartment(tenantId, parentDepartmentId);
         String parentDepartmentTitle =
-                schemeRegularityRepository.getParentDepartmentTitleByDepartment(parentDepartmentId);
+                schemeRegularityRepository.getParentDepartmentTitleByDepartment(tenantId, parentDepartmentId);
         List<SchemeRegularityRepository.SchemeSubmissionMetrics> topSchemes =
                 schemeRegularityRepository.getTopSchemeSubmissionMetricsByDepartment(
-                        parentDepartmentId, startDate, endDate, topSchemeCount);
+                        tenantId, parentDepartmentId, startDate, endDate, topSchemeCount);
 
         return SchemeStatusAndTopReportingResponse.builder()
                 .parentLgdId(null)
