@@ -38,6 +38,9 @@ public class DimUserSchemeMapping {
     @Column(name = "scheme_id", nullable = false)
     private Integer schemeId;
 
+    @Column(name = "tenant_id", nullable = false)
+    private Integer tenantId;
+
     @Column(name = "status", nullable = false)
     private Integer status;
 
