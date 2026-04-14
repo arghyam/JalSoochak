@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Lazily provisions Keycloak accounts for staff users on their first successful OTP login.
@@ -37,6 +38,14 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class StaffKeycloakService {
+
+    /**
+     * Result of {@link #ensureKeycloakAccount}. {@code keycloakUuid} is non-null only when a
+     * <em>new</em> Keycloak account was just provisioned and its UUID written to the DB — callers
+     * should use this to trigger downstream sync (e.g. analytics). On the fast path (existing
+     * account), {@code keycloakUuid} is {@code null}.
+     */
+    public record ProvisionResult(String managedPassword, UUID keycloakUuid) {}
 
     /** Placeholder values set when the user was created without a Keycloak account. */
     private static final Set<String> PLACEHOLDER_PASSWORDS = Set.of("CSV_ONBOARDED", "KEYCLOAK_MANAGED");
@@ -61,16 +70,17 @@ public class StaffKeycloakService {
      * @param user       the staff user record (decrypted PII already available on the record)
      * @param tenantCode tenant state code (e.g. "MP")
      * @param schema     tenant schema name (e.g. "tenant_mp")
-     * @return the plaintext managed password to use for the Keycloak token request
+     * @return a {@link ProvisionResult} containing the plaintext managed password and, when a new
+     *         account was just created, the Keycloak UUID written to the DB
      */
-    public String ensureKeycloakAccount(TenantUserRecord user, String tenantCode, String schema) {
+    public ProvisionResult ensureKeycloakAccount(TenantUserRecord user, String tenantCode, String schema) {
         // Fast path: existing managed password in DB
         String existingPassword = userTenantRepository.findPasswordByUserId(schema, user.id())
                 .orElse(null);
 
         if (existingPassword != null && !existingPassword.trim().isBlank() && !PLACEHOLDER_PASSWORDS.contains(existingPassword)) {
             try {
-                return passwordCipher.decrypt(existingPassword);
+                return new ProvisionResult(passwordCipher.decrypt(existingPassword), null);
             } catch (IllegalStateException e) {
                 log.warn("Failed to decrypt managed password for userId={} — reprovisioning Keycloak account",
                         user.id());
@@ -82,8 +92,8 @@ public class StaffKeycloakService {
         return provisionKeycloakAccount(user, tenantCode, schema);
     }
 
-    private String provisionKeycloakAccount(TenantUserRecord user, String tenantCode, String schema) {
-        String keycloakUuid = null;
+    private ProvisionResult provisionKeycloakAccount(TenantUserRecord user, String tenantCode, String schema) {
+        UUID keycloakUuid = null;
         try {
             var usersResource = keycloakProvider.getAdminInstance()
                     .realm(keycloakProvider.getRealm()).users();
@@ -104,7 +114,8 @@ public class StaffKeycloakService {
                     if (concurrentPassword != null && !concurrentPassword.isBlank()
                             && !PLACEHOLDER_PASSWORDS.contains(concurrentPassword)) {
                         try {
-                            return passwordCipher.decrypt(concurrentPassword);
+                            // keycloakUuid=null: the concurrent winner is responsible for the analytics sync
+                            return new ProvisionResult(passwordCipher.decrypt(concurrentPassword), null);
                         } catch (IllegalStateException decryptEx) {
                             log.warn("Failed to decrypt concurrent managed password for userId={}", user.id());
                         }
@@ -129,7 +140,7 @@ public class StaffKeycloakService {
                             "Keycloak returned 201 but no Location header — cannot extract user UUID");
                 }
                 String location = locationUri.toString();
-                keycloakUuid = location.substring(location.lastIndexOf('/') + 1);
+                keycloakUuid = UUID.fromString(location.substring(location.lastIndexOf('/') + 1));
             }
 
             String managedPassword = generateManagedPassword();
@@ -138,22 +149,22 @@ public class StaffKeycloakService {
             cred.setType(CredentialRepresentation.PASSWORD);
             cred.setValue(managedPassword);
             cred.setTemporary(false);
-            usersResource.get(keycloakUuid).resetPassword(cred);
+            usersResource.get(keycloakUuid.toString()).resetPassword(cred);
 
             String encryptedPassword = passwordCipher.encrypt(managedPassword);
-            userTenantRepository.updateKeycloakUuidAndPassword(schema, user.id(), keycloakUuid, encryptedPassword);
+            userTenantRepository.updateKeycloakUuidAndPassword(schema, user.id(), keycloakUuid.toString(), encryptedPassword);
 
             log.info("Keycloak account provisioned for staffUserId={} tenantCode={}", user.id(), tenantCode);
-            return managedPassword;
+            return new ProvisionResult(managedPassword, keycloakUuid);
 
         } catch (RuntimeException e) {
             if (keycloakUuid != null) {
-                keycloakAdminHelper.deleteUser(keycloakUuid);
+                keycloakAdminHelper.deleteUser(keycloakUuid.toString());
             }
             throw e;
         } catch (Exception e) {
             if (keycloakUuid != null) {
-                keycloakAdminHelper.deleteUser(keycloakUuid);
+                keycloakAdminHelper.deleteUser(keycloakUuid.toString());
             }
             throw new KeycloakOperationException("Failed to provision staff Keycloak account", e);
         }
@@ -169,10 +180,10 @@ public class StaffKeycloakService {
      * already-written managed password is never overwritten. If 0 rows are affected, the
      * concurrent winner's password is read back and returned instead.
      */
-    private String recoverOrphanedKeycloakAccount(UsersResource usersResource,
-                                                   TenantUserRecord user,
-                                                   String tenantCode,
-                                                   String schema) {
+    private ProvisionResult recoverOrphanedKeycloakAccount(UsersResource usersResource,
+                                                           TenantUserRecord user,
+                                                           String tenantCode,
+                                                           String schema) {
         List<UserRepresentation> existing = usersResource.searchByUsername(user.phoneNumber(), true);
         if (existing.size() != 1) {
             log.error("Orphan recovery failed: expected 1 Keycloak user for userId={}, found={}",
@@ -180,10 +191,10 @@ public class StaffKeycloakService {
             throw new KeycloakOperationException("Failed to create Keycloak user for staff: HTTP 409");
         }
 
-        String orphanUuid = existing.get(0).getId();
+        UUID orphanUuid = UUID.fromString(existing.get(0).getId());
 
-        UserRepresentation orphanRep = usersResource.get(orphanUuid).toRepresentation();
-        verifyOrphanOwnership(user, tenantCode, orphanUuid, orphanRep.getAttributes());
+        UserRepresentation orphanRep = usersResource.get(orphanUuid.toString()).toRepresentation();
+        verifyOrphanOwnership(user, tenantCode, orphanUuid.toString(), orphanRep.getAttributes());
 
         String managedPassword = generateManagedPassword();
 
@@ -191,11 +202,11 @@ public class StaffKeycloakService {
         cred.setType(CredentialRepresentation.PASSWORD);
         cred.setValue(managedPassword);
         cred.setTemporary(false);
-        usersResource.get(orphanUuid).resetPassword(cred);
+        usersResource.get(orphanUuid.toString()).resetPassword(cred);
 
         String encryptedPassword = passwordCipher.encrypt(managedPassword);
         int affected = userTenantRepository.updateKeycloakUuidAndPasswordIfUnmanaged(
-                schema, user.id(), orphanUuid, encryptedPassword);
+                schema, user.id(), orphanUuid.toString(), encryptedPassword);
 
         if (affected == 0) {
             // A concurrent caller already wrote a managed password to the DB.
@@ -207,7 +218,8 @@ public class StaffKeycloakService {
                     && !PLACEHOLDER_PASSWORDS.contains(concurrentPassword)) {
                 try {
                     log.info("Orphan recovery: concurrent writer won DB race for staffUserId={}", user.id());
-                    return passwordCipher.decrypt(concurrentPassword);
+                    // keycloakUuid=null: the concurrent winner is responsible for the analytics sync
+                    return new ProvisionResult(passwordCipher.decrypt(concurrentPassword), null);
                 } catch (IllegalStateException e) {
                     log.warn("Orphan recovery: failed to decrypt concurrent managed password for userId={}", user.id());
                 }
@@ -218,7 +230,7 @@ public class StaffKeycloakService {
         }
 
         log.info("Orphan Keycloak account recovered for staffUserId={} tenantCode={}", user.id(), tenantCode);
-        return managedPassword;
+        return new ProvisionResult(managedPassword, orphanUuid);
     }
 
     /**
