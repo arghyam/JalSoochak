@@ -274,7 +274,9 @@ public class StaffKeycloakService {
         Map<String, List<String>> attrs = new HashMap<>();
         attrs.put("tenant_state_code", List.of(tenantCode.toUpperCase()));
         attrs.put("user_type", List.of(userType));
-        attrs.put("database_user_id", List.of(String.valueOf(userId)));
+        if (userId != null) {
+            attrs.put("database_user_id", List.of(String.valueOf(userId)));
+        }
         return attrs;
     }
 
