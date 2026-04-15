@@ -640,7 +640,9 @@ public class GlificMeterWorkflowService {
             }
 
             String message;
-            if ("noWaterSupply".equalsIgnoreCase(responseSelectedKey)
+            if ("meterReplace".equalsIgnoreCase(responseSelectedKey)
+                    || "meterReplaced".equalsIgnoreCase(responseSelectedKey)
+                    || "noWaterSupply".equalsIgnoreCase(responseSelectedKey)
                     || "noReadingSubmission".equalsIgnoreCase(responseSelectedKey)) {
                 message = "please wait a second...";
             } else {
