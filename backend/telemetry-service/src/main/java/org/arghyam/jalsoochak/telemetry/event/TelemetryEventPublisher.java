@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -106,9 +107,7 @@ public class TelemetryEventPublisher {
                                        String reason,
                                        Integer status,
                                        String correlationId) {
-        String eventUuid = (correlationId != null && !correlationId.isBlank())
-                ? correlationId
-                : UUID.randomUUID().toString();
+        String eventUuid = resolveAnomalyEventUuid(correlationId, userId);
         AnomalyEvent event = AnomalyEvent.builder()
                 .eventType(EVENT_ANOMALY_RECORDED)
                 .uuid(eventUuid)
@@ -235,6 +234,17 @@ public class TelemetryEventPublisher {
             return value.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.HALF_UP).intValue();
         }
         return value.setScale(0, RoundingMode.HALF_UP).intValue();
+    }
+
+    private static String resolveAnomalyEventUuid(String correlationId, Long userId) {
+        if (correlationId == null || correlationId.isBlank()) {
+            return UUID.randomUUID().toString();
+        }
+        if (userId == null) {
+            return correlationId;
+        }
+        String key = correlationId + ":" + userId;
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private record ReasonPayload(String outageReason, String nonSubmissionReason) {

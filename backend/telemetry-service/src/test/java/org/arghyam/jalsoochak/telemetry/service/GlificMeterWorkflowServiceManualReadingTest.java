@@ -31,6 +31,7 @@ import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -434,7 +435,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-        when(telemetryTenantRepository.findSectionOfficerUserIdForScheme("tenant_test", 10L)).thenReturn(Optional.of(99L));
+        when(telemetryTenantRepository.findSectionOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L, 100L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
@@ -476,15 +477,31 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertEquals(true, resp.isSuccess());
         assertEquals("CONFIRMED", resp.getQualityStatus());
 
-        verify(telemetryEventPublisher).publishEscalationCreated(
+        verify(telemetryEventPublisher, times(2)).publishEscalationCreated(
                 org.mockito.ArgumentMatchers.eq(1),
                 org.mockito.ArgumentMatchers.eq(10L),
-                org.mockito.ArgumentMatchers.eq(99L),
+                ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS),
                 org.mockito.ArgumentMatchers.eq("Manual overrides recorded for five or more consecutive days."),
                 org.mockito.ArgumentMatchers.eq("bfm-1"),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 org.mockito.ArgumentMatchers.isNull()
+        );
+        verify(telemetryEventPublisher, times(2)).publishAnomalyRecorded(
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_MANUAL_OVERRIDE),
+                ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.eq(10L),
+                any(),
+                any(),
+                any(),
+                anyInt(),
+                any(),
+                any(),
+                anyInt(),
+                org.mockito.ArgumentMatchers.eq("Manual reading submitted as override."),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
+                any()
         );
         verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),
