@@ -382,6 +382,29 @@ public class TelemetryTenantRepository {
         return Boolean.TRUE.equals(exists);
     }
 
+    public Optional<Long> findSectionOfficerUserIdForScheme(String schemaName, Long schemeId) {
+        validateSchemaName(schemaName);
+        if (schemeId == null) {
+            return Optional.empty();
+        }
+        String sql = String.format("""
+                SELECT usm.user_id
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.user_table u
+                  ON u.id = usm.user_id
+                JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type
+                WHERE usm.scheme_id = ?
+                  AND usm.status = 1
+                  AND u.status = 1
+                  AND UPPER(COALESCE(ut.c_name, '')) = 'SECTION_OFFICER'
+                ORDER BY usm.id DESC
+                LIMIT 1
+                """, schemaName, schemaName);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("user_id")), schemeId);
+        return rows.stream().findFirst();
+    }
+
     public Long createFlowReading(String schemaName,
                                   Long schemeId,
                                   Long operatorId,

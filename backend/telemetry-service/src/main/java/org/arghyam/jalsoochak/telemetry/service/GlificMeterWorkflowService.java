@@ -591,6 +591,7 @@ public class GlificMeterWorkflowService {
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long analyticsUserId = resolveAnalyticsUserId(operatorWithSchema.schemaName(), schemeId, operatorWithSchema.operator().id());
 
             String correlationId = "issue-report-" + UUID.randomUUID();
             if (shouldStoreIssueAsAnomaly(anomalySelectedKey, rawIssueReason, ISSUE_REPORT_ANOMALY_SELECTION_KEYS)) {
@@ -608,7 +609,7 @@ public class GlificMeterWorkflowService {
                 telemetryEventPublisher.publishAnomalyRecorded(
                         tenantId,
                         anomalyType,
-                        operatorWithSchema.operator().id(),
+                        analyticsUserId,
                         schemeId,
                         null,
                         null,
@@ -810,6 +811,7 @@ public class GlificMeterWorkflowService {
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long analyticsUserId = resolveAnalyticsUserId(operatorWithSchema.schemaName(), schemeId, operatorWithSchema.operator().id());
 
             String correlationId = telemetryTenantRepository.upsertPendingIssueReportRecord(
                     operatorWithSchema.schemaName(),
@@ -822,7 +824,7 @@ public class GlificMeterWorkflowService {
             telemetryEventPublisher.publishEscalationCreated(
                     tenantId,
                     schemeId,
-                    operatorWithSchema.operator().id(),
+                    analyticsUserId,
                     anomalyType,
                     resolvedIssueReason,
                     correlationId,
@@ -883,6 +885,7 @@ public class GlificMeterWorkflowService {
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long analyticsUserId = resolveAnalyticsUserId(operatorWithSchema.schemaName(), schemeId, operatorWithSchema.operator().id());
 
             String correlationId = "issue-report-" + UUID.randomUUID();
             String issueReason = request.getIssueReason().trim();
@@ -901,7 +904,7 @@ public class GlificMeterWorkflowService {
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
                     AnomalyConstants.TYPE_NO_SUBMISSION,
-                    operatorWithSchema.operator().id(),
+                    analyticsUserId,
                     schemeId,
                     null,
                     null,
@@ -992,6 +995,7 @@ public class GlificMeterWorkflowService {
                             operatorWithSchema.operator().id()
                     ))
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            Long analyticsUserId = resolveAnalyticsUserId(operatorWithSchema.schemaName(), schemeId, operatorWithSchema.operator().id());
 
             Optional<TelemetryPendingMeterChangeRecord> pendingOpt = telemetryTenantRepository.findLatestPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
@@ -1073,7 +1077,7 @@ public class GlificMeterWorkflowService {
                         telemetryEventPublisher.publishAnomalyRecorded(
                                 tenantId,
                                 AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                                operatorWithSchema.operator().id(),
+                                analyticsUserId,
                                 schemeId,
                                 pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
                                 null,
@@ -1118,7 +1122,7 @@ public class GlificMeterWorkflowService {
                         telemetryEventPublisher.publishAnomalyRecorded(
                                 tenantId,
                                 AnomalyConstants.TYPE_OVER_WATER_SUPPLY,
-                                operatorWithSchema.operator().id(),
+                                analyticsUserId,
                                 schemeId,
                                 pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
                                 null,
@@ -1227,7 +1231,7 @@ public class GlificMeterWorkflowService {
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
                     AnomalyConstants.TYPE_MANUAL_OVERRIDE,
-                    operatorWithSchema.operator().id(),
+                    analyticsUserId,
                     schemeId,
                     pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
                     null,
@@ -1261,19 +1265,13 @@ public class GlificMeterWorkflowService {
                         "Manual overrides recorded for five or more consecutive days.",
                         AnomalyConstants.STATUS_OPEN
                 );
-                telemetryEventPublisher.publishAnomalyRecorded(
+                telemetryEventPublisher.publishEscalationCreated(
                         tenantId,
-                        AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS,
-                        operatorWithSchema.operator().id(),
                         schemeId,
-                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                        null,
-                        manualReadingValue,
-                        0,
-                        previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null),
-                        previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null),
-                        consecutiveOverrideDays,
+                        analyticsUserId,
+                        AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS,
                         "Manual overrides recorded for five or more consecutive days.",
+                        correlationId,
                         AnomalyConstants.STATUS_OPEN,
                         null
                 );
@@ -1778,6 +1776,14 @@ public class GlificMeterWorkflowService {
             }
         }
         return out.toString();
+    }
+
+    private Long resolveAnalyticsUserId(String schemaName, Long schemeId, Long fallbackUserId) {
+        Optional<Long> sectionOfficerId = telemetryTenantRepository.findSectionOfficerUserIdForScheme(schemaName, schemeId);
+        if (sectionOfficerId == null || sectionOfficerId.isEmpty()) {
+            return fallbackUserId;
+        }
+        return sectionOfficerId.get();
     }
 
     private int calculateConsecutiveDays(List<LocalDate> dates, LocalDate startDate) {
