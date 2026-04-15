@@ -483,11 +483,15 @@ public class BfmReadingService {
     }
 
     private List<Long> resolveAnalyticsUserIds(String schemaName, Long schemeId, Long fallbackUserId) {
-        List<Long> sectionOfficerIds = telemetryTenantRepository.findSectionOfficerUserIdsForScheme(schemaName, schemeId);
-        if (sectionOfficerIds == null || sectionOfficerIds.isEmpty()) {
-            return List.of(fallbackUserId);
+        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
+        if (subDivisionalOfficerIds != null && !subDivisionalOfficerIds.isEmpty()) {
+            return subDivisionalOfficerIds;
         }
-        return sectionOfficerIds;
+        List<Long> sectionOfficerIds = telemetryTenantRepository.findSectionOfficerUserIdsForScheme(schemaName, schemeId);
+        if (sectionOfficerIds != null && !sectionOfficerIds.isEmpty()) {
+            return sectionOfficerIds;
+        }
+        return List.of(fallbackUserId);
     }
 
     private static String toPlain(BigDecimal value) {
