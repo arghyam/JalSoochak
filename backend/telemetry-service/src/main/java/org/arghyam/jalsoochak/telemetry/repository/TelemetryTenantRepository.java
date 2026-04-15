@@ -1307,13 +1307,19 @@ public class TelemetryTenantRepository {
         updateSql.append("""
                 
                 WHERE id = (
-                    SELECT id
-                    FROM analytics_schema.fact_water_quantity_table
-                    WHERE tenant_id = ?
-                      AND scheme_id = ?
-                      AND date = ?
-                    ORDER BY updated_at DESC NULLS LAST, id DESC
-                    LIMIT 1
+                    SELECT latest.id
+                    FROM (
+                        SELECT id
+                        FROM analytics_schema.fact_water_quantity_table
+                        WHERE tenant_id = ?
+                          AND scheme_id = ?
+                          AND date = ?
+                        ORDER BY
+                            CASE WHEN updated_at IS NULL THEN 1 ELSE 0 END,
+                            updated_at DESC,
+                            id DESC
+                        LIMIT 1
+                    ) latest
                 )
                 """);
         updateArgs.add(tenantId);
