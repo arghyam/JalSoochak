@@ -65,8 +65,6 @@ class GlificMeterWorkflowServiceIssueReportTest {
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
-        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
@@ -117,8 +115,6 @@ class GlificMeterWorkflowServiceIssueReportTest {
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
-        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
@@ -130,6 +126,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("meterReplaced", resp.getSelected());
+        assertEquals("please wait a second...", resp.getMessage());
 
         verify(telemetryTenantRepository).createIssueReportRecord(
                 eq("tenant_test"),
