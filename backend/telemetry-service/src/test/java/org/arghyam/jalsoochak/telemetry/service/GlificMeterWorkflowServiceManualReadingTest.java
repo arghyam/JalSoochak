@@ -421,4 +421,86 @@ class GlificMeterWorkflowServiceManualReadingTest {
         verify(telemetryTenantRepository).updateMeterChangeReason("tenant_test", 55L, "METER_REPLACED", 1L);
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
+
+    @Test
+    void manualReadingAfterFiveConsecutiveOverridesPublishesEscalationEvent() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findSectionOfficerUserIdForScheme("tenant_test", 10L)).thenReturn(Optional.of(99L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L,
+                        "bfm-1",
+                        1L,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO
+                )));
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt()))
+                .thenReturn(List.of(
+                        LocalDate.now(),
+                        LocalDate.now().minusDays(1),
+                        LocalDate.now().minusDays(2),
+                        LocalDate.now().minusDays(3),
+                        LocalDate.now().minusDays(4)
+                ));
+
+        doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                anyInt(),
+                anyString(),
+                anyInt()
+        );
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
+
+        verify(telemetryEventPublisher).publishEscalationCreated(
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(10L),
+                org.mockito.ArgumentMatchers.eq(99L),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS),
+                org.mockito.ArgumentMatchers.eq("Manual overrides recorded for five or more consecutive days."),
+                org.mockito.ArgumentMatchers.eq("bfm-1"),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
+                org.mockito.ArgumentMatchers.isNull()
+        );
+        verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS),
+                anyLong(),
+                anyLong(),
+                any(),
+                any(),
+                any(),
+                anyInt(),
+                any(),
+                any(),
+                anyInt(),
+                anyString(),
+                anyInt(),
+                any()
+        );
+    }
 }

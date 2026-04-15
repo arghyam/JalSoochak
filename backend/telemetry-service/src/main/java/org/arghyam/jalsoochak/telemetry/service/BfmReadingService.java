@@ -57,6 +57,7 @@ public class BfmReadingService {
         if (!belongsToScheme) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
+        Long analyticsUserId = resolveAnalyticsUserId(schemaName, request.getSchemeId(), operatorInRequest.id());
 
         FlowVisionResult ocrResult = null;
         BigDecimal finalReading = request.getReadingValue();
@@ -88,7 +89,7 @@ public class BfmReadingService {
                     telemetryEventPublisher.publishAnomalyRecorded(
                             tenantId,
                             AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                            operatorInRequest.id(),
+                            analyticsUserId,
                             request.getSchemeId(),
                             null,
                             null,
@@ -129,7 +130,7 @@ public class BfmReadingService {
                 telemetryEventPublisher.publishAnomalyRecorded(
                         tenantId,
                         AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                        operatorInRequest.id(),
+                        analyticsUserId,
                         request.getSchemeId(),
                         null,
                         null,
@@ -219,7 +220,7 @@ public class BfmReadingService {
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
                     AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                    operatorInRequest.id(),
+                    analyticsUserId,
                     request.getSchemeId(),
                     extractedReading,
                     confidenceLevel,
@@ -258,7 +259,7 @@ public class BfmReadingService {
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
                     AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
-                    operatorInRequest.id(),
+                    analyticsUserId,
                     request.getSchemeId(),
                     extractedReading,
                     confidenceLevel,
@@ -470,6 +471,14 @@ public class BfmReadingService {
             log.warn("Invalid water supply threshold config for tenantId {}: {}", tenantId, e.getMessage());
             return Optional.empty();
         }
+    }
+
+    private Long resolveAnalyticsUserId(String schemaName, Long schemeId, Long fallbackUserId) {
+        Optional<Long> sectionOfficerId = telemetryTenantRepository.findSectionOfficerUserIdForScheme(schemaName, schemeId);
+        if (sectionOfficerId == null || sectionOfficerId.isEmpty()) {
+            return fallbackUserId;
+        }
+        return sectionOfficerId.get();
     }
 
     private static String toPlain(BigDecimal value) {
