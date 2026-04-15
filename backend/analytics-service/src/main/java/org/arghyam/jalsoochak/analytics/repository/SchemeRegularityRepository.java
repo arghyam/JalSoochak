@@ -1645,6 +1645,12 @@ public class SchemeRegularityRepository {
     public SubmissionStatusCount getSubmissionStatusCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
         String sql = """
+                WITH user_schemes AS (
+                    SELECT DISTINCT usm.scheme_id
+                    FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    WHERE usm.user_id = ?
+                      AND usm.tenant_id = ?
+                )
                 SELECT
                     COALESCE(
                         COUNT(*) FILTER (
@@ -1661,12 +1667,13 @@ public class SchemeRegularityRepository {
                         0
                     )::int AS anomalous_submission_count
                 FROM analytics_schema.fact_meter_reading_table m
-                WHERE m.user_id = ?
-                  AND m.tenant_id = ?
+                JOIN user_schemes us
+                    ON us.scheme_id = m.scheme_id
+                WHERE m.tenant_id = ?
                   AND m.reading_date BETWEEN ? AND ?
                 """;
 
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, userId, tenantId, startDate, endDate);
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, userId, tenantId, tenantId, startDate, endDate);
         int compliantSubmissionCount =
                 result.get("compliant_submission_count") instanceof Number value ? value.intValue() : 0;
         int anomalousSubmissionCount =
@@ -1931,8 +1938,7 @@ public class SchemeRegularityRepository {
                 FROM analytics_schema.fact_meter_reading_table m
                 JOIN user_schemes us
                     ON us.scheme_id = m.scheme_id
-                WHERE m.user_id = ?
-                  AND m.tenant_id = ?
+                WHERE m.tenant_id = ?
                   AND m.extracted_reading IS NOT NULL
                   AND m.reading_date BETWEEN ? AND ?
                 GROUP BY m.reading_date
@@ -1946,7 +1952,6 @@ public class SchemeRegularityRepository {
                         rs.getInt("submitted_scheme_count")),
                 userId,
                 tenantId,
-                userId,
                 tenantId,
                 startDate,
                 endDate);
