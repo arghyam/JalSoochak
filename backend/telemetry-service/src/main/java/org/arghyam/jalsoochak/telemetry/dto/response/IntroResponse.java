@@ -4,12 +4,15 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class IntroResponse {
     private boolean success;
     private String message;
+    private List<String> options;
     private String correlationId;
     private String selected;
     private Boolean hasBfm;
