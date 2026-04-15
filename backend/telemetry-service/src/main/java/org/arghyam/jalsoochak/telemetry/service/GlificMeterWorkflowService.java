@@ -469,7 +469,7 @@ public class GlificMeterWorkflowService {
             if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
                 return IntroResponse.builder()
                         .success(false)
-                        .message("Please choose a number between 1 and " + reasons.size() + ".")
+                        .message("invalid choice, please restart the flow")
                         .build();
             }
 
@@ -639,15 +639,20 @@ public class GlificMeterWorkflowService {
                 );
             }
 
-            String fallbackMessage = "Issue reported. Thank you.";
-            if ("hindi".equals(languageKey)) {
-                fallbackMessage = "समस्या रिपोर्ट हो गई है। धन्यवाद।";
+            String message;
+            if ("noWaterSupply".equalsIgnoreCase(responseSelectedKey)
+                    || "noReadingSubmission".equalsIgnoreCase(responseSelectedKey)) {
+                message = "please wait a second...";
+            } else {
+                String fallbackMessage = "Issue reported. Thank you.";
+                if ("hindi".equals(languageKey)) {
+                    fallbackMessage = "समस्या रिपोर्ट हो गई है। धन्यवाद।";
+                }
+                message = templatesService
+                        .resolveScreenConfirmationTemplate(tenantId, "ISSUE_REPORT", languageKey)
+                        .or(() -> tenantConfigRepository.findIssueReportConfirmationTemplate(tenantId, languageKey))
+                        .orElse(fallbackMessage);
             }
-
-            String message = templatesService
-                    .resolveScreenConfirmationTemplate(tenantId, "ISSUE_REPORT", languageKey)
-                    .or(() -> tenantConfigRepository.findIssueReportConfirmationTemplate(tenantId, languageKey))
-                    .orElse(fallbackMessage);
 
             return IntroResponse.builder()
                     .success(true)
@@ -782,7 +787,7 @@ public class GlificMeterWorkflowService {
                 if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
                     return IntroResponse.builder()
                             .success(false)
-                            .message("Please choose a number between 1 and " + reasons.size() + ".")
+                            .message("invalid choice, please restart the flow")
                             .build();
                 }
 
@@ -996,21 +1001,44 @@ public class GlificMeterWorkflowService {
                     : "manual-" + UUID.randomUUID();
 
             // Validation baseline:
-            // - If the meter is not replaced, compare only against yesterday's confirmed reading (if any).
-            //   This avoids rejecting a "today" reading against an older historic reading when there was no
-            //   reading yesterday.
-            // - If the meter is replaced, we still load the latest snapshot for anomaly/audit context, but we
-            //   do not reject lower readings vs the previous meter's baseline.
+            // - If the meter is not replaced, compare against the most recent confirmed reading by default.
+            // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
+            // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
             LocalDate today = LocalDate.now();
-            LocalDate yesterday = today.minusDays(1);
+            boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt = isMeterReplaced
                     ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(operatorWithSchema.schemaName(), schemeId, null)
-                    : telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(
+                    : (compareWithLatest
+                    ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                             operatorWithSchema.schemaName(),
                             schemeId,
-                            yesterday,
                             null
-                    );
+                    )
+                    : telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
+                            operatorWithSchema.schemaName(),
+                            schemeId,
+                            today,
+                            null
+                    ));
+
+            if (!isMeterReplaced
+                    && previousSnapshotOpt.isPresent()
+                    && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
+                TelemetryConfirmedReadingSnapshot previousSnapshot = previousSnapshotOpt.get();
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message(localizationService.localizeMessage(
+                                "Reading cannot be less than previous confirmed reading. Submitted reading: "
+                                        + toPlain(manualReadingValue) + ". Previous reading: "
+                                        + toPlain(previousSnapshot.confirmedReading()) + ".",
+                                languageKey
+                        ))
+                        .qualityStatus("REJECTED")
+                        .correlationId(correlationId)
+                        .meterReading(manualReadingValue)
+                        .lastConfirmedReading(previousSnapshot.confirmedReading())
+                        .build();
+            }
 
             // Tenant-configured water supply threshold validation (relative to WATER_NORM).
             // For manual submissions, validate the submitted value directly against thresholds, independent of previous-day readings.
@@ -1484,6 +1512,29 @@ public class GlificMeterWorkflowService {
                     readingValue,
                     operatorId
             );
+            BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
+                    .map(TelemetryFlowReadingDetails::confirmedReading)
+                    .orElse(BigDecimal.ZERO);
+            BigDecimal targetDayWaterQuantity = readingValue.subtract(previousDayConfirmedReading);
+            telemetryTenantRepository.upsertAnalyticsWaterQuantity(
+                    tenantId,
+                    schemeId,
+                    operatorId,
+                    targetDay,
+                    targetDayWaterQuantity,
+                    1
+            );
+            if (dayAfterTargetOpt.isPresent()) {
+                BigDecimal dayAfterWaterQuantity = dayAfterTargetOpt.get().confirmedReading().subtract(readingValue);
+                telemetryTenantRepository.upsertAnalyticsWaterQuantity(
+                        tenantId,
+                        schemeId,
+                        operatorId,
+                        dayAfterTarget,
+                        dayAfterWaterQuantity,
+                        1
+                );
+            }
 
             String correlationId = targetDayRecord.correlationId();
             if (correlationId == null || correlationId.isBlank()) {

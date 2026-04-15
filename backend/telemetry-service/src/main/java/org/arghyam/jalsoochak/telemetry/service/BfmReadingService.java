@@ -170,17 +170,27 @@ public class BfmReadingService {
         Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = telemetryTenantRepository
                 .findLatestConfirmedReadingSnapshot(schemaName, request.getSchemeId(), null);
 
-        // For non-meter-replacement submissions, compare only against yesterday's confirmed reading (if any).
-        // This prevents rejecting a reading against an older historic baseline when there was no reading yesterday.
-        LocalDate yesterday = LocalDate.now().minusDays(1);
+        // For non-meter-replacement submissions, validate against the latest confirmed reading.
+        // Meter-replacement submissions are treated as a new baseline.
         Optional<TelemetryConfirmedReadingSnapshot> validationBaselineOpt = isMeterReplaced
                 ? latestSnapshotOpt
-                : telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(
-                        schemaName,
-                        request.getSchemeId(),
-                        yesterday,
-                        null
-                );
+                : latestSnapshotOpt;
+
+        if (!isMeterReplaced
+                && validationBaselineOpt.isPresent()
+                && confirmedReading != null
+                && confirmedReading.compareTo(validationBaselineOpt.get().confirmedReading()) < 0) {
+            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.get();
+            return CreateReadingResponse.builder()
+                    .success(false)
+                    .message("Reading cannot be less than previous confirmed reading. Submitted reading: "
+                            + toPlain(confirmedReading) + ". Previous reading: " + toPlain(previousSnapshot.confirmedReading()) + ".")
+                    .correlationId(correlationId)
+                    .meterReading(confirmedReading)
+                    .qualityStatus("REJECTED")
+                    .lastConfirmedReading(previousSnapshot.confirmedReading())
+                    .build();
+        }
 
         Optional<WaterSupplyThreshold> thresholdOpt = !isMeterReplaced ? loadWaterSupplyThreshold(tenantId) : Optional.empty();
         Optional<BigDecimal> waterNormOpt = !isMeterReplaced ? loadWaterNorm(tenantId) : Optional.empty();

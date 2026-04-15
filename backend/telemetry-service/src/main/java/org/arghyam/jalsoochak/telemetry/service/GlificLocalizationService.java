@@ -86,7 +86,7 @@ public class GlificLocalizationService {
             return localizeMessage("Language selection is required. Please choose one of the listed options.", languageKey);
         }
         if (normalized.contains("invalid language selection")) {
-            return localizeMessage("Invalid language selection. Please choose a valid number or language from the list.", languageKey);
+            return localizeMessage("Invalid language selection. Please restart the process", languageKey);
         }
         if (normalized.contains("no language options configured")) {
             return localizeMessage("Language options are not configured for this tenant.", languageKey);
@@ -95,7 +95,7 @@ public class GlificLocalizationService {
             return localizeMessage("Channel selection is required. Please choose one of the listed options.", languageKey);
         }
         if (normalized.contains("invalid channel selection")) {
-            return localizeMessage("Invalid channel selection. Please choose a valid number or channel from the list.", languageKey);
+            return localizeMessage("Invalid channel selection. Please restart the process", languageKey);
         }
         if (normalized.contains("no channel options configured")) {
             return localizeMessage("Channel options are not configured for this tenant.", languageKey);
