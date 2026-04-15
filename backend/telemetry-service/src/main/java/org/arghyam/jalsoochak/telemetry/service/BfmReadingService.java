@@ -196,11 +196,17 @@ public class BfmReadingService {
                     reason,
                     AnomalyConstants.STATUS_OPEN
             );
-            for (Long sdoUserId : resolveSdoUserIds(schemaName, request.getSchemeId())) {
+            List<Long> recipientUserIds = resolveSdoUserIds(schemaName, request.getSchemeId());
+            if (recipientUserIds.isEmpty()) {
+                log.warn("No SDO mapped for schemeId={} in schema={}; falling back to analytics recipients for anomaly type={}",
+                        request.getSchemeId(), schemaName, AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS);
+                recipientUserIds = analyticsUserIds;
+            }
+            for (Long recipientUserId : recipientUserIds) {
                 telemetryEventPublisher.publishAnomalyRecorded(
                         tenantId,
                         AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                        sdoUserId,
+                        recipientUserId,
                         request.getSchemeId(),
                         extractedReading,
                         confidenceLevel,
