@@ -1063,11 +1063,17 @@ public class GlificMeterWorkflowService {
                         reason,
                         AnomalyConstants.STATUS_OPEN
                 );
-                for (Long sdoUserId : resolveSdoUserIds(operatorWithSchema.schemaName(), schemeId)) {
+                List<Long> recipientUserIds = resolveSdoUserIds(operatorWithSchema.schemaName(), schemeId);
+                if (recipientUserIds.isEmpty()) {
+                    log.warn("No SDO mapped for schemeId={} in schema={}; falling back to analytics recipients for anomaly type={}",
+                            schemeId, operatorWithSchema.schemaName(), AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS);
+                    recipientUserIds = analyticsUserIds;
+                }
+                for (Long recipientUserId : recipientUserIds) {
                     telemetryEventPublisher.publishAnomalyRecorded(
                             tenantId,
                             AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                            sdoUserId,
+                            recipientUserId,
                             schemeId,
                             pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
                             null,
