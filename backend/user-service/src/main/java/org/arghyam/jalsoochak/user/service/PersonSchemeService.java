@@ -7,6 +7,8 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDT
 import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
 
+import java.time.LocalDate;
+
 public interface PersonSchemeService {
 
     long countSchemesByPerson(String tenantCode, long personId, String schemeName);
@@ -36,6 +38,8 @@ public interface PersonSchemeService {
             String name,
             String status,
             Integer durationDays,
+            LocalDate startDate,
+            LocalDate endDate,
             String sortBy,
             String sortDir,
             int page,
