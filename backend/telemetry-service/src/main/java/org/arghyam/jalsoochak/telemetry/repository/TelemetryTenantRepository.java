@@ -1123,6 +1123,74 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingBeforeDate(String schemaName,
+                                                                                             Long schemeId,
+                                                                                             Long operatorId,
+                                                                                             LocalDate beforeDate) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND reading_date < ?
+                  AND extracted_reading > 0
+                  AND confirmed_reading > 0
+                  AND deleted_at IS NULL
+                ORDER BY reading_date DESC, %s DESC, id DESC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryCompletedFlowReading(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                schemeId,
+                operatorId,
+                beforeDate
+        );
+        return rows.stream().findFirst();
+    }
+
+    public Optional<TelemetryCompletedFlowReading> findEarliestCompletedFlowReadingAfterDate(String schemaName,
+                                                                                              Long schemeId,
+                                                                                              Long operatorId,
+                                                                                              LocalDate afterDate) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND reading_date > ?
+                  AND extracted_reading > 0
+                  AND confirmed_reading > 0
+                  AND deleted_at IS NULL
+                ORDER BY reading_date ASC, %s ASC, id ASC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryCompletedFlowReading(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                schemeId,
+                operatorId,
+                afterDate
+        );
+        return rows.stream().findFirst();
+    }
+
     public void updateReadingValues(String schemaName, Long readingId, BigDecimal readingValue, Long updatedBy) {
         validateSchemaName(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
