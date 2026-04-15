@@ -341,7 +341,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        service.startWelcomeFlow(55L);
+        service.startWelcomeFlow(55L, "Ramesh Kumar", "Madhya Pradesh");
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
         verify(client).execute(contains("startContactFlow"), varsCaptor.capture());
@@ -352,13 +352,49 @@ class GlificWhatsAppServiceTest {
     }
 
     @Test
+    void startWelcomeFlow_passesNameAndState_inDefaultResults() throws Exception {
+        JsonNode response = mapper.readTree("""
+                {"startContactFlow":{"success":true,"errors":[]}}
+                """);
+        when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
+
+        service.startWelcomeFlow(55L, "welcome-flow-456", "Ramesh Kumar", "Madhya Pradesh");
+
+        ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
+        verify(client).execute(contains("startContactFlow"), varsCaptor.capture());
+
+        String defaultResults = (String) varsCaptor.getValue().get("defaultResults");
+        JsonNode results = mapper.readTree(defaultResults);
+        assertThat(results.path("name").asText()).isEqualTo("Ramesh Kumar");
+        assertThat(results.path("state").asText()).isEqualTo("Madhya Pradesh");
+    }
+
+    @Test
+    void startWelcomeFlow_usesEmptyStrings_whenNameAndStateAreNull() throws Exception {
+        JsonNode response = mapper.readTree("""
+                {"startContactFlow":{"success":true,"errors":[]}}
+                """);
+        when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
+
+        service.startWelcomeFlow(55L, "welcome-flow-456", null, null);
+
+        ArgumentCaptor<Map<String, Object>> varsCaptor = varsCaptor();
+        verify(client).execute(contains("startContactFlow"), varsCaptor.capture());
+
+        String defaultResults = (String) varsCaptor.getValue().get("defaultResults");
+        JsonNode results = mapper.readTree(defaultResults);
+        assertThat(results.path("name").asText()).isEqualTo("");
+        assertThat(results.path("state").asText()).isEqualTo("");
+    }
+
+    @Test
     void startWelcomeFlow_throwsException_whenGlificReturnsErrors() throws Exception {
         JsonNode response = mapper.readTree("""
                 {"startContactFlow":{"success":false,"errors":[{"key":"flow","message":"not found"}]}}
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.startWelcomeFlow(55L))
+        assertThatThrownBy(() -> service.startWelcomeFlow(55L, "Ramesh", "MP"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("startContactFlow");
     }
@@ -370,7 +406,7 @@ class GlificWhatsAppServiceTest {
                 """);
         when(client.execute(contains("startContactFlow"), anyMap())).thenReturn(response);
 
-        assertThatThrownBy(() -> service.startWelcomeFlow(55L))
+        assertThatThrownBy(() -> service.startWelcomeFlow(55L, "Ramesh", "MP"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("success=false");
     }
@@ -506,7 +542,7 @@ class GlificWhatsAppServiceTest {
 
         @Test
         void startWelcomeFlow_isNoOp() {
-            service.startWelcomeFlow(55L);
+            service.startWelcomeFlow(55L, "Ramesh", "MP");
 
             verifyNoInteractions(client);
         }

@@ -298,10 +298,12 @@ public class GlificWhatsAppService {
      * Initiates the Glific welcome flow for a newly onboarded operator.
      *
      * @param contactId Glific contact ID obtained from {@link #optIn}
+     * @param name      operator display name passed as {@code @results.name} in the flow
+     * @param state     tenant state name passed as {@code @results.state} in the flow
      * @throws RuntimeException if Glific returns GraphQL errors or {@code success=false}
      */
-    public void startWelcomeFlow(Long contactId) {
-        startWelcomeFlow(contactId, welcomeFlowId);
+    public void startWelcomeFlow(Long contactId, String name, String state) {
+        startWelcomeFlow(contactId, welcomeFlowId, name, state);
     }
 
     /**
@@ -309,18 +311,23 @@ public class GlificWhatsAppService {
      *
      * @param contactId Glific contact ID obtained from {@link #optIn}
      * @param flowId    Glific flow ID to use for welcome flow
+     * @param name      operator display name passed as {@code @results.name} in the flow
+     * @param state     tenant state name passed as {@code @results.state} in the flow
      * @throws IllegalStateException if {@code flowId} is blank
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */
-    public void startWelcomeFlow(Long contactId, String flowId) {
+    public void startWelcomeFlow(Long contactId, String flowId, String name, String state) {
         if (isDryRun("startWelcomeFlow")) return;
         if (flowId == null || flowId.isBlank()) {
             throw new IllegalStateException("glific.flow.welcome-id is not configured");
         }
+        com.fasterxml.jackson.databind.node.ObjectNode results = objectMapper.createObjectNode();
+        results.put("name",  name  != null ? name  : "");
+        results.put("state", state != null ? state : "");
         JsonNode response = client.execute(START_CONTACT_FLOW_MUTATION, Map.of(
-                "flowId", flowId,
-                "contactId", contactId,
-                "defaultResults", "{}"));
+                "flowId",         flowId,
+                "contactId",      contactId,
+                "defaultResults", results.toString()));
         checkErrors(response, "startContactFlow");
         boolean success = response.path("startContactFlow").path("success").asBoolean(false);
         if (!success) {

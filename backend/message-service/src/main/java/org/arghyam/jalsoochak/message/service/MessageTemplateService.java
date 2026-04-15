@@ -84,6 +84,12 @@ public class MessageTemplateService {
         return normalized.isBlank() ? "english" : normalized;
     }
 
+    public String findStateName(int tenantId) {
+        return findConfigValue(tenantId, "state_name")
+                .filter(s -> !s.isBlank())
+                .orElse("");
+    }
+
     private Optional<String> findConfigValue(int tenantId, String key) {
         List<String> rows = jdbcTemplate.query(
                 "SELECT config_value " +
