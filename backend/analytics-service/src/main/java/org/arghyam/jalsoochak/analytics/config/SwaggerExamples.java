@@ -256,6 +256,18 @@ public final class SwaggerExamples {
             }
             """;
 
+    public static final String OFFICER_DASHBOARD_TOTALS_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "totalEscalationCount": 12,
+                "totalAnomalyCount": 3,
+                "totalMappedSchemeCount": 8,
+                "totalWaterSupplied": 145000
+              }
+            }
+            """;
+
     public static final String WATER_QUANTITY_REGION_WISE_SUCCESS = """
             {
               "success": true,
