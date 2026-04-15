@@ -48,7 +48,7 @@ class LgdStateWarmCacheTaskTest {
         verify(schemeRegularityService, times(1))
                 .getNonSubmissionReasonSchemeCountByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class));
         verify(schemeRegularityService, times(1))
-                .getSchemeStatusAndTopReportingByLgd(eq(889100), any(LocalDate.class), any(LocalDate.class), isNull());
+                .getSchemeStatusAndTopReportingByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class), eq(1), isNull());
         verify(schemeRegularityService, times(1))
                 .getSchemeRegionReportByLgd(eq(99501), eq(889100), any(LocalDate.class), any(LocalDate.class), eq(1), isNull());
 

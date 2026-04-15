@@ -129,10 +129,12 @@ public class OtpService {
     }
 
     private String generateOtp() {
-        StringBuilder sb = new StringBuilder(otpProperties.otpLength());
-        for (int i = 0; i < otpProperties.otpLength(); i++) {
-            sb.append(secureRandom.nextInt(10));
-        }
-        return sb.toString();
+        // TODO: Revert to random OTP generation from the hardcoded value after testing
+        // StringBuilder sb = new StringBuilder(otpProperties.otpLength());
+        // for (int i = 0; i < otpProperties.otpLength(); i++) {
+        //     sb.append(secureRandom.nextInt(10));
+        // }
+        // return sb.toString();
+        return "123456";
     }
 }

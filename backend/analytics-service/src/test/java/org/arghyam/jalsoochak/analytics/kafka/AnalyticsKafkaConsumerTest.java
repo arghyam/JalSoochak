@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.kafka;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
@@ -108,6 +109,24 @@ class AnalyticsKafkaConsumerTest {
         assertThat(readField(event, "eventType")).isEqualTo("USER_UPDATED");
         assertThat(readField(event, "status")).isEqualTo(0);
         assertThat(readField(event, "title")).isNull();
+    }
+
+    @Test
+    void consumeUserEvents_userSchemeMappingsReplaced_routesToReplaceUserSchemeMappings() {
+        String message = """
+                {"eventType":"USER_SCHEME_MAPPINGS_REPLACED","userId":42,"tenantId":3,"userUuid":"11111111-1111-1111-1111-111111111111","schemeIds":[1001,1002],"status":1}
+                """;
+
+        consumer.consumeUserEvents(message);
+
+        ArgumentCaptor<UserSchemeMappingsReplacedEvent> captor =
+                ArgumentCaptor.forClass(UserSchemeMappingsReplacedEvent.class);
+        verify(dimensionService).replaceUserSchemeMappings(captor.capture());
+        UserSchemeMappingsReplacedEvent event = captor.getValue();
+        assertThat(readField(event, "eventType")).isEqualTo("USER_SCHEME_MAPPINGS_REPLACED");
+        assertThat(readField(event, "userId")).isEqualTo(42);
+        assertThat(readField(event, "tenantId")).isEqualTo(3);
+        assertThat(readField(event, "status")).isEqualTo(1);
     }
 
     @Test

@@ -29,6 +29,7 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -58,6 +59,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/analytics")
 @RequiredArgsConstructor
 @Tag(name = "Analytics - Scheme Reporting", description = "Scheme dashboards, region reports (CSV/JSON), escalations, and scheme performance queries")
+@Slf4j
 public class AnalyticsSchemeReportingController {
 
     private static final String CSV_OUTPUT_FORMAT = "csv";
@@ -232,11 +234,13 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<SchemeStatusAndTopReportingResponse>> getSchemeStatusAndTopReportingRate(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
             @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
-            @RequestParam(name = "scheme_count", required = false, defaultValue = "10") Integer schemeCount) {
+            @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
+            @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit) {
         try {
             if (parentLgdId != null && parentDepartmentId != null) {
                 throw new IllegalArgumentException("Provide either parent_lgd_id or parent_department_id, not both");
@@ -246,8 +250,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             SchemeStatusAndTopReportingResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(parentLgdId, startDate, endDate, schemeCount)
-                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(parentDepartmentId, startDate, endDate, schemeCount);
+                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(tenantId, parentLgdId, startDate, endDate, pageNumber, limit)
+                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(tenantId, parentDepartmentId, startDate, endDate, pageNumber, limit);
 
             return ResponseEntity.ok(ApiResponse.<SchemeStatusAndTopReportingResponse>builder()
                     .success(true)
@@ -403,6 +407,20 @@ public class AnalyticsSchemeReportingController {
 
             AnalyticsControllerHelper.AuthenticatedUserRef userRef =
                     authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            log.info(
+                    "Escalations request: extracted tenantId={}, userId={}, userUuid={}, page_number={}, limit={}, escalation_type={}, scheme_id={}, scheme_name_present={}, resolution_status={}, start_date={}, end_date={}",
+                    userRef != null ? userRef.tenantId() : null,
+                    userRef != null ? userRef.userId() : null,
+                    userRef != null ? userRef.userUuid() : null,
+                    pageNumber,
+                    limit,
+                    escalationType,
+                    schemeId,
+                    schemeName != null && !schemeName.isBlank(),
+                    resolutionStatus,
+                    startDate,
+                    endDate
+            );
             Integer tenantId = userRef.tenantId();
             if (tenantId == null || tenantId <= 0) {
                 throw new IllegalArgumentException("tenant_id is required");
@@ -615,7 +633,8 @@ public class AnalyticsSchemeReportingController {
                             description = "Totals fetched successfully",
                             content = @Content(
                                     mediaType = "application/json",
-                                    schema = @Schema(implementation = ApiResponse.class)
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.OFFICER_DASHBOARD_TOTALS_SUCCESS)
                             )
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -623,7 +642,8 @@ public class AnalyticsSchemeReportingController {
                             description = "Bad request",
                             content = @Content(
                                     mediaType = "application/json",
-                                    schema = @Schema(implementation = ApiResponse.class)
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
                             )
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -631,7 +651,8 @@ public class AnalyticsSchemeReportingController {
                             description = "Unexpected error",
                             content = @Content(
                                     mediaType = "application/json",
-                                    schema = @Schema(implementation = ApiResponse.class)
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
                             )
                     )
             }

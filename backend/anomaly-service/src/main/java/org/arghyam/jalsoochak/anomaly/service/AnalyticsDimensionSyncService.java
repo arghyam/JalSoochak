@@ -7,8 +7,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.LinkedHashSet;
-import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -57,51 +55,6 @@ public class AnalyticsDimensionSyncService {
                             VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                             """,
                     userId, tenantId, email, userType, uuid, title, status);
-        }
-    }
-
-    @Transactional
-    public void replaceUserSchemeMappings(JsonNode event) {
-        Integer userId = intOrNull(event, "userId");
-        Integer tenantId = intOrNull(event, "tenantId");
-        if (userId == null || tenantId == null) {
-            log.debug("[analytics-dim-sync] skip user mapping event: missing userId/tenantId");
-            return;
-        }
-        UUID userUuid = uuidOrNull(event, "userUuid");
-        Integer status = intOrNull(event, "status");
-        int mappingStatus = status != null ? status : 1;
-
-        Set<Integer> schemeIds = new LinkedHashSet<>();
-        JsonNode schemeIdsNode = event.path("schemeIds");
-        if (schemeIdsNode.isArray()) {
-            for (JsonNode n : schemeIdsNode) {
-                if (n != null && n.canConvertToInt()) {
-                    schemeIds.add(n.asInt());
-                }
-            }
-        }
-
-        jdbcTemplate.update("""
-                        DELETE FROM analytics_schema.dim_user_scheme_mapping_table
-                        WHERE tenant_id = ? AND user_id = ?
-                        """,
-                tenantId, userId);
-
-        for (Integer schemeId : schemeIds) {
-            UUID mappingUuid = UUID.randomUUID();
-            jdbcTemplate.update("""
-                            INSERT INTO analytics_schema.dim_user_scheme_mapping_table
-                                (uuid, user_id, scheme_id, status, tenant_id, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, NOW(), NOW())
-                            """,
-                    mappingUuid, userId, schemeId, mappingStatus, tenantId);
-        }
-
-        if (schemeIds.isEmpty() && userUuid != null) {
-            // Keep a marker row only when needed for future UUID-based lookups.
-            log.debug("[analytics-dim-sync] user has no mapped schemes [tenantId={}, userId={}, userUuid={}]",
-                    tenantId, userId, userUuid);
         }
     }
 

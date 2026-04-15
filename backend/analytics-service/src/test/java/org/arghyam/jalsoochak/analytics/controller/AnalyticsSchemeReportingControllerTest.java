@@ -154,7 +154,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemesDashboard_withParentLgdId_returnsParentLgdCName() throws Exception {
-        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(101, START, END, 5))
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 1, 5))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentLgdId(101)
                         .parentLgdCName("Parent")
@@ -162,6 +162,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentLgdLevel(2)
                         .activeSchemeCount(1)
                         .inactiveSchemeCount(1)
+                        .totalCount(42L)
                         .topSchemeCount(1)
                         .topSchemes(List.of(SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(1)
@@ -189,12 +190,15 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101")
-                        .param("scheme_count", "5"))
+                        .param("page_number", "1")
+                        .param("limit", "5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.totalCount").value(42))
                 .andExpect(jsonPath("$.data.parentLgdId").value(101))
                 .andExpect(jsonPath("$.data.parentLgdCName").value("Parent"))
                 .andExpect(jsonPath("$.data.parentLgdTitle").value("Parent LGD"))
@@ -210,7 +214,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemesDashboard_withParentDepartmentId_returnsParentDepartmentCName() throws Exception {
-        when(schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(201, START, END, 5))
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(TENANT_ID, 201, START, END, 1, 5))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentDepartmentId(201)
                         .parentDepartmentCName("Parent Dept")
@@ -218,6 +222,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentDepartmentLevel(4)
                         .activeSchemeCount(1)
                         .inactiveSchemeCount(1)
+                        .totalCount(7L)
                         .topSchemeCount(1)
                         .topSchemes(List.of(SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(2)
@@ -237,12 +242,15 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("parent_department_id", "201")
-                        .param("scheme_count", "5"))
+                        .param("page_number", "1")
+                        .param("limit", "5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.totalCount").value(7))
                 .andExpect(jsonPath("$.data.parentDepartmentId").value(201))
                 .andExpect(jsonPath("$.data.parentDepartmentCName").value("Parent Dept"))
                 .andExpect(jsonPath("$.data.parentDepartmentTitle").value("Parent Dept"))
@@ -254,6 +262,15 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.topSchemes[0].immediateParentDepartmentLevel").value(5))
                 .andExpect(jsonPath("$.data.topSchemes[0].lgdLadder.level_2").value(22))
                 .andExpect(jsonPath("$.data.topSchemes[0].departmentLadder.level_4").value(903));
+    }
+
+    @Test
+    void getSchemesDashboard_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -782,6 +799,165 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.success").value(false));
 
         verify(factEscalationRepository, never()).save(any(FactEscalation.class));
+    }
+
+    @Test
+    void updateEscalationResolutionStatus_withoutResolutionStatus_returnsBadRequest() throws Exception {
+        UUID uuid = UUID.fromString("77777777-7777-7777-7777-777777777777");
+
+        mockMvc.perform(put(BASE + "/escalations/status")
+                        .param("tenant_id", "10")
+                        .param("uuid", uuid.toString())
+                        .param("escalation_id", "77")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
+    }
+
+    @Test
+    void updateEscalationResolutionStatus_withCorrelationId_updatesLatestRow() throws Exception {
+        UUID uuid = UUID.fromString("88888888-8888-8888-8888-888888888888");
+        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+
+        FactEscalation escalation = FactEscalation.builder()
+                .id(99L)
+                .tenantId(10)
+                .userId(9001)
+                .schemeId(101)
+                .resolutionStatus(0)
+                .createdAt(LocalDateTime.of(2026, 2, 2, 10, 0))
+                .updatedAt(LocalDateTime.of(2026, 2, 2, 10, 0))
+                .build();
+
+        when(factEscalationRepository.findFirstByTenantIdAndUserIdAndCorrelationIdOrderByCreatedAtDesc(eq(10), eq(9001), eq("esc-1")))
+                .thenReturn(Optional.of(escalation));
+        when(factEscalationRepository.save(any(FactEscalation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        mockMvc.perform(put(BASE + "/escalations/status")
+                        .param("tenant_id", "10")
+                        .param("uuid", uuid.toString())
+                        .param("correlation_id", "  esc-1  ")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolutionStatus\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.escalation_id").value(99))
+                .andExpect(jsonPath("$.data.resolution_status").value(1));
+    }
+
+    @Test
+    void updateEscalationResolutionStatus_whenUnexpectedError_returnsServerError() throws Exception {
+        UUID uuid = UUID.fromString("99999999-9999-9999-9999-999999999999");
+        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+
+        FactEscalation escalation = FactEscalation.builder()
+                .id(77L)
+                .tenantId(10)
+                .userId(9001)
+                .resolutionStatus(0)
+                .build();
+        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001)))
+                .thenReturn(Optional.of(escalation));
+        when(factEscalationRepository.save(any(FactEscalation.class)))
+                .thenThrow(new RuntimeException("db down"));
+
+        mockMvc.perform(put(BASE + "/escalations/status")
+                        .param("tenant_id", "10")
+                        .param("uuid", uuid.toString())
+                        .param("escalation_id", "77")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resolutionStatus\":2}"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getEscalationsPaginated_whenPageNumberInvalid_returnsBadRequest() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
+
+        mockMvc.perform(get(BASE + "/escalations")
+                        .principal(buildJwtAuthentication())
+                        .param("page_number", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.total_count").value(0))
+                .andExpect(jsonPath("$.escalations").isArray());
+    }
+
+    @Test
+    void getEscalationsPaginated_whenLimitInvalid_returnsBadRequest() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
+
+        mockMvc.perform(get(BASE + "/escalations")
+                        .principal(buildJwtAuthentication())
+                        .param("limit", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.total_count").value(0))
+                .andExpect(jsonPath("$.escalations").isArray());
+    }
+
+    @Test
+    void getEscalationsPaginated_whenTenantIdMissingInAuthRef_returnsBadRequest() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, null));
+
+        mockMvc.perform(get(BASE + "/escalations")
+                        .principal(buildJwtAuthentication()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.total_count").value(0))
+                .andExpect(jsonPath("$.escalations").isArray());
+    }
+
+    @Test
+    void getEscalationsPaginated_whenUserIdNull_resolvesViaUuid() throws Exception {
+        UUID uuid = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(null, uuid, 10));
+        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
+                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
+
+        Page<EscalationListItemDto> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        when(escalationQueryService.getEscalations(
+                eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get(BASE + "/escalations")
+                        .principal(buildJwtAuthentication()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.limit").value(10))
+                .andExpect(jsonPath("$.total_count").value(0));
+
+        verify(dimUserRepository, times(1))
+                .findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid));
+    }
+
+    @Test
+    void getEscalationsPaginated_whenServiceThrows_returnsServerError() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
+        when(escalationQueryService.getEscalations(
+                eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/escalations")
+                        .principal(buildJwtAuthentication()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.total_count").value(0))
+                .andExpect(jsonPath("$.escalations").isArray());
     }
 
     @Test

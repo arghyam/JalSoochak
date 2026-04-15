@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -57,6 +58,7 @@ public class BfmReadingService {
         if (!belongsToScheme) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
+        List<Long> analyticsUserIds = resolveAnalyticsUserIds(schemaName, request.getSchemeId(), operatorInRequest.id());
 
         FlowVisionResult ocrResult = null;
         BigDecimal finalReading = request.getReadingValue();
@@ -85,22 +87,24 @@ public class BfmReadingService {
                             "Unreadable image. OCR could not extract a valid meter reading.",
                             AnomalyConstants.STATUS_OPEN
                     );
-                    telemetryEventPublisher.publishAnomalyRecorded(
-                            tenantId,
-                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                            operatorInRequest.id(),
-                            request.getSchemeId(),
-                            null,
-                            null,
-                            null,
-                            retries,
-                            null,
-                            null,
-                            0,
-                            "Unreadable image. OCR could not extract a valid meter reading.",
-                            AnomalyConstants.STATUS_OPEN,
-                            null
-                    );
+                    for (Long recipientUserId : analyticsUserIds) {
+                        telemetryEventPublisher.publishAnomalyRecorded(
+                                tenantId,
+                                AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                                recipientUserId,
+                                request.getSchemeId(),
+                                null,
+                                null,
+                                null,
+                                retries,
+                                null,
+                                null,
+                                0,
+                                "Unreadable image. OCR could not extract a valid meter reading.",
+                                AnomalyConstants.STATUS_OPEN,
+                                null
+                        );
+                    }
                     return CreateReadingResponse.builder()
                             .success(false)
                             .message("Could not read meter value from image. Please retry with a clearer photo.")
@@ -126,22 +130,24 @@ public class BfmReadingService {
                         "Unreadable image. OCR failed during extraction.",
                         AnomalyConstants.STATUS_OPEN
                 );
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                        operatorInRequest.id(),
-                        request.getSchemeId(),
-                        null,
-                        null,
-                        null,
-                        retries,
-                        null,
-                        null,
-                        0,
-                        "Unreadable image. OCR failed during extraction.",
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
+                for (Long recipientUserId : analyticsUserIds) {
+                    telemetryEventPublisher.publishAnomalyRecorded(
+                            tenantId,
+                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                            recipientUserId,
+                            request.getSchemeId(),
+                            null,
+                            null,
+                            null,
+                            retries,
+                            null,
+                            null,
+                            0,
+                            "Unreadable image. OCR failed during extraction.",
+                            AnomalyConstants.STATUS_OPEN,
+                            null
+                    );
+                }
                 return CreateReadingResponse.builder()
                         .success(false)
                         .message("OCR failed. Please try again with a clearer image.")
@@ -170,17 +176,27 @@ public class BfmReadingService {
         Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = telemetryTenantRepository
                 .findLatestConfirmedReadingSnapshot(schemaName, request.getSchemeId(), null);
 
-        // For non-meter-replacement submissions, compare only against yesterday's confirmed reading (if any).
-        // This prevents rejecting a reading against an older historic baseline when there was no reading yesterday.
-        LocalDate yesterday = LocalDate.now().minusDays(1);
+        // For non-meter-replacement submissions, validate against the latest confirmed reading.
+        // Meter-replacement submissions are treated as a new baseline.
         Optional<TelemetryConfirmedReadingSnapshot> validationBaselineOpt = isMeterReplaced
                 ? latestSnapshotOpt
-                : telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(
-                        schemaName,
-                        request.getSchemeId(),
-                        yesterday,
-                        null
-                );
+                : latestSnapshotOpt;
+
+        if (!isMeterReplaced
+                && validationBaselineOpt.isPresent()
+                && confirmedReading != null
+                && confirmedReading.compareTo(validationBaselineOpt.get().confirmedReading()) < 0) {
+            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.get();
+            return CreateReadingResponse.builder()
+                    .success(false)
+                    .message("Reading cannot be less than previous confirmed reading. Submitted reading: "
+                            + toPlain(confirmedReading) + ". Previous reading: " + toPlain(previousSnapshot.confirmedReading()) + ".")
+                    .correlationId(correlationId)
+                    .meterReading(confirmedReading)
+                    .qualityStatus("REJECTED")
+                    .lastConfirmedReading(previousSnapshot.confirmedReading())
+                    .build();
+        }
 
         Optional<WaterSupplyThreshold> thresholdOpt = !isMeterReplaced ? loadWaterSupplyThreshold(tenantId) : Optional.empty();
         Optional<BigDecimal> waterNormOpt = !isMeterReplaced ? loadWaterNorm(tenantId) : Optional.empty();
@@ -206,22 +222,24 @@ public class BfmReadingService {
                     reason,
                     AnomalyConstants.STATUS_OPEN
             );
-            telemetryEventPublisher.publishAnomalyRecorded(
-                    tenantId,
-                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
-                    extractedReading,
-                    confidenceLevel,
-                    confirmedReading,
-                    0,
-                    previousConfirmed,
-                    previousConfirmedAt,
-                    0,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN,
-                    null
-            );
+            for (Long recipientUserId : analyticsUserIds) {
+                telemetryEventPublisher.publishAnomalyRecorded(
+                        tenantId,
+                        AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+                        recipientUserId,
+                        request.getSchemeId(),
+                        extractedReading,
+                        confidenceLevel,
+                        confirmedReading,
+                        0,
+                        previousConfirmed,
+                        previousConfirmedAt,
+                        0,
+                        reason,
+                        AnomalyConstants.STATUS_OPEN,
+                        null
+                );
+            }
             return CreateReadingResponse.builder()
                     .success(false)
                     .message("Reading rejected because it is below the allowed minimum. Submitted: "
@@ -245,22 +263,24 @@ public class BfmReadingService {
                     "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
                     AnomalyConstants.STATUS_OPEN
             );
-            telemetryEventPublisher.publishAnomalyRecorded(
-                    tenantId,
-                    AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
-                    extractedReading,
-                    confidenceLevel,
-                    confirmedReading,
-                    0,
-                    previousSnapshot.confirmedReading(),
-                    previousSnapshot.createdAt(),
-                    0,
-                    "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
-                    AnomalyConstants.STATUS_OPEN,
-                    null
-            );
+            for (Long recipientUserId : analyticsUserIds) {
+                telemetryEventPublisher.publishAnomalyRecorded(
+                        tenantId,
+                        AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
+                        recipientUserId,
+                        request.getSchemeId(),
+                        extractedReading,
+                        confidenceLevel,
+                        confirmedReading,
+                        0,
+                        previousSnapshot.confirmedReading(),
+                        previousSnapshot.createdAt(),
+                        0,
+                        "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
+                        AnomalyConstants.STATUS_OPEN,
+                        null
+                );
+            }
             return CreateReadingResponse.builder()
                     .success(false)
                     .message("Duplicate image submission detected. The extracted reading matches the previous reading.")
@@ -460,6 +480,18 @@ public class BfmReadingService {
             log.warn("Invalid water supply threshold config for tenantId {}: {}", tenantId, e.getMessage());
             return Optional.empty();
         }
+    }
+
+    private List<Long> resolveAnalyticsUserIds(String schemaName, Long schemeId, Long fallbackUserId) {
+        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
+        if (subDivisionalOfficerIds != null && !subDivisionalOfficerIds.isEmpty()) {
+            return subDivisionalOfficerIds;
+        }
+        List<Long> sectionOfficerIds = telemetryTenantRepository.findSectionOfficerUserIdsForScheme(schemaName, schemeId);
+        if (sectionOfficerIds != null && !sectionOfficerIds.isEmpty()) {
+            return sectionOfficerIds;
+        }
+        return List.of(fallbackUserId);
     }
 
     private static String toPlain(BigDecimal value) {

@@ -26,8 +26,8 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                         a.createdAt, a.updatedAt, s.schemeName)
                     FROM Anomaly a, DimUserSchemeMapping m, DimScheme s
                     WHERE a.tenantId = :tenantId
-                      AND m.schemeId = a.schemeId AND m.userId = :mappedUserId
-                      AND s.schemeId = a.schemeId
+                      AND m.schemeId = a.schemeId AND m.userId = :mappedUserId AND m.tenantId = a.tenantId
+                      AND s.schemeId = a.schemeId AND s.tenantId = a.tenantId
                       AND a.deletedAt IS NULL
                       AND a.createdAt >= :fromInclusive
                       AND a.createdAt < :toExclusive
@@ -39,8 +39,8 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
                     SELECT count(distinct a.id)
                     FROM Anomaly a, DimUserSchemeMapping m, DimScheme s
                     WHERE a.tenantId = :tenantId
-                      AND m.schemeId = a.schemeId AND m.userId = :mappedUserId
-                      AND s.schemeId = a.schemeId
+                      AND m.schemeId = a.schemeId AND m.userId = :mappedUserId AND m.tenantId = a.tenantId
+                      AND s.schemeId = a.schemeId AND s.tenantId = a.tenantId
                       AND a.deletedAt IS NULL
                       AND a.createdAt >= :fromInclusive
                       AND a.createdAt < :toExclusive
@@ -63,7 +63,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
             SELECT count(distinct a.id)
             FROM Anomaly a, DimUserSchemeMapping m
             WHERE a.tenantId = :tenantId
-              AND m.schemeId = a.schemeId AND m.userId = :mappedUserId
+              AND m.schemeId = a.schemeId AND m.userId = :mappedUserId AND m.tenantId = a.tenantId
               AND a.deletedAt IS NULL
               AND a.createdAt >= :fromInclusive
               AND a.createdAt < :toExclusive

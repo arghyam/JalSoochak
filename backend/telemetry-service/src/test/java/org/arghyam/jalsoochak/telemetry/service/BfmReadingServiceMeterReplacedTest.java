@@ -52,7 +52,7 @@ class BfmReadingServiceMeterReplacedTest {
     private BfmReadingService service;
 
     @Test
-    void createReadingAcceptsLowerReadingWhenMeterNotReplacedIfAboveThreshold() {
+    void createReadingRejectsLowerReadingWhenMeterNotReplaced() {
         String schemaName = "tenant_test";
         TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
 
@@ -68,16 +68,14 @@ class BfmReadingServiceMeterReplacedTest {
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(schemaName, 10L, LocalDate.now().minusDays(1), null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
-
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
         assertNotNull(resp);
-        assertEquals(true, resp.isSuccess());
-        assertEquals("CONFIRMED", resp.getQualityStatus());
+        assertEquals(false, resp.isSuccess());
+        assertEquals("REJECTED", resp.getQualityStatus());
+        assertTrue(resp.getMessage().contains("Reading cannot be less than previous confirmed reading"));
 
-        verify(telemetryTenantRepository).createFlowReading(
+        verify(telemetryTenantRepository, never()).createFlowReading(
                 anyString(),
                 anyLong(),
                 anyLong(),
@@ -98,7 +96,7 @@ class BfmReadingServiceMeterReplacedTest {
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(10L)
                 .operatorId(1L)
-                .readingValue(new BigDecimal("800"))
+                .readingValue(new BigDecimal("850"))
                 .build();
 
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
@@ -106,9 +104,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("1200"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(schemaName, 10L, LocalDate.now().minusDays(1), null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("1200"), LocalDateTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), LocalDateTime.now().minusDays(1))));
 
         when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
                 .thenReturn(Optional.empty());

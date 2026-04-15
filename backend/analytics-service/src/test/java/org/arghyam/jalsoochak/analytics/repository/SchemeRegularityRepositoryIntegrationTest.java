@@ -662,17 +662,19 @@ class SchemeRegularityRepositoryIntegrationTest {
         List<SchemeRegularityRepository.DailySubmissionSchemeCount> dailyCounts =
                 repository.getDailySubmissionSchemeCountByUser(1, 11, D1, D3);
 
-        assertThat(statusCount.compliantSubmissionCount()).isEqualTo(3);
+        // Counts are scoped to schemes mapped to the user via dim_user_scheme_mapping_table,
+        // not to fact_meter_reading_table.user_id.
+        assertThat(statusCount.compliantSubmissionCount()).isEqualTo(5);
         assertThat(statusCount.anomalousSubmissionCount()).isEqualTo(1);
         assertThat(dailyCounts).hasSize(3);
         assertThat(dailyCounts)
                 .anySatisfy(r -> {
                     assertThat(r.date()).isEqualTo(D1);
-                    assertThat(r.submittedSchemeCount()).isEqualTo(1);
+                    assertThat(r.submittedSchemeCount()).isEqualTo(2);
                 })
                 .anySatisfy(r -> {
                     assertThat(r.date()).isEqualTo(D2);
-                    assertThat(r.submittedSchemeCount()).isEqualTo(1);
+                    assertThat(r.submittedSchemeCount()).isEqualTo(2);
                 })
                 .anySatisfy(r -> {
                     assertThat(r.date()).isEqualTo(D3);
