@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -65,6 +66,8 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
+        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, 10L))
+                .thenReturn(List.of(99L));
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
@@ -85,6 +88,30 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 any(),
                 any()
+        );
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
+                anyString(),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+        );
+        verify(telemetryEventPublisher).publishAnomalyRecorded(
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
+                org.mockito.ArgumentMatchers.eq(99L),
+                org.mockito.ArgumentMatchers.eq(10L),
+                any(),
+                any(),
+                any(),
+                org.mockito.ArgumentMatchers.eq(0),
+                any(),
+                any(),
+                org.mockito.ArgumentMatchers.eq(0),
+                anyString(),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
+                anyString()
         );
     }
 

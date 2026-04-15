@@ -89,7 +89,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertEquals(true, resp.isSuccess());
         assertEquals("CONFIRMED", resp.getQualityStatus());
         verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("900"), 1L);
-        verify(telemetryTenantRepository).upsertAnalyticsWaterQuantity(
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
                 1,
                 10L,
                 1L,
@@ -97,7 +97,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
                 new BigDecimal("-100"),
                 1
         );
-        verify(telemetryTenantRepository).upsertAnalyticsWaterQuantity(
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
                 1,
                 10L,
                 1L,
@@ -151,7 +151,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryTenantRepository, never()).upsertAnalyticsWaterQuantity(any(), anyLong(), anyLong(), any(), any(), any());
+        verify(telemetryEventPublisher, never()).publishWaterQuantityRecorded(any(), anyLong(), anyLong(), any(), any(), any());
     }
 
     @Test
@@ -199,7 +199,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertEquals(new BigDecimal("1110"), resp.getMeterReading());
         assertEquals("corr-2", resp.getCorrelationId());
         verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("1110"), 1L);
-        verify(telemetryTenantRepository).upsertAnalyticsWaterQuantity(
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
                 1,
                 10L,
                 1L,
@@ -207,7 +207,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
                 new BigDecimal("110"),
                 1
         );
-        verify(telemetryTenantRepository).upsertAnalyticsWaterQuantity(
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
                 1,
                 10L,
                 1L,

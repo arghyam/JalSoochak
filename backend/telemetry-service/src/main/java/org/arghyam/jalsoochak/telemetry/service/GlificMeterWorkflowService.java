@@ -1054,6 +1054,33 @@ public class GlificMeterWorkflowService {
                     && previousSnapshotOpt.isPresent()
                     && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
                 TelemetryConfirmedReadingSnapshot previousSnapshot = previousSnapshotOpt.get();
+                String reason = "Submitted reading is less than previous confirmed reading.";
+                telemetryTenantRepository.createTenantAnomalyRecord(
+                        operatorWithSchema.schemaName(),
+                        operatorWithSchema.operator().id(),
+                        schemeId,
+                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                        reason,
+                        AnomalyConstants.STATUS_OPEN
+                );
+                for (Long sdoUserId : resolveSdoUserIds(operatorWithSchema.schemaName(), schemeId)) {
+                    telemetryEventPublisher.publishAnomalyRecorded(
+                            tenantId,
+                            AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                            sdoUserId,
+                            schemeId,
+                            pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+                            null,
+                            manualReadingValue,
+                            0,
+                            previousSnapshot.confirmedReading(),
+                            previousSnapshot.createdAt(),
+                            0,
+                            reason,
+                            AnomalyConstants.STATUS_OPEN,
+                            correlationId
+                    );
+                }
                 return CreateReadingResponse.builder()
                         .success(false)
                         .message(localizationService.localizeMessage(
@@ -1541,7 +1568,7 @@ public class GlificMeterWorkflowService {
                     .map(TelemetryCompletedFlowReading::confirmedReading)
                     .orElse(BigDecimal.ZERO);
             BigDecimal targetDayWaterQuantity = readingValue.subtract(previousDayConfirmedReading);
-            telemetryTenantRepository.upsertAnalyticsWaterQuantity(
+            telemetryEventPublisher.publishWaterQuantityRecorded(
                     tenantId,
                     schemeId,
                     operatorId,
@@ -1552,7 +1579,7 @@ public class GlificMeterWorkflowService {
             if (dayAfterTargetOpt.isPresent()) {
                 TelemetryCompletedFlowReading dayAfterTarget = dayAfterTargetOpt.get();
                 BigDecimal dayAfterWaterQuantity = dayAfterTarget.confirmedReading().subtract(readingValue);
-                telemetryTenantRepository.upsertAnalyticsWaterQuantity(
+                telemetryEventPublisher.publishWaterQuantityRecorded(
                         tenantId,
                         schemeId,
                         operatorId,
@@ -1814,6 +1841,11 @@ public class GlificMeterWorkflowService {
             return sectionOfficerIds;
         }
         return List.of(fallbackUserId);
+    }
+
+    private List<Long> resolveSdoUserIds(String schemaName, Long schemeId) {
+        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
+        return subDivisionalOfficerIds == null ? List.of() : subDivisionalOfficerIds;
     }
 
     private int calculateConsecutiveDays(List<LocalDate> dates, LocalDate startDate) {

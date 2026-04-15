@@ -184,6 +184,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L))
+                .thenReturn(List.of(99L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
@@ -203,6 +205,30 @@ class GlificMeterWorkflowServiceManualReadingTest {
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
+                anyString(),
+                ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+        );
+        verify(telemetryEventPublisher).publishAnomalyRecorded(
+                ArgumentMatchers.eq(1),
+                ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
+                ArgumentMatchers.eq(99L),
+                ArgumentMatchers.eq(10L),
+                any(),
+                any(),
+                ArgumentMatchers.eq(new BigDecimal("100")),
+                ArgumentMatchers.eq(0),
+                any(),
+                any(),
+                ArgumentMatchers.eq(0),
+                anyString(),
+                ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
+                anyString()
+        );
     }
 
     @Test
