@@ -254,14 +254,14 @@ public class GlificWhatsAppService {
      * the operator's button response.</p>
      *
      * <p>Operator name and date are passed as {@code defaultResults} using the keys
-     * {@code "name"} and {@code "date"} respectively, matching the HSM template parameter names.</p>
+     * {@code "name"} and {@code "state"} respectively, matching the HSM template parameter names.</p>
      *
      * <p>{@code glific.flow.nudge-id} is a required configuration — startup fails fast
      * if it is absent (see {@code @PostConstruct} validation).</p>
      *
      * @param contactId    Glific contact ID obtained from {@link #optIn}
      * @param operatorName operator name; passed as {@code defaultResults} key {@code "name"}
-     * @param date         today's date string; passed as {@code defaultResults} key {@code "date"}
+     * @param date         today's date string; passed as {@code defaultResults} key {@code "state"}
      * @throws IllegalStateException if {@code glific.flow.nudge-id} is blank
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */
@@ -271,13 +271,7 @@ public class GlificWhatsAppService {
             throw new IllegalStateException("glific.flow.nudge-id is not configured");
         }
 
-        String defaultResults;
-        try {
-            defaultResults = objectMapper.writeValueAsString(
-                    Map.of("name", operatorName, "date", date));
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to serialize flow defaultResults", e);
-        }
+        String defaultResults = serializeDefaultResults(operatorName, date);
 
         JsonNode response = client.execute(START_CONTACT_FLOW_MUTATION, Map.of(
                 "flowId", nudgeFlowId,
@@ -322,13 +316,7 @@ public class GlificWhatsAppService {
             throw new IllegalStateException("glific.flow.welcome-id is not configured");
         }
 
-        String defaultResults;
-        try {
-            defaultResults = objectMapper.writeValueAsString(
-                    Map.of("name", name != null ? name : "", "state", state != null ? state : ""));
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to serialize flow defaultResults", e);
-        }
+        String defaultResults = serializeDefaultResults(name, state);
 
         JsonNode response = client.execute(START_CONTACT_FLOW_MUTATION, Map.of(
                 "flowId",         flowId,
@@ -367,6 +355,24 @@ public class GlificWhatsAppService {
             String msg = errors.toString();
             log.error("[Glific] GraphQL errors in {}: {}", mutationKey, msg);
             throw new RuntimeException("Glific GraphQL error in " + mutationKey + ": " + msg);
+        }
+    }
+
+    /**
+     * Serializes flow defaultResults as JSON for name and state parameters.
+     * Both values are null-safe (converted to empty string if null).
+     *
+     * @param name  operator name (null-safe)
+     * @param state context value (e.g., tenant state or date) (null-safe)
+     * @return JSON string representation of defaultResults with keys "name" and "state"
+     * @throws RuntimeException if JSON serialization fails
+     */
+    private String serializeDefaultResults(String name, String state) {
+        try {
+            return objectMapper.writeValueAsString(
+                    Map.of("name", name != null ? name : "", "state", state != null ? state : ""));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize flow defaultResults", e);
         }
     }
 
