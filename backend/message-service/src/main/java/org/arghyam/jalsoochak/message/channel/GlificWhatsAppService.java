@@ -254,7 +254,7 @@ public class GlificWhatsAppService {
      * the operator's button response.</p>
      *
      * <p>Operator name and date are passed as {@code defaultResults} using the keys
-     * {@code "name"} and {@code "state"} respectively, matching the HSM template parameter names.</p>
+     * {@code "name"} and {@code "date"} respectively, matching the HSM template parameter names.</p>
      *
      * <p>{@code glific.flow.nudge-id} is a required configuration — startup fails fast
      * if it is absent (see {@code @PostConstruct} validation).</p>
@@ -271,7 +271,13 @@ public class GlificWhatsAppService {
             throw new IllegalStateException("glific.flow.nudge-id is not configured");
         }
 
-        String defaultResults = serializeDefaultResults(operatorName, date);
+        String defaultResults;
+        try {
+            defaultResults = objectMapper.writeValueAsString(
+                    Map.of("name", operatorName, "date", date));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize flow defaultResults", e);
+        }
 
         JsonNode response = client.execute(START_CONTACT_FLOW_MUTATION, Map.of(
                 "flowId", nudgeFlowId,
