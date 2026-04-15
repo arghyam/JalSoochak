@@ -75,7 +75,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
@@ -130,7 +130,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
@@ -172,7 +172,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
-    void manualReadingAcceptsLowerReadingWhenMeterNotReplacedIfAboveThreshold() {
+    void manualReadingRejectsLowerReadingWhenMeterNotReplaced() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -185,14 +185,9 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
-                .thenReturn(Optional.empty());
-        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString()))
-                .thenReturn(Optional.empty());
 
-        // Lower than yesterday should be accepted as long as it is above threshold.
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
                 .manualReading("100")
@@ -200,13 +195,13 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .build());
 
         assertNotNull(resp);
-        assertEquals(true, resp.isSuccess());
-        assertEquals("CONFIRMED", resp.getQualityStatus());
+        assertEquals(false, resp.isSuccess());
+        assertEquals("REJECTED", resp.getQualityStatus());
 
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
-        verify(telemetryTenantRepository).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
 
     @Test
@@ -225,7 +220,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.empty());
 
         // Snapshot is optional for this validation; it's only used as context in the anomaly record.
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
         // Thresholds: undersupply 50% of water norm (oversupply 0%).
@@ -280,7 +275,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
         // Oversupply 10% above water norm.
@@ -313,7 +308,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
-    void manualReadingWhenNoYesterdaySnapshotDoesNotRejectAgainstHistoricReadings() {
+    void manualReadingWhenNoPreviousSnapshotBeforeTodayAllowsSubmission() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -327,8 +322,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
 
-        // No confirmed reading yesterday => do not reject today's manual reading against any older history.
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        // No confirmed reading before today => allow today's manual reading.
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
@@ -366,8 +361,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertEquals(new BigDecimal("1000"), resp.getMeterReading());
         assertEquals("bfm-1", resp.getCorrelationId());
 
-        verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null);
-        verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null);
+        verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null);
         verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshot("tenant_test", 10L, null);
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1000"), 1L);
     }
