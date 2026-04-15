@@ -321,13 +321,19 @@ public class GlificWhatsAppService {
         if (flowId == null || flowId.isBlank()) {
             throw new IllegalStateException("glific.flow.welcome-id is not configured");
         }
-        com.fasterxml.jackson.databind.node.ObjectNode results = objectMapper.createObjectNode();
-        results.put("name",  name  != null ? name  : "");
-        results.put("state", state != null ? state : "");
+
+        String defaultResults;
+        try {
+            defaultResults = objectMapper.writeValueAsString(
+                    Map.of("name", name != null ? name : "", "state", state != null ? state : ""));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize flow defaultResults", e);
+        }
+
         JsonNode response = client.execute(START_CONTACT_FLOW_MUTATION, Map.of(
                 "flowId",         flowId,
                 "contactId",      contactId,
-                "defaultResults", results.toString()));
+                "defaultResults", defaultResults));
         checkErrors(response, "startContactFlow");
         boolean success = response.path("startContactFlow").path("success").asBoolean(false);
         if (!success) {
