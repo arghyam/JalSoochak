@@ -137,7 +137,6 @@
                         <configuration>
                             <includes>
                                 <include>org/arghyam/jalsoochak/scheme/service/SchemeUploadChunkProcessor*</include>
-                                <include>org/arghyam/jalsoochak/scheme/service/SchemeServiceImpl*</include>
                                 <include>org/arghyam/jalsoochak/scheme/config/OpenApiConfig*</include>
                             </includes>
                         </configuration>
@@ -154,7 +153,6 @@
                         <configuration>
                             <includes>
                                 <include>org/arghyam/jalsoochak/scheme/service/SchemeUploadChunkProcessor*</include>
-                                <include>org/arghyam/jalsoochak/scheme/service/SchemeServiceImpl*</include>
                                 <include>org/arghyam/jalsoochak/scheme/config/OpenApiConfig*</include>
                             </includes>
                             <rules>
