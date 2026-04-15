@@ -134,12 +134,6 @@
                     <execution>
                         <id>report</id>
                         <phase>verify</phase>
-                        <configuration>
-                            <includes>
-                                <include>org/arghyam/jalsoochak/scheme/service/SchemeUploadChunkProcessor*</include>
-                                <include>org/arghyam/jalsoochak/scheme/config/OpenApiConfig*</include>
-                            </includes>
-                        </configuration>
                         <goals>
                             <goal>report</goal>
                         </goals>

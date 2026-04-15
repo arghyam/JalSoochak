@@ -1286,6 +1286,9 @@ public class TelemetryTenantRepository {
         boolean hasNonSubmissionReason = columnExists("analytics_schema", "fact_water_quantity_table", "non_submission_reason");
 
         List<Object> updateArgs = new ArrayList<>();
+        updateArgs.add(tenantId);
+        updateArgs.add(schemeIdInt);
+        updateArgs.add(date);
         StringBuilder updateSql = new StringBuilder("""
                 UPDATE analytics_schema.fact_water_quantity_table
                 SET user_id = ?,
@@ -1304,27 +1307,22 @@ public class TelemetryTenantRepository {
         if (hasNonSubmissionReason) {
             updateSql.append(", non_submission_reason = NULL");
         }
-        updateSql.append("""
-                
-                WHERE id = (
-                    SELECT latest.id
-                    FROM (
-                        SELECT id
-                        FROM analytics_schema.fact_water_quantity_table
-                        WHERE tenant_id = ?
-                          AND scheme_id = ?
-                          AND date = ?
-                        ORDER BY
-                            CASE WHEN updated_at IS NULL THEN 1 ELSE 0 END,
-                            updated_at DESC,
-                            id DESC
-                        LIMIT 1
-                    ) latest
+        updateSql.insert(0, """
+                WITH latest AS (
+                    SELECT id
+                    FROM analytics_schema.fact_water_quantity_table
+                    WHERE tenant_id = ?
+                      AND scheme_id = ?
+                      AND "date" = ?
+                    ORDER BY updated_at DESC NULLS LAST, id DESC
+                    LIMIT 1
                 )
                 """);
-        updateArgs.add(tenantId);
-        updateArgs.add(schemeIdInt);
-        updateArgs.add(date);
+        updateSql.append("""
+
+                FROM latest
+                WHERE analytics_schema.fact_water_quantity_table.id = latest.id
+                """);
 
         int updated = jdbcTemplate.update(updateSql.toString(), updateArgs.toArray());
         if (updated > 0) {
@@ -1332,7 +1330,7 @@ public class TelemetryTenantRepository {
         }
 
         List<Object> insertArgs = new ArrayList<>();
-        StringBuilder columns = new StringBuilder("tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at");
+        StringBuilder columns = new StringBuilder("tenant_id, scheme_id, user_id, water_quantity, \"date\", created_at, updated_at");
         StringBuilder values = new StringBuilder("?, ?, ?, ?, ?, NOW(), NOW()");
         insertArgs.add(tenantId);
         insertArgs.add(schemeIdInt);
