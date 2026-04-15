@@ -67,7 +67,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-        when(telemetryTenantRepository.findSectionOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L));
+        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L));
 
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -358,7 +358,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-        when(telemetryTenantRepository.findSectionOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L));
+        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L));
         when(telemetryTenantRepository.upsertPendingIssueReportRecord(
                 eq("tenant_test"),
                 eq(10L),

@@ -387,7 +387,15 @@ public class TelemetryTenantRepository {
         return userIds.stream().findFirst();
     }
 
+    public List<Long> findSubDivisionalOfficerUserIdsForScheme(String schemaName, Long schemeId) {
+        return findUserIdsForSchemeByUserType(schemaName, schemeId, "SUB_DIVISIONAL_OFFICER");
+    }
+
     public List<Long> findSectionOfficerUserIdsForScheme(String schemaName, Long schemeId) {
+        return findUserIdsForSchemeByUserType(schemaName, schemeId, "SECTION_OFFICER");
+    }
+
+    private List<Long> findUserIdsForSchemeByUserType(String schemaName, Long schemeId, String userType) {
         validateSchemaName(schemaName);
         if (schemeId == null) {
             return List.of();
@@ -402,10 +410,10 @@ public class TelemetryTenantRepository {
                 WHERE usm.scheme_id = ?
                   AND usm.status = 1
                   AND u.status = 1
-                  AND UPPER(COALESCE(ut.c_name, '')) = 'SECTION_OFFICER'
+                  AND UPPER(COALESCE(ut.c_name, '')) = ?
                 ORDER BY usm.id DESC
                 """, schemaName, schemaName);
-        return jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("user_id")), schemeId);
+        return jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("user_id")), schemeId, userType);
     }
 
     public Long createFlowReading(String schemaName,
