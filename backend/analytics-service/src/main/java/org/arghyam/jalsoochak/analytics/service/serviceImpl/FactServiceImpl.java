@@ -108,19 +108,33 @@ public class FactServiceImpl implements FactService {
         LocalDate date = parseDate(event.getDate());
         ensureDateExists(date);
         LocalDateTime now = LocalDateTime.now();
-
-        FactWaterQuantity fact = FactWaterQuantity.builder()
-                .tenantId(event.getTenantId())
-                .schemeId(event.getSchemeId())
-                .userId(event.getUserId())
-                .waterQuantity(event.getWaterQuantity())
-                .submissionStatus(event.getSubmissionStatus())
-                .outageReason(event.getOutageReason())
-                .nonSubmissionReason(event.getNonSubmissionReason())
-                .date(date)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
+        FactWaterQuantity fact = waterQuantityRepository
+                .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                        event.getTenantId(),
+                        event.getSchemeId(),
+                        date
+                )
+                .map(existing -> {
+                    existing.setUserId(event.getUserId());
+                    existing.setWaterQuantity(event.getWaterQuantity());
+                    existing.setSubmissionStatus(event.getSubmissionStatus());
+                    existing.setOutageReason(event.getOutageReason());
+                    existing.setNonSubmissionReason(event.getNonSubmissionReason());
+                    existing.setUpdatedAt(now);
+                    return existing;
+                })
+                .orElseGet(() -> FactWaterQuantity.builder()
+                        .tenantId(event.getTenantId())
+                        .schemeId(event.getSchemeId())
+                        .userId(event.getUserId())
+                        .waterQuantity(event.getWaterQuantity())
+                        .submissionStatus(event.getSubmissionStatus())
+                        .outageReason(event.getOutageReason())
+                        .nonSubmissionReason(event.getNonSubmissionReason())
+                        .date(date)
+                        .createdAt(now)
+                        .updatedAt(now)
+                        .build());
 
         waterQuantityRepository.save(fact);
         log.info("Ingested fact_water_quantity_table for scheme={} tenant={}", event.getSchemeId(), event.getTenantId());

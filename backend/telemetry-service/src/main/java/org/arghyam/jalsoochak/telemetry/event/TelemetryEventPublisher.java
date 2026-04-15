@@ -34,6 +34,32 @@ public class TelemetryEventPublisher {
     private final KafkaProducer kafkaProducer;
 
     @Async("kafkaPublisherExecutor")
+    public void publishWaterQuantityRecorded(Integer tenantId,
+                                             Long schemeId,
+                                             Long userId,
+                                             LocalDate date,
+                                             BigDecimal waterQuantity,
+                                             Integer submissionStatus) {
+        WaterQuantityEvent event = WaterQuantityEvent.builder()
+                .eventType(EVENT_WATER_QUANTITY_RECORDED)
+                .tenantId(tenantId)
+                .schemeId(toInt(schemeId))
+                .userId(toInt(userId))
+                .waterQuantity(toInt(waterQuantity))
+                .submissionStatus(submissionStatus)
+                .outageReason(null)
+                .nonSubmissionReason(null)
+                .date((date != null ? date : LocalDate.now()).toString())
+                .build();
+
+        boolean ok = kafkaProducer.publishJson(TOPIC, event);
+        if (!ok) {
+            log.warn("[telemetry-events] publish_failed water_quantity tenantId={} schemeId={} userId={} date={}",
+                    tenantId, schemeId, userId, date);
+        }
+    }
+
+    @Async("kafkaPublisherExecutor")
     public void publishOutageOrNonSubmissionReason(Integer tenantId,
                                                    Long schemeId,
                                                    Long userId,
