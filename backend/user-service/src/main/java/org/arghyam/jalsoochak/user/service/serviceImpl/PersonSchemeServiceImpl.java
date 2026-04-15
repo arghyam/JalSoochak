@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.user.service.PersonSchemeService;
 import org.arghyam.jalsoochak.user.util.TenantSchemaResolver;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -83,6 +84,8 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
             String name,
             String status,
             Integer durationDays,
+            LocalDate startDate,
+            LocalDate endDate,
             String sortBy,
             String sortDir,
             int page,
@@ -97,6 +100,8 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
                 name,
                 statusCode,
                 durationDays,
+                startDate,
+                endDate,
                 sortBy,
                 sortDir,
                 offset,
@@ -107,7 +112,9 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
                 personId,
                 name,
                 statusCode,
-                durationDays
+                durationDays,
+                startDate,
+                endDate
         );
         return PageResponseDTO.of(rows, total, page, size);
     }

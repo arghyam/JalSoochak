@@ -15,6 +15,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -49,6 +50,18 @@ public class PersonSchemeRepository {
         if (schemaName == null || !schemaName.matches("^[a-z_][a-z0-9_]*$")) {
             throw new IllegalArgumentException("Invalid schema name: " + schemaName);
         }
+    }
+
+    private Integer findTenantIdBySchemaName(String schemaName) {
+        String tenantCode = schemaName.startsWith("tenant_") ? schemaName.substring("tenant_".length()) : schemaName;
+        String sql = """
+                SELECT id
+                FROM common_schema.tenant_master_table
+                WHERE LOWER(state_code) = LOWER(?)
+                LIMIT 1
+                """;
+        List<Integer> rows = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getInt("id"), tenantCode);
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     private boolean tableExists(String schemaName, String tableName) {
@@ -435,7 +448,7 @@ public class PersonSchemeRepository {
         String col = switch (key) {
             case "name", "title" -> "o.id";
             case "status" -> "o.status";
-            case "lastsubmissionat" -> "last.last_submission_at";
+            case "lastsubmissionat" -> "COALESCE(aw.last_submission_at, fl.last_submission_at)";
             default -> "o.id";
         };
         return "ORDER BY " + col + " " + dir;
@@ -447,7 +460,9 @@ public class PersonSchemeRepository {
             long personId,
             String name,
             Integer status,
-            Integer durationDays
+            Integer durationDays,
+            LocalDate startDate,
+            LocalDate endDate
     ) {
         validateSchemaName(schemaName);
         if (!tableExists(schemaName, "user_scheme_mapping_table")) {
@@ -461,6 +476,17 @@ public class PersonSchemeRepository {
         }
         if (status != null) {
             args.add(status);
+        }
+        if (startDate != null) {
+            args.add(startDate);
+        }
+        if (endDate != null) {
+            args.add(endDate);
+        }
+        boolean analyticsFactAvailable = tableExists("analytics_schema", "fact_water_quantity_table");
+        if (analyticsFactAvailable) {
+            Integer tenantId = findTenantIdBySchemaName(schemaName);
+            args.add(tenantId == null ? -1 : tenantId);
         }
         if (durationDays != null) {
             args.add(durationDays);
@@ -491,21 +517,40 @@ public class PersonSchemeRepository {
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                       %s
                       %s
+                      %s
+                      %s
                 )
                 SELECT COUNT(1)
                 FROM ops o
+                LEFT JOIN LATERAL (
+                    %s
+                ) aw ON true
                 LEFT JOIN LATERAL (
                     SELECT MAX(fr.%s) AS last_submission_at
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = o.id
-                ) last ON true
+                ) fl ON true
                 %s
                 """, schemaName, schemaName, schemaName,
                 nameFilter == null ? "" : "AND u.title_hash = ?",
                 status == null ? "" : "AND u.status = ?",
+                startDate == null ? "" : "AND u.created_at::date >= ?",
+                endDate == null ? "" : "AND u.created_at::date <= ?",
+                analyticsFactAvailable
+                        ? """
+                        SELECT COALESCE(fwq.updated_at, fwq.created_at, fwq.date::timestamp) AS last_submission_at
+                        FROM analytics_schema.fact_water_quantity_table fwq
+                        WHERE fwq.user_id = o.id
+                          AND fwq.tenant_id = ?
+                          AND COALESCE(fwq.submission_status, 1) = 1
+                          AND fwq.scheme_id IN (SELECT scheme_id FROM person_schemes)
+                        ORDER BY fwq.date DESC, fwq.created_at DESC, fwq.id DESC
+                        LIMIT 1
+                        """
+                        : "SELECT NULL::timestamp AS last_submission_at",
                 resolveFlowReadingTimeColumn(schemaName), schemaName,
-                durationDays == null ? "" : "WHERE last.last_submission_at::date >= CURRENT_DATE - ?");
+                durationDays == null ? "" : "WHERE COALESCE(aw.last_submission_at, fl.last_submission_at)::date >= CURRENT_DATE - ?");
 
         Long total = jdbcTemplate.queryForObject(sql, Long.class, args.toArray());
         return total == null ? 0 : total;
@@ -518,6 +563,8 @@ public class PersonSchemeRepository {
             String name,
             Integer status,
             Integer durationDays,
+            LocalDate startDate,
+            LocalDate endDate,
             String sortBy,
             String sortDir,
             int offset,
@@ -529,6 +576,7 @@ public class PersonSchemeRepository {
         }
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String confirmedExpr = resolveConfirmedReadingExpression(schemaName, "fr");
+        boolean analyticsFactAvailable = tableExists("analytics_schema", "fact_water_quantity_table");
 
         String nameFilter = buildNameFilter(schemaName, name);
         List<Object> args = new ArrayList<>();
@@ -538,6 +586,16 @@ public class PersonSchemeRepository {
         }
         if (status != null) {
             args.add(status);
+        }
+        if (startDate != null) {
+            args.add(startDate);
+        }
+        if (endDate != null) {
+            args.add(endDate);
+        }
+        if (analyticsFactAvailable) {
+            Integer tenantId = findTenantIdBySchemaName(schemaName);
+            args.add(tenantId == null ? -1 : tenantId);
         }
         if (durationDays != null) {
             args.add(durationDays);
@@ -572,15 +630,20 @@ public class PersonSchemeRepository {
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                       %s
                       %s
+                      %s
+                      %s
                 )
                 SELECT o.id,
                        o.uuid,
                        o.title,
                        o.status,
-                       last.last_submission_at,
-                       last.last_water_supplied,
+                       COALESCE(aw.last_submission_at, fl.last_submission_at) AS last_submission_at,
+                       COALESCE(aw.last_water_supplied, fl.last_water_supplied) AS last_water_supplied,
                        comp.reporting_rate_percent
                 FROM ops o
+                LEFT JOIN LATERAL (
+                    %s
+                ) aw ON true
                 LEFT JOIN LATERAL (
                     WITH ordered AS (
                         SELECT fr.%s AS reading_at,
@@ -598,7 +661,7 @@ public class PersonSchemeRepository {
                     FROM ordered
                     ORDER BY reading_at DESC
                     LIMIT 1
-                ) last ON true
+                ) fl ON true
                 LEFT JOIN LATERAL (
                     SELECT MIN(fr.reading_date) AS first_submission_date,
                            COUNT(DISTINCT fr.reading_date) AS submitted_days
@@ -624,9 +687,24 @@ public class PersonSchemeRepository {
                 """, schemaName, schemaName, schemaName,
                 nameFilter == null ? "" : "AND u.title_hash = ?",
                 status == null ? "" : "AND u.status = ?",
+                startDate == null ? "" : "AND u.created_at::date >= ?",
+                endDate == null ? "" : "AND u.created_at::date <= ?",
+                analyticsFactAvailable
+                        ? """
+                        SELECT COALESCE(fwq.updated_at, fwq.created_at, fwq.date::timestamp) AS last_submission_at,
+                               fwq.water_quantity::numeric AS last_water_supplied
+                        FROM analytics_schema.fact_water_quantity_table fwq
+                        WHERE fwq.user_id = o.id
+                          AND fwq.tenant_id = ?
+                          AND COALESCE(fwq.submission_status, 1) = 1
+                          AND fwq.scheme_id IN (SELECT scheme_id FROM person_schemes)
+                        ORDER BY fwq.date DESC, fwq.created_at DESC, fwq.id DESC
+                        LIMIT 1
+                        """
+                        : "SELECT NULL::timestamp AS last_submission_at, NULL::numeric AS last_water_supplied",
                 timeColumn, confirmedExpr, confirmedExpr, timeColumn, schemaName,
                 schemaName,
-                durationDays == null ? "" : "WHERE last.last_submission_at::date >= CURRENT_DATE - ?",
+                durationDays == null ? "" : "WHERE COALESCE(aw.last_submission_at, fl.last_submission_at)::date >= CURRENT_DATE - ?",
                 pumpOperatorOrderBy(sortBy, sortDir));
 
         record Row(
