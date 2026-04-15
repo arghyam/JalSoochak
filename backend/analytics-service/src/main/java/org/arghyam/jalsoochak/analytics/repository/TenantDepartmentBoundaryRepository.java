@@ -54,6 +54,25 @@ public class TenantDepartmentBoundaryRepository {
         return jdbcTemplate.queryForList(sql, parentDepartmentId, tenantId, tenantId, childLevel, parentDepartmentId);
     }
 
+    public String getBoundaryGeoJsonByDepartmentId(Integer tenantId, Integer departmentId) {
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalArgumentException("tenant_id must be a positive integer");
+        }
+        if (departmentId == null || departmentId <= 0) {
+            throw new IllegalArgumentException("department_id must be a positive integer");
+        }
+        String sql = """
+                SELECT ST_AsGeoJSON(d.geom, 9, 8) AS boundary_geojson
+                FROM analytics_schema.dim_department_location_table d
+                WHERE d.tenant_id = ?
+                  AND d.department_id = ?
+                  AND d.geom IS NOT NULL
+                LIMIT 1
+                """;
+        List<String> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getString("boundary_geojson"), tenantId, departmentId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     public Map<String, Object> getMergedBoundaryByParentDepartment(Integer tenantId, Integer parentDepartmentId, Integer parentLevel) {
         int childLevel = parentLevel + 1;
         String parentLevelColumn = getDeptLevelColumn(parentLevel);
