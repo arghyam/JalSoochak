@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
@@ -1053,6 +1054,39 @@ public class GlificMeterWorkflowService {
                     && previousSnapshotOpt.isPresent()
                     && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
                 TelemetryConfirmedReadingSnapshot previousSnapshot = previousSnapshotOpt.get();
+                String reason = "Submitted reading is less than previous confirmed reading.";
+                telemetryTenantRepository.createTenantAnomalyRecord(
+                        operatorWithSchema.schemaName(),
+                        operatorWithSchema.operator().id(),
+                        schemeId,
+                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                        reason,
+                        AnomalyConstants.STATUS_OPEN
+                );
+                List<Long> recipientUserIds = resolveSdoUserIds(operatorWithSchema.schemaName(), schemeId);
+                if (recipientUserIds.isEmpty()) {
+                    log.warn("No SDO mapped for schemeId={} in schema={}; falling back to analytics recipients for anomaly type={}",
+                            schemeId, operatorWithSchema.schemaName(), AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS);
+                    recipientUserIds = analyticsUserIds;
+                }
+                for (Long recipientUserId : recipientUserIds) {
+                    telemetryEventPublisher.publishAnomalyRecorded(
+                            tenantId,
+                            AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                            recipientUserId,
+                            schemeId,
+                            pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+                            null,
+                            manualReadingValue,
+                            0,
+                            previousSnapshot.confirmedReading(),
+                            previousSnapshot.createdAt(),
+                            0,
+                            reason,
+                            AnomalyConstants.STATUS_OPEN,
+                            correlationId
+                    );
+                }
                 return CreateReadingResponse.builder()
                         .success(false)
                         .message(localizationService.localizeMessage(
@@ -1459,34 +1493,28 @@ public class GlificMeterWorkflowService {
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             LocalDate today = LocalDate.now();
-            LocalDate targetDay = today.minusDays(2);
-            LocalDate dayBeforeTarget = targetDay.minusDays(1);
-            LocalDate dayAfterTarget = targetDay.plusDays(1);
 
-            // Use the richer lookup so we can validate bounds before updating.
-            Optional<TelemetryFlowReadingDetails> targetDayRecordOpt = telemetryTenantRepository
-                    .findLatestFlowReadingForDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay)
-                    .filter(r -> r.confirmedReading() != null && r.confirmedReading().compareTo(BigDecimal.ZERO) > 0);
+            Optional<TelemetryCompletedFlowReading> targetDayRecordOpt = telemetryTenantRepository
+                    .findLatestCompletedFlowReadingBeforeDate(operatorWithSchema.schemaName(), schemeId, operatorId, today);
             if (targetDayRecordOpt.isEmpty()) {
                 return CreateReadingResponse.builder()
                         .success(false)
                         .message(localizationService.localizeMessage(
-                                "No previous day reading found for " + targetDay + ". Please submit a reading for that day first.",
+                                "No previous submitted reading found. Please submit a reading first.",
                                 languageKey
                         ))
                         .qualityStatus("REJECTED")
                         .correlationId(request.getContactId())
                         .build();
             }
-            TelemetryFlowReadingDetails targetDayRecord = targetDayRecordOpt.get();
+            TelemetryCompletedFlowReading targetDayRecord = targetDayRecordOpt.get();
+            LocalDate targetDay = targetDayRecord.readingDate();
 
-            Optional<TelemetryFlowReadingDetails> dayBeforeTargetOpt = telemetryTenantRepository
-                    .findLatestFlowReadingForDate(operatorWithSchema.schemaName(), schemeId, operatorId, dayBeforeTarget)
-                    .filter(r -> r.confirmedReading() != null && r.confirmedReading().compareTo(BigDecimal.ZERO) > 0);
+            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = telemetryTenantRepository
+                    .findLatestCompletedFlowReadingBeforeDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay);
 
-            Optional<TelemetryFlowReadingDetails> dayAfterTargetOpt = telemetryTenantRepository
-                    .findLatestFlowReadingForDate(operatorWithSchema.schemaName(), schemeId, operatorId, dayAfterTarget)
-                    .filter(r -> r.confirmedReading() != null && r.confirmedReading().compareTo(BigDecimal.ZERO) > 0);
+            Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt = telemetryTenantRepository
+                    .findEarliestCompletedFlowReadingAfterDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay);
 
             // Threshold bounds (water quantity implied by the reading deltas).
             // Effective thresholds:
@@ -1524,7 +1552,7 @@ public class GlificMeterWorkflowService {
                         return CreateReadingResponse.builder()
                                 .success(false)
                                 .message(localizationService.localizeMessage(
-                                        "Updated reading implies water quantity for " + dayAfterTarget + " (" + toPlain(qtyForDayAfter)
+                                        "Updated reading implies water quantity for " + dayAfterTargetOpt.get().readingDate() + " (" + toPlain(qtyForDayAfter)
                                                 + ") outside allowed range [" + toPlain(minAllowedQty) + ", " + toPlain(maxAllowedQty) + "].",
                                         languageKey
                                 ))
@@ -1543,10 +1571,10 @@ public class GlificMeterWorkflowService {
                     operatorId
             );
             BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
-                    .map(TelemetryFlowReadingDetails::confirmedReading)
+                    .map(TelemetryCompletedFlowReading::confirmedReading)
                     .orElse(BigDecimal.ZERO);
             BigDecimal targetDayWaterQuantity = readingValue.subtract(previousDayConfirmedReading);
-            telemetryTenantRepository.upsertAnalyticsWaterQuantity(
+            telemetryEventPublisher.publishWaterQuantityRecorded(
                     tenantId,
                     schemeId,
                     operatorId,
@@ -1555,12 +1583,13 @@ public class GlificMeterWorkflowService {
                     1
             );
             if (dayAfterTargetOpt.isPresent()) {
-                BigDecimal dayAfterWaterQuantity = dayAfterTargetOpt.get().confirmedReading().subtract(readingValue);
-                telemetryTenantRepository.upsertAnalyticsWaterQuantity(
+                TelemetryCompletedFlowReading dayAfterTarget = dayAfterTargetOpt.get();
+                BigDecimal dayAfterWaterQuantity = dayAfterTarget.confirmedReading().subtract(readingValue);
+                telemetryEventPublisher.publishWaterQuantityRecorded(
                         tenantId,
                         schemeId,
                         operatorId,
-                        dayAfterTarget,
+                        dayAfterTarget.readingDate(),
                         dayAfterWaterQuantity,
                         1
                 );
@@ -1818,6 +1847,11 @@ public class GlificMeterWorkflowService {
             return sectionOfficerIds;
         }
         return List.of(fallbackUserId);
+    }
+
+    private List<Long> resolveSdoUserIds(String schemaName, Long schemeId) {
+        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
+        return subDivisionalOfficerIds == null ? List.of() : subDivisionalOfficerIds;
     }
 
     private int calculateConsecutiveDays(List<LocalDate> dates, LocalDate startDate) {

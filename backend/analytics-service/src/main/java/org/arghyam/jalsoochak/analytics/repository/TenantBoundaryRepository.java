@@ -50,6 +50,25 @@ public class TenantBoundaryRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    public String getBoundaryGeoJsonByLgdId(Integer tenantId, Integer lgdId) {
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalArgumentException("tenant_id must be a positive integer");
+        }
+        if (lgdId == null || lgdId <= 0) {
+            throw new IllegalArgumentException("lgd_id must be a positive integer");
+        }
+        String sql = """
+                SELECT ST_AsGeoJSON(l.geom, 9, 8) AS boundary_geojson
+                FROM analytics_schema.dim_lgd_location_table l
+                WHERE l.tenant_id = ?
+                  AND l.lgd_id = ?
+                  AND l.geom IS NOT NULL
+                LIMIT 1
+                """;
+        List<String> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getString("boundary_geojson"), tenantId, lgdId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     public List<Map<String, Object>> getChildLevelByParent(
             Integer tenantId,
             Integer parentLgdId,

@@ -1123,6 +1123,74 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingBeforeDate(String schemaName,
+                                                                                             Long schemeId,
+                                                                                             Long operatorId,
+                                                                                             LocalDate beforeDate) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND reading_date < ?
+                  AND extracted_reading > 0
+                  AND confirmed_reading > 0
+                  AND deleted_at IS NULL
+                ORDER BY reading_date DESC, %s DESC, id DESC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryCompletedFlowReading(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                schemeId,
+                operatorId,
+                beforeDate
+        );
+        return rows.stream().findFirst();
+    }
+
+    public Optional<TelemetryCompletedFlowReading> findEarliestCompletedFlowReadingAfterDate(String schemaName,
+                                                                                              Long schemeId,
+                                                                                              Long operatorId,
+                                                                                              LocalDate afterDate) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND reading_date > ?
+                  AND extracted_reading > 0
+                  AND confirmed_reading > 0
+                  AND deleted_at IS NULL
+                ORDER BY reading_date ASC, %s ASC, id ASC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryCompletedFlowReading(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                schemeId,
+                operatorId,
+                afterDate
+        );
+        return rows.stream().findFirst();
+    }
+
     public void updateReadingValues(String schemaName, Long readingId, BigDecimal readingValue, Long updatedBy) {
         validateSchemaName(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
@@ -1218,6 +1286,9 @@ public class TelemetryTenantRepository {
         boolean hasNonSubmissionReason = columnExists("analytics_schema", "fact_water_quantity_table", "non_submission_reason");
 
         List<Object> updateArgs = new ArrayList<>();
+        updateArgs.add(tenantId);
+        updateArgs.add(schemeIdInt);
+        updateArgs.add(date);
         StringBuilder updateSql = new StringBuilder("""
                 UPDATE analytics_schema.fact_water_quantity_table
                 SET user_id = ?,
@@ -1236,21 +1307,22 @@ public class TelemetryTenantRepository {
         if (hasNonSubmissionReason) {
             updateSql.append(", non_submission_reason = NULL");
         }
-        updateSql.append("""
-                
-                WHERE id = (
+        updateSql.insert(0, """
+                WITH latest AS (
                     SELECT id
                     FROM analytics_schema.fact_water_quantity_table
                     WHERE tenant_id = ?
                       AND scheme_id = ?
-                      AND date = ?
+                      AND "date" = ?
                     ORDER BY updated_at DESC NULLS LAST, id DESC
                     LIMIT 1
                 )
                 """);
-        updateArgs.add(tenantId);
-        updateArgs.add(schemeIdInt);
-        updateArgs.add(date);
+        updateSql.append("""
+
+                FROM latest
+                WHERE analytics_schema.fact_water_quantity_table.id = latest.id
+                """);
 
         int updated = jdbcTemplate.update(updateSql.toString(), updateArgs.toArray());
         if (updated > 0) {
@@ -1258,7 +1330,7 @@ public class TelemetryTenantRepository {
         }
 
         List<Object> insertArgs = new ArrayList<>();
-        StringBuilder columns = new StringBuilder("tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at");
+        StringBuilder columns = new StringBuilder("tenant_id, scheme_id, user_id, water_quantity, \"date\", created_at, updated_at");
         StringBuilder values = new StringBuilder("?, ?, ?, ?, ?, NOW(), NOW()");
         insertArgs.add(tenantId);
         insertArgs.add(schemeIdInt);

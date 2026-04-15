@@ -87,13 +87,29 @@ class NotificationEventRouterTest {
     }
 
     /**
-     * Helper method to stub jdbcTemplate.query for user lookup.
-     * Centralizes the SQL matcher and return list handling.
+     * Helper method to stub jdbcTemplate.query for language-update user lookup (returns Long contact IDs).
      */
     @SuppressWarnings("unchecked")
     private void stubUserLookup(String tenantCode, String phone, List<Long> returnList) {
         when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_" + tenantCode + ".user_table") && sql.contains("WHERE phone_number = ?")),
+                argThat(sql -> sql.contains("FROM tenant_" + tenantCode + ".user_table")
+                        && sql.contains("WHERE phone_number = ?")
+                        && !sql.contains("title")),
+                any(RowMapper.class),
+                eq(phone)))
+                .thenReturn(returnList);
+    }
+
+    /**
+     * Helper method to stub jdbcTemplate.query for welcome-flow contact info lookup (returns UserContactInfo).
+     */
+    @SuppressWarnings("unchecked")
+    private void stubWelcomeLookup(String tenantCode, String phone,
+                                   List<NotificationEventRouter.UserContactInfo> returnList) {
+        when(jdbcTemplate.query(
+                argThat(sql -> sql.contains("FROM tenant_" + tenantCode + ".user_table")
+                        && sql.contains("WHERE phone_number = ?")
+                        && sql.contains("title")),
                 any(RowMapper.class),
                 eq(phone)))
                 .thenReturn(returnList);
@@ -728,27 +744,30 @@ class NotificationEventRouterTest {
 
     @Test
     void route_sendsWelcomeMessage_whenContactIdFound() {
-        stubUserLookup("mp", "919111111111", List.of(88L));
+        stubWelcomeLookup("mp", "919111111111",
+                List.of(new NotificationEventRouter.UserContactInfo(88L, "Ramesh Kumar")));
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("Madhya Pradesh");
 
         router.route("""
                 {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
                  "pumpOperatorPhones":["919111111111"]}
                 """);
 
-        verify(glificWhatsAppService).startWelcomeFlow(88L);
+        verify(glificWhatsAppService).startWelcomeFlow(88L, "Ramesh Kumar", "Madhya Pradesh");
         verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
     }
 
     @Test
     void route_routesToDlt_whenNoContactIdFound() {
-        stubUserLookup("mp", "919222222222", List.of());
+        stubWelcomeLookup("mp", "919222222222", List.of());
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
 
         router.route("""
                 {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
                  "pumpOperatorPhones":["919222222222"]}
                 """);
 
-        verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong());
+        verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong(), anyString(), anyString());
         verify(kafkaProducer).publishJson(eq("welcome-message-dlt"), any());
     }
 

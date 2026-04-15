@@ -113,6 +113,8 @@ class FactServiceImplTest {
         event.setOutageReason("no_electricity");
         event.setDate("invalid-date");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
 
         service.ingestWaterQuantity(event);
 
@@ -120,6 +122,43 @@ class FactServiceImplTest {
         verify(waterQuantityRepository, times(1)).save(captor.capture());
         assertThat(captor.getValue().getDate()).isEqualTo(LocalDate.now());
         assertThat(captor.getValue().getOutageReason()).isEqualTo("no_electricity");
+    }
+
+    @Test
+    void ingestWaterQuantity_whenExistingRecord_updatesExistingRow() {
+        WaterQuantityEvent event = new WaterQuantityEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(22);
+        event.setWaterQuantity(200);
+        event.setSubmissionStatus(1);
+        event.setDate("2026-01-05");
+
+        FactWaterQuantity existing = FactWaterQuantity.builder()
+                .id(99L)
+                .tenantId(1)
+                .schemeId(11)
+                .userId(10)
+                .waterQuantity(100)
+                .submissionStatus(0)
+                .date(LocalDate.of(2026, 1, 5))
+                .createdAt(LocalDateTime.now().minusDays(1))
+                .updatedAt(LocalDateTime.now().minusDays(1))
+                .build();
+
+        when(dimDateRepository.findByFullDate(LocalDate.of(2026, 1, 5))).thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                1, 11, LocalDate.of(2026, 1, 5)))
+                .thenReturn(Optional.of(existing));
+
+        service.ingestWaterQuantity(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getId()).isEqualTo(99L);
+        assertThat(captor.getValue().getUserId()).isEqualTo(22);
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(200);
+        assertThat(captor.getValue().getSubmissionStatus()).isEqualTo(1);
     }
 
     @Test

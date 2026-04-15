@@ -109,7 +109,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         String cacheKey = TENANT_DETAILS_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":parent_department:" + parentDepartmentId
-                + ":v2";
+                + ":v3";
         TenantDetailsResponse cached = readFromCache(cacheKey);
         if (cached != null) {
             return cached;
@@ -144,13 +144,19 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         Map<String, Object> mergedBoundaryResult = tenantDepartmentBoundaryRepository
                 .getMergedBoundaryByParentDepartment(tenantId, parentDepartmentId, parentLevel);
 
+        String parentBoundaryGeoJson =
+                tenantDepartmentBoundaryRepository.getBoundaryGeoJsonByDepartmentId(tenantId, parentDepartmentId);
+        String boundaryGeoJson = (parentBoundaryGeoJson != null && !parentBoundaryGeoJson.isBlank())
+                ? parentBoundaryGeoJson
+                : (String) mergedBoundaryResult.get("boundary_geojson");
+
         TenantDetailsResponse response = TenantDetailsResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
                 .parentLgdLevel(null)
                 .parentDepartmentLevel(parentLevel)
                 .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
-                .boundaryGeoJson((String) mergedBoundaryResult.get("boundary_geojson"))
+                .boundaryGeoJson(boundaryGeoJson)
                 .childRegions(childRegions)
                 .build();
 
@@ -271,13 +277,19 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         Map<String, Object> mergedBoundaryResult =
                 tenantBoundaryRepository.getMergedBoundaryByParent(tenant.getTenantId(), parentLgdId, parentLevel);
 
+        String parentBoundaryGeoJson =
+                tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(tenant.getTenantId(), parentLgdId);
+        String boundaryGeoJson = (parentBoundaryGeoJson != null && !parentBoundaryGeoJson.isBlank())
+                ? parentBoundaryGeoJson
+                : (String) mergedBoundaryResult.get("boundary_geojson");
+
         return TenantDetailsResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
                 .parentLgdLevel(parentLevel)
                 .parentDepartmentLevel(null)
                 .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
-                .boundaryGeoJson((String) mergedBoundaryResult.get("boundary_geojson"))
+                .boundaryGeoJson(boundaryGeoJson)
                 .childRegions(childRegions)
                 .build();
     }

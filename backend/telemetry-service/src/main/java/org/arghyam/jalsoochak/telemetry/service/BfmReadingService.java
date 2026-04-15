@@ -187,6 +187,39 @@ public class BfmReadingService {
                 && confirmedReading != null
                 && confirmedReading.compareTo(validationBaselineOpt.get().confirmedReading()) < 0) {
             TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.get();
+            String reason = "Submitted reading is less than previous confirmed reading.";
+            telemetryTenantRepository.createTenantAnomalyRecord(
+                    schemaName,
+                    operatorInRequest.id(),
+                    request.getSchemeId(),
+                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                    reason,
+                    AnomalyConstants.STATUS_OPEN
+            );
+            List<Long> recipientUserIds = resolveSdoUserIds(schemaName, request.getSchemeId());
+            if (recipientUserIds.isEmpty()) {
+                log.warn("No SDO mapped for schemeId={} in schema={}; falling back to analytics recipients for anomaly type={}",
+                        request.getSchemeId(), schemaName, AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS);
+                recipientUserIds = analyticsUserIds;
+            }
+            for (Long recipientUserId : recipientUserIds) {
+                telemetryEventPublisher.publishAnomalyRecorded(
+                        tenantId,
+                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                        recipientUserId,
+                        request.getSchemeId(),
+                        extractedReading,
+                        confidenceLevel,
+                        confirmedReading,
+                        0,
+                        previousSnapshot.confirmedReading(),
+                        previousSnapshot.createdAt(),
+                        0,
+                        reason,
+                        AnomalyConstants.STATUS_OPEN,
+                        correlationId
+                );
+            }
             return CreateReadingResponse.builder()
                     .success(false)
                     .message("Reading cannot be less than previous confirmed reading. Submitted reading: "
@@ -492,6 +525,11 @@ public class BfmReadingService {
             return sectionOfficerIds;
         }
         return List.of(fallbackUserId);
+    }
+
+    private List<Long> resolveSdoUserIds(String schemaName, Long schemeId) {
+        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
+        return subDivisionalOfficerIds == null ? List.of() : subDivisionalOfficerIds;
     }
 
     private static String toPlain(BigDecimal value) {

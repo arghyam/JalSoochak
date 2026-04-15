@@ -317,6 +317,7 @@ public class NotificationEventRouter {
             log.warn("[Router/WELCOME] No tenant-specific welcome flow ID found; using default config (tenantCode={}, tenantId={})",
                     tenantCode, tenantId);
         }
+        String stateName = messageTemplateService.findStateName(tenantId);
         int success = 0, failed = 0;
         for (JsonNode phoneNode : phonesNode) {
             String phone = phoneNode.asText("");
@@ -327,8 +328,8 @@ public class NotificationEventRouter {
                 continue;
             }
             try {
-                Long contactId = fetchWhatsappConnectionId(tenantSchema, phone);
-                if (contactId == null || contactId <= 0) {
+                UserContactInfo info = fetchUserContactInfo(tenantSchema, phone);
+                if (info.contactId() == null || info.contactId() <= 0) {
                     log.warn("[Router/WELCOME] No whatsapp_connection_id found in schema={}", tenantSchema);
                     log.debug("[Router/WELCOME] No whatsapp_connection_id for phone={} in schema={}", phone, tenantSchema);
                     publishWelcomeDlt(tenantSchema, phone, "no_whatsapp_connection_id");
@@ -336,9 +337,9 @@ public class NotificationEventRouter {
                     continue;
                 }
                 if (welcomeFlowId.isBlank()) {
-                    glificWhatsAppService.startWelcomeFlow(contactId);
+                    glificWhatsAppService.startWelcomeFlow(info.contactId(), info.name(), stateName);
                 } else {
-                    glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId);
+                    glificWhatsAppService.startWelcomeFlow(info.contactId(), welcomeFlowId, info.name(), stateName);
                 }
                 success++;
             } catch (Exception e) {
@@ -370,6 +371,7 @@ public class NotificationEventRouter {
             log.warn("[Router/WELCOME_ADMIN] No tenant-specific welcome flow ID found; using default config (tenantCode={}, tenantId={})",
                     tenantCode, tenantId);
         }
+        String stateName = messageTemplateService.findStateName(tenantId);
         int success = 0, failed = 0;
         for (JsonNode phoneNode : phonesNode) {
             String phone = phoneNode.asText("");
@@ -381,10 +383,12 @@ public class NotificationEventRouter {
                 continue;
             }
             try {
-                Long contactId = fetchWhatsappConnectionId(tenantSchema, phone);
-                if ((contactId == null || contactId <= 0) && !normalized.equals(phone)) {
-                    contactId = fetchWhatsappConnectionId(tenantSchema, normalized);
+                UserContactInfo info = fetchUserContactInfo(tenantSchema, phone);
+                if ((info.contactId() == null || info.contactId() <= 0) && !normalized.equals(phone)) {
+                    info = fetchUserContactInfo(tenantSchema, normalized);
                 }
+                Long contactId = info.contactId();
+                String name = info.name();
                 if (contactId == null || contactId <= 0) {
                     contactId = glificWhatsAppService.optIn(normalized);
                     if (contactId == null || contactId <= 0) {
@@ -394,9 +398,9 @@ public class NotificationEventRouter {
                     }
                 }
                 if (welcomeFlowId.isBlank()) {
-                    glificWhatsAppService.startWelcomeFlow(contactId);
+                    glificWhatsAppService.startWelcomeFlow(contactId, name, stateName);
                 } else {
-                    glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId);
+                    glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId, name, stateName);
                 }
                 success++;
             } catch (Exception e) {
@@ -659,6 +663,23 @@ public class NotificationEventRouter {
                 + ".user_table WHERE phone_number = ? LIMIT 1";
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getObject("whatsapp_connection_id", Long.class), phone);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    record UserContactInfo(Long contactId, String name) {}
+
+    /**
+     * Looks up both the Glific contact ID and display name for a phone number.
+     * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
+     */
+    private UserContactInfo fetchUserContactInfo(String tenantSchema, String phone) {
+        String sql = "SELECT whatsapp_connection_id, title FROM " + tenantSchema
+                + ".user_table WHERE phone_number = ? LIMIT 1";
+        List<UserContactInfo> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new UserContactInfo(
+                        rs.getObject("whatsapp_connection_id", Long.class),
+                        rs.getString("title")),
+                phone);
+        return rows.isEmpty() ? new UserContactInfo(null, null) : rows.get(0);
     }
 
     private void handleEscalation(JsonNode root) throws Exception {
