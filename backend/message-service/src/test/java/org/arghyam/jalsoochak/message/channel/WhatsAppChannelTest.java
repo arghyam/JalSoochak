@@ -145,7 +145,7 @@ class WhatsAppChannelTest {
         InOrder inOrder = inOrder(glificWhatsAppService);
         inOrder.verify(glificWhatsAppService).optIn("919876543210");
         inOrder.verify(glificWhatsAppService).updateContactLanguage(42L, 2);
-        inOrder.verify(glificWhatsAppService).startWelcomeFlow(42L);
+        inOrder.verify(glificWhatsAppService).startWelcomeFlow(42L, null, null);
     }
 
     @Test
@@ -157,14 +157,14 @@ class WhatsAppChannelTest {
                 .isInstanceOf(RuntimeException.class);
 
         verify(glificWhatsAppService, never()).updateContactLanguage(anyLong(), anyInt());
-        verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong());
+        verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong(), any(), any());
     }
 
     @Test
     void onboardOperator_throwsException_whenWelcomeFlowFails() {
         when(glificWhatsAppService.optIn("919876543210")).thenReturn(42L);
         doThrow(new RuntimeException("Flow error"))
-                .when(glificWhatsAppService).startWelcomeFlow(42L);
+                .when(glificWhatsAppService).startWelcomeFlow(42L, null, null);
 
         assertThatThrownBy(() -> whatsAppChannel.onboardOperator("919876543210", 2))
                 .isInstanceOf(RuntimeException.class)
