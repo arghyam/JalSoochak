@@ -457,14 +457,17 @@ public class GlificSelectionService {
                 visibleItemOptions = buildVisibleItemOptions(tenantId, languageKey, itemOptions);
             }
 
-            List<String> options = visibleItemOptions.stream()
-                    .map(VisibleItemOption::label)
-                    .toList();
+            StringBuilder message = new StringBuilder(prompt.trim());
+            for (int i = 0; i < visibleItemOptions.size(); i++) {
+                message.append("\n")
+                        .append(i + 1)
+                        .append(". ")
+                        .append(visibleItemOptions.get(i).label());
+            }
 
             return IntroResponse.builder()
                     .success(true)
-                    .message(prompt.trim())
-                    .options(options)
+                    .message(message.toString())
                     .build();
         } catch (Exception e) {
             log.error("Error building item selection message: {}", e.getMessage(), e);
