@@ -51,7 +51,6 @@ public class FlowVisionService {
             }
 
             Map<String, Object> responseBody = responseEntity.getBody();
-            log.info("Raw FlowVision response: {}", responseBody);
 
             if (responseBody == null || !responseBody.containsKey("result")) {
                 log.error("FlowVision response missing 'result'");

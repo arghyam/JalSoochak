@@ -67,8 +67,6 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L));
-
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
                 .issueReason("2")
@@ -96,7 +94,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
         verify(telemetryEventPublisher).publishAnomalyRecorded(
                 eq(1),
                 eq(AnomalyConstants.TYPE_NO_SUBMISSION),
-                eq(99L),
+                eq(1L),
                 eq(10L),
                 isNull(),
                 isNull(),

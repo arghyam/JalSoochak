@@ -184,8 +184,6 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L))
-                .thenReturn(List.of(99L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
@@ -216,7 +214,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         verify(telemetryEventPublisher).publishAnomalyRecorded(
                 ArgumentMatchers.eq(1),
                 ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
-                ArgumentMatchers.eq(99L),
+                ArgumentMatchers.eq(1L),
                 ArgumentMatchers.eq(10L),
                 any(),
                 any(),
@@ -514,7 +512,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 org.mockito.ArgumentMatchers.isNull()
         );
-        verify(telemetryEventPublisher, times(2)).publishAnomalyRecorded(
+        verify(telemetryEventPublisher, times(1)).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_MANUAL_OVERRIDE),
                 ArgumentMatchers.anyLong(),

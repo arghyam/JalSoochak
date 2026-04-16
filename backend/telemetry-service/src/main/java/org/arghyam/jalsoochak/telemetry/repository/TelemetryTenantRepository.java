@@ -172,13 +172,16 @@ public class TelemetryTenantRepository {
     public Optional<Long> findFirstSchemeForUser(String schemaName, Long userId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
-                SELECT scheme_id
-                FROM %s.user_scheme_mapping_table
-                WHERE user_id = ?
-                  AND status = 1
-                ORDER BY id
+                SELECT usm.scheme_id
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
+                ORDER BY usm.id
                 LIMIT 1
-                """, schemaName);
+                """, schemaName, schemaName);
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("scheme_id")), userId);
         return rows.stream().findFirst();
     }
@@ -191,6 +194,8 @@ public class TelemetryTenantRepository {
                 JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
                 WHERE usm.user_id = ?
                   AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
                 ORDER BY usm.id
                 """, schemaName, schemaName);
         return jdbcTemplate.query(
@@ -1279,7 +1284,7 @@ public class TelemetryTenantRepository {
 
         int schemeIdInt = Math.toIntExact(schemeId);
         int userIdInt = Math.toIntExact(userId);
-        int waterQuantityInt = waterQuantity.setScale(0, RoundingMode.HALF_UP).intValue();
+        int waterQuantityInt = Math.max(0, waterQuantity.setScale(0, RoundingMode.HALF_UP).intValue());
 
         boolean hasSubmissionStatus = columnExists("analytics_schema", "fact_water_quantity_table", "submission_status");
         boolean hasOutageReason = columnExists("analytics_schema", "fact_water_quantity_table", "outage_reason");
