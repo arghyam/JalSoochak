@@ -40,7 +40,7 @@ class GlificSelectionServiceSchemeSelectionTest {
     private GlificContactSyncService glificContactSyncService;
 
     @Test
-    void schemeSelectionMessageReturnsTrueWhenSingleSchemeExists() {
+    void schemeSelectionMessageReturnsFalseWhenSingleSchemeExists() {
         GlificSelectionService service = new GlificSelectionService(
                 operatorContextService,
                 localizationService,
@@ -64,11 +64,11 @@ class GlificSelectionServiceSchemeSelectionTest {
         IntroResponse response = service.schemeSelectionMessage(IntroRequest.builder().contactId(contactId).build());
 
         assertTrue(response.isSuccess());
-        assertTrue(response.getNoOfSchemes());
+        assertFalse(response.getIsSchemeGreaterThanOne());
     }
 
     @Test
-    void schemeSelectionMessageReturnsFalseWhenMoreThanOneSchemeExists() {
+    void schemeSelectionMessageReturnsTrueWhenMoreThanOneSchemeExists() {
         GlificSelectionService service = new GlificSelectionService(
                 operatorContextService,
                 localizationService,
@@ -95,6 +95,6 @@ class GlificSelectionServiceSchemeSelectionTest {
         IntroResponse response = service.schemeSelectionMessage(IntroRequest.builder().contactId(contactId).build());
 
         assertTrue(response.isSuccess());
-        assertFalse(response.getNoOfSchemes());
+        assertTrue(response.getIsSchemeGreaterThanOne());
     }
 }

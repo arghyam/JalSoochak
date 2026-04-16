@@ -13,8 +13,8 @@ public class IntroResponse {
     private String message;
     private String correlationId;
     private String selected;
-    @JsonProperty("noOfSchemes")
-    private Boolean noOfSchemes;
+    @JsonProperty("isSchemeGreaterThanOne")
+    private Boolean isSchemeGreaterThanOne;
     private Boolean hasBfm;
     private Boolean hasElectric;
     private Boolean isBfmorIsElectrical;

@@ -355,7 +355,7 @@ public class GlificSelectionService {
             return IntroResponse.builder()
                     .success(true)
                     .message(message.toString())
-                    .noOfSchemes(schemes.size() == 1)
+                    .isSchemeGreaterThanOne(schemes.size() > 1)
                     .build();
         } catch (Exception e) {
             log.error("Error building scheme selection message: {}", e.getMessage(), e);
