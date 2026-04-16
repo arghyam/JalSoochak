@@ -39,6 +39,13 @@ public class MinioStorageService {
                 .build();
     }
 
+    /** Package-private constructor for unit testing — accepts a pre-built MinioClient. */
+    MinioStorageService(MinioClient minioClient, String bucket, String minioBaseUrl) {
+        this.minioClient = minioClient;
+        this.bucket = bucket;
+        this.minioBaseUrl = minioBaseUrl;
+    }
+
     /**
      * Uploads the local PDF file at {@code localPath} to MinIO and returns
      * the public URL.
