@@ -219,6 +219,23 @@ class FactServiceImplTest {
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_WATER_SUPPLY, 21, 1, 11));
     }
 
+    @Test
+    void ingestAnomalyRecorded_forImageAnomaly_savesOnlyAnomaly() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-image-1");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(EscalationType.UNREADABLE_IMAGE.code);
+        event.setReason("Unreadable image");
+        event.setStatus(1);
+
+        service.ingestAnomalyRecorded(event);
+
+        verify(anomalyRepository, times(1)).save(any());
+        verify(escalationRepository, never()).save(any());
+    }
+
     // ── ingestTenantEscalation ───────────────────────────────────────────────
 
     private TenantEscalationEvent buildEscalationEvent(TenantEscalationEvent.TenantOperatorEscalationDetail... ops) {

@@ -189,7 +189,9 @@ public class TelemetryTenantRepository {
     public List<TelemetrySchemeOption> findSchemesForUser(String schemaName, Long userId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
-                SELECT DISTINCT usm.scheme_id AS id, sm.scheme_name AS name
+                SELECT usm.scheme_id AS id,
+                       sm.scheme_name AS name,
+                       MIN(usm.id) AS mapping_order
                 FROM %s.user_scheme_mapping_table usm
                 JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
                 WHERE usm.user_id = ?
@@ -197,7 +199,8 @@ public class TelemetryTenantRepository {
                   AND usm.deleted_at IS NULL
                   AND sm.status = 1
                   AND sm.deleted_at IS NULL
-                ORDER BY usm.id
+                GROUP BY usm.scheme_id, sm.scheme_name
+                ORDER BY mapping_order
                 """, schemaName, schemaName);
         return jdbcTemplate.query(
                 sql,
@@ -382,6 +385,7 @@ public class TelemetryTenantRepository {
                     WHERE user_id = ?
                       AND scheme_id = ?
                       AND status = 1
+                      AND deleted_at IS NULL
                 )
                 """, schemaName);
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, operatorId, schemeId);
@@ -415,7 +419,9 @@ public class TelemetryTenantRepository {
                   ON ut.id = u.user_type
                 WHERE usm.scheme_id = ?
                   AND usm.status = 1
+                  AND usm.deleted_at IS NULL
                   AND u.status = 1
+                  AND u.deleted_at IS NULL
                   AND UPPER(COALESCE(ut.c_name, '')) = ?
                 ORDER BY usm.id DESC
                 """, schemaName, schemaName);
