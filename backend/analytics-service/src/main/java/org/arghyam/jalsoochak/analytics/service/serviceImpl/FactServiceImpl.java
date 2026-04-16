@@ -440,6 +440,12 @@ public class FactServiceImpl implements FactService {
             log.warn("Water anomaly missing correlationId, derived correlationId={} (uuid={})", correlationId, uuid);
         }
 
+        if (anomalyRepository.existsByUuid(uuid)) {
+            anomalyRepository.touchByUuid(uuid, now);
+            log.info("Touched anomaly_table row for duplicate anomaly uuid={}", uuid);
+            return;
+        }
+
         Anomaly anomaly = Anomaly.builder()
                 .uuid(uuid)
                 .type(intCodeToVarchar(event.getType()))
@@ -465,7 +471,9 @@ public class FactServiceImpl implements FactService {
             log.info("Ingested anomaly_table row for scheme={} tenant={} uuid={}",
                     event.getSchemeId(), event.getTenantId(), event.getUuid());
         } catch (DataIntegrityViolationException e) {
-            log.debug("Skipping duplicate anomaly uuid={} (unique constraint)", event.getUuid());
+            anomalyRepository.touchByUuid(uuid, now);
+            log.debug("Touched duplicate anomaly uuid={} (unique constraint)", event.getUuid());
+            return;
         }
 
         if (isWaterAnomaly(event.getType())) {

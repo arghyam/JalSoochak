@@ -236,6 +236,44 @@ class FactServiceImplTest {
         verify(escalationRepository, never()).save(any());
     }
 
+    @Test
+    void ingestAnomalyRecorded_duplicateUuid_touchesExistingAnomalyAndSkipsInsert() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-image-dup");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(EscalationType.UNREADABLE_IMAGE.code);
+        event.setReason("Unreadable image");
+        event.setStatus(1);
+        when(anomalyRepository.existsByUuid("uuid-image-dup")).thenReturn(true);
+
+        service.ingestAnomalyRecorded(event);
+
+        verify(anomalyRepository, never()).save(any());
+        verify(anomalyRepository, times(1)).touchByUuid(org.mockito.ArgumentMatchers.eq("uuid-image-dup"), any());
+        verify(escalationRepository, never()).save(any());
+    }
+
+    @Test
+    void ingestAnomalyRecorded_duplicateOnInsert_touchesExistingAnomaly() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-image-race");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(EscalationType.UNREADABLE_IMAGE.code);
+        event.setReason("Unreadable image");
+        event.setStatus(1);
+        when(anomalyRepository.save(any())).thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+        service.ingestAnomalyRecorded(event);
+
+        verify(anomalyRepository, times(1)).save(any());
+        verify(anomalyRepository, times(1)).touchByUuid(org.mockito.ArgumentMatchers.eq("uuid-image-race"), any());
+        verify(escalationRepository, never()).save(any());
+    }
+
     // ── ingestTenantEscalation ───────────────────────────────────────────────
 
     private TenantEscalationEvent buildEscalationEvent(TenantEscalationEvent.TenantOperatorEscalationDetail... ops) {

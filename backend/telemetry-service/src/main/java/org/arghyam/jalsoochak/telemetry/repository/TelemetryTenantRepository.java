@@ -981,6 +981,26 @@ public class TelemetryTenantRepository {
         return count != null ? count : 0;
     }
 
+    public int touchLatestAnomalyByTypeForToday(String schemaName, Long userId, Long schemeId, int anomalyType) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                UPDATE %1$s.anomaly_table
+                SET created_at = NOW()
+                WHERE id = (
+                    SELECT id
+                    FROM %1$s.anomaly_table
+                    WHERE user_id = ?
+                      AND scheme_id = ?
+                      AND type = ?
+                      AND DATE(created_at) = CURRENT_DATE
+                      AND deleted_at IS NULL
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                )
+                """, schemaName);
+        return jdbcTemplate.update(sql, userId, schemeId, anomalyType);
+    }
+
     public List<LocalDate> findAnomalyDatesByType(String schemaName, Long userId, Long schemeId, int anomalyType, int limitDays) {
         validateSchemaName(schemaName);
         String sql = String.format("""

@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,7 +61,7 @@ class BfmReadingServiceAnomalyDedupTest {
     }
 
     @Test
-    void unreadableImagePublishesStableCorrelationIdForSameImage() {
+    void unreadableImageIsDeduplicatedPerDayAndKeepsStableCorrelationId() {
         TelemetryOperator operator = new TelemetryOperator(11L, 7, "op", "op@example.com", "919999999999", null);
         when(telemetryTenantRepository.existsSchemeById("tenant_up", 100L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
@@ -99,13 +100,19 @@ class BfmReadingServiceAnomalyDedupTest {
         assertEquals(2, correlationCaptor.getAllValues().size());
         assertFalse(correlationCaptor.getAllValues().get(0).isBlank());
         assertEquals(correlationCaptor.getAllValues().get(0), correlationCaptor.getAllValues().get(1));
-        verify(telemetryTenantRepository, times(2)).createTenantAnomalyRecord(
+        verify(telemetryTenantRepository, times(1)).createTenantAnomalyRecord(
                 eq("tenant_up"),
                 eq(11L),
                 eq(100L),
                 eq(AnomalyConstants.TYPE_UNREADABLE_IMAGE),
                 contains("Unreadable image"),
                 eq(AnomalyConstants.STATUS_OPEN)
+        );
+        verify(telemetryTenantRepository, times(1)).touchLatestAnomalyByTypeForToday(
+                eq("tenant_up"),
+                eq(11L),
+                eq(100L),
+                eq(AnomalyConstants.TYPE_UNREADABLE_IMAGE)
         );
     }
 
@@ -122,9 +129,6 @@ class BfmReadingServiceAnomalyDedupTest {
                         .correlationId("ocr-correlation")
                         .build()
         );
-        when(telemetryTenantRepository.countAnomaliesByTypeForToday(
-                "tenant_up", 11L, 100L, AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION
-        )).thenReturn(0, 1);
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_up", 100L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), LocalDateTime.now().minusDays(1))));
         when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
@@ -139,7 +143,7 @@ class BfmReadingServiceAnomalyDedupTest {
         service.createReading(request, "tenant_up", operator, "919999999999", false);
 
         ArgumentCaptor<String> correlationCaptor = ArgumentCaptor.forClass(String.class);
-        verify(telemetryEventPublisher, times(1)).publishAnomalyRecorded(
+        verify(telemetryEventPublisher, times(2)).publishAnomalyRecorded(
                 eq(7),
                 eq(AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION),
                 eq(11L),
@@ -147,7 +151,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 eq(new BigDecimal("123")),
                 eq(new BigDecimal("0.95")),
                 eq(new BigDecimal("123")),
-                eq(0),
+                anyInt(),
                 eq(new BigDecimal("123")),
                 any(LocalDateTime.class),
                 eq(0),
@@ -155,15 +159,21 @@ class BfmReadingServiceAnomalyDedupTest {
                 eq(AnomalyConstants.STATUS_OPEN),
                 correlationCaptor.capture()
         );
-        assertEquals(1, correlationCaptor.getAllValues().size());
+        assertEquals(2, correlationCaptor.getAllValues().size());
         assertFalse(correlationCaptor.getAllValues().get(0).isBlank());
-        verify(telemetryTenantRepository, times(1)).createTenantAnomalyRecord(
+        verify(telemetryTenantRepository, times(2)).createTenantAnomalyRecord(
                 eq("tenant_up"),
                 eq(11L),
                 eq(100L),
                 eq(AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION),
                 contains("Duplicate image submission detected"),
                 eq(AnomalyConstants.STATUS_OPEN)
+        );
+        verify(telemetryTenantRepository, never()).touchLatestAnomalyByTypeForToday(
+                eq("tenant_up"),
+                eq(11L),
+                eq(100L),
+                eq(AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION)
         );
     }
 }
