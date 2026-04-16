@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 
@@ -12,6 +13,7 @@ public class IntroResponse {
     private String message;
     private String correlationId;
     private String selected;
+    @JsonProperty("noOfSchemes")
     private Boolean noOfSchemes;
     private Boolean hasBfm;
     private Boolean hasElectric;
