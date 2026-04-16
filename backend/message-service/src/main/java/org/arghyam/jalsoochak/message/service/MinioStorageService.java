@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.message.service;
 import io.minio.MinioClient;
 import io.minio.UploadObjectArgs;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +24,7 @@ public class MinioStorageService {
     @Value("${minio.base-url:http://localhost:9000}")
     private String minioBaseUrl;
 
+    @Autowired
     public MinioStorageService(
             @Value("${minio.endpoint:http://localhost:9000}") String endpoint,
             @Value("${minio.access-key}") String accessKey,
