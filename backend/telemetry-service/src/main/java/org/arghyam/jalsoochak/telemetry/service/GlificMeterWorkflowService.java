@@ -611,24 +611,22 @@ public class GlificMeterWorkflowService {
                         resolvedIssueReason,
                         AnomalyConstants.STATUS_OPEN
                 );
-                for (Long recipientUserId : analyticsUserIds) {
-                    telemetryEventPublisher.publishAnomalyRecorded(
-                            tenantId,
-                            anomalyType,
-                            recipientUserId,
-                            schemeId,
-                            null,
-                            null,
-                            null,
-                            0,
-                            null,
-                            null,
-                            0,
-                            resolvedIssueReason,
-                            AnomalyConstants.STATUS_OPEN,
-                            correlationId
-                    );
-                }
+                telemetryEventPublisher.publishAnomalyRecorded(
+                        tenantId,
+                        anomalyType,
+                        operatorWithSchema.operator().id(),
+                        schemeId,
+                        null,
+                        null,
+                        null,
+                        0,
+                        null,
+                        null,
+                        0,
+                        resolvedIssueReason,
+                        AnomalyConstants.STATUS_OPEN,
+                        correlationId
+                );
                 telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                         tenantId,
                         schemeId,
@@ -918,24 +916,22 @@ public class GlificMeterWorkflowService {
                     issueReason,
                     AnomalyConstants.STATUS_OPEN
             );
-            for (Long recipientUserId : analyticsUserIds) {
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_NO_SUBMISSION,
-                        recipientUserId,
-                        schemeId,
-                        null,
-                        null,
-                        null,
-                        0,
-                        null,
-                        null,
-                        0,
-                        issueReason,
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
-            }
+            telemetryEventPublisher.publishAnomalyRecorded(
+                    tenantId,
+                    AnomalyConstants.TYPE_NO_SUBMISSION,
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    null,
+                    0,
+                    issueReason,
+                    AnomalyConstants.STATUS_OPEN,
+                    null
+            );
             telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                     tenantId,
                     schemeId,
@@ -1063,30 +1059,22 @@ public class GlificMeterWorkflowService {
                         reason,
                         AnomalyConstants.STATUS_OPEN
                 );
-                List<Long> recipientUserIds = resolveSdoUserIds(operatorWithSchema.schemaName(), schemeId);
-                if (recipientUserIds.isEmpty()) {
-                    log.warn("No SDO mapped for schemeId={} in schema={}; falling back to analytics recipients for anomaly type={}",
-                            schemeId, operatorWithSchema.schemaName(), AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS);
-                    recipientUserIds = analyticsUserIds;
-                }
-                for (Long recipientUserId : recipientUserIds) {
-                    telemetryEventPublisher.publishAnomalyRecorded(
-                            tenantId,
-                            AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                            recipientUserId,
-                            schemeId,
-                            pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                            null,
-                            manualReadingValue,
-                            0,
-                            previousSnapshot.confirmedReading(),
-                            previousSnapshot.createdAt(),
-                            0,
-                            reason,
-                            AnomalyConstants.STATUS_OPEN,
-                            correlationId
-                    );
-                }
+                telemetryEventPublisher.publishAnomalyRecorded(
+                        tenantId,
+                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                        operatorWithSchema.operator().id(),
+                        schemeId,
+                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+                        null,
+                        manualReadingValue,
+                        0,
+                        previousSnapshot.confirmedReading(),
+                        previousSnapshot.createdAt(),
+                        0,
+                        reason,
+                        AnomalyConstants.STATUS_OPEN,
+                        correlationId
+                );
                 return CreateReadingResponse.builder()
                         .success(false)
                         .message(localizationService.localizeMessage(
@@ -1130,24 +1118,22 @@ public class GlificMeterWorkflowService {
                                 "Manual reading is below allowed minimum (" + toPlain(minAllowed) + ").",
                                 AnomalyConstants.STATUS_OPEN
                         );
-                        for (Long recipientUserId : analyticsUserIds) {
-                            telemetryEventPublisher.publishAnomalyRecorded(
-                                    tenantId,
-                                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                                    recipientUserId,
-                                    schemeId,
-                                    pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                                    null,
-                                    manualReadingValue,
-                                    0,
-                                    previousConfirmed,
-                                    previousConfirmedAt,
-                                    0,
-                                    "Manual reading is below allowed minimum (" + toPlain(minAllowed) + ").",
-                                    AnomalyConstants.STATUS_OPEN,
-                                    null
-                            );
-                        }
+                        telemetryEventPublisher.publishAnomalyRecorded(
+                                tenantId,
+                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+                                operatorWithSchema.operator().id(),
+                                schemeId,
+                                pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+                                null,
+                                manualReadingValue,
+                                0,
+                                previousConfirmed,
+                                previousConfirmedAt,
+                                0,
+                                "Manual reading is below allowed minimum (" + toPlain(minAllowed) + ").",
+                                AnomalyConstants.STATUS_OPEN,
+                                null
+                        );
                         telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                                 tenantId,
                                 schemeId,
@@ -1177,24 +1163,22 @@ public class GlificMeterWorkflowService {
                                 "Manual reading is above allowed maximum (" + toPlain(maxAllowed) + ").",
                                 AnomalyConstants.STATUS_OPEN
                         );
-                        for (Long recipientUserId : analyticsUserIds) {
-                            telemetryEventPublisher.publishAnomalyRecorded(
-                                    tenantId,
-                                    AnomalyConstants.TYPE_OVER_WATER_SUPPLY,
-                                    recipientUserId,
-                                    schemeId,
-                                    pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                                    null,
-                                    manualReadingValue,
-                                    0,
-                                    previousConfirmed,
-                                    previousConfirmedAt,
-                                    0,
-                                    "Manual reading is above allowed maximum (" + toPlain(maxAllowed) + ").",
-                                    AnomalyConstants.STATUS_OPEN,
-                                    null
-                            );
-                        }
+                        telemetryEventPublisher.publishAnomalyRecorded(
+                                tenantId,
+                                AnomalyConstants.TYPE_OVER_WATER_SUPPLY,
+                                operatorWithSchema.operator().id(),
+                                schemeId,
+                                pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+                                null,
+                                manualReadingValue,
+                                0,
+                                previousConfirmed,
+                                previousConfirmedAt,
+                                0,
+                                "Manual reading is above allowed maximum (" + toPlain(maxAllowed) + ").",
+                                AnomalyConstants.STATUS_OPEN,
+                                null
+                        );
                         return CreateReadingResponse.builder()
                                 .success(false)
                                 .message(localizationService.localizeMessage(
@@ -1288,24 +1272,22 @@ public class GlificMeterWorkflowService {
                     "Manual reading submitted as override.",
                     AnomalyConstants.STATUS_OPEN
             );
-            for (Long recipientUserId : analyticsUserIds) {
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_MANUAL_OVERRIDE,
-                        recipientUserId,
-                        schemeId,
-                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                        null,
-                        manualReadingValue,
-                        unreadableRetryCountToday,
-                        previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null),
-                        previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null),
-                        0,
-                        "Manual reading submitted as override.",
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
-            }
+            telemetryEventPublisher.publishAnomalyRecorded(
+                    tenantId,
+                    AnomalyConstants.TYPE_MANUAL_OVERRIDE,
+                    operatorWithSchema.operator().id(),
+                    schemeId,
+                    pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+                    null,
+                    manualReadingValue,
+                    unreadableRetryCountToday,
+                    previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null),
+                    previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null),
+                    0,
+                    "Manual reading submitted as override.",
+                    AnomalyConstants.STATUS_OPEN,
+                    null
+            );
 
             int consecutiveOverrideDays = calculateConsecutiveDays(
                     telemetryTenantRepository.findAnomalyDatesByType(
