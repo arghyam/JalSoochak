@@ -291,28 +291,20 @@ public class BfmReadingService {
                     request.getSchemeId(),
                     request.getReadingUrl()
             );
-            telemetryTenantRepository.createTenantAnomalyRecord(
+            recordImageAnomalyOncePerDay(
                     schemaName,
+                    tenantId,
                     operatorInRequest.id(),
                     request.getSchemeId(),
                     AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
                     "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
-                    AnomalyConstants.STATUS_OPEN
-            );
-            telemetryEventPublisher.publishAnomalyRecorded(
-                    tenantId,
-                    AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
+                    0,
                     extractedReading,
                     confidenceLevel,
                     confirmedReading,
-                    0,
                     previousSnapshot.confirmedReading(),
                     previousSnapshot.createdAt(),
                     0,
-                    "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
-                    AnomalyConstants.STATUS_OPEN,
                     anomalyCorrelationId
             );
             return CreateReadingResponse.builder()
@@ -527,6 +519,58 @@ public class BfmReadingService {
         String normalizedUrl = readingUrl == null ? "" : readingUrl.trim();
         String key = anomalyType + ":" + userId + ":" + schemeId + ":" + normalizedUrl;
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
+    }
+
+    private void recordImageAnomalyOncePerDay(String schemaName,
+                                              Integer tenantId,
+                                              Long userId,
+                                              Long schemeId,
+                                              int anomalyType,
+                                              String reason,
+                                              int retries,
+                                              BigDecimal aiReading,
+                                              BigDecimal aiConfidencePercentage,
+                                              BigDecimal overriddenReading,
+                                              BigDecimal previousReading,
+                                              LocalDateTime previousReadingDate,
+                                              Integer consecutiveDaysMissed,
+                                              String correlationId) {
+        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
+                schemaName,
+                userId,
+                schemeId,
+                anomalyType
+        );
+        if (existingCount > 0) {
+            log.info("Skipping duplicate image anomaly publish for userId={} schemeId={} anomalyType={} correlationId={}",
+                    userId, schemeId, anomalyType, correlationId);
+            return;
+        }
+
+        telemetryTenantRepository.createTenantAnomalyRecord(
+                schemaName,
+                userId,
+                schemeId,
+                anomalyType,
+                reason,
+                AnomalyConstants.STATUS_OPEN
+        );
+        telemetryEventPublisher.publishAnomalyRecorded(
+                tenantId,
+                anomalyType,
+                userId,
+                schemeId,
+                aiReading,
+                aiConfidencePercentage,
+                overriddenReading,
+                retries,
+                previousReading,
+                previousReadingDate,
+                consecutiveDaysMissed,
+                reason,
+                AnomalyConstants.STATUS_OPEN,
+                correlationId
+        );
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {
