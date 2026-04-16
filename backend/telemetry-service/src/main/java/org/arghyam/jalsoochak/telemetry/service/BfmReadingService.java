@@ -21,6 +21,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -71,6 +72,12 @@ public class BfmReadingService {
             try {
                 ocrResult = flowVisionService.extractReading(request.getReadingUrl());
                 if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
+                    String anomalyCorrelationId = buildImageAnomalyCorrelationId(
+                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                            operatorInRequest.id(),
+                            request.getSchemeId(),
+                            request.getReadingUrl()
+                    );
                     int retries = telemetryTenantRepository.countAnomaliesByTypeForToday(
                             schemaName,
                             operatorInRequest.id(),
@@ -99,7 +106,7 @@ public class BfmReadingService {
                             0,
                             "Unreadable image. OCR could not extract a valid meter reading.",
                             AnomalyConstants.STATUS_OPEN,
-                            null
+                            anomalyCorrelationId
                     );
                     return CreateReadingResponse.builder()
                             .success(false)
@@ -112,6 +119,12 @@ public class BfmReadingService {
                 confidenceLevel = ocrResult.getQualityConfidence();
             } catch (Exception ex) {
                 log.error("FlowVision OCR failed for URL: {}", request.getReadingUrl(), ex);
+                String anomalyCorrelationId = buildImageAnomalyCorrelationId(
+                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                        operatorInRequest.id(),
+                        request.getSchemeId(),
+                        request.getReadingUrl()
+                );
                 int retries = telemetryTenantRepository.countAnomaliesByTypeForToday(
                         schemaName,
                         operatorInRequest.id(),
@@ -140,7 +153,7 @@ public class BfmReadingService {
                         0,
                         "Unreadable image. OCR failed during extraction.",
                         AnomalyConstants.STATUS_OPEN,
-                        null
+                        anomalyCorrelationId
                 );
                 return CreateReadingResponse.builder()
                         .success(false)
@@ -272,6 +285,12 @@ public class BfmReadingService {
                 && extractedReading.compareTo(latestSnapshotOpt.get().confirmedReading()) == 0
                 && request.getReadingUrl() != null && !request.getReadingUrl().isBlank()) {
             TelemetryConfirmedReadingSnapshot previousSnapshot = latestSnapshotOpt.get();
+            String anomalyCorrelationId = buildImageAnomalyCorrelationId(
+                    AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
+                    operatorInRequest.id(),
+                    request.getSchemeId(),
+                    request.getReadingUrl()
+            );
             telemetryTenantRepository.createTenantAnomalyRecord(
                     schemaName,
                     operatorInRequest.id(),
@@ -294,7 +313,7 @@ public class BfmReadingService {
                     0,
                     "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
                     AnomalyConstants.STATUS_OPEN,
-                    null
+                    anomalyCorrelationId
             );
             return CreateReadingResponse.builder()
                     .success(false)
@@ -502,6 +521,12 @@ public class BfmReadingService {
             return "";
         }
         return value.stripTrailingZeros().toPlainString();
+    }
+
+    private String buildImageAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, String readingUrl) {
+        String normalizedUrl = readingUrl == null ? "" : readingUrl.trim();
+        String key = anomalyType + ":" + userId + ":" + schemeId + ":" + normalizedUrl;
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {
