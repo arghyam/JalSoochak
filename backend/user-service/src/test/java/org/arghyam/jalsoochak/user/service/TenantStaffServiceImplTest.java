@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
+import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
@@ -37,9 +38,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -168,6 +171,60 @@ class TenantStaffServiceImplTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Unknown status");
         }
+
+        @Test
+        @DisplayName("parses numeric status string directly to integer")
+        void parsesNumericStatus() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(
+                    any(), any(), eq(3), any(), any(), any(), anyInt(), anyInt()))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", 0, 20, "id", "desc", null, "3", null);
+            verify(tenantStaffRepository).listStaffPage(any(), any(), eq(3), any(), any(), any(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("null status maps to null integer")
+        void nullStatusMapsToNull() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(
+                    any(), any(), eq(null), any(), any(), any(), anyInt(), anyInt()))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", 0, 20, "id", "desc", null, null, null);
+            verify(tenantStaffRepository).listStaffPage(any(), any(), eq(null), any(), any(), any(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("skips null and blank entries in role list normalization")
+        void skipsNullAndBlankRoleEntries() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(
+                    eq("tenant_mp"),
+                    eq(List.of("section_officer")),
+                    any(), any(), any(), any(), anyInt(), anyInt()))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", 0, 20, "id", "desc",
+                    java.util.Arrays.asList(null, "  ", "SECTION_OFFICER"), null, null);
+
+            verify(tenantStaffRepository).listStaffPage(
+                    eq("tenant_mp"),
+                    eq(List.of("section_officer")),
+                    any(), any(), any(), any(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("negative page is clamped to 0")
+        void negativePage() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(any(), any(), any(), any(), any(), any(), eq(0), anyInt()))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", -5, 10, "id", "desc", null, null, null);
+            verify(tenantStaffRepository).listStaffPage(any(), any(), any(), any(), any(), any(), eq(0), anyInt());
+        }
     }
 
     // --- countStaffByRole ---
@@ -243,6 +300,22 @@ class TenantStaffServiceImplTest {
                     .hasMessageContaining("already has role");
         }
 
+        private void mockKeycloakChain(String uuid) {
+            Keycloak kc = mock(Keycloak.class);
+            RealmResource realm = mock(RealmResource.class);
+            UsersResource users = mock(UsersResource.class);
+            UserResource userResource = mock(UserResource.class);
+            UserRepresentation rep = new UserRepresentation();
+            rep.setAttributes(new HashMap<>());
+
+            when(keycloakProvider.getAdminInstance()).thenReturn(kc);
+            when(keycloakProvider.getRealm()).thenReturn("jalsoochak-realm");
+            when(kc.realm("jalsoochak-realm")).thenReturn(realm);
+            when(realm.users()).thenReturn(users);
+            when(users.get(uuid)).thenReturn(userResource);
+            when(userResource.toRepresentation()).thenReturn(rep);
+        }
+
         @Test
         @DisplayName("successfully updates role and returns updated staff DTO")
         void updatesRoleSuccessfully() {
@@ -257,21 +330,7 @@ class TenantStaffServiceImplTest {
             when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
             when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L)).thenReturn(1);
             when(tenantStaffRepository.findStaffById("tenant_mp", 10L)).thenReturn(Optional.of(updated));
-
-            // Mock Keycloak chain
-            Keycloak kc = mock(Keycloak.class);
-            RealmResource realm = mock(RealmResource.class);
-            UsersResource users = mock(UsersResource.class);
-            UserResource userResource = mock(UserResource.class);
-            UserRepresentation rep = new UserRepresentation();
-            rep.setAttributes(new HashMap<>());
-
-            when(keycloakProvider.getAdminInstance()).thenReturn(kc);
-            when(keycloakProvider.getRealm()).thenReturn("jalsoochak-realm");
-            when(kc.realm("jalsoochak-realm")).thenReturn(realm);
-            when(realm.users()).thenReturn(users);
-            when(users.get("kc-uuid")).thenReturn(userResource);
-            when(userResource.toRepresentation()).thenReturn(rep);
+            mockKeycloakChain("kc-uuid");
 
             TenantStaffResponseDTO result = service.updateStaffRole(10L, req, auth);
 
@@ -281,6 +340,84 @@ class TenantStaffServiceImplTest {
             verify(userCommonRepository).findTenantIdByStateCode("mp");
             verify(userTenantRepository).updateUserRole("tenant_mp", 10L, 4L);
             verify(tenantStaffRepository).findStaffById("tenant_mp", 10L);
+        }
+
+        @Test
+        @DisplayName("skips analytics event and logs warning when tenantId not found for stateCode")
+        void skipsAnalyticsWhenTenantIdNotFound() {
+            Authentication auth = callerAuth("MP");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+
+            TenantStaffResponseDTO updated = TenantStaffResponseDTO.builder()
+                    .id(10L).role("DISTRICT_OFFICER").build();
+
+            when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.empty()); // no tenant found
+            when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L)).thenReturn(1);
+            when(tenantStaffRepository.findStaffById("tenant_mp", 10L)).thenReturn(Optional.of(updated));
+            mockKeycloakChain("kc-uuid");
+
+            TenantStaffResponseDTO result = service.updateStaffRole(10L, req, auth);
+
+            assertThat(result.role()).isEqualTo("DISTRICT_OFFICER");
+            verify(userAnalyticsEventPublisher, never()).publishStaffUserUpdatedAfterCommit(
+                    anyLong(), anyInt(), anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("throws IllegalStateException when user has no Keycloak UUID")
+        void throwsWhenKeycloakUuidMissing() {
+            Authentication auth = callerAuth("MP");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+
+            TenantUserRecord noUuidUser = new TenantUserRecord(
+                    10L, 1, "919876543210", "officer@test.com", 3L, "SECTION_OFFICER",
+                    "Officer", null, TenantUserStatus.ACTIVE.code, null);
+            when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(noUuidUser));
+            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+
+            assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("no Keycloak UUID");
+        }
+
+        @Test
+        @DisplayName("compensates Keycloak roles and attributes when an exception occurs mid-update, then rethrows")
+        void rollsBackKeycloakOnException() {
+            Authentication auth = callerAuth("MP");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+
+            when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            mockKeycloakChain("kc-uuid");
+            // Simulate failure at DB role update step
+            when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L))
+                    .thenThrow(new RuntimeException("DB error"));
+
+            assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("DB error");
+
+            // Verify compensation: old role re-assigned and new role removed
+            verify(keycloakAdminHelper).assignRoleToUser("kc-uuid", "SECTION_OFFICER");
+            verify(keycloakAdminHelper).removeRoleFromUser("kc-uuid", "DISTRICT_OFFICER");
+        }
+
+        @Test
+        @DisplayName("throws ResourceNotFoundException when DB role update affects 0 rows")
+        void throwsWhenDbUpdateAffectsZeroRows() {
+            Authentication auth = callerAuth("MP");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+
+            when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L)).thenReturn(0); // 0 rows affected
+            mockKeycloakChain("kc-uuid");
+
+            assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("User not found during role update");
         }
     }
 }
