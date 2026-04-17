@@ -591,7 +591,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getRegionWiseWaterQuantityByLgd_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
         mockRedisValueOps();
-        String cacheKey = ":water_quantity:region_wise:tenant:1:parent_lgd:101:start:2026-01-01:end:2026-01-03:v5";
+        String cacheKey = ":water_quantity:region_wise:tenant:1:parent_lgd:101:start:2026-01-01:end:2026-01-03:v6";
         when(valueOperations.get(cacheKey)).thenReturn(null);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -610,7 +610,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getRegionWiseWaterQuantityByDepartment_cacheKeyIncludesTenantId_andWritesCache() throws Exception {
         mockRedisValueOps();
-        String cacheKey = ":water_quantity:region_wise:tenant:1:parent_department:201:start:2026-01-01:end:2026-01-03:v3";
+        String cacheKey = ":water_quantity:region_wise:tenant:1:parent_department:201:start:2026-01-01:end:2026-01-03:v4";
         when(valueOperations.get(cacheKey)).thenReturn(null);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 

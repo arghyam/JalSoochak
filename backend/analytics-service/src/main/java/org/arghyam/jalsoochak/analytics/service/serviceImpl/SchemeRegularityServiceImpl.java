@@ -1207,7 +1207,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":parent_lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v5";
+                + ":v6";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1260,7 +1260,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":parent_department:" + parentDepartmentId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v3";
+                + ":v4";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
