@@ -171,21 +171,44 @@ class CoverageSmokeTest {
      */
     private static List<Class<?>> safeListClasses(String packageName) {
         String rel = packageName.replace('.', '/');
+        // Prefer deterministic filesystem scanning (works on GitHub runners too).
+        List<Path> roots = List.of(
+                Path.of(System.getProperty("user.dir")).resolve("target/classes").resolve(rel),
+                Path.of(System.getProperty("user.dir")).resolve("target/test-classes").resolve(rel)
+        );
+
+        List<Class<?>> fromFs = roots.stream()
+                .filter(Files::exists)
+                .flatMap(root -> {
+                    try {
+                        return Files.walk(root);
+                    } catch (Exception e) {
+                        return Stream.empty();
+                    }
+                })
+                .filter(p -> p.toString().endsWith(".class"))
+                .filter(p -> !p.getFileName().toString().matches(".*\\$\\d+\\.class$")) // ignore anonymous
+                .sorted(Comparator.comparing(Path::toString))
+                .map(p -> toClassName(rel, p))
+                .map(CoverageSmokeTest::loadClass)
+                .flatMap(Optional::stream)
+                .toList();
+
+        if (!fromFs.isEmpty()) return fromFs;
+
+        // Fallback: classloader resource lookup.
         try {
             URI uri = Objects.requireNonNull(
                             Thread.currentThread().getContextClassLoader().getResource(rel),
                             "Missing resource for package " + packageName)
                     .toURI();
 
-            // Only support filesystem resources (which is true in Maven unit test runs).
             if (!"file".equals(uri.getScheme())) return List.of();
-
             Path dir = Path.of(uri);
             try (Stream<Path> paths = Files.walk(dir)) {
                 return paths
                         .filter(p -> p.toString().endsWith(".class"))
-                        // keep inner classes too (DTO inner classes & repository projections are often inner)
-                        .filter(p -> !p.getFileName().toString().matches(".*\\$\\d+\\.class$")) // ignore anonymous
+                        .filter(p -> !p.getFileName().toString().matches(".*\\$\\d+\\.class$"))
                         .sorted(Comparator.comparing(Path::toString))
                         .map(p -> toClassName(rel, p))
                         .map(CoverageSmokeTest::loadClass)

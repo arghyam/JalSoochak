@@ -28,6 +28,7 @@ import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -115,6 +116,21 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 .andExpect(jsonPath("$.data").value(nullValue()));
     }
 
+    @Test
+    void getAverageWaterSupplyPerRegion_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionForCurrentScope(any(), any(), any()))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/water-supply/average-per-region")
+                        .param("scope", "current")
+                        .param("tenant_id", "10")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
 //     @Test
 //     void populateDateDimension_validDateRange_returnsOkAndCallsService() throws Exception {
 //         mockMvc.perform(post(BASE + "/date-dimension")
@@ -167,6 +183,19 @@ class AnalyticsWaterSupplyNationalControllerTest {
     }
 
     @Test
+    void getNationalDashboard_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getNationalDashboardForApi(eq(START), eq(END)))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/national/dashboard")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
     void getNationalDashboardBoundaries_returnsOk() throws Exception {
         when(schemeRegularityService.getNationalDashboardBoundariesForApi())
                 .thenReturn(NationalDashboardBoundaryResponse.builder()
@@ -186,12 +215,37 @@ class AnalyticsWaterSupplyNationalControllerTest {
     }
 
     @Test
+    void getNationalDashboardBoundaries_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getNationalDashboardBoundariesForApi())
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
     void getPeriodicNationalSchemeRegularity_withUnsupportedScale_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("scale", "year"))
                 .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getPeriodicNationalSchemeRegularity_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getPeriodicSchemeRegularityForNationForApi(eq(START), eq(END), any()))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "day"))
+                .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
     }

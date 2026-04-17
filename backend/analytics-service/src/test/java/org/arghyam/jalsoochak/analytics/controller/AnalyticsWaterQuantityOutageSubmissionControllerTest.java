@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.controller;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicWaterQuantityResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SubmissionStatusSummaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
@@ -36,6 +37,7 @@ import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -125,6 +127,21 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void getWaterQuantityRegionWise_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getRegionWiseWaterQuantityByLgd(TENANT_ID, 101, START, END))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/water-quantity/region-wise")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
     @ParameterizedTest
     @MethodSource("periodicValidRoutes")
     void getPeriodicWaterQuantity_validRoutes(String idParam, String idValue, String scale, boolean lgdRoute) throws Exception {
@@ -180,6 +197,21 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                         .param("scale", "year")
                         .param("lgd_id", "101"))
                 .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getPeriodicWaterQuantity_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getPeriodicWaterQuantityByLgdId(eq(101), eq(START), eq(END), any()))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/water-quantity/periodic")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "day")
+                        .param("lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
     }
@@ -244,6 +276,76 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getOutageReasons_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getOutageReasonSchemeCountByLgd(TENANT_ID, 101, START, END))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/outage-reasons")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getPeriodicOutageReasons_withLgdId_routesToLgdService() throws Exception {
+        when(schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(
+                TENANT_ID, 101, START, END, PeriodScale.DAY))
+                .thenReturn(PeriodicOutageReasonSchemeCountResponse.builder()
+                        .scale("day")
+                        .periodCount(0)
+                        .metrics(List.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/outage-reasons/periodic")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "day")
+                        .param("lgd_id", "101"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.scale").value("day"));
+
+        verify(schemeRegularityService, times(1))
+                .getPeriodicOutageReasonSchemeCountByLgdId(TENANT_ID, 101, START, END, PeriodScale.DAY);
+    }
+
+    @Test
+    void getPeriodicOutageReasons_withBothIds_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/outage-reasons/periodic")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "day")
+                        .param("lgd_id", "101")
+                        .param("department_id", "201"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getPeriodicOutageReasons_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(
+                TENANT_ID, 101, START, END, PeriodScale.DAY))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/outage-reasons/periodic")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "day")
+                        .param("lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
     }
 
     @Test
@@ -342,6 +444,21 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getNonSubmissionReasons_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(TENANT_ID, 101, START, END))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/non-submission-reasons")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
     }
 
     @Test
@@ -535,6 +652,21 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                         .param("end_date", END.toString())
                         .param("lgd_id", "100"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getSubmissionStatusSummary_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getSubmissionStatusSummaryByLgd(TENANT_ID, 100, START, END))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/submission-status")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("lgd_id", "100"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
     }
 
     private static Stream<Arguments> regionWiseValidRoutes() {
