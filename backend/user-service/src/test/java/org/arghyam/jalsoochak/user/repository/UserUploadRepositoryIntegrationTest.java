@@ -290,7 +290,7 @@ class UserUploadRepositoryIntegrationTest {
         @Test
         @DisplayName("returns scheme ids for user with active mappings")
         void findsActive() {
-            int userId = insertUser("scheme@mp.gov", "91XXXXXXXXXА", 3);
+            int userId = insertUser("scheme@mp.gov", "91XXXXXXXXXA", 3);
             int schemeId = insertScheme("STATE-030", "CENTRE-030");
             repo.insertUserSchemeMappings(SCHEMA, List.of(new UserSchemeMappingCreateRow(userId, schemeId)), userId);
 

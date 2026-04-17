@@ -19,7 +19,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @Slf4j
 public class UserNotificationEventPublisher {
 
-    private static final String COMMON_TOPIC = "common-topic";
+    public static final String COMMON_TOPIC = "common-topic";
 
     private final KafkaProducer kafkaProducer;
 

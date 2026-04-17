@@ -125,6 +125,11 @@ class TenantStaffServiceImplTest {
 
             service.listStaff("mp", 0, 20, "id", "desc",
                     List.of("SECTION_OFFICER,DISTRICT_OFFICER"), null, null);
+
+            verify(tenantStaffRepository).listStaffPage(
+                    eq("tenant_mp"),
+                    eq(List.of("section_officer", "district_officer")),
+                    any(), any(), any(), any(), anyInt(), anyInt());
         }
 
         @Test
@@ -136,6 +141,9 @@ class TenantStaffServiceImplTest {
                     .thenReturn(staffPage);
 
             service.listStaff("mp", 0, 20, "id", "desc", null, "ACTIVE", null);
+
+            verify(tenantStaffRepository).listStaffPage(
+                    any(), any(), eq(1), any(), any(), any(), anyInt(), anyInt());
         }
 
         @Test
@@ -147,6 +155,9 @@ class TenantStaffServiceImplTest {
                     .thenReturn(staffPage);
 
             service.listStaff("mp", 0, 20, "id", "desc", null, "INACTIVE", null);
+
+            verify(tenantStaffRepository).listStaffPage(
+                    any(), any(), eq(0), any(), any(), any(), anyInt(), anyInt());
         }
 
         @Test
@@ -265,6 +276,11 @@ class TenantStaffServiceImplTest {
             TenantStaffResponseDTO result = service.updateStaffRole(10L, req, auth);
 
             assertThat(result.role()).isEqualTo("DISTRICT_OFFICER");
+            verify(userTenantRepository).findUserById("tenant_mp", 10L);
+            verify(userCommonRepository).findUserTypeIdByName("DISTRICT_OFFICER");
+            verify(userCommonRepository).findTenantIdByStateCode("mp");
+            verify(userTenantRepository).updateUserRole("tenant_mp", 10L, 4L);
+            verify(tenantStaffRepository).findStaffById("tenant_mp", 10L);
         }
     }
 }

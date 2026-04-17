@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,20 +47,18 @@ class WelcomeMessageServiceImplTest {
         service = new WelcomeMessageServiceImpl(userTenantRepository, userCommonRepository, userEventPublisher);
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static Authentication stateAdminAuth(String tenantCode) {
         Authentication auth = mock(Authentication.class);
-        when(auth.getAuthorities()).thenReturn((java.util.Collection) List.of(
+        doReturn(List.of(
                 new SimpleGrantedAuthority("TENANT_" + tenantCode.toUpperCase()),
-                new SimpleGrantedAuthority("ROLE_STATE_ADMIN")));
+                new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))).when(auth).getAuthorities();
         return auth;
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static Authentication superUserAuth() {
         Authentication auth = mock(Authentication.class);
-        when(auth.getAuthorities()).thenReturn((java.util.Collection) List.of(
-                new SimpleGrantedAuthority("ROLE_SUPER_USER")));
+        doReturn(List.of(
+                new SimpleGrantedAuthority("ROLE_SUPER_USER"))).when(auth).getAuthorities();
         return auth;
     }
 
@@ -143,8 +142,10 @@ class WelcomeMessageServiceImplTest {
             Authentication auth = superUserAuth();
             when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
             // No phones returned → no events
-            service.sendWelcomeMessages("mp", validRequest("SECTION_OFFICER"), auth);
+            WelcomeMessageResponseDTO resp = service.sendWelcomeMessages("mp", validRequest("SECTION_OFFICER"), auth);
             verify(userCommonRepository).findTenantIdByStateCode("mp");
+            assertThat(resp.totalPhones()).isZero();
+            assertThat(resp.message()).contains("No matching users");
         }
     }
 
@@ -222,8 +223,12 @@ class WelcomeMessageServiceImplTest {
             WelcomeMessageRequestDTO req = validRequest("SECTION_OFFICER");
             req.setOnboardedAfter("2024-01-01T00:00:00Z");
 
-            // Should not throw
-            service.sendWelcomeMessages("mp", req, auth);
+            WelcomeMessageResponseDTO resp = service.sendWelcomeMessages("mp", req, auth);
+
+            assertThat(resp.totalPhones()).isZero();
+            assertThat(resp.message()).contains("No matching users");
+            verify(userTenantRepository).streamPhonesByRolesAndOnboardingWindow(
+                    anyString(), any(), any(java.time.Instant.class), any(), any());
         }
 
         @Test
@@ -234,8 +239,12 @@ class WelcomeMessageServiceImplTest {
             WelcomeMessageRequestDTO req = validRequest("SECTION_OFFICER");
             req.setOnboardedAfter("2024-01-01");
 
-            // Should not throw
-            service.sendWelcomeMessages("mp", req, auth);
+            WelcomeMessageResponseDTO resp = service.sendWelcomeMessages("mp", req, auth);
+
+            assertThat(resp.totalPhones()).isZero();
+            assertThat(resp.message()).contains("No matching users");
+            verify(userTenantRepository).streamPhonesByRolesAndOnboardingWindow(
+                    anyString(), any(), any(java.time.Instant.class), any(), any());
         }
 
         @Test

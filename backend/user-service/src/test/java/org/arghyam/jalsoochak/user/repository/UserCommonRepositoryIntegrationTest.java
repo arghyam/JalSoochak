@@ -85,7 +85,7 @@ class UserCommonRepositoryIntegrationTest {
 
         @Test
         @DisplayName("existsTenantByStateCode returns true for existing tenant (case-insensitive)")
-        void existsTenant_caseSensitive() {
+        void existsTenant_caseInsensitive() {
             assertThat(repo.existsTenantByStateCode("MP")).isTrue();
             assertThat(repo.existsTenantByStateCode("mp")).isTrue();
         }
@@ -319,8 +319,19 @@ class UserCommonRepositoryIntegrationTest {
         @DisplayName("updateAdminUserProfile changes phone number")
         void updateProfile() {
             Long id = createActiveUser("update@example.com", "91XXXXXXXXX1", 1, 2);
+
+            Long updatedByBefore = jdbc.queryForObject(
+                    "SELECT updated_by FROM common_schema.tenant_admin_user_master_table WHERE id = ?",
+                    Long.class, id);
+
             repo.updateAdminUserProfile(id, "91XXXXXXXXX9", id);
-            // verify we can still find the user (phone is encrypted; just check row exists)
+
+            Long updatedByAfter = jdbc.queryForObject(
+                    "SELECT updated_by FROM common_schema.tenant_admin_user_master_table WHERE id = ?",
+                    Long.class, id);
+
+            assertThat(updatedByAfter).isEqualTo(id);
+            assertThat(updatedByAfter).isNotEqualTo(updatedByBefore);
             assertThat(repo.findAdminUserById(id)).isPresent();
         }
     }

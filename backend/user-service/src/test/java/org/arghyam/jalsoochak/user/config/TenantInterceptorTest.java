@@ -41,6 +41,19 @@ class TenantInterceptorTest {
             assertThat(result).isTrue();
             assertThat(TenantContext.getSchema()).isNull();
         }
+
+        @Test
+        @DisplayName("returns true and does not set schema when header is whitespace-only")
+        void whitespaceOnlyHeaderReturnsTrueAndDoesNotSetSchema() throws Exception {
+            MockHttpServletRequest req = new MockHttpServletRequest();
+            req.addHeader("X-Tenant-Code", "   ");
+            MockHttpServletResponse res = new MockHttpServletResponse();
+
+            boolean result = interceptor.preHandle(req, res, new Object());
+
+            assertThat(result).isTrue();
+            assertThat(TenantContext.getSchema()).isNull();
+        }
     }
 
     @Nested

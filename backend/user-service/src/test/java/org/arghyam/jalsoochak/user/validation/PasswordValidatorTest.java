@@ -36,6 +36,20 @@ class PasswordValidatorTest {
         void acceptsValidPasswords(String password) {
             assertThat(validator.isValid(password, null)).isTrue();
         }
+
+        @Test
+        @DisplayName("accepts password of exactly 8 characters (inclusive lower bound)")
+        void boundaryEightChars() {
+            assertThat(validator.isValid("Ab1!cccc", null)).isTrue();
+        }
+
+        @Test
+        @DisplayName("accepts password of exactly 64 characters (inclusive upper bound)")
+        void boundarySixtyFourChars() {
+            String pwd = "Ab1!" + "a".repeat(60);
+            assertThat(pwd).hasSize(64);
+            assertThat(validator.isValid(pwd, null)).isTrue();
+        }
     }
 
     @Nested

@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -130,6 +131,25 @@ class UserEventPublisherTest {
             publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", null);
             publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of());
             verify(kafkaProducer, never()).publishJson(any(), any());
+        }
+
+        @Test
+        @DisplayName("publishes UPDATE_USER_LANGUAGE and SEND_WELCOME_MESSAGE events for non-empty phone list")
+        void publishesEventsForNonEmptyPhoneList() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of("91XXXXXXXXX1"));
+
+            // Two events published asynchronously: UPDATE_USER_LANGUAGE + SEND_WELCOME_MESSAGE
+            ArgumentCaptor<PumpOperatorMessagingEvent> captor =
+                    ArgumentCaptor.forClass(PumpOperatorMessagingEvent.class);
+            verify(kafkaProducer, timeout(2000).times(2))
+                    .publishJson(eq(UserEventPublisher.COMMON_TOPIC), captor.capture());
+
+            List<String> eventTypes = captor.getAllValues().stream()
+                    .map(PumpOperatorMessagingEvent::getEventType)
+                    .toList();
+            assertThat(eventTypes).containsExactlyInAnyOrder("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
         }
     }
 }

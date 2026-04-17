@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("UserNotificationEventPublisher")
 class UserNotificationEventPublisherTest {
 
-    private static final String COMMON_TOPIC = "common-topic";
+    private static final String COMMON_TOPIC = UserNotificationEventPublisher.COMMON_TOPIC;
 
     @Mock private KafkaProducer kafkaProducer;
 
@@ -98,6 +98,8 @@ class UserNotificationEventPublisherTest {
             when(kafkaProducer.publishJson(eq(COMMON_TOPIC), eq(event))).thenReturn(false);
 
             publisher.publishInviteEmailAfterCommit(event); // must not throw
+
+            verify(kafkaProducer).publishJson(COMMON_TOPIC, event);
         }
     }
 
@@ -146,6 +148,8 @@ class UserNotificationEventPublisherTest {
             when(kafkaProducer.publishJson(eq(COMMON_TOPIC), eq(event))).thenReturn(false);
 
             publisher.publishResetPasswordEmailAfterCommit(event);
+
+            verify(kafkaProducer).publishJson(COMMON_TOPIC, event);
         }
     }
 

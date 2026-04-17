@@ -16,6 +16,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -352,22 +353,40 @@ class UserTenantRepositoryIntegrationTest {
         @Test
         @DisplayName("respects onboardedAfter window")
         void respectsOnboardedAfterWindow() {
+            // Out-of-window user: inserted now, will be before the future threshold
             insertUser("uuid-stream3", "stream3@mp.gov", "91XXXXXXXXXG", "Window User", 3, "pwd");
-            Instant future = Instant.now().plus(1, ChronoUnit.DAYS);
 
+            // In-window user: set created_at to well in the future via JDBC
+            Long inWindowId = insertUser("uuid-stream3b", "stream3b@mp.gov", "91XXXXXXXXXG2", "Window User In", 3, "pwd");
+            Instant futureOnboard = Instant.now().plus(2, ChronoUnit.DAYS);
+            jdbc.update("UPDATE tenant_mp.user_table SET created_at = ? WHERE id = ?",
+                    Timestamp.from(futureOnboard), inWindowId);
+
+            Instant threshold = Instant.now().plus(1, ChronoUnit.DAYS);
             List<String> phones = new ArrayList<>();
-            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, List.of("section_officer"), future, null, phones::add);
+            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, List.of("section_officer"), threshold, null, phones::add);
+
+            assertThat(phones).contains("91XXXXXXXXXG2");
             assertThat(phones).doesNotContain("91XXXXXXXXXG");
         }
 
         @Test
         @DisplayName("respects onboardedBefore window")
         void respectsOnboardedBeforeWindow() {
+            // Out-of-window user: inserted now, will be after the past threshold
             insertUser("uuid-stream4", "stream4@mp.gov", "91XXXXXXXXXH", "Window User2", 3, "pwd");
-            Instant past = Instant.now().minus(1, ChronoUnit.DAYS);
 
+            // In-window user: set created_at to well before the threshold via JDBC
+            Long inWindowId = insertUser("uuid-stream4b", "stream4b@mp.gov", "91XXXXXXXXXH2", "Window User In", 3, "pwd");
+            Instant pastOnboard = Instant.now().minus(2, ChronoUnit.DAYS);
+            jdbc.update("UPDATE tenant_mp.user_table SET created_at = ? WHERE id = ?",
+                    Timestamp.from(pastOnboard), inWindowId);
+
+            Instant threshold = Instant.now().minus(1, ChronoUnit.DAYS);
             List<String> phones = new ArrayList<>();
-            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, List.of("section_officer"), null, past, phones::add);
+            repo.streamPhonesByRolesAndOnboardingWindow(SCHEMA, List.of("section_officer"), null, threshold, phones::add);
+
+            assertThat(phones).contains("91XXXXXXXXXH2");
             assertThat(phones).doesNotContain("91XXXXXXXXXH");
         }
     }

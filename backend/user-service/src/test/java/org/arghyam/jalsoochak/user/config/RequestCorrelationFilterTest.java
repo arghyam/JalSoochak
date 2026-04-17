@@ -47,7 +47,7 @@ class RequestCorrelationFilterTest {
         String generatedId = res.getHeader(RequestCorrelationFilter.REQUEST_ID_HEADER);
         assertThat(generatedId).isNotBlank();
         // UUID format
-        assertThat(generatedId).matches("[0-9a-f\\-]{36}");
+        assertThat(generatedId).matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     }
 
     @Test
@@ -61,7 +61,7 @@ class RequestCorrelationFilterTest {
         filter.doFilter(req, res, chain);
 
         String generatedId = res.getHeader(RequestCorrelationFilter.REQUEST_ID_HEADER);
-        assertThat(generatedId).isNotBlank().matches("[0-9a-f\\-]{36}");
+        assertThat(generatedId).isNotBlank().matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     }
 
     @Test

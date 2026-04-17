@@ -22,6 +22,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -130,7 +131,10 @@ class PublicPumpOperatorServiceImplTest {
             when(repository.countReadingCompliance("tenant_mp")).thenReturn(0L);
 
             PageResponseDTO<PumpOperatorReadingComplianceRowDTO> page = service.listReadingCompliance("mp", 0, 0);
+
             assertThat(page.getContent()).isEmpty();
+            assertThat(page.getSize()).isEqualTo(1);
+            verify(repository).listReadingCompliance("tenant_mp", 0, 1);
         }
 
         @Test
@@ -140,7 +144,10 @@ class PublicPumpOperatorServiceImplTest {
             when(repository.countReadingCompliance("tenant_mp")).thenReturn(0L);
 
             PageResponseDTO<PumpOperatorReadingComplianceRowDTO> page = service.listReadingCompliance("mp", 0, 500);
+
             assertThat(page.getContent()).isEmpty();
+            assertThat(page.getSize()).isEqualTo(100);
+            verify(repository).listReadingCompliance("tenant_mp", 0, 100);
         }
     }
 
