@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.user.event;
 
 import org.arghyam.jalsoochak.user.kafka.KafkaProducer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -9,6 +10,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -125,6 +128,13 @@ class UserEventPublisherTest {
     @DisplayName("publishPumpOperatorOnboardedAfterCommit")
     class PublishPumpOperatorOnboarded {
 
+        @AfterEach
+        void cleanUpTransactionSync() {
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.clearSynchronization();
+            }
+        }
+
         @Test
         @DisplayName("does nothing for null or empty phone list")
         void doesNothingForNullOrEmpty() {
@@ -134,7 +144,7 @@ class UserEventPublisherTest {
         }
 
         @Test
-        @DisplayName("publishes UPDATE_USER_LANGUAGE and SEND_WELCOME_MESSAGE events for non-empty phone list")
+        @DisplayName("publishes UPDATE_USER_LANGUAGE and SEND_WELCOME_MESSAGE events when no transaction active")
         void publishesEventsForNonEmptyPhoneList() {
             when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
 
@@ -150,6 +160,47 @@ class UserEventPublisherTest {
                     .map(PumpOperatorMessagingEvent::getEventType)
                     .toList();
             assertThat(eventTypes).containsExactlyInAnyOrder("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
+        }
+
+        @Test
+        @DisplayName("registers afterCommit synchronization when transaction is active and fires on commit")
+        void registersAfterCommitWhenTransactionActive() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
+
+            // Simulate an active transaction synchronization context
+            TransactionSynchronizationManager.initSynchronization();
+
+            publisher.publishPumpOperatorOnboardedAfterCommit("mp", 1, "en", List.of("91XXXXXXXXX1"));
+
+            // Before commit fires — events must NOT have been published yet
+            verify(kafkaProducer, never()).publishJson(any(), any());
+
+            // Fire afterCommit on all registered synchronizations
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(TransactionSynchronization::afterCommit);
+
+            // Now events should be published asynchronously
+            ArgumentCaptor<PumpOperatorMessagingEvent> captor =
+                    ArgumentCaptor.forClass(PumpOperatorMessagingEvent.class);
+            verify(kafkaProducer, timeout(2000).times(2))
+                    .publishJson(eq(UserEventPublisher.COMMON_TOPIC), captor.capture());
+
+            List<String> eventTypes = captor.getAllValues().stream()
+                    .map(PumpOperatorMessagingEvent::getEventType)
+                    .toList();
+            assertThat(eventTypes).containsExactlyInAnyOrder("UPDATE_USER_LANGUAGE", "SEND_WELCOME_MESSAGE");
+        }
+
+        @Test
+        @DisplayName("logs warning and publishes immediately when no transaction synchronization is active")
+        void publishesImmediatelyWhenNoTransactionSync() {
+            when(kafkaProducer.publishJson(eq(UserEventPublisher.COMMON_TOPIC), any())).thenReturn(true);
+
+            // No TransactionSynchronizationManager.initSynchronization() — tests the else branch
+            publisher.publishPumpOperatorOnboardedAfterCommit("tr", 2, "hi", List.of("91XXXXXXXXX2"));
+
+            verify(kafkaProducer, timeout(2000).times(2))
+                    .publishJson(eq(UserEventPublisher.COMMON_TOPIC), any());
         }
     }
 }
