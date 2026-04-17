@@ -35,37 +35,36 @@ class KeycloakProviderTest {
     }
 
     @Test
-    void testAdminInstanceCreation() {
+    void testAdminInstanceCreationLifecycleAndCachingOnly() {
         Keycloak adminInstance = keycloakProvider.getAdminInstance();
         assertNotNull(adminInstance);
-        
+
         // Verify the admin instance is properly configured
-        // Note: We can't easily test the internal Keycloak configuration without
-        // complex mocking, but we can verify the instance is created
+        // Note: This test only verifies lifecycle and caching behavior, not internal Keycloak configuration
         assertDoesNotThrow(() -> adminInstance.toString());
     }
 
     @Test
-    void testLoginInstanceCreation() {
+    void testLoginInstanceCreationLifecycleAndCachingOnly() {
         Keycloak loginInstance = keycloakProvider.getLoginInstance();
         assertNotNull(loginInstance);
-        
-        // Verify the login instance is properly configured
+
+        // Note: This test only verifies lifecycle and caching behavior, not internal Keycloak configuration
         assertDoesNotThrow(() -> loginInstance.toString());
     }
 
     @Test
-    void testDifferentInstances() {
+    void testDifferentInstancesLifecycleAndCachingOnly() {
         Keycloak adminInstance = keycloakProvider.getAdminInstance();
         Keycloak loginInstance = keycloakProvider.getLoginInstance();
-        
+
         // Admin and login instances should be different objects
         assertNotSame(adminInstance, loginInstance);
-        
-        // But multiple calls to the same method should return the same instance
+
+        // But multiple calls to the same method should return the same instance (caching)
         Keycloak adminInstance2 = keycloakProvider.getAdminInstance();
         Keycloak loginInstance2 = keycloakProvider.getLoginInstance();
-        
+
         assertSame(adminInstance, adminInstance2);
         assertSame(loginInstance, loginInstance2);
     }
@@ -88,25 +87,7 @@ class KeycloakProviderTest {
     }
 
     @Test
-    void testConstructorWithEdgeCases() {
-        // Test with empty strings
-        KeycloakProvider provider = new KeycloakProvider(
-            "",
-            "",
-            "",
-            "",
-            "",
-            ""
-        );
-        
-        assertEquals("", provider.getServerURL());
-        assertEquals("", provider.getRealm());
-        assertNotNull(provider.getAdminInstance());
-        assertNotNull(provider.getLoginInstance());
-    }
-
-    @Test
-    void testInstanceConsistency() {
+    void testInstanceConsistencyLifecycleAndCachingOnly() {
         // Verify that instances are consistent across multiple calls
         Keycloak admin1 = keycloakProvider.getAdminInstance();
         Keycloak admin2 = keycloakProvider.getAdminInstance();

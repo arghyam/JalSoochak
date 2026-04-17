@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.user.clients;
 
+import com.github.tomakehurst.wiremock.junit5.WireMockRuntimeInfo;
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,22 +9,24 @@ import org.springframework.http.MediaType;
 import org.springframework.web.server.ResponseStatusException;
 import org.arghyam.jalsoochak.user.exceptions.KeycloakLogoutException;
 
+import com.github.tomakehurst.wiremock.http.Fault;
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@WireMockTest(httpPort = 8089)
+@WireMockTest
 class KeycloakClientTest {
 
     private KeycloakClient keycloakClient;
-    private static final String AUTH_SERVER_URL = "http://localhost:8089";
+    private String authServerUrl;
     private static final String REALM = "test-realm";
     private static final String CLIENT_ID = "test-client";
     private static final String CLIENT_SECRET = "test-secret";
 
     @BeforeEach
-    void setUp() {
+    void setUp(WireMockRuntimeInfo runtimeInfo) {
+        authServerUrl = runtimeInfo.getHttpBaseUrl();
         keycloakClient = new KeycloakClient(
-                AUTH_SERVER_URL,
+                authServerUrl,
                 REALM,
                 CLIENT_ID,
                 CLIENT_SECRET,
@@ -250,8 +253,9 @@ class KeycloakClientTest {
 
     @Test
     void testLogout_networkError() {
-        // Given - Simulate network failure by not stubbing the endpoint
-        // This will cause a connection error
+        // Given - Simulate true network failure with connection reset fault
+        stubFor(post(urlEqualTo("/realms/test-realm/protocol/openid-connect/logout"))
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
 
         // When & Then
         KeycloakLogoutException exception = assertThrows(KeycloakLogoutException.class,

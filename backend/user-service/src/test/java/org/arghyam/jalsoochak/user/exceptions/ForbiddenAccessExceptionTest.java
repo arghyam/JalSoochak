@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.user.exceptions;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertAll;
 
 class ForbiddenAccessExceptionTest {
 
@@ -16,11 +17,14 @@ class ForbiddenAccessExceptionTest {
     }
 
     @Test
-    void testExceptionType() {
+    void testExceptionTypeHierarchy() {
         ForbiddenAccessException exception = new ForbiddenAccessException("Test message");
 
-        assertTrue(exception instanceof RuntimeException);
-        assertTrue(exception instanceof Exception);
+        assertAll("Type hierarchy checks",
+            () -> assertTrue(exception instanceof RuntimeException, "Should be RuntimeException"),
+            () -> assertTrue(exception instanceof Exception, "Should be Exception"),
+            () -> assertTrue(exception instanceof Throwable, "Should be Throwable")
+        );
     }
 
     @Test
@@ -56,20 +60,6 @@ class ForbiddenAccessExceptionTest {
         StackTraceElement[] stackTrace = exception.getStackTrace();
         assertNotNull(stackTrace);
         assertTrue(stackTrace.length > 0);
-    }
-
-    @Test
-    void testExceptionInheritance() {
-        ForbiddenAccessException exception = new ForbiddenAccessException("Test");
-
-        // Test that it inherits from RuntimeException
-        assertTrue(exception instanceof RuntimeException);
-        
-        // Test that RuntimeException inherits from Exception
-        assertTrue(exception instanceof Exception);
-        
-        // Test that Exception inherits from Throwable
-        assertTrue(exception instanceof Throwable);
     }
 
     @Test

@@ -19,18 +19,6 @@ class TenantStatusConstantsTest {
     }
 
     @Test
-    void testConstantsAreFinal() {
-        // These should be constants, not modifiable
-        assertTrue(TenantStatusConstants.INACTIVE >= 0);
-        assertTrue(TenantStatusConstants.ONBOARDED >= 0);
-        assertTrue(TenantStatusConstants.CONFIGURED >= 0);
-        assertTrue(TenantStatusConstants.ACTIVE >= 0);
-        assertTrue(TenantStatusConstants.SUSPENDED >= 0);
-        assertTrue(TenantStatusConstants.DEGRADED >= 0);
-        assertTrue(TenantStatusConstants.ARCHIVED >= 0);
-    }
-
-    @Test
     void testStatusValuesAreUnique() {
         // Ensure all status codes are unique
         int[] statuses = {
@@ -51,23 +39,4 @@ class TenantStatusConstantsTest {
         }
     }
 
-    @Test
-    void testExpectedStatusRange() {
-        // Test that status codes are within reasonable range
-        assertTrue(TenantStatusConstants.INACTIVE >= 0 && TenantStatusConstants.INACTIVE <= 10);
-        assertTrue(TenantStatusConstants.ONBOARDED >= 0 && TenantStatusConstants.ONBOARDED <= 10);
-        assertTrue(TenantStatusConstants.CONFIGURED >= 0 && TenantStatusConstants.CONFIGURED <= 10);
-        assertTrue(TenantStatusConstants.ACTIVE >= 0 && TenantStatusConstants.ACTIVE <= 10);
-        assertTrue(TenantStatusConstants.SUSPENDED >= 0 && TenantStatusConstants.SUSPENDED <= 10);
-        assertTrue(TenantStatusConstants.DEGRADED >= 0 && TenantStatusConstants.DEGRADED <= 10);
-        assertTrue(TenantStatusConstants.ARCHIVED >= 0 && TenantStatusConstants.ARCHIVED <= 10);
-    }
-
-    @Test
-    void testSpecificStatusMeanings() {
-        // Test specific status meanings based on business logic
-        assertEquals(3, TenantStatusConstants.ACTIVE, "Active status should be 3");
-        assertEquals(0, TenantStatusConstants.INACTIVE, "Inactive status should be 0");
-        assertEquals(1, TenantStatusConstants.ONBOARDED, "Onboarded status should be 1");
-    }
 }

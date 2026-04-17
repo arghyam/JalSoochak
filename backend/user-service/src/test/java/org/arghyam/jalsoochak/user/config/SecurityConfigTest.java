@@ -1,14 +1,17 @@
 package org.arghyam.jalsoochak.user.config;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -21,9 +24,6 @@ class SecurityConfigTest {
     @Mock
     private Environment environment;
 
-    @Mock
-    private HttpSecurity httpSecurity;
-
     private SecurityConfig securityConfig;
 
     @BeforeEach
@@ -31,88 +31,71 @@ class SecurityConfigTest {
         securityConfig = new SecurityConfig(jwtAuthConverter, environment);
     }
 
+    private void setAllowedOrigins(String origins) throws Exception {
+        var field = SecurityConfig.class.getDeclaredField("allowedOrigins");
+        field.setAccessible(true);
+        field.set(securityConfig, origins);
+    }
+
     @Test
-    void testCorsConfigurationSource_Creation() {
-        // Using reflection to set the private field
-        try {
-            var field = SecurityConfig.class.getDeclaredField("allowedOrigins");
-            field.setAccessible(true);
-            field.set(securityConfig, "http://localhost:3000,https://example.com");
-        } catch (Exception e) {
-            fail("Failed to set allowedOrigins field");
-        }
+    void testCorsConfigurationSource_WithValidOrigins() throws Exception {
+        setAllowedOrigins("http://localhost:3000,https://example.com");
 
         CorsConfigurationSource source = securityConfig.corsConfigurationSource();
         assertNotNull(source);
-        
-        // Basic smoke test - the source should be created successfully
-        assertDoesNotThrow(() -> source.toString());
+
+        HttpServletRequest request = new MockHttpServletRequest("GET", "/api/test");
+        CorsConfiguration cfg = source.getCorsConfiguration(request);
+
+        assertNotNull(cfg);
+        assertEquals(List.of("http://localhost:3000", "https://example.com"), cfg.getAllowedOrigins());
+        assertTrue(cfg.getAllowCredentials());
+        assertTrue(cfg.getAllowedMethods().contains("GET"));
+        assertTrue(cfg.getAllowedMethods().contains("POST"));
+        assertTrue(cfg.getAllowedMethods().contains("PUT"));
+        assertTrue(cfg.getAllowedMethods().contains("DELETE"));
+        assertTrue(cfg.getAllowedMethods().contains("OPTIONS"));
     }
 
     @Test
-    void testCorsConfigurationSource_WithEmptyOrigins() {
-        try {
-            var field = SecurityConfig.class.getDeclaredField("allowedOrigins");
-            field.setAccessible(true);
-            field.set(securityConfig, "");
-        } catch (Exception e) {
-            fail("Failed to set allowedOrigins field");
-        }
+    void testCorsConfigurationSource_WithEmptyOrigins() throws Exception {
+        setAllowedOrigins("");
 
         CorsConfigurationSource source = securityConfig.corsConfigurationSource();
         assertNotNull(source);
-        
-        assertDoesNotThrow(() -> source.toString());
+
+        HttpServletRequest request = new MockHttpServletRequest("GET", "/api/test");
+        CorsConfiguration cfg = source.getCorsConfiguration(request);
+
+        assertNotNull(cfg);
+        assertTrue(cfg.getAllowedOrigins().isEmpty());
     }
 
     @Test
-    void testCorsConfigurationSource_WithNullOrigins() {
-        try {
-            var field = SecurityConfig.class.getDeclaredField("allowedOrigins");
-            field.setAccessible(true);
-            field.set(securityConfig, null);
-        } catch (Exception e) {
-            fail("Failed to set allowedOrigins field");
-        }
+    void testCorsConfigurationSource_WithNullOrigins() throws Exception {
+        setAllowedOrigins(null);
 
         CorsConfigurationSource source = securityConfig.corsConfigurationSource();
         assertNotNull(source);
-        
-        assertDoesNotThrow(() -> source.toString());
+
+        HttpServletRequest request = new MockHttpServletRequest("GET", "/api/test");
+        CorsConfiguration cfg = source.getCorsConfiguration(request);
+
+        assertNotNull(cfg);
+        assertTrue(cfg.getAllowedOrigins().isEmpty());
     }
 
     @Test
-    void testCorsConfigurationSource_WithBlankOrigins() {
-        try {
-            var field = SecurityConfig.class.getDeclaredField("allowedOrigins");
-            field.setAccessible(true);
-            field.set(securityConfig, "   , ,  ");
-        } catch (Exception e) {
-            fail("Failed to set allowedOrigins field");
-        }
+    void testCorsConfigurationSource_WithBlankOrigins() throws Exception {
+        setAllowedOrigins("   , ,  ");
 
         CorsConfigurationSource source = securityConfig.corsConfigurationSource();
         assertNotNull(source);
-        
-        assertDoesNotThrow(() -> source.toString());
-    }
 
-    @Test
-    void testSecurityFilterChain_InProduction() throws Exception {
-        // This test verifies that the method exists and can be called
-        // Actual SecurityFilterChain creation requires complex Spring Security setup
-        assertDoesNotThrow(() -> {
-            // Note: Full testing would require more complex Spring Security test setup
-            // This is a basic smoke test to ensure the method exists
-            SecurityFilterChain.class.getMethod("getFilters");
-        });
-    }
+        HttpServletRequest request = new MockHttpServletRequest("GET", "/api/test");
+        CorsConfiguration cfg = source.getCorsConfiguration(request);
 
-    @Test
-    void testSecurityFilterChain_InDevelopment() throws Exception {
-        // This test verifies that the method exists and can be called
-        assertDoesNotThrow(() -> {
-            SecurityFilterChain.class.getMethod("getFilters");
-        });
+        assertNotNull(cfg);
+        assertTrue(cfg.getAllowedOrigins().isEmpty());
     }
 }
