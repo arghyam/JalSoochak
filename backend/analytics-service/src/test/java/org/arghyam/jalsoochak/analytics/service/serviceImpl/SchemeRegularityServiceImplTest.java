@@ -1239,7 +1239,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void refreshNationalDashboard_computesAndWritesCache() throws Exception {
         mockRedisValueOps();
-        String key = ":national:dashboard:start:2026-01-01:end:2026-01-03:v4";
+        String key = ":national:dashboard:start:2026-01-01:end:2026-01-03:v5";
 
         when(schemeRegularityRepository.getAverageWaterSupplyPerNation(START, END))
                 .thenReturn(List.of(
@@ -1372,7 +1372,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getNationalDashboard_cacheHit_returnsFromCacheWithoutCallingRepository() throws Exception {
         mockRedisValueOps();
-        String cacheKey = ":national:dashboard:start:2026-01-01:end:2026-01-03:v4";
+        String cacheKey = ":national:dashboard:start:2026-01-01:end:2026-01-03:v5";
         NationalDashboardResponse cached = NationalDashboardResponse.builder().daysInRange(3).build();
         when(valueOperations.get(cacheKey)).thenReturn("cached");
         when(objectMapper.readValue("cached", NationalDashboardResponse.class)).thenReturn(cached);
@@ -1386,7 +1386,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getNationalDashboardForApi_delegatesToNationalDashboard_cacheHit() throws Exception {
         mockRedisValueOps();
-        String cacheKey = ":national:dashboard:start:2026-01-01:end:2026-01-03:v4";
+        String cacheKey = ":national:dashboard:start:2026-01-01:end:2026-01-03:v5";
         NationalDashboardResponse cached = NationalDashboardResponse.builder().daysInRange(3).build();
         when(valueOperations.get(cacheKey)).thenReturn("cached");
         when(objectMapper.readValue("cached", NationalDashboardResponse.class)).thenReturn(cached);

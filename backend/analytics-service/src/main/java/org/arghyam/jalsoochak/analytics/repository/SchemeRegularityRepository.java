@@ -3629,12 +3629,13 @@ public class SchemeRegularityRepository {
                 ),
                 ewater_by_scheme_day AS (
                     SELECT
+                        f.tenant_id,
                         f.scheme_id,
                         f.date,
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
-                    GROUP BY f.scheme_id, f.date
+                    GROUP BY f.tenant_id, f.scheme_id, f.date
                 ),
                 tenant_supply_days AS (
                     SELECT
@@ -3658,7 +3659,8 @@ public class SchemeRegularityRepository {
                     FROM schemes_in_scope s
                     CROSS JOIN dates_in_range dr
                     LEFT JOIN ewater_by_scheme_day wd
-                        ON wd.scheme_id = s.scheme_id
+                        ON wd.tenant_id = s.tenant_id
+                        AND wd.scheme_id = s.scheme_id
                         AND wd.date = dr.date
                     JOIN tenant_cfg tc
                         ON tc.tenant_id = s.tenant_id

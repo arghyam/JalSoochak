@@ -865,7 +865,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         return NATIONAL_DASHBOARD_CACHE_PREFIX
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v4";
+                + ":v5";
     }
 
     private NationalDashboardResponse buildAndCacheNationalDashboard(
