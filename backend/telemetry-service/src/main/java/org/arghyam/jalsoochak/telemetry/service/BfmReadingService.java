@@ -151,6 +151,7 @@ public class BfmReadingService {
                 .map(FlowVisionResult::getAdjustedReading)
                 .orElse(finalReading);
         BigDecimal confirmedReading = request.getReadingValue() != null ? request.getReadingValue() : finalReading;
+        BigDecimal effectiveConfirmedReading = confirmedReading;
 
         Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = telemetryTenantRepository
                 .findLatestConfirmedReadingSnapshot(schemaName, request.getSchemeId(), null);
@@ -191,15 +192,8 @@ public class BfmReadingService {
                     AnomalyConstants.STATUS_OPEN,
                     correlationId
             );
-            return CreateReadingResponse.builder()
-                    .success(false)
-                    .message("Reading cannot be less than previous confirmed reading. Submitted reading: "
-                            + toPlain(confirmedReading) + ". Previous reading: " + toPlain(previousSnapshot.confirmedReading()) + ".")
-                    .correlationId(correlationId)
-                    .meterReading(confirmedReading)
-                    .qualityStatus("REJECTED")
-                    .lastConfirmedReading(previousSnapshot.confirmedReading())
-                    .build();
+            // Keep extracted reading as-is, but prevent confirmed reading from going below the previous confirmed value.
+            effectiveConfirmedReading = previousSnapshot.confirmedReading();
         }
 
         Optional<WaterSupplyThreshold> thresholdOpt = !isMeterReplaced ? loadWaterSupplyThreshold(tenantId) : Optional.empty();
@@ -212,8 +206,8 @@ public class BfmReadingService {
                     .divide(BigDecimal.valueOf(100.0d), 6, RoundingMode.HALF_UP);
         }
 
-        if (!isMeterReplaced && confirmedReading != null && minAllowed != null
-                && confirmedReading.compareTo(minAllowed) < 0) {
+        if (!isMeterReplaced && effectiveConfirmedReading != null && minAllowed != null
+                && effectiveConfirmedReading.compareTo(minAllowed) < 0) {
             TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.orElse(null);
             BigDecimal previousConfirmed = previousSnapshot != null ? previousSnapshot.confirmedReading() : null;
             LocalDateTime previousConfirmedAt = previousSnapshot != null ? previousSnapshot.createdAt() : null;
@@ -233,7 +227,7 @@ public class BfmReadingService {
                     request.getSchemeId(),
                     extractedReading,
                     confidenceLevel,
-                    confirmedReading,
+                    effectiveConfirmedReading,
                     0,
                     previousConfirmed,
                     previousConfirmedAt,
@@ -245,9 +239,9 @@ public class BfmReadingService {
             return CreateReadingResponse.builder()
                     .success(false)
                     .message("Reading rejected because it is below the allowed minimum. Submitted: "
-                            + toPlain(confirmedReading) + ". Minimum allowed: " + toPlain(minAllowed) + ".")
+                            + toPlain(effectiveConfirmedReading) + ". Minimum allowed: " + toPlain(minAllowed) + ".")
                     .correlationId(correlationId)
-                    .meterReading(confirmedReading)
+                    .meterReading(effectiveConfirmedReading)
                     .qualityStatus("REJECTED")
                     .lastConfirmedReading(previousConfirmed)
                     .build();
@@ -268,7 +262,7 @@ public class BfmReadingService {
                     0,
                     extractedReading,
                     confidenceLevel,
-                    confirmedReading,
+                    effectiveConfirmedReading,
                     previousSnapshot.confirmedReading(),
                     previousSnapshot.createdAt(),
                     0,
@@ -299,7 +293,7 @@ public class BfmReadingService {
                     readingId,
                     readingAt,
                     extractedReading,
-                    confirmedReading,
+                    effectiveConfirmedReading,
                     correlationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
@@ -312,7 +306,7 @@ public class BfmReadingService {
                     operatorInRequest.id(),
                     readingAt,
                     extractedReading,
-                    confirmedReading,
+                    effectiveConfirmedReading,
                     correlationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason()
@@ -333,7 +327,7 @@ public class BfmReadingService {
                 request.getSchemeId(),
                 operatorInRequest.id(),
                 extractedReading,
-                confirmedReading,
+                effectiveConfirmedReading,
                 confidenceLevel,
                 request.getReadingUrl(),
                 readingAt,
