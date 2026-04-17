@@ -103,6 +103,37 @@ class FactServiceImplTest {
     }
 
     @Test
+    void ingestMeterReading_whenComputedWaterQuantityIsNegative_storesZero() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setConfirmedReading(95);
+        event.setReadingAt("2026-01-02T10:15:00");
+        event.setReadingDate("2026-01-02");
+        event.setSubmissionStatus(1);
+        event.setReadingType(0);
+
+        FactMeterReading previousDayReading = FactMeterReading.builder()
+                .confirmedReading(100)
+                .build();
+
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
+                .thenReturn(Optional.of(previousDayReading));
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(0);
+    }
+
+    @Test
     void ingestWaterQuantity_whenInvalidDate_fallsBackToToday() {
         WaterQuantityEvent event = new WaterQuantityEvent();
         event.setTenantId(1);
@@ -159,6 +190,28 @@ class FactServiceImplTest {
         assertThat(captor.getValue().getUserId()).isEqualTo(22);
         assertThat(captor.getValue().getWaterQuantity()).isEqualTo(200);
         assertThat(captor.getValue().getSubmissionStatus()).isEqualTo(1);
+    }
+
+    @Test
+    void ingestWaterQuantity_whenIncomingWaterQuantityIsNegative_storesZero() {
+        WaterQuantityEvent event = new WaterQuantityEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(22);
+        event.setWaterQuantity(-25);
+        event.setSubmissionStatus(1);
+        event.setDate("2026-01-05");
+
+        when(dimDateRepository.findByFullDate(LocalDate.of(2026, 1, 5))).thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                1, 11, LocalDate.of(2026, 1, 5)))
+                .thenReturn(Optional.empty());
+
+        service.ingestWaterQuantity(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(0);
     }
 
     @Test
