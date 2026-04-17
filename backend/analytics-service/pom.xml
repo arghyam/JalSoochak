@@ -142,20 +142,7 @@
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <configuration>
-                    <!--
-                      SchemeRegularityRepository is a Spring Data interface with large @Query JPQL blocks.
-                      JaCoCo counts every annotation line as executable; coverage is driven by integration tests
-                      (SchemeRegularityRepository*IntegrationTest) rather than bytecode on the interface itself.
-                      Excluding this type keeps the LINE metric aligned with testable application code.
-                    -->
                     <excludes>
-                        <exclude>org/arghyam/jalsoochak/analytics/repository/SchemeRegularityRepository*</exclude>
-                        <!-- Option 1: keep METHOD coverage meaningful (exclude mostly-generated code) -->
-                        <exclude>org/arghyam/jalsoochak/analytics/dto/**</exclude>
-                        <exclude>org/arghyam/jalsoochak/analytics/entity/**</exclude>
-                        <exclude>org/arghyam/jalsoochak/analytics/enums/**</exclude>
-                        <exclude>org/arghyam/jalsoochak/analytics/constant/**</exclude>
-                        <exclude>org/arghyam/jalsoochak/analytics/config/**</exclude>
                     </excludes>
                 </configuration>
                 <executions>
