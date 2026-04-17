@@ -986,6 +986,144 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.totalWaterSupplied").value(143200));
     }
 
+    @Test
+    void getSchemeStatusCount_whenServiceThrows_returnsInternalServerError() throws Exception {
+        when(schemeRegularityService.getSchemeStatusCountByLgd(any(), any()))
+                .thenThrow(new RuntimeException("db error"));
+
+        mockMvc.perform(get(BASE + "/schemes/status-count")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void getSchemesDashboard_whenServiceThrowsIllegalArg_returnsBadRequest() throws Exception {
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(
+                any(), any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("invalid"));
+
+        mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("parent_lgd_id", "101")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void getSchemesDashboard_whenServiceThrows_returnsInternalServerError() throws Exception {
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(
+                any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("unexpected"));
+
+        mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("parent_lgd_id", "101")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void getSchemeRegionReport_whenServiceThrows_returnsInternalServerError() throws Exception {
+        when(schemeRegularityService.getSchemeRegionReportByLgd(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("db error"));
+
+        mockMvc.perform(get(BASE + "/schemes/region-report")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("parent_lgd_id", "101")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void getOperatorAttendanceDayWise_whenServiceThrows_returnsInternalServerError() throws Exception {
+        when(operatorAttendanceQueryService.getDayWiseAttendance(any(), any(), any()))
+                .thenThrow(new RuntimeException("unexpected"));
+
+        mockMvc.perform(get(BASE + "/operator-attendance")
+                        .param("uuid", "11111111-1111-1111-1111-111111111111")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void getAnomalies_whenServiceThrowsIllegalArg_returnsBadRequest() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(
+                        9001, null, 10));
+        when(anomalyQueryService.getAnomaliesForUserSchemes(
+                any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("invalid range"));
+
+        mockMvc.perform(get(BASE + "/anomalies")
+                        .principal(buildJwtAuthentication()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void getAnomalies_whenServiceThrows_returnsInternalServerError() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(
+                        9001, null, 10));
+        when(anomalyQueryService.getAnomaliesForUserSchemes(
+                any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("db error"));
+
+        mockMvc.perform(get(BASE + "/anomalies")
+                        .principal(buildJwtAuthentication()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void getUserAlertTotals_whenServiceThrowsIllegalArg_returnsBadRequest() throws Exception {
+        when(userAlertTotalsService.getTotals(any(), any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("invalid"));
+
+        mockMvc.perform(get(BASE + "/officer/dashboard")
+                        .param("tenant_id", "10")
+                        .param("user_id", "9001")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void getUserAlertTotals_whenServiceThrows_returnsInternalServerError() throws Exception {
+        when(userAlertTotalsService.getTotals(any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("db error"));
+
+        mockMvc.perform(get(BASE + "/officer/dashboard")
+                        .param("tenant_id", "10")
+                        .param("user_id", "9001")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void getSchemePerformance_whenServiceThrows_returnsInternalServerError() throws Exception {
+        when(schemePerformanceRepository.findByTenantIdAndSchemeId(any(), any()))
+                .thenThrow(new RuntimeException("db error"));
+
+        mockMvc.perform(get(BASE + "/scheme-performance")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("schemeId", "11"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
     private static Stream<Arguments> schemeStatusValidRoutes() {
         return Stream.of(
                 Arguments.of("lgd_id", "101", true),

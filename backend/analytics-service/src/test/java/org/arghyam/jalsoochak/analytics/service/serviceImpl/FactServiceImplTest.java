@@ -506,6 +506,104 @@ class FactServiceImplTest {
     }
 
     @Test
+    void ingestMeterReading_nullSubmissionStatus_defaultsToSubmitted() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setReadingAt("2026-01-01T10:00:00");
+        event.setReadingDate("2026-01-01");
+        event.setSubmissionStatus(null);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
+        verify(meterReadingRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSubmissionStatus()).isEqualTo(1); // SUBMITTED
+    }
+
+    @Test
+    void ingestMeterReading_nullReadingType_defaultsToZero() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setReadingAt("2026-01-01T10:00:00");
+        event.setReadingDate("2026-01-01");
+        event.setReadingType(null);
+        event.setSubmissionStatus(1);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
+        verify(meterReadingRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getReadingType()).isEqualTo(0);
+    }
+
+    @Test
+    void ingestMeterReading_existingOperatorAttendance_doesNotSaveDuplicate() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setReadingAt("2026-01-01T10:00:00");
+        event.setReadingDate("2026-01-01");
+        event.setSubmissionStatus(1);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(true);
+
+        service.ingestMeterReading(event);
+
+        verify(dimOperatorAttendanceRepository, never()).save(any());
+    }
+
+    @Test
+    void ingestAnomalyRecorded_blankUuid_generatesNewUuid() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("   ");
+        event.setStatus(1);
+        event.setType(100); // non-water anomaly type
+        when(anomalyRepository.existsByUuid(any())).thenReturn(false);
+
+        service.ingestAnomalyRecorded(event);
+
+        ArgumentCaptor<Anomaly> captor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getUuid()).isNotBlank().isNotEqualTo("   ");
+    }
+
+    @Test
+    void ingestAnomalyRecorded_nullStatus_defaultsToOpen() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-null-status");
+        event.setStatus(null);
+        event.setType(100);
+        when(anomalyRepository.existsByUuid("uuid-null-status")).thenReturn(false);
+
+        service.ingestAnomalyRecorded(event);
+
+        ArgumentCaptor<Anomaly> captor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(1); // OPEN
+    }
+
+    @Test
+    void ingestTenantEscalation_nullOfficerId_skipsEscalationFact() {
+        TenantEscalationEvent event = buildEscalationEvent(buildOp(21, 5, "corr-no-officer", "11"));
+        event.setOfficerId(null);
+        when(dimTenantRepository.existsById(1)).thenReturn(true);
+
+        service.ingestTenantEscalation(event);
+
+        verify(escalationRepository, never()).save(any());
+        verify(anomalyRepository, times(1)).save(any()); // anomaly still saved
+    }
+
+    @Test
     void ingestSchemePerformance_whenBlankDate_fallsBackToToday() {
         SchemePerformanceEvent event = new SchemePerformanceEvent();
         event.setTenantId(1);
