@@ -80,6 +80,22 @@ class GlobalExceptionHandlerTest {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         }
+
+        @Test
+        @DisplayName("uses whole path as field name when path contains no dot")
+        void usesWholePathWhenNoDot() {
+            ConstraintViolation<?> violation = mock(ConstraintViolation.class);
+            Path path = mock(Path.class);
+            when(path.toString()).thenReturn("fieldOnly");
+            when(violation.getPropertyPath()).thenReturn(path);
+            when(violation.getMessage()).thenReturn("must not be blank");
+
+            ConstraintViolationException ex = new ConstraintViolationException(Set.of(violation));
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleConstraintViolation(ex);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(response.getBody()).isNotNull();
+        }
     }
 
     // ── MethodArgumentNotValidException ──────────────────────────────────────
