@@ -17,6 +17,7 @@ import org.springframework.kafka.support.SendResult;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -58,7 +59,7 @@ class KafkaProducerTest {
         @Test
         @DisplayName("returns true and logs OK when send succeeds with metadata")
         void returnsTrueWhenSendSucceeds() throws JsonProcessingException {
-            when(objectMapper.writeValueAsString(anyString())).thenReturn("{\"key\":\"value\"}");
+            when(objectMapper.writeValueAsString(any())).thenReturn("{\"key\":\"value\"}");
 
             @SuppressWarnings("unchecked")
             SendResult<String, String> sendResult = mock(SendResult.class);
@@ -73,7 +74,7 @@ class KafkaProducerTest {
         @Test
         @DisplayName("returns true and logs OK with metadata-unavailable fallback when getRecordMetadata throws")
         void returnsTrueWhenMetadataUnavailable() throws JsonProcessingException {
-            when(objectMapper.writeValueAsString(anyString())).thenReturn("{}");
+            when(objectMapper.writeValueAsString(any())).thenReturn("{}");
 
             // Completing with null causes NPE on res.getRecordMetadata(), exercising the inner catch
             when(kafkaTemplate.send(anyString(), anyString()))
@@ -85,7 +86,7 @@ class KafkaProducerTest {
         @Test
         @DisplayName("returns true and logs error when future completes exceptionally")
         void returnsTrueWhenFutureCompletesExceptionally() throws JsonProcessingException {
-            when(objectMapper.writeValueAsString(anyString())).thenReturn("{}");
+            when(objectMapper.writeValueAsString(any())).thenReturn("{}");
             when(kafkaTemplate.send(anyString(), anyString()))
                     .thenReturn(CompletableFuture.failedFuture(new RuntimeException("broker unavailable")));
 
@@ -95,7 +96,7 @@ class KafkaProducerTest {
         @Test
         @DisplayName("returns false when JSON serialization fails")
         void returnsFalseWhenSerializationFails() throws JsonProcessingException {
-            when(objectMapper.writeValueAsString(anyString()))
+            when(objectMapper.writeValueAsString(any()))
                     .thenThrow(mock(JsonProcessingException.class));
 
             assertThat(producer.publishJson("topic", "payload")).isFalse();
@@ -104,7 +105,7 @@ class KafkaProducerTest {
         @Test
         @DisplayName("returns false when kafkaTemplate.send throws unexpectedly")
         void returnsFalseWhenKafkaSendThrows() throws JsonProcessingException {
-            when(objectMapper.writeValueAsString(anyString())).thenReturn("{}");
+            when(objectMapper.writeValueAsString(any())).thenReturn("{}");
             when(kafkaTemplate.send(anyString(), anyString()))
                     .thenThrow(new RuntimeException("kafka down"));
 

@@ -14,10 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
@@ -32,22 +28,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers
 @ActiveProfiles("test")
 @DisplayName("PublicPumpOperatorRepository Integration Tests")
-class PublicPumpOperatorRepositoryIntegrationTest {
+class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
 
     private static final String SCHEMA = "tenant_mp";
-
-    @SuppressWarnings("resource")
-    @Container
-    static PostgreSQLContainer<?> postgres =
-            new PostgreSQLContainer<>("postgres:16-alpine")
-                    .withInitScript("sql/test-schema.sql");
-
-    @DynamicPropertySource
-    static void dbProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-    }
 
     @Autowired PublicPumpOperatorRepository repo;
     @Autowired PiiEncryptionService pii;
@@ -118,7 +101,7 @@ class PublicPumpOperatorRepositoryIntegrationTest {
     class ValidateSchemaName {
 
         @Test
-        @DisplayName("throws IllegalArgumentException for invalid schema name")
+        @DisplayName("throws InvalidDataAccessApiUsageException for invalid schema name")
         void throwsForInvalidSchemaName() {
             assertThatThrownBy(() -> repo.findPumpOperatorById("bad schema!", 1L))
                     .isInstanceOf(InvalidDataAccessApiUsageException.class)
@@ -361,7 +344,7 @@ class PublicPumpOperatorRepositoryIntegrationTest {
         }
 
         @Test
-        @DisplayName("returns correct count of readings for operators in scheme")
+        @DisplayName("returns count of distinct operators with at least one reading in scheme")
         void returnsCorrectCountWithReadings() {
             long poId = insertPumpOperator("919876540021", "PO Read Compliance");
             backdateUserCreatedAt(poId, 10);
@@ -370,7 +353,7 @@ class PublicPumpOperatorRepositoryIntegrationTest {
             insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(2));
             insertReading(schemeId, poId, 200.0, LocalDate.now().minusDays(1));
 
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId)).isEqualTo(2);
+            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId)).isEqualTo(1);
         }
     }
 

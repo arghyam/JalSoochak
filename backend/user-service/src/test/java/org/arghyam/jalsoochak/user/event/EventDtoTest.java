@@ -219,8 +219,8 @@ class EventDtoTest {
                     .eventType("SEND_LOGIN_OTP").officerPhoneNumber("919876543210")
                     .otp("000000").expiryMinutes(5).deliveryChannel("WHATSAPP").build();
 
-            // @Value class — toString includes all fields; ensure eventType is present
             assertThat(event.toString()).contains("SEND_LOGIN_OTP");
+            assertThat(event.toString()).doesNotContain("919876543210");
         }
     }
 

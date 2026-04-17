@@ -887,10 +887,10 @@ public class PublicPumpOperatorRepository {
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 )
-                SELECT COUNT(*)
-                FROM %s.flow_reading_table fr
-                JOIN latest_mapping l
-                  ON l.id = fr.created_by
+                SELECT COUNT(DISTINCT l.id)
+                FROM latest_mapping l
+                JOIN %s.flow_reading_table fr
+                  ON fr.created_by = l.id
                 WHERE fr.deleted_at IS NULL
                   AND l.onboarding_date IS NOT NULL
                   AND fr.reading_date BETWEEN l.onboarding_date AND CURRENT_DATE

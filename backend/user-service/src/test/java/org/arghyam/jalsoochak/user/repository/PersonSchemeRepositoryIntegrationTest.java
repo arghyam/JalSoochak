@@ -14,12 +14,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -32,22 +29,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers
 @ActiveProfiles("test")
 @DisplayName("PersonSchemeRepository Integration Tests")
-class PersonSchemeRepositoryIntegrationTest {
+class PersonSchemeRepositoryIntegrationTest extends AbstractPostgresIT {
 
     private static final String SCHEMA = "tenant_mp";
-
-    @SuppressWarnings("resource")
-    @Container
-    static PostgreSQLContainer<?> postgres =
-            new PostgreSQLContainer<>("postgres:16-alpine")
-                    .withInitScript("sql/test-schema.sql");
-
-    @DynamicPropertySource
-    static void dbProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-    }
 
     @Autowired PersonSchemeRepository repo;
     @Autowired PiiEncryptionService pii;
@@ -109,7 +93,7 @@ class PersonSchemeRepositoryIntegrationTest {
     class ValidateSchemaName {
 
         @Test
-        @DisplayName("throws IllegalArgumentException for null schema name")
+        @DisplayName("throws InvalidDataAccessApiUsageException for null schema name")
         void throwsForNull() {
             assertThatThrownBy(() -> repo.countSchemesByPerson(null, 1L, null))
                     .isInstanceOf(InvalidDataAccessApiUsageException.class)
@@ -117,7 +101,7 @@ class PersonSchemeRepositoryIntegrationTest {
         }
 
         @Test
-        @DisplayName("throws IllegalArgumentException for schema with invalid characters")
+        @DisplayName("throws InvalidDataAccessApiUsageException for schema with invalid characters")
         void throwsForInvalidChars() {
             assertThatThrownBy(() -> repo.countSchemesByPerson("tenant-mp; DROP TABLE", 1L, null))
                     .isInstanceOf(InvalidDataAccessApiUsageException.class)
@@ -212,6 +196,14 @@ class PersonSchemeRepositoryIntegrationTest {
             List<PersonSchemeDetailsDTO> asc =
                     repo.listSchemesByPerson(SCHEMA, personId, null, "stateSchemeId", "asc", 0, 10);
             assertThat(asc).hasSize(2);
+            assertThat(asc.get(0).stateSchemeId()).isEqualTo("A-1");
+            assertThat(asc.get(1).stateSchemeId()).isEqualTo("B-2");
+
+            List<PersonSchemeDetailsDTO> desc =
+                    repo.listSchemesByPerson(SCHEMA, personId, null, "stateSchemeId", "desc", 0, 10);
+            assertThat(desc).hasSize(2);
+            assertThat(desc.get(0).stateSchemeId()).isEqualTo("B-2");
+            assertThat(desc.get(1).stateSchemeId()).isEqualTo("A-1");
         }
 
         @Test
@@ -256,6 +248,8 @@ class PersonSchemeRepositoryIntegrationTest {
             SchemeDetailsWithReportingDTO dto = repo.getSchemeDetails(SCHEMA, schemeId);
             assertThat(dto).isNotNull();
             assertThat(dto.lastSubmissionAt()).isNotNull();
+            assertThat(dto.reportingRatePercent()).isNotNull();
+            assertThat(dto.reportingRatePercent()).isBetween(BigDecimal.ZERO, BigDecimal.valueOf(100));
         }
     }
 

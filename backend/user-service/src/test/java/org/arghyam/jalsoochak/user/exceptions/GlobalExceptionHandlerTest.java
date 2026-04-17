@@ -446,7 +446,7 @@ class GlobalExceptionHandlerTest {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
             assertThat(response.getBody()).isNotNull();
-            assertThat(response.getBody().getMessage()).isNotBlank();
+            assertThat(response.getBody().getMessage()).isEqualTo(ex.getMessage());
         }
     }
 
@@ -491,7 +491,10 @@ class GlobalExceptionHandlerTest {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             String message = response.getBody().getMessage();
-            assertThat(message).contains("WRONG").contains("status").contains("INACTIVE").contains("ACTIVE");
+            assertThat(message).contains("WRONG").contains("status");
+            for (AdminUserStatus s : AdminUserStatus.values()) {
+                assertThat(message).contains(s.name());
+            }
         }
 
         @Test

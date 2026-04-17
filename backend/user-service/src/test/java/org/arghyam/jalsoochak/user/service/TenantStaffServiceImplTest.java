@@ -41,8 +41,11 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import org.mockito.ArgumentCaptor;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -189,11 +192,11 @@ class TenantStaffServiceImplTest {
         void nullStatusMapsToNull() {
             TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
             when(tenantStaffRepository.listStaffPage(
-                    any(), any(), eq(null), any(), any(), any(), anyInt(), anyInt()))
+                    any(), any(), isNull(), any(), any(), any(), anyInt(), anyInt()))
                     .thenReturn(staffPage);
 
             service.listStaff("mp", 0, 20, "id", "desc", null, null, null);
-            verify(tenantStaffRepository).listStaffPage(any(), any(), eq(null), any(), any(), any(), anyInt(), anyInt());
+            verify(tenantStaffRepository).listStaffPage(any(), any(), isNull(), any(), any(), any(), anyInt(), anyInt());
         }
 
         @Test
@@ -300,7 +303,7 @@ class TenantStaffServiceImplTest {
                     .hasMessageContaining("already has role");
         }
 
-        private void mockKeycloakChain(String uuid) {
+        private UserResource mockKeycloakChain(String uuid) {
             Keycloak kc = mock(Keycloak.class);
             RealmResource realm = mock(RealmResource.class);
             UsersResource users = mock(UsersResource.class);
@@ -314,6 +317,7 @@ class TenantStaffServiceImplTest {
             when(realm.users()).thenReturn(users);
             when(users.get(uuid)).thenReturn(userResource);
             when(userResource.toRepresentation()).thenReturn(rep);
+            return userResource;
         }
 
         @Test
@@ -390,7 +394,7 @@ class TenantStaffServiceImplTest {
 
             when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
             when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
-            mockKeycloakChain("kc-uuid");
+            UserResource userResource = mockKeycloakChain("kc-uuid");
             // Simulate failure at DB role update step
             when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L))
                     .thenThrow(new RuntimeException("DB error"));
@@ -402,6 +406,13 @@ class TenantStaffServiceImplTest {
             // Verify compensation: old role re-assigned and new role removed
             verify(keycloakAdminHelper).assignRoleToUser("kc-uuid", "SECTION_OFFICER");
             verify(keycloakAdminHelper).removeRoleFromUser("kc-uuid", "DISTRICT_OFFICER");
+
+            // Verify Keycloak attribute rollback: user_type restored to original role
+            ArgumentCaptor<UserRepresentation> repCaptor =
+                    ArgumentCaptor.forClass(UserRepresentation.class);
+            verify(userResource, times(2)).update(repCaptor.capture());
+            UserRepresentation rollbackRep = repCaptor.getAllValues().get(1);
+            assertThat(rollbackRep.getAttributes().get("user_type")).isEqualTo(List.of("SECTION_OFFICER"));
         }
 
         @Test
