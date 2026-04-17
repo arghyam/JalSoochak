@@ -197,7 +197,6 @@ public class TelemetryTenantRepository {
                 WHERE usm.user_id = ?
                   AND usm.status = 1
                   AND usm.deleted_at IS NULL
-                  AND sm.status = 1
                   AND sm.deleted_at IS NULL
                 GROUP BY usm.scheme_id, sm.scheme_name
                 ORDER BY mapping_order

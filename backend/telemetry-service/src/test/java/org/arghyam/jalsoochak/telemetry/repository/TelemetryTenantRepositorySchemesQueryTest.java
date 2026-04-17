@@ -42,7 +42,6 @@ class TelemetryTenantRepositorySchemesQueryTest {
         assertTrue(sql.contains("WHERE usm.user_id = ?"));
         assertTrue(sql.contains("AND usm.deleted_at IS NULL"));
         assertTrue(sql.contains("AND sm.deleted_at IS NULL"));
-        assertTrue(sql.contains("AND sm.status = 1"));
         assertTrue(sql.contains("GROUP BY usm.scheme_id, sm.scheme_name"));
         assertTrue(sql.contains("ORDER BY mapping_order"));
     }
