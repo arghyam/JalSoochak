@@ -89,7 +89,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getAverageSchemeRegularity_cacheHit_returnsCachedAndSkipsRepository() throws Exception {
         mockRedisValueOps();
-        String key = ":scheme_regularity:tenant:1:lgd:101:start:2026-01-01:end:2026-01-03";
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:2026-01-01:end:2026-01-03:v2";
         AverageSchemeRegularityResponse cached = AverageSchemeRegularityResponse.builder()
                 .lgdId(101)
                 .averageRegularity(new BigDecimal("0.7777"))
@@ -107,7 +107,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getAverageSchemeRegularity_cacheMiss_computesAndWritesCache() throws Exception {
         mockRedisValueOps();
-        String key = ":scheme_regularity:tenant:1:lgd:101:start:2026-01-01:end:2026-01-03";
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:2026-01-01:end:2026-01-03:v2";
         when(valueOperations.get(key)).thenReturn(null);
         when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, START, END))
                 .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3));
@@ -698,7 +698,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getAverageSchemeRegularityByDepartment_cacheMiss_returnsComputedResponse() throws Exception {
         mockRedisValueOps();
-        String key = ":scheme_regularity:tenant:1:department:201:start:2026-01-01:end:2026-01-03";
+        String key = ":scheme_regularity:tenant:1:department:201:start:2026-01-01:end:2026-01-03:v2";
         when(valueOperations.get(key)).thenReturn(null);
         when(schemeRegularityRepository.getSchemeRegularityMetricsByDepartment(1, 201, START, END))
                 .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 4));
@@ -714,7 +714,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getAverageSchemeRegularityByDepartmentForChildRegions_aggregatesChildRows() throws Exception {
         mockRedisValueOps();
-        String key = ":scheme_regularity:tenant:1:department:201:scope:child:start:2026-01-01:end:2026-01-03";
+        String key = ":scheme_regularity:tenant:1:department:201:scope:child:start:2026-01-01:end:2026-01-03:v2";
         when(valueOperations.get(key)).thenReturn(null);
         when(schemeRegularityRepository.getDepartmentLevelForTenant(1, 201)).thenReturn(2);
         when(schemeRegularityRepository.getChildSchemeRegularityMetricsByDepartment(1, 201, START, END))
@@ -1483,7 +1483,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getAverageSchemeRegularityByDepartment_cacheHit_skipsRepository() throws Exception {
         mockRedisValueOps();
-        String key = ":scheme_regularity:tenant:1:department:201:start:2026-01-01:end:2026-01-03";
+        String key = ":scheme_regularity:tenant:1:department:201:start:2026-01-01:end:2026-01-03:v2";
         AverageSchemeRegularityResponse cached = AverageSchemeRegularityResponse.builder()
                 .parentDepartmentId(201).schemeCount(3).build();
         when(valueOperations.get(key)).thenReturn("cached");
@@ -1498,7 +1498,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getAverageSchemeRegularityForChildRegions_cacheHit_skipsRepository() throws Exception {
         mockRedisValueOps();
-        String key = ":scheme_regularity:tenant:1:lgd:101:scope:child:start:2026-01-01:end:2026-01-03";
+        String key = ":scheme_regularity:tenant:1:lgd:101:scope:child:start:2026-01-01:end:2026-01-03:v2";
         AverageSchemeRegularityResponse cached = AverageSchemeRegularityResponse.builder()
                 .lgdId(101).schemeCount(4).build();
         when(valueOperations.get(key)).thenReturn("cached");
@@ -1553,7 +1553,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getAverageSchemeRegularityByDepartmentForChildRegions_cacheHit_skipsRepository() throws Exception {
         mockRedisValueOps();
-        String key = ":scheme_regularity:tenant:1:department:201:scope:child:start:2026-01-01:end:2026-01-03";
+        String key = ":scheme_regularity:tenant:1:department:201:scope:child:start:2026-01-01:end:2026-01-03:v2";
         AverageSchemeRegularityResponse cached = AverageSchemeRegularityResponse.builder()
                 .parentDepartmentId(201).schemeCount(4).build();
         when(valueOperations.get(key)).thenReturn("cached");

@@ -54,7 +54,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         String cacheKey = TENANT_DETAILS_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":parent:" + parentSegment
-                + ":v3";
+                + ":v4";
         TenantDetailsResponse cached = readFromCache(cacheKey);
         if (cached != null) {
             return cached;
@@ -109,7 +109,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         String cacheKey = TENANT_DETAILS_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":parent_department:" + parentDepartmentId
-                + ":v3";
+                + ":v4";
         TenantDetailsResponse cached = readFromCache(cacheKey);
         if (cached != null) {
             return cached;
@@ -172,7 +172,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                 + ":parent:" + (parentLgdId == null ? "all" : parentLgdId)
                 + ":from:" + startDate
                 + ":to:" + endDate
-                + ":v3";
+                + ":v4";
 
         TenantDetailsResponse cached = readFromCache(cacheKey);
         if (cached != null) {
@@ -219,7 +219,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                 + ":parent_department:" + parentDepartmentId
                 + ":from:" + startDate
                 + ":to:" + endDate
-                + ":v3";
+                + ":v4";
 
         TenantDetailsResponse cached = readFromCache(cacheKey);
         if (cached != null) {
