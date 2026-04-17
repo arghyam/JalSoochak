@@ -1,0 +1,286 @@
+package org.arghyam.jalsoochak.user.service;
+
+import org.arghyam.jalsoochak.user.config.KeycloakProvider;
+import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
+import org.arghyam.jalsoochak.user.dto.request.UpdateStaffRoleRequestDTO;
+import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
+import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
+import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
+import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
+import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
+import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
+import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
+import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
+import org.arghyam.jalsoochak.user.service.serviceImpl.TenantStaffServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.keycloak.admin.client.Keycloak;
+import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.admin.client.resource.UserResource;
+import org.keycloak.admin.client.resource.UsersResource;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+@DisplayName("TenantStaffServiceImpl")
+class TenantStaffServiceImplTest {
+
+    @Mock private TenantStaffRepository tenantStaffRepository;
+    @Mock private UserTenantRepository userTenantRepository;
+    @Mock private UserCommonRepository userCommonRepository;
+    @Mock private KeycloakAdminHelper keycloakAdminHelper;
+    @Mock private KeycloakProvider keycloakProvider;
+    @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+
+    private TenantStaffServiceImpl service;
+
+    private static final TenantUserRecord SECTION_OFFICER = new TenantUserRecord(
+            10L, 1, "919876543210", "officer@test.com", 3L, "SECTION_OFFICER",
+            "Officer", "kc-uuid", TenantUserStatus.ACTIVE.code, null);
+
+    @BeforeEach
+    void setUp() {
+        service = new TenantStaffServiceImpl(
+                tenantStaffRepository, userTenantRepository, userCommonRepository,
+                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher);
+        ReflectionTestUtils.setField(service, "allowedUpdateRoles",
+                List.of("SECTION_OFFICER", "DISTRICT_OFFICER"));
+    }
+
+    // --- listStaff ---
+
+    @Nested
+    @DisplayName("listStaff")
+    class ListStaff {
+
+        @Test
+        @DisplayName("delegates to repository with resolved schema and default pagination")
+        void delegatesToRepository() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(
+                    List.of(TenantStaffResponseDTO.builder().id(1L).build()), 1L);
+            when(tenantStaffRepository.listStaffPage(
+                    eq("tenant_mp"), any(), any(), any(), anyString(), anyString(), anyInt(), anyInt()))
+                    .thenReturn(staffPage);
+
+            PageResponseDTO<TenantStaffResponseDTO> result =
+                    service.listStaff("mp", 0, 20, "id", "desc", null, null, null);
+
+            assertThat(result.getContent()).hasSize(1);
+            assertThat(result.getTotalElements()).isEqualTo(1L);
+        }
+
+        @Test
+        @DisplayName("clamps limit below 1 to 1")
+        void clampsLimitBelow1() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(any(), any(), any(), any(), any(), any(), eq(0), eq(1)))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", 0, 0, "id", "desc", null, null, null);
+            verify(tenantStaffRepository).listStaffPage(any(), any(), any(), any(), any(), any(), eq(0), eq(1));
+        }
+
+        @Test
+        @DisplayName("clamps limit above 100 to 100")
+        void clampsLimitAbove100() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(any(), any(), any(), any(), any(), any(), eq(0), eq(100)))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", 0, 500, "id", "desc", null, null, null);
+            verify(tenantStaffRepository).listStaffPage(any(), any(), any(), any(), any(), any(), eq(0), eq(100));
+        }
+
+        @Test
+        @DisplayName("normalizes comma-separated role strings into individual entries")
+        void normalizesCommaDelimitedRoles() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(
+                    eq("tenant_mp"),
+                    eq(List.of("section_officer", "district_officer")),
+                    any(), any(), any(), any(), anyInt(), anyInt()))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", 0, 20, "id", "desc",
+                    List.of("SECTION_OFFICER,DISTRICT_OFFICER"), null, null);
+
+            verify(tenantStaffRepository).listStaffPage(
+                    eq("tenant_mp"),
+                    eq(List.of("section_officer", "district_officer")),
+                    any(), any(), any(), any(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("parses ACTIVE status string to integer 1")
+        void parsesActiveStatus() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(
+                    any(), any(), eq(1), any(), any(), any(), anyInt(), anyInt()))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", 0, 20, "id", "desc", null, "ACTIVE", null);
+
+            verify(tenantStaffRepository).listStaffPage(
+                    any(), any(), eq(1), any(), any(), any(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("parses INACTIVE status string to integer 0")
+        void parsesInactiveStatus() {
+            TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
+            when(tenantStaffRepository.listStaffPage(
+                    any(), any(), eq(0), any(), any(), any(), anyInt(), anyInt()))
+                    .thenReturn(staffPage);
+
+            service.listStaff("mp", 0, 20, "id", "desc", null, "INACTIVE", null);
+
+            verify(tenantStaffRepository).listStaffPage(
+                    any(), any(), eq(0), any(), any(), any(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("throws IllegalArgumentException for unknown status string")
+        void throwsForUnknownStatus() {
+            assertThatThrownBy(() ->
+                    service.listStaff("mp", 0, 20, "id", "desc", null, "UNKNOWN", null))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Unknown status");
+        }
+    }
+
+    // --- countStaffByRole ---
+
+    @Nested
+    @DisplayName("countStaffByRole")
+    class CountStaffByRole {
+
+        @Test
+        @DisplayName("delegates to repository")
+        void delegatesToRepository() {
+            List<RoleCountDTO> counts = List.of(new RoleCountDTO("SECTION_OFFICER", 5));
+            when(tenantStaffRepository.countByRole("tenant_mp", null, null)).thenReturn(counts);
+
+            assertThat(service.countStaffByRole("mp", null, null)).hasSize(1);
+        }
+    }
+
+    // --- updateStaffRole ---
+
+    @Nested
+    @DisplayName("updateStaffRole")
+    class UpdateStaffRole {
+
+        private Authentication callerAuth(String tenantCode) {
+            Authentication auth = mock(Authentication.class);
+            when(auth.getAuthorities()).thenAnswer(inv ->
+                    List.of(new SimpleGrantedAuthority("TENANT_" + tenantCode.toUpperCase())));
+            return auth;
+        }
+
+        @Test
+        @DisplayName("throws ForbiddenAccessException when caller tenant does not match request tenant")
+        void throwsWhenTenantMismatch() {
+            Authentication auth = callerAuth("TR");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SECTION_OFFICER");
+
+            assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
+                    .isInstanceOf(ForbiddenAccessException.class);
+        }
+
+        @Test
+        @DisplayName("throws IllegalArgumentException when requested role is not in allowed list")
+        void throwsWhenRoleNotAllowed() {
+            Authentication auth = callerAuth("MP");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUPER_USER");
+
+            assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Role must be one of");
+        }
+
+        @Test
+        @DisplayName("throws ResourceNotFoundException when user not found")
+        void throwsWhenUserNotFound() {
+            Authentication auth = callerAuth("MP");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
+                    .hasMessageContaining("User not found");
+        }
+
+        @Test
+        @DisplayName("throws IllegalArgumentException when user already has the requested role")
+        void throwsWhenSameRole() {
+            Authentication auth = callerAuth("MP");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SECTION_OFFICER");
+            when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
+
+            assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("already has role");
+        }
+
+        @Test
+        @DisplayName("successfully updates role and returns updated staff DTO")
+        void updatesRoleSuccessfully() {
+            Authentication auth = callerAuth("MP");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+
+            TenantStaffResponseDTO updated = TenantStaffResponseDTO.builder()
+                    .id(10L).role("DISTRICT_OFFICER").build();
+
+            when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L)).thenReturn(1);
+            when(tenantStaffRepository.findStaffById("tenant_mp", 10L)).thenReturn(Optional.of(updated));
+
+            // Mock Keycloak chain
+            Keycloak kc = mock(Keycloak.class);
+            RealmResource realm = mock(RealmResource.class);
+            UsersResource users = mock(UsersResource.class);
+            UserResource userResource = mock(UserResource.class);
+            UserRepresentation rep = new UserRepresentation();
+            rep.setAttributes(new HashMap<>());
+
+            when(keycloakProvider.getAdminInstance()).thenReturn(kc);
+            when(keycloakProvider.getRealm()).thenReturn("jalsoochak-realm");
+            when(kc.realm("jalsoochak-realm")).thenReturn(realm);
+            when(realm.users()).thenReturn(users);
+            when(users.get("kc-uuid")).thenReturn(userResource);
+            when(userResource.toRepresentation()).thenReturn(rep);
+
+            TenantStaffResponseDTO result = service.updateStaffRole(10L, req, auth);
+
+            assertThat(result.role()).isEqualTo("DISTRICT_OFFICER");
+            verify(userTenantRepository).findUserById("tenant_mp", 10L);
+            verify(userCommonRepository).findUserTypeIdByName("DISTRICT_OFFICER");
+            verify(userCommonRepository).findTenantIdByStateCode("mp");
+            verify(userTenantRepository).updateUserRole("tenant_mp", 10L, 4L);
+            verify(tenantStaffRepository).findStaffById("tenant_mp", 10L);
+        }
+    }
+}
