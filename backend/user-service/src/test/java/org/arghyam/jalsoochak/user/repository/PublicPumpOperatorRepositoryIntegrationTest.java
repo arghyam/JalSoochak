@@ -23,6 +23,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDate;
 import java.util.List;
 
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -94,6 +96,11 @@ class PublicPumpOperatorRepositoryIntegrationTest {
                 """, userId, schemeId);
     }
 
+    private void backdateUserCreatedAt(long userId, int daysAgo) {
+        jdbc.update("UPDATE tenant_mp.user_table SET created_at = NOW() - (? * INTERVAL '1 day') WHERE id = ?",
+                daysAgo, userId);
+    }
+
     private void insertReading(long schemeId, long createdBy, double reading, LocalDate date) {
         jdbc.update("""
                 INSERT INTO tenant_mp.flow_reading_table
@@ -114,7 +121,7 @@ class PublicPumpOperatorRepositoryIntegrationTest {
         @DisplayName("throws IllegalArgumentException for invalid schema name")
         void throwsForInvalidSchemaName() {
             assertThatThrownBy(() -> repo.findPumpOperatorById("bad schema!", 1L))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(InvalidDataAccessApiUsageException.class)
                     .hasMessageContaining("Invalid schema name");
         }
     }
@@ -357,6 +364,7 @@ class PublicPumpOperatorRepositoryIntegrationTest {
         @DisplayName("returns correct count of readings for operators in scheme")
         void returnsCorrectCountWithReadings() {
             long poId = insertPumpOperator("919876540021", "PO Read Compliance");
+            backdateUserCreatedAt(poId, 10);
             long schemeId = insertScheme("CPC-2");
             mapUserToScheme(poId, schemeId);
             insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(2));
@@ -396,6 +404,7 @@ class PublicPumpOperatorRepositoryIntegrationTest {
         @DisplayName("returns compliance rows with reading data")
         void returnsComplianceRowsWithReadings() {
             long poId = insertPumpOperator("919876540023", "PO Compliance List");
+            backdateUserCreatedAt(poId, 10);
             long schemeId = insertScheme("LPSC-2");
             mapUserToScheme(poId, schemeId);
             insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(1));
@@ -412,6 +421,7 @@ class PublicPumpOperatorRepositoryIntegrationTest {
         @DisplayName("respects offset and limit pagination")
         void respectsPagination() {
             long poId = insertPumpOperator("919876540024", "PO Pagination");
+            backdateUserCreatedAt(poId, 10);
             long schemeId = insertScheme("LPSC-3");
             mapUserToScheme(poId, schemeId);
             for (int i = 1; i <= 5; i++) {

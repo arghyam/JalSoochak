@@ -566,10 +566,10 @@ public class PublicPumpOperatorRepository {
                 LEFT JOIN LATERAL (
                     SELECT %s AS last_submission_at,
                            %s AS confirmed_reading
-                    FROM %s.flow_reading_table
-                    WHERE deleted_at IS NULL
-                      AND created_by = u.id
-                    ORDER BY %s DESC, id DESC
+                    FROM %s.flow_reading_table fr
+                    WHERE fr.deleted_at IS NULL
+                      AND fr.created_by = u.id
+                    ORDER BY fr.%s DESC, fr.id DESC
                     LIMIT 1
                 ) fr ON true
                 WHERE u.deleted_at IS NULL
@@ -611,10 +611,10 @@ public class PublicPumpOperatorRepository {
                 LEFT JOIN LATERAL (
                     SELECT %s AS last_submission_at,
                            %s AS confirmed_reading
-                    FROM %s.flow_reading_table
-                    WHERE deleted_at IS NULL
-                      AND created_by = u.id
-                    ORDER BY %s DESC, id DESC
+                    FROM %s.flow_reading_table fr
+                    WHERE fr.deleted_at IS NULL
+                      AND fr.created_by = u.id
+                    ORDER BY fr.%s DESC, fr.id DESC
                     LIMIT 1
                 ) fr ON true
                 WHERE u.deleted_at IS NULL

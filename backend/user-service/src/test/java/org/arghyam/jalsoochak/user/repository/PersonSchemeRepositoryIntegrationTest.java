@@ -23,6 +23,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDate;
 import java.util.List;
 
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -110,7 +112,7 @@ class PersonSchemeRepositoryIntegrationTest {
         @DisplayName("throws IllegalArgumentException for null schema name")
         void throwsForNull() {
             assertThatThrownBy(() -> repo.countSchemesByPerson(null, 1L, null))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(InvalidDataAccessApiUsageException.class)
                     .hasMessageContaining("Invalid schema name");
         }
 
@@ -118,7 +120,7 @@ class PersonSchemeRepositoryIntegrationTest {
         @DisplayName("throws IllegalArgumentException for schema with invalid characters")
         void throwsForInvalidChars() {
             assertThatThrownBy(() -> repo.countSchemesByPerson("tenant-mp; DROP TABLE", 1L, null))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(InvalidDataAccessApiUsageException.class)
                     .hasMessageContaining("Invalid schema name");
         }
     }
@@ -527,7 +529,7 @@ class PersonSchemeRepositoryIntegrationTest {
         @DisplayName("throws IllegalArgumentException for invalid status string")
         void throwsForInvalidStatus() {
             assertThatThrownBy(() -> repo.parseStatus("unknown"))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(InvalidDataAccessApiUsageException.class)
                     .hasMessageContaining("Invalid status value");
         }
     }

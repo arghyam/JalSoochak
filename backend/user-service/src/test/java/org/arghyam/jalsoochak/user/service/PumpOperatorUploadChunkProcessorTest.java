@@ -195,8 +195,6 @@ class PumpOperatorUploadChunkProcessorTest {
                     anyString(), anyInt(), anyString(), anyString(), anyLong())).thenReturn(null);
             when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt()))
                     .thenReturn(new int[]{});
-            when(userUploadRepository.markUserSchemeMappingsDeleted(eq(SCHEMA), anyList(), anyInt()))
-                    .thenReturn(0);
 
             PumpOperatorUploadChunkProcessor.ChunkResult result =
                     processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), 1, 1,
@@ -251,8 +249,6 @@ class PumpOperatorUploadChunkProcessorTest {
                     .thenReturn(Optional.of(existingUser));
             when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt()))
                     .thenReturn(new int[]{});
-            when(userUploadRepository.markUserSchemeMappingsDeleted(eq(SCHEMA), anyList(), anyInt()))
-                    .thenReturn(0);
 
             PumpOperatorUploadChunkProcessor.ChunkResult result =
                     processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), 1, 1,
@@ -277,8 +273,6 @@ class PumpOperatorUploadChunkProcessorTest {
 
             when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt()))
                     .thenReturn(new int[]{});
-            when(userUploadRepository.markUserSchemeMappingsDeleted(eq(SCHEMA), anyList(), anyInt()))
-                    .thenReturn(0);
 
             PumpOperatorUploadChunkProcessor.ChunkResult result =
                     processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), 1, 1,
@@ -296,8 +290,6 @@ class PumpOperatorUploadChunkProcessorTest {
             when(userUploadRepository.findSchemeId(SCHEMA, "SS-MISSING", null)).thenReturn(null);
             when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt()))
                     .thenReturn(new int[]{});
-            when(userUploadRepository.markUserSchemeMappingsDeleted(eq(SCHEMA), anyList(), anyInt()))
-                    .thenReturn(0);
 
             PumpOperatorUploadChunkProcessor.ChunkResult result =
                     processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), 1, 1,
