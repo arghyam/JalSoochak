@@ -163,6 +163,25 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <!-- Spring Boot entry point -->
+                        <exclude>org/arghyam/jalsoochak/user/UserServiceApplication.class</exclude>
+                        <!-- Pure config/infrastructure beans — no business logic -->
+                        <exclude>org/arghyam/jalsoochak/user/config/DataSourceConfig.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/SecurityConfig.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/WebConfig.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/OpenApiConfig.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/CommonApiResponses.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/KeycloakProvider.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/RequiresUserAccess.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/kafka/KafkaConfig.class</exclude>
+                        <!-- @ConfigurationProperties — setters/getters only, no logic -->
+                        <exclude>org/arghyam/jalsoochak/user/config/properties/**</exclude>
+                        <!-- DTOs — pure data containers, Lombok-generated equals/hashCode/builder -->
+                        <exclude>org/arghyam/jalsoochak/user/dto/**</exclude>
+                    </excludes>
+                </configuration>
                 <executions>
                     <execution>
                         <id>prepare-agent</id>
