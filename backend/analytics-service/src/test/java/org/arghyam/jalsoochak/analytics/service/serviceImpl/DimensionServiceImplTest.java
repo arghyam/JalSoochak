@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
@@ -24,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Optional;
@@ -32,9 +34,12 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -50,6 +55,8 @@ class DimensionServiceImplTest {
     private DimLgdLocationRepository dimLgdLocationRepository;
     @Mock
     private DimDepartmentLocationRepository dimDepartmentLocationRepository;
+    @Mock
+    private JdbcTemplate jdbcTemplate;
 
     @InjectMocks
     private DimensionServiceImpl service;
@@ -280,6 +287,73 @@ class DimensionServiceImplTest {
         assertThatThrownBy(() -> service.updateWaterSupplyThreshold(event))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("99");
+    }
+
+    @Test
+    void replaceUserSchemeMappings_happyPath_deletesExistingAndInsertsNew() {
+        UserSchemeMappingsReplacedEvent event = new UserSchemeMappingsReplacedEvent();
+        event.setUserId(11);
+        event.setTenantId(1);
+        event.setSchemeIds(List.of(101, 102));
+        event.setStatus(1);
+
+        service.replaceUserSchemeMappings(event);
+
+        // 1 DELETE + 2 INSERT = 3 total JdbcTemplate.update calls
+        verify(jdbcTemplate, times(1)).update(anyString(), eq(1), eq(11));
+        verify(jdbcTemplate, times(2)).update(anyString(), any(), eq(11), any(), eq(1), eq(1));
+    }
+
+    @Test
+    void replaceUserSchemeMappings_nullUserId_skipsWithoutJdbcCall() {
+        UserSchemeMappingsReplacedEvent event = new UserSchemeMappingsReplacedEvent();
+        event.setUserId(null);
+        event.setTenantId(1);
+        event.setSchemeIds(List.of(101));
+
+        service.replaceUserSchemeMappings(event);
+
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    void replaceUserSchemeMappings_nullTenantId_skipsWithoutJdbcCall() {
+        UserSchemeMappingsReplacedEvent event = new UserSchemeMappingsReplacedEvent();
+        event.setUserId(11);
+        event.setTenantId(null);
+        event.setSchemeIds(List.of(101));
+
+        service.replaceUserSchemeMappings(event);
+
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    void replaceUserSchemeMappings_emptySchemeIds_onlyDeletesWithoutInsert() {
+        UserSchemeMappingsReplacedEvent event = new UserSchemeMappingsReplacedEvent();
+        event.setUserId(11);
+        event.setTenantId(1);
+        event.setSchemeIds(List.of());
+        event.setStatus(1);
+
+        service.replaceUserSchemeMappings(event);
+
+        verify(jdbcTemplate, times(1)).update(anyString(), eq(1), eq(11));
+        verify(jdbcTemplate, never()).update(anyString(), any(), eq(11), any(), any(), any());
+    }
+
+    @Test
+    void replaceUserSchemeMappings_nullStatus_defaultsToStatusOne() {
+        UserSchemeMappingsReplacedEvent event = new UserSchemeMappingsReplacedEvent();
+        event.setUserId(11);
+        event.setTenantId(1);
+        event.setSchemeIds(List.of(101));
+        event.setStatus(null);
+
+        service.replaceUserSchemeMappings(event);
+
+        verify(jdbcTemplate, times(1)).update(anyString(), eq(1), eq(11));
+        verify(jdbcTemplate, times(1)).update(anyString(), any(), eq(11), eq(101), eq(1), eq(1));
     }
 
     @Test

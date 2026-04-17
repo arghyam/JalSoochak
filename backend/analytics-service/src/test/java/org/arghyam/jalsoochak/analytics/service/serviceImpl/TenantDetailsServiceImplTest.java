@@ -105,7 +105,7 @@ class TenantDetailsServiceImplTest {
     @Test
     void getTenantDetails_cacheHit_returnsCachedResponse() throws Exception {
         mockRedisValueOps();
-        String key = "analytics-service:api-cache:get_tenant_details:tenant:1:parent:all:v3";
+        String key = "analytics-service:api-cache:get_tenant_details:tenant:1:parent:all:v4";
         TenantDetailsResponse cached = TenantDetailsResponse.builder().tenantId(1).stateCode("mp").build();
         when(valueOperations.get(key)).thenReturn("cached");
         when(objectMapper.readValue("cached", TenantDetailsResponse.class)).thenReturn(cached);
@@ -284,7 +284,7 @@ class TenantDetailsServiceImplTest {
                 + ":parent:" + parentLgdId
                 + ":from:" + start
                 + ":to:" + end
-                + ":v3";
+                + ":v4";
 
         when(dimTenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant(tenantId, "mp")));
         when(tenantBoundaryRepository.getLocationLevel(parentLgdId)).thenReturn(1);
@@ -412,7 +412,7 @@ class TenantDetailsServiceImplTest {
                 + ":parent_department:" + parentDepartmentId
                 + ":from:" + start
                 + ":to:" + end
-                + ":v3";
+                + ":v4";
 
         TenantDetailsResponse cached = TenantDetailsResponse.builder()
                 .tenantId(tenantId)

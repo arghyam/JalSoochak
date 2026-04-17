@@ -1046,6 +1046,7 @@ public class GlificMeterWorkflowService {
                             null
                     ));
 
+            BigDecimal effectiveConfirmedReading = manualReadingValue;
             if (!isMeterReplaced
                     && previousSnapshotOpt.isPresent()
                     && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
@@ -1075,23 +1076,12 @@ public class GlificMeterWorkflowService {
                         AnomalyConstants.STATUS_OPEN,
                         correlationId
                 );
-                return CreateReadingResponse.builder()
-                        .success(false)
-                        .message(localizationService.localizeMessage(
-                                "Reading cannot be less than previous confirmed reading. Submitted reading: "
-                                        + toPlain(manualReadingValue) + ". Previous reading: "
-                                        + toPlain(previousSnapshot.confirmedReading()) + ".",
-                                languageKey
-                        ))
-                        .qualityStatus("REJECTED")
-                        .correlationId(correlationId)
-                        .meterReading(manualReadingValue)
-                        .lastConfirmedReading(previousSnapshot.confirmedReading())
-                        .build();
+                // Keep submitted/manual value as-is for context, but clamp confirmed reading at previous confirmed.
+                effectiveConfirmedReading = previousSnapshot.confirmedReading();
             }
 
             // Tenant-configured water supply threshold validation (relative to WATER_NORM).
-            // For manual submissions, validate the submitted value directly against thresholds, independent of previous-day readings.
+            // Validate against the effective confirmed value after baseline clamping.
             if (!isMeterReplaced) {
                 Optional<WaterSupplyThreshold> thresholdOpt = loadWaterSupplyThreshold(tenantId);
                 Optional<BigDecimal> waterNormOpt = loadWaterNorm(tenantId);
@@ -1109,7 +1099,7 @@ public class GlificMeterWorkflowService {
                     BigDecimal previousConfirmed = previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null);
                     LocalDateTime previousConfirmedAt = previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null);
 
-                    if (manualReadingValue.compareTo(minAllowed) < 0) {
+                    if (effectiveConfirmedReading.compareTo(minAllowed) < 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
                                 operatorWithSchema.operator().id(),
@@ -1125,7 +1115,7 @@ public class GlificMeterWorkflowService {
                                 schemeId,
                                 pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
                                 null,
-                                manualReadingValue,
+                                effectiveConfirmedReading,
                                 0,
                                 previousConfirmed,
                                 previousConfirmedAt,
@@ -1144,17 +1134,17 @@ public class GlificMeterWorkflowService {
                         return CreateReadingResponse.builder()
                                 .success(false)
                                 .message(localizationService.localizeMessage(
-                                        "Reading rejected because it is below the allowed minimum. Submitted: " + toPlain(manualReadingValue)
+                                        "Reading rejected because it is below the allowed minimum. Submitted: " + toPlain(effectiveConfirmedReading)
                                                 + ". Minimum allowed: " + toPlain(minAllowed) + ".",
                                         languageKey
                                 ))
                                 .qualityStatus("REJECTED")
                                 .correlationId(correlationId)
-                                .meterReading(manualReadingValue)
+                                .meterReading(effectiveConfirmedReading)
                                 .lastConfirmedReading(previousConfirmed)
                                 .build();
                     }
-                    if (manualReadingValue.compareTo(maxAllowed) > 0) {
+                    if (effectiveConfirmedReading.compareTo(maxAllowed) > 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
                                 operatorWithSchema.operator().id(),
@@ -1170,7 +1160,7 @@ public class GlificMeterWorkflowService {
                                 schemeId,
                                 pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
                                 null,
-                                manualReadingValue,
+                                effectiveConfirmedReading,
                                 0,
                                 previousConfirmed,
                                 previousConfirmedAt,
@@ -1182,13 +1172,13 @@ public class GlificMeterWorkflowService {
                         return CreateReadingResponse.builder()
                                 .success(false)
                                 .message(localizationService.localizeMessage(
-                                        "Reading rejected because it is above the allowed maximum. Submitted: " + toPlain(manualReadingValue)
+                                        "Reading rejected because it is above the allowed maximum. Submitted: " + toPlain(effectiveConfirmedReading)
                                                 + ". Maximum allowed: " + toPlain(maxAllowed) + ".",
                                         languageKey
                                 ))
                                 .qualityStatus("REJECTED")
                                 .correlationId(correlationId)
-                                .meterReading(manualReadingValue)
+                                .meterReading(effectiveConfirmedReading)
                                 .lastConfirmedReading(previousConfirmed)
                                 .build();
                     }
@@ -1200,7 +1190,7 @@ public class GlificMeterWorkflowService {
                 telemetryTenantRepository.updateConfirmedReading(
                         operatorWithSchema.schemaName(),
                         pendingOpt.get().id(),
-                        manualReadingValue,
+                        effectiveConfirmedReading,
                         operatorWithSchema.operator().id()
                 );
                 if (isMeterReplaced) {
@@ -1227,7 +1217,7 @@ public class GlificMeterWorkflowService {
                     telemetryTenantRepository.updateConfirmedReading(
                             operatorWithSchema.schemaName(),
                             todaysFlow.id(),
-                            manualReadingValue,
+                            effectiveConfirmedReading,
                             operatorWithSchema.operator().id()
                     );
                     if (isMeterReplaced) {
@@ -1249,7 +1239,7 @@ public class GlificMeterWorkflowService {
                             operatorWithSchema.operator().id(),
                             LocalDateTime.now(),
                             BigDecimal.ZERO,
-                            manualReadingValue,
+                            effectiveConfirmedReading,
                             correlationId,
                             "",
                             isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason()

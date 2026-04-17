@@ -100,7 +100,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":tenant:" + tenantId
                 + ":lgd:" + parentLgdId
                 + ":start:" + startDate
-                + ":end:" + endDate;
+                + ":end:" + endDate
+                + ":v2";
         AverageSchemeRegularityResponse cached = readFromCache(cacheKey, AverageSchemeRegularityResponse.class);
         if (cached != null) {
             return cached;
@@ -243,7 +244,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":tenant:" + tenantId
                 + ":department:" + parentDepartmentId
                 + ":start:" + startDate
-                + ":end:" + endDate;
+                + ":end:" + endDate
+                + ":v2";
         AverageSchemeRegularityResponse cached = readFromCache(cacheKey, AverageSchemeRegularityResponse.class);
         if (cached != null) {
             return cached;
@@ -292,7 +294,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":lgd:" + parentLgdId
                 + ":scope:child"
                 + ":start:" + startDate
-                + ":end:" + endDate;
+                + ":end:" + endDate
+                + ":v2";
         AverageSchemeRegularityResponse cached = readFromCache(cacheKey, AverageSchemeRegularityResponse.class);
         if (cached != null) {
             return cached;
@@ -367,7 +370,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":department:" + parentDepartmentId
                 + ":scope:child"
                 + ":start:" + startDate
-                + ":end:" + endDate;
+                + ":end:" + endDate
+                + ":v2";
         AverageSchemeRegularityResponse cached = readFromCache(cacheKey, AverageSchemeRegularityResponse.class);
         if (cached != null) {
             return cached;

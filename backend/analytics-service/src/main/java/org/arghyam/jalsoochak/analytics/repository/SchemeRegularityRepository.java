@@ -76,6 +76,7 @@ public class SchemeRegularityRepository {
                         ON sl.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading > 0
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -83,7 +84,7 @@ public class SchemeRegularityRepository {
                     COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
                 """, schemeLgdColumn);
 
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, tenantId, startDate, endDate);
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, tenantId, startDate, endDate, tenantId);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
         int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
 
@@ -220,6 +221,7 @@ public class SchemeRegularityRepository {
                         ON sd.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading > 0
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -227,7 +229,8 @@ public class SchemeRegularityRepository {
                     COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
                 """, schemeDepartmentColumn);
 
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentDepartmentId, tenantId, startDate, endDate);
+        Map<String, Object> result =
+                jdbcTemplate.queryForMap(sql, parentDepartmentId, tenantId, startDate, endDate, tenantId);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
         int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
 
@@ -940,6 +943,7 @@ public class SchemeRegularityRepository {
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading > 0
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -980,7 +984,8 @@ public class SchemeRegularityRepository {
                 parentLgdId,
                 tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<ChildRegionSchemeRegularityMetrics> getChildSchemeRegularityMetricsByDepartment(
@@ -1112,6 +1117,7 @@ public class SchemeRegularityRepository {
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading > 0
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -1152,7 +1158,8 @@ public class SchemeRegularityRepository {
                 parentDepartmentId,
                 tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByLgd(
