@@ -29,6 +29,7 @@ import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -656,7 +657,24 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
-        return schemeRegularityRepository.getChildAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate);
+        String cacheKey = ":performance_score:child:lgd:"
+                + parentLgdId
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v1";
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> cached = readFromCache(
+                cacheKey,
+                new TypeReference<>() {
+                });
+        if (cached != null) {
+            return cached;
+        }
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> response =
+                schemeRegularityRepository.getChildAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate);
+        writeToCache(cacheKey, response);
+        return response;
     }
 
     @Override
@@ -664,8 +682,25 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
-        return schemeRegularityRepository.getChildAveragePerformanceScoreByDepartment(
-                parentDepartmentId, startDate, endDate);
+        String cacheKey = ":performance_score:child:department:"
+                + parentDepartmentId
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v1";
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> cached = readFromCache(
+                cacheKey,
+                new TypeReference<>() {
+                });
+        if (cached != null) {
+            return cached;
+        }
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> response =
+                schemeRegularityRepository.getChildAveragePerformanceScoreByDepartment(
+                        parentDepartmentId, startDate, endDate);
+        writeToCache(cacheKey, response);
+        return response;
     }
 
     @Override
@@ -2588,6 +2623,19 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 return null;
             }
             return objectMapper.readValue(payload, responseClass);
+        } catch (Exception e) {
+            log.warn("Failed to read scheme regularity cache [{}]: {}", cacheKey, e.getMessage());
+            return null;
+        }
+    }
+
+    private <T> T readFromCache(String cacheKey, TypeReference<T> typeReference) {
+        try {
+            String payload = redisTemplate.opsForValue().get(cacheKey);
+            if (payload == null || payload.isBlank()) {
+                return null;
+            }
+            return objectMapper.readValue(payload, typeReference);
         } catch (Exception e) {
             log.warn("Failed to read scheme regularity cache [{}]: {}", cacheKey, e.getMessage());
             return null;

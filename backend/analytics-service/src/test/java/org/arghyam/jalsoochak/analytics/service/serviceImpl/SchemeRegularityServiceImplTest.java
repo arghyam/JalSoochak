@@ -136,6 +136,41 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
+    void getChildAveragePerformanceScoreByLgd_cacheHit_skipsRepository() throws Exception {
+        mockRedisValueOps();
+        String key = ":performance_score:child:lgd:101:start:2026-01-01:end:2026-01-03:v1";
+        var cached = List.of(
+                new SchemeRegularityRepository.ChildRegionPerformanceScore(401, null, new BigDecimal("0.9")));
+        when(valueOperations.get(key)).thenReturn("cached");
+        when(objectMapper.readValue(eq("cached"), any(com.fasterxml.jackson.core.type.TypeReference.class)))
+                .thenReturn(cached);
+
+        var response = service.getChildAveragePerformanceScoreByLgd(101, START, END);
+
+        assertThat(response).hasSize(1);
+        assertThat(response.getFirst().lgdId()).isEqualTo(401);
+        verify(schemeRegularityRepository, never()).getChildAveragePerformanceScoreByLgd(any(), any(), any());
+        verify(valueOperations, never()).set(any(), any(), any(Duration.class));
+    }
+
+    @Test
+    void getChildAveragePerformanceScoreByDepartment_cacheMiss_writesCache() throws Exception {
+        mockRedisValueOps();
+        String key = ":performance_score:child:department:201:start:2026-01-01:end:2026-01-03:v1";
+        when(valueOperations.get(key)).thenReturn(null);
+        var repoRows = List.of(
+                new SchemeRegularityRepository.ChildRegionPerformanceScore(null, 501, new BigDecimal("0.88")));
+        when(schemeRegularityRepository.getChildAveragePerformanceScoreByDepartment(201, START, END))
+                .thenReturn(repoRows);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        var response = service.getChildAveragePerformanceScoreByDepartment(201, START, END);
+
+        assertThat(response).isEqualTo(repoRows);
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
     void getAverageSchemeRegularityForChildRegions_whenLevelHasNoChildren_throws() {
         mockRedisValueOps();
         when(valueOperations.get(any())).thenReturn(null);

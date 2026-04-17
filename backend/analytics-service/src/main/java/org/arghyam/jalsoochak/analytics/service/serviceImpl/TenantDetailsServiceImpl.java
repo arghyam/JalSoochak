@@ -167,6 +167,18 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
     @Override
     public TenantDetailsResponse getTenantDetailsWithAggregatedMetrics(
             Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        String cacheKey = TENANT_DETAILS_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":parent:" + (parentLgdId == null ? "all" : parentLgdId)
+                + ":from:" + startDate
+                + ":to:" + endDate
+                + ":v3";
+
+        TenantDetailsResponse cached = readFromCache(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
         // Base boundary + child list
         TenantDetailsResponse response = getTenantDetails(tenantId, parentLgdId);
 
@@ -194,6 +206,8 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                 schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate));
         response.setAverageSchemeRegularity(averageRegularity.getAverageRegularity());
         response.setReadingSubmissionRate(submissionRate.getReadingSubmissionRate());
+
+        writeToCache(cacheKey, response);
         return response;
     }
 
