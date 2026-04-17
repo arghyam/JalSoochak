@@ -92,7 +92,8 @@ class NotificationEventRouterTest {
     @SuppressWarnings("unchecked")
     private void stubUserLookup(String tenantCode, String phone, List<Long> returnList) {
         when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_" + tenantCode + ".user_table")
+                argThat(sql -> sql != null
+                        && sql.contains("FROM tenant_" + tenantCode + ".user_table")
                         && sql.contains("WHERE phone_number = ?")
                         && !sql.contains("title")),
                 any(RowMapper.class),
@@ -107,7 +108,8 @@ class NotificationEventRouterTest {
     private void stubWelcomeLookup(String tenantCode, String phone,
                                    List<NotificationEventRouter.UserContactInfo> returnList) {
         when(jdbcTemplate.query(
-                argThat(sql -> sql.contains("FROM tenant_" + tenantCode + ".user_table")
+                argThat(sql -> sql != null
+                        && sql.contains("FROM tenant_" + tenantCode + ".user_table")
                         && sql.contains("WHERE phone_number = ?")
                         && sql.contains("title")),
                 any(RowMapper.class),
@@ -839,5 +841,251 @@ class NotificationEventRouterTest {
                 """);
 
         verifyNoInteractions(glificWhatsAppService, jdbcTemplate);
+    }
+
+    // ──────────────────── SEND_WELCOME_MESSAGE_ADMIN ───────────────────────────
+
+    @Test
+    void route_skipsWelcomeMessageAdmin_whenTenantCodeIsBlank() {
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"",
+                 "pumpOperatorPhones":["919100000001"]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsWelcomeMessageAdmin_whenTenantCodeContainsSpecialChars() {
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"invalid code!",
+                 "pumpOperatorPhones":["919100000002"]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsWelcomeMessageAdmin_whenPhonesListIsEmpty() {
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"mp",
+                 "pumpOperatorPhones":[]}
+                """);
+
+        verifyNoInteractions(glificWhatsAppService);
+    }
+
+    @Test
+    void route_sendsWelcomeAdmin_whenContactIdFoundInDb() {
+        stubWelcomeLookup("mp", "919100000003",
+                List.of(new NotificationEventRouter.UserContactInfo(55L, "Operator A")));
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("Madhya Pradesh");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"mp","tenantId":1,
+                 "pumpOperatorPhones":["919100000003"]}
+                """);
+
+        verify(glificWhatsAppService).startWelcomeFlow(55L, "Operator A", "Madhya Pradesh");
+        verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
+    }
+
+    @Test
+    void route_optInsAndSendsWelcomeAdmin_whenContactIdNotFoundInDb() {
+        stubWelcomeLookup("mp", "919100000004", List.of());
+        when(glificWhatsAppService.optIn("919100000004")).thenReturn(66L);
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("MP");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"mp","tenantId":1,
+                 "pumpOperatorPhones":["919100000004"]}
+                """);
+
+        verify(glificWhatsAppService).optIn("919100000004");
+        verify(glificWhatsAppService).startWelcomeFlow(66L, null, "MP");
+        verify(kafkaProducer, never()).publishJson(eq("welcome-message-dlt"), any());
+    }
+
+    @Test
+    void route_routesToDlt_whenOptInFails_forWelcomeAdmin() {
+        stubWelcomeLookup("mp", "919100000005", List.of());
+        when(glificWhatsAppService.optIn(anyString())).thenReturn(0L);
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"mp","tenantId":1,
+                 "pumpOperatorPhones":["919100000005"]}
+                """);
+
+        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"),
+                argThat(p -> p.toString().contains("optin_failed")));
+    }
+
+    @Test
+    void route_routesToDlt_whenPhoneIsBlankAfterNormalization_forWelcomeAdmin() {
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"mp","tenantId":1,
+                 "pumpOperatorPhones":[""]}
+                """);
+
+        verify(kafkaProducer).publishJson(eq("welcome-message-dlt"),
+                argThat(p -> p.toString().contains("blank_phone")));
+        verifyNoInteractions(glificWhatsAppService);
+    }
+
+    @Test
+    void route_normalizesPhone_from10DigitsTo91Prefix_forWelcomeAdmin() {
+        // A 10-digit phone ("9876543210") must be prefixed to "919876543210" before the optIn call.
+        // We skip DB lookups returning empty (no contactId) so that optIn is reached with the
+        // normalized number, which lets us assert the prefix was applied without needing two
+        // jdbcTemplate stubs on the same method signature.
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
+        when(glificWhatsAppService.optIn("919876543210")).thenReturn(77L);
+
+        // Stub the jdbcTemplate lookup for the raw AND normalized phone.
+        // Use lenient() because only one will actually be called depending on equality check.
+        org.mockito.Mockito.lenient()
+                .when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains("user_table")),
+                        any(org.springframework.jdbc.core.RowMapper.class),
+                        org.mockito.ArgumentMatchers.<Object>any()))
+                .thenReturn(List.of());
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE_ADMIN","tenantCode":"mp","tenantId":1,
+                 "pumpOperatorPhones":["9876543210"]}
+                """);
+
+        verify(glificWhatsAppService).optIn("919876543210");
+    }
+
+    // ───────────────────── SEND_LOGIN_OTP — SMS channel ────────────────────────
+
+    @Test
+    void route_sendsLoginOtp_viaSms_whenDeliveryChannelIsSms() {
+        when(smsCountryService.sendOtpReactive("919876500020", "123456", 5))
+                .thenReturn(reactor.core.publisher.Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500020","expiryMinutes":5}
+                """);
+
+        verify(smsCountryService).sendOtpReactive("919876500020", "123456", 5);
+        verifyNoInteractions(whatsAppChannel);
+    }
+
+    @Test
+    void route_sendsLoginOtp_viaSms_defaultsExpiryToFive_whenExpiryMinutesIsZero() {
+        when(smsCountryService.sendOtpReactive("919876500021", "654321", 5))
+                .thenReturn(reactor.core.publisher.Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"654321",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500021","expiryMinutes":0}
+                """);
+
+        verify(smsCountryService).sendOtpReactive("919876500021", "654321", 5);
+    }
+
+    @Test
+    void route_sendsLoginOtp_viaSms_defaultsExpiryToFive_whenExpiryMinutesIsNegative() {
+        when(smsCountryService.sendOtpReactive("919876500022", "111222", 5))
+                .thenReturn(reactor.core.publisher.Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"111222",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500022","expiryMinutes":-1}
+                """);
+
+        verify(smsCountryService).sendOtpReactive("919876500022", "111222", 5);
+    }
+
+    @Test
+    void route_skipsLoginOtp_viaSms_whenPhoneIsBlank() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"333444",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"","expiryMinutes":5}
+                """);
+
+        verifyNoInteractions(smsCountryService);
+    }
+
+    @Test
+    void route_skipsLoginOtp_whenDeliveryChannelIsBlank() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"555666",
+                 "deliveryChannel":"","officerPhoneNumber":"919876500023"}
+                """);
+
+        verifyNoInteractions(whatsAppChannel, smsCountryService, glificWhatsAppService);
+    }
+
+    @Test
+    void route_skipsLoginOtp_whenDeliveryChannelIsUnsupported() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"777888",
+                 "deliveryChannel":"TELEGRAM","officerPhoneNumber":"919876500024"}
+                """);
+
+        verifyNoInteractions(whatsAppChannel, smsCountryService, glificWhatsAppService);
+    }
+
+    // ────────────── SEND_INVITE_EMAIL — STATE_ADMIN with stateName ──────────────
+
+    @Test
+    void route_dispatchesStateAdminInviteEmail_whenRoleIsStateAdminAndStateNamePresent() {
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in",
+                 "name":"Priya Sharma","role":"STATE_ADMIN",
+                 "stateName":"Madhya Pradesh",
+                 "inviteLink":"https://app.jalsoochak.in/activate?token=sa1","expiryHours":24}
+                """);
+
+        verify(accountEmailService).sendStateAdminInviteEmail(
+                "sa@mp.gov.in", "Priya Sharma", "Madhya Pradesh",
+                "https://app.jalsoochak.in/activate?token=sa1", 24);
+        verify(accountEmailService, never()).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void route_routesToDlt_whenStateAdminInviteEmailThrows() {
+        doThrow(new IllegalArgumentException("stateName must not be null or blank"))
+                .when(accountEmailService)
+                .sendStateAdminInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in",
+                 "name":"Priya Sharma","role":"STATE_ADMIN",
+                 "stateName":"Madhya Pradesh",
+                 "inviteLink":"https://link","expiryHours":24}
+                """);
+
+        verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(p -> {
+            String s = p.toString();
+            return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("email_delivery_error");
+        }));
+    }
+
+    @Test
+    void route_fallsBackToGenericInviteEmail_whenStateAdminHasNoStateName() {
+        // When role=STATE_ADMIN but stateName is absent/blank, the code falls through
+        // to sendInviteEmail, which will throw (STATE_ADMIN requires stateName).
+        // The exception is caught and routed to DLT.
+        doThrow(new IllegalArgumentException("STATE_ADMIN invitations require a stateName"))
+                .when(accountEmailService)
+                .sendInviteEmail(anyString(), anyString(), eq("STATE_ADMIN"), anyString(), anyInt());
+
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in",
+                 "name":"Priya Sharma","role":"STATE_ADMIN",
+                 "inviteLink":"https://link","expiryHours":24}
+                """);
+
+        verify(accountEmailService).sendInviteEmail(
+                "sa@mp.gov.in", "Priya Sharma", "STATE_ADMIN", "https://link", 24);
+        verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
 }
