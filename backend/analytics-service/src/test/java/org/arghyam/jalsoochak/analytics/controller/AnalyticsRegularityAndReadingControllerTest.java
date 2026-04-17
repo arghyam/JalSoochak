@@ -281,6 +281,72 @@ class AnalyticsRegularityAndReadingControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void getPeriodicSchemeRegularity_withDepartmentId_routesToDepartmentService() throws Exception {
+        when(schemeRegularityService.getPeriodicSchemeRegularityByDepartment(1, 201, START, END, PeriodScale.WEEK))
+                .thenReturn(periodicSchemeRegularityResponse());
+
+        mockMvc.perform(get(BASE + "/scheme-regularity/periodic")
+                        .param("tenant_id", "1")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "week")
+                        .param("department_id", "201"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(schemeRegularityService, times(1))
+                .getPeriodicSchemeRegularityByDepartment(1, 201, START, END, PeriodScale.WEEK);
+    }
+
+    @Test
+    void getPeriodicSchemeRegularity_serviceThrows_returnsServerError() throws Exception {
+        when(schemeRegularityService.getPeriodicSchemeRegularityByLgdId(1, 101, START, END, PeriodScale.DAY))
+                .thenThrow(new RuntimeException("unexpected"));
+
+        mockMvc.perform(get(BASE + "/scheme-regularity/periodic")
+                        .param("tenant_id", "1")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("scale", "day")
+                        .param("lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getAverageSchemeRegularity_serviceThrows_returnsServerError() throws Exception {
+        when(schemeRegularityService.getAverageSchemeRegularity(TENANT_ID, 101, START, END))
+                .thenThrow(new RuntimeException("unexpected db error"));
+
+        mockMvc.perform(get(BASE + "/scheme-regularity/average")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("scope", "current")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getReadingSubmissionRate_serviceThrows_returnsServerError() throws Exception {
+        when(schemeRegularityService.getReadingSubmissionRateByLgd(TENANT_ID, 101, START, END))
+                .thenThrow(new RuntimeException("unexpected"));
+
+        mockMvc.perform(get(BASE + "/reading-submission-rate")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("scope", "current")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
     private static Stream<Arguments> averageRegularityValidRoutes() {
         return Stream.of(
                 Arguments.of("current", "parent_lgd_id", "101", 1),

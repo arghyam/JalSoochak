@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
@@ -1305,6 +1306,163 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getStateWiseBoundaries().getFirst().getBoundary().get("type").asText()).isEqualTo("Polygon");
         verify(valueOperations, times(1)).set(
                 eq(":national:dashboard:boundaries:v1"), eq("{boundary-json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
+    void getAveragePerformanceScoreByLgd_valid_returnsScore() {
+        BigDecimal expected = new BigDecimal("0.8500");
+        when(schemeRegularityRepository.getAveragePerformanceScoreByLgd(101, START, END)).thenReturn(expected);
+
+        BigDecimal result = service.getAveragePerformanceScoreByLgd(101, START, END);
+
+        assertThat(result).isEqualByComparingTo("0.8500");
+        verify(schemeRegularityRepository, times(1)).getAveragePerformanceScoreByLgd(101, START, END);
+    }
+
+    @Test
+    void getAveragePerformanceScoreByDepartment_valid_returnsScore() {
+        BigDecimal expected = new BigDecimal("0.7200");
+        when(schemeRegularityRepository.getAveragePerformanceScoreByDepartment(201, START, END)).thenReturn(expected);
+
+        BigDecimal result = service.getAveragePerformanceScoreByDepartment(201, START, END);
+
+        assertThat(result).isEqualByComparingTo("0.7200");
+        verify(schemeRegularityRepository, times(1)).getAveragePerformanceScoreByDepartment(201, START, END);
+    }
+
+    @Test
+    void getAverageWaterSupplyPerCurrentRegionForCurrentScope_nullsOutChildFields() throws Exception {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegion(10, START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.SchemeWaterSupplyMetrics(
+                                1, "Scheme-A", 100L, 90L, 110L, 1200L, 2, new BigDecimal("4.0000"))
+                ));
+        when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageWaterSupplyResponse response =
+                service.getAverageWaterSupplyPerCurrentRegionForCurrentScope(10, START, END);
+
+        assertThat(response.getTenantId()).isEqualTo(10);
+        assertThat(response.getChildRegionCount()).isNull();
+        assertThat(response.getChildRegions()).isNull();
+    }
+
+    @Test
+    void getAverageWaterSupplyPerNationForChildScope_nullsOutSchemeFields() throws Exception {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getAverageWaterSupplyPerNation(START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                                1, "mp", null, null, "Madhya Pradesh", 120L, 100L, 140L, 9000L, 3,
+                                new BigDecimal("3000.0000"))
+                ));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageWaterSupplyResponse response = service.getAverageWaterSupplyPerNationForChildScope(START, END);
+
+        assertThat(response.getSchemeCount()).isNull();
+        assertThat(response.getSchemes()).isNull();
+        assertThat(response.getChildRegionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void getNationalDashboard_cacheHit_returnsFromCacheWithoutCallingRepository() throws Exception {
+        mockRedisValueOps();
+        String cacheKey = ":national:dashboard:start:2026-01-01:end:2026-01-03:v4";
+        NationalDashboardResponse cached = NationalDashboardResponse.builder().daysInRange(3).build();
+        when(valueOperations.get(cacheKey)).thenReturn("cached");
+        when(objectMapper.readValue("cached", NationalDashboardResponse.class)).thenReturn(cached);
+
+        NationalDashboardResponse result = service.getNationalDashboard(START, END);
+
+        assertThat(result.getDaysInRange()).isEqualTo(3);
+        verify(schemeRegularityRepository, never()).getAverageWaterSupplyPerNation(any(), any());
+    }
+
+    @Test
+    void getNationalDashboardForApi_delegatesToNationalDashboard_cacheHit() throws Exception {
+        mockRedisValueOps();
+        String cacheKey = ":national:dashboard:start:2026-01-01:end:2026-01-03:v4";
+        NationalDashboardResponse cached = NationalDashboardResponse.builder().daysInRange(3).build();
+        when(valueOperations.get(cacheKey)).thenReturn("cached");
+        when(objectMapper.readValue("cached", NationalDashboardResponse.class)).thenReturn(cached);
+
+        NationalDashboardResponse result = service.getNationalDashboardForApi(START, END);
+
+        assertThat(result.getDaysInRange()).isEqualTo(3);
+        verify(schemeRegularityRepository, never()).getAverageWaterSupplyPerNation(any(), any());
+    }
+
+    @Test
+    void getAverageWaterSupplyPerCurrentRegionByLgdForChildScope_nullsOutSchemeFields() throws Exception {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getLgdLevel(101)).thenReturn(2);
+        when(schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegionByLgd(10, 101, START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                                null, null, 401, null, "Village A", 100L, 90L, 110L, 10000L, 2,
+                                new BigDecimal("50.0000"))
+                ));
+        when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageWaterSupplyResponse response =
+                service.getAverageWaterSupplyPerCurrentRegionByLgdForChildScope(10, 101, START, END);
+
+        assertThat(response.getSchemeCount()).isNull();
+        assertThat(response.getSchemes()).isNull();
+        assertThat(response.getChildRegionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope_nullsOutSchemeFields() throws Exception {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getDepartmentLevel(201)).thenReturn(2);
+        when(schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegionByDepartment(10, 201, START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                                null, null, null, 501, "Dept-1", 120L, 100L, 140L, 9000L, 3,
+                                new BigDecimal("3000.0000"))
+                ));
+        when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageWaterSupplyResponse response =
+                service.getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(10, 201, START, END);
+
+        assertThat(response.getSchemeCount()).isNull();
+        assertThat(response.getSchemes()).isNull();
+        assertThat(response.getChildRegionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void getPeriodicSchemeRegularityByDepartment_mapsMetricsCorrectly() {
+        LocalDate requestedEnd = LocalDate.of(2026, 1, 10);
+        when(schemeRegularityRepository.getPeriodicSchemeRegularityByDepartment(
+                        1, 201, START, requestedEnd, PeriodScale.WEEK))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.PeriodicSchemeRegularityMetrics(
+                                LocalDate.of(2025, 12, 29),
+                                LocalDate.of(2026, 1, 12),
+                                2,
+                                3,
+                                20L)));
+
+        PeriodicSchemeRegularityResponse response =
+                service.getPeriodicSchemeRegularityByDepartment(1, 201, START, requestedEnd, PeriodScale.WEEK);
+
+        assertThat(response.getScale()).isEqualTo("week");
+        assertThat(response.getDepartmentId()).isEqualTo(201);
+        assertThat(response.getSchemeCount()).isEqualTo(2);
+        assertThat(response.getPeriodCount()).isEqualTo(1);
+        assertThat(response.getMetrics().getFirst().getPeriodStartDate()).isEqualTo(START);
+        assertThat(response.getMetrics().getFirst().getPeriodEndDate()).isEqualTo(requestedEnd);
     }
 
     private static DimTenant tenant(Integer id, String stateCode) {

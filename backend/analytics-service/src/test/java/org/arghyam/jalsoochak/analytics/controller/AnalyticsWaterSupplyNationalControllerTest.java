@@ -257,6 +257,25 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 Arguments.of("month"));
     }
 
+    @Test
+    void getAverageWaterSupplyPerRegion_scopeChildWithDepartmentId_routesToDepartmentService() throws Exception {
+        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(any(), any(), any(), any()))
+                .thenReturn(averageWaterSupplyResponse());
+
+        mockMvc.perform(get(BASE + "/water-supply/average-per-region")
+                        .param("scope", "child")
+                        .param("tenant_id", "10")
+                        .param("parent_department_id", "201")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").exists());
+
+        verify(schemeRegularityService, times(1))
+                .getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(10, 201, START, END);
+    }
+
     private static Stream<Arguments> waterSupplyCombinationMatrix() {
         return Stream.of(
                 Arguments.of("current", "10", null, null, 200),
