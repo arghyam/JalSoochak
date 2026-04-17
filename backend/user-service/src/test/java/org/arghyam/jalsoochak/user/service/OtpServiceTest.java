@@ -38,7 +38,7 @@ class OtpServiceTest {
 
     @BeforeEach
     void setUp() {
-        otpProperties = new OtpProperties(10, 5, 60, 6, "WHATSAPP");
+        otpProperties = new OtpProperties(10, 5, 60, 6, "WHATSAPP", null);
         otpService = new OtpService(otpRepository, piiEncryptionService, otpProperties);
     }
 
@@ -72,6 +72,21 @@ class OtpServiceTest {
 
             assertThat(otp).hasSize(6);
             verify(otpRepository).revokeActiveOtp(1L, 1, OtpType.LOGIN);
+        }
+
+        @Test
+        @DisplayName("returns cheat OTP when cheat is enabled")
+        void returnsCheatOtpWhenEnabled() {
+            OtpProperties cheatProps = new OtpProperties(10, 5, 60, 6, "WHATSAPP",
+                    new OtpProperties.Cheat(true, "000000"));
+            OtpService cheatService = new OtpService(otpRepository, piiEncryptionService, cheatProps);
+            when(otpRepository.findActiveOtp(1L, 1, OtpType.LOGIN)).thenReturn(Optional.empty());
+            when(piiEncryptionService.encrypt("000000")).thenReturn("encrypted");
+
+            String otp = cheatService.requestOtp(1L, 1, OtpType.LOGIN);
+
+            assertThat(otp).isEqualTo("000000");
+            verify(otpRepository).insertOtp(eq(1L), eq(1), eq(OtpType.LOGIN), eq("encrypted"), any(Instant.class));
         }
 
         @Test

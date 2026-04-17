@@ -13,8 +13,17 @@ public record OtpProperties(
         int maxAttempts,
         int cooldownSeconds,
         int otpLength,
-        String deliveryChannel
+        String deliveryChannel,
+        Cheat cheat
 ) {
+    /**
+     * Cheat OTP configuration — for non-production environments only.
+     *
+     * @param enabled when {@code true}, all OTP requests return {@code value} instead of a random OTP
+     * @param value   the fixed OTP to return; must be non-blank when {@code enabled} is {@code true}
+     */
+    public record Cheat(boolean enabled, String value) {}
+
     public OtpProperties {
         if (expiryMinutes <= 0)    throw new IllegalArgumentException("otp.expiry-minutes must be > 0");
         if (maxAttempts <= 0)      throw new IllegalArgumentException("otp.max-attempts must be > 0");
@@ -23,5 +32,8 @@ public record OtpProperties(
         if (deliveryChannel == null || deliveryChannel.isBlank())
             throw new IllegalArgumentException("otp.delivery-channel must not be blank");
         deliveryChannel = deliveryChannel.trim().toUpperCase(Locale.ROOT);
+        if (cheat == null) cheat = new Cheat(false, null);
+        if (cheat.enabled() && (cheat.value() == null || cheat.value().isBlank()))
+            throw new IllegalArgumentException("otp.cheat.value must not be blank when otp.cheat.enabled is true");
     }
 }

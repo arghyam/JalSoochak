@@ -103,6 +103,9 @@ otp:
   cooldown-seconds: ${OTP_COOLDOWN_SECONDS:60}
   otp-length: ${OTP_LENGTH:6}
   delivery-channel: ${OTP_DELIVERY_CHANNEL:WHATSAPP}
+  cheat:
+    enabled: ${OTP_CHEAT_ENABLED:false}
+    value: ${OTP_CHEAT_VALUE:}
 
 eureka:
   client:

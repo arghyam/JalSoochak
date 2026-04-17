@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.analytics.entity.Anomaly;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -14,8 +15,23 @@ import java.time.OffsetDateTime;
 @Repository
 public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
 
+    boolean existsByUuid(String uuid);
+
     boolean existsByCorrelationIdAndTypeAndSchemeIdAndTenantId(
             String correlationId, String type, Integer schemeId, Integer tenantId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE Anomaly a
+            SET a.createdAt = :timestamp,
+                a.updatedAt = :timestamp
+            WHERE a.uuid = :uuid
+              AND a.deletedAt IS NULL
+            """)
+    int touchByUuid(
+            @Param("uuid") String uuid,
+            @Param("timestamp") OffsetDateTime timestamp
+    );
 
     @Query(
             value = """

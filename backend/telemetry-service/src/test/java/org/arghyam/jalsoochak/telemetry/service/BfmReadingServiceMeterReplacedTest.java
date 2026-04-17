@@ -66,9 +66,6 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, 10L))
-                .thenReturn(List.of(99L));
-
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
@@ -100,7 +97,7 @@ class BfmReadingServiceMeterReplacedTest {
         verify(telemetryEventPublisher).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
-                org.mockito.ArgumentMatchers.eq(99L),
+                org.mockito.ArgumentMatchers.eq(1L),
                 org.mockito.ArgumentMatchers.eq(10L),
                 any(),
                 any(),

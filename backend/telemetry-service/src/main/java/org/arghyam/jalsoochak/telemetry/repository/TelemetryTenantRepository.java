@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.repository;
 
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Repository
 @RequiredArgsConstructor
@@ -34,6 +36,16 @@ public class TelemetryTenantRepository {
                 }
             }
     );
+    @Value("${telemetry.cache.metadata.enabled:true}")
+    private boolean metadataCacheEnabled = true;
+    @Value("${telemetry.cache.tenant-schemas-ttl-ms:300000}")
+    private long tenantSchemaListCacheTtlMs = 300_000L;
+    @Value("${telemetry.cache.column-exists-ttl-ms:600000}")
+    private long columnExistsCacheTtlMs = 600_000L;
+    private final Object metadataCacheLock = new Object();
+    private final Map<String, TimedCacheValue<Boolean>> columnExistsCache = new ConcurrentHashMap<>();
+    private volatile List<String> tenantSchemasCache = List.of();
+    private volatile long tenantSchemasCacheExpiresAtMs = 0L;
 
     public boolean existsSchemeById(String schemaName, Long schemeId) {
         validateSchemaName(schemaName);
@@ -90,13 +102,7 @@ public class TelemetryTenantRepository {
             phoneToSchemaCache.remove(normalizedPhone);
         }
 
-        String schemaSql = """
-                SELECT nspname
-                FROM pg_namespace
-                WHERE nspname LIKE 'tenant_%'
-                ORDER BY nspname
-                """;
-        List<String> schemas = jdbcTemplate.query(schemaSql, (rs, n) -> rs.getString("nspname"));
+        List<String> schemas = getTenantSchemasCached();
         TelemetryOperatorWithSchema firstMatch = null;
         for (String schemaName : schemas) {
             Optional<TelemetryOperator> operator = findOperatorByPhone(schemaName, phoneNumber, normalizedPhone);
@@ -144,13 +150,7 @@ public class TelemetryTenantRepository {
             }
         }
 
-        String schemaSql = """
-                SELECT nspname
-                FROM pg_namespace
-                WHERE nspname LIKE 'tenant_%'
-                ORDER BY nspname
-                """;
-        List<String> schemas = jdbcTemplate.query(schemaSql, (rs, n) -> rs.getString("nspname"));
+        List<String> schemas = getTenantSchemasCached();
         TelemetryOperatorWithSchema firstMatch = null;
         for (String schemaName : schemas) {
             Optional<TelemetryOperator> operator = findOperatorByPhoneHashValue(schemaName, normalizedHash);
@@ -172,13 +172,16 @@ public class TelemetryTenantRepository {
     public Optional<Long> findFirstSchemeForUser(String schemaName, Long userId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
-                SELECT scheme_id
-                FROM %s.user_scheme_mapping_table
-                WHERE user_id = ?
-                  AND status = 1
-                ORDER BY id
+                SELECT usm.scheme_id
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
+                ORDER BY usm.id
                 LIMIT 1
-                """, schemaName);
+                """, schemaName, schemaName);
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("scheme_id")), userId);
         return rows.stream().findFirst();
     }
@@ -186,12 +189,17 @@ public class TelemetryTenantRepository {
     public List<TelemetrySchemeOption> findSchemesForUser(String schemaName, Long userId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
-                SELECT usm.scheme_id AS id, sm.scheme_name AS name
+                SELECT usm.scheme_id AS id,
+                       sm.scheme_name AS name,
+                       MIN(usm.id) AS mapping_order
                 FROM %s.user_scheme_mapping_table usm
                 JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
                 WHERE usm.user_id = ?
                   AND usm.status = 1
-                ORDER BY usm.id
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
+                GROUP BY usm.scheme_id, sm.scheme_name
+                ORDER BY mapping_order
                 """, schemaName, schemaName);
         return jdbcTemplate.query(
                 sql,
@@ -376,6 +384,7 @@ public class TelemetryTenantRepository {
                     WHERE user_id = ?
                       AND scheme_id = ?
                       AND status = 1
+                      AND deleted_at IS NULL
                 )
                 """, schemaName);
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, operatorId, schemeId);
@@ -409,7 +418,9 @@ public class TelemetryTenantRepository {
                   ON ut.id = u.user_type
                 WHERE usm.scheme_id = ?
                   AND usm.status = 1
+                  AND usm.deleted_at IS NULL
                   AND u.status = 1
+                  AND u.deleted_at IS NULL
                   AND UPPER(COALESCE(ut.c_name, '')) = ?
                 ORDER BY usm.id DESC
                 """, schemaName, schemaName);
@@ -969,6 +980,26 @@ public class TelemetryTenantRepository {
         return count != null ? count : 0;
     }
 
+    public int touchLatestAnomalyByTypeForToday(String schemaName, Long userId, Long schemeId, int anomalyType) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                UPDATE %1$s.anomaly_table
+                SET created_at = NOW()
+                WHERE id = (
+                    SELECT id
+                    FROM %1$s.anomaly_table
+                    WHERE user_id = ?
+                      AND scheme_id = ?
+                      AND type = ?
+                      AND DATE(created_at) = CURRENT_DATE
+                      AND deleted_at IS NULL
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                )
+                """, schemaName);
+        return jdbcTemplate.update(sql, userId, schemeId, anomalyType);
+    }
+
     public List<LocalDate> findAnomalyDatesByType(String schemaName, Long userId, Long schemeId, int anomalyType, int limitDays) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -1279,7 +1310,7 @@ public class TelemetryTenantRepository {
 
         int schemeIdInt = Math.toIntExact(schemeId);
         int userIdInt = Math.toIntExact(userId);
-        int waterQuantityInt = waterQuantity.setScale(0, RoundingMode.HALF_UP).intValue();
+        int waterQuantityInt = Math.max(0, waterQuantity.setScale(0, RoundingMode.HALF_UP).intValue());
 
         boolean hasSubmissionStatus = columnExists("analytics_schema", "fact_water_quantity_table", "submission_status");
         boolean hasOutageReason = columnExists("analytics_schema", "fact_water_quantity_table", "outage_reason");
@@ -1644,7 +1675,30 @@ public class TelemetryTenantRepository {
         }
     }
 
+    public void invalidateMetadataCaches() {
+        synchronized (metadataCacheLock) {
+            tenantSchemasCache = List.of();
+            tenantSchemasCacheExpiresAtMs = 0L;
+            columnExistsCache.clear();
+        }
+    }
+
     private boolean columnExists(String schemaName, String tableName, String columnName) {
+        if (!metadataCacheEnabled || columnExistsCacheTtlMs <= 0L) {
+            return queryColumnExists(schemaName, tableName, columnName);
+        }
+        String cacheKey = schemaName + "." + tableName + "." + columnName;
+        long now = System.currentTimeMillis();
+        TimedCacheValue<Boolean> cached = columnExistsCache.get(cacheKey);
+        if (cached != null && !cached.isExpired(now)) {
+            return cached.value();
+        }
+        boolean exists = queryColumnExists(schemaName, tableName, columnName);
+        columnExistsCache.put(cacheKey, new TimedCacheValue<>(exists, now + columnExistsCacheTtlMs));
+        return exists;
+    }
+
+    private boolean queryColumnExists(String schemaName, String tableName, String columnName) {
         String sql = """
                 SELECT EXISTS (
                     SELECT 1
@@ -1656,6 +1710,36 @@ public class TelemetryTenantRepository {
                 """;
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, schemaName, tableName, columnName);
         return Boolean.TRUE.equals(exists);
+    }
+
+    private List<String> getTenantSchemasCached() {
+        if (!metadataCacheEnabled || tenantSchemaListCacheTtlMs <= 0L) {
+            return queryTenantSchemas();
+        }
+        long now = System.currentTimeMillis();
+        if (now < tenantSchemasCacheExpiresAtMs) {
+            return tenantSchemasCache;
+        }
+        synchronized (metadataCacheLock) {
+            long refreshedNow = System.currentTimeMillis();
+            if (refreshedNow < tenantSchemasCacheExpiresAtMs) {
+                return tenantSchemasCache;
+            }
+            List<String> refreshed = queryTenantSchemas();
+            tenantSchemasCache = refreshed;
+            tenantSchemasCacheExpiresAtMs = refreshedNow + tenantSchemaListCacheTtlMs;
+            return refreshed;
+        }
+    }
+
+    private List<String> queryTenantSchemas() {
+        String schemaSql = """
+                SELECT nspname
+                FROM pg_namespace
+                WHERE nspname LIKE 'tenant_%'
+                ORDER BY nspname
+                """;
+        return jdbcTemplate.query(schemaSql, (rs, n) -> rs.getString("nspname"));
     }
 
     private String resolveSelectColumn(String schemaName, String tableName, String columnName, String fallbackExpression) {
@@ -1705,5 +1789,11 @@ public class TelemetryTenantRepository {
             return number.intValue();
         }
         throw new IllegalArgumentException("Expected numeric DB value, got: " + value.getClass().getName());
+    }
+
+    private record TimedCacheValue<T>(T value, long expiresAtMs) {
+        private boolean isExpired(long nowMs) {
+            return nowMs >= expiresAtMs;
+        }
     }
 }
