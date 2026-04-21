@@ -25,19 +25,26 @@ public class GlificWebhookService {
     private final GlificMessageService messageService;
     private final GlificSelectionService selectionService;
     private final GlificMeterWorkflowService meterWorkflowService;
+    private final GlificReadingsAsyncService glificReadingsAsyncService;
 
     public GlificWebhookService(GlificImageWorkflowService imageWorkflowService,
                                 GlificMessageService messageService,
                                 GlificSelectionService selectionService,
-                                GlificMeterWorkflowService meterWorkflowService) {
+                                GlificMeterWorkflowService meterWorkflowService,
+                                GlificReadingsAsyncService glificReadingsAsyncService) {
         this.imageWorkflowService = imageWorkflowService;
         this.messageService = messageService;
         this.selectionService = selectionService;
         this.meterWorkflowService = meterWorkflowService;
+        this.glificReadingsAsyncService = glificReadingsAsyncService;
     }
 
     public CreateReadingResponse processImage(GlificWebhookRequest glificWebhookRequest) {
         return imageWorkflowService.processImage(glificWebhookRequest);
+    }
+
+    public String enqueueImageProcessing(GlificWebhookRequest glificWebhookRequest) {
+        return glificReadingsAsyncService.enqueue(glificWebhookRequest);
     }
 
     public IntroResponse introMessage(IntroRequest introRequest) {
