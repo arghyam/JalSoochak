@@ -50,6 +50,11 @@ glific:
     resume:
       enabled: ${GLIFIC_READINGS_RESUME_ENABLED:true}
       flow-id: ${GLIFIC_READINGS_RESUME_FLOW_ID:37172}
+      token-ttl-ms: ${GLIFIC_READINGS_RESUME_TOKEN_TTL_MS:1500000}
+      retry:
+        max-attempts: ${GLIFIC_READINGS_RESUME_RETRY_MAX_ATTEMPTS:3}
+        initial-backoff-ms: ${GLIFIC_READINGS_RESUME_RETRY_INITIAL_BACKOFF_MS:500}
+        max-backoff-ms: ${GLIFIC_READINGS_RESUME_RETRY_MAX_BACKOFF_MS:4000}
 
 flowvision:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
