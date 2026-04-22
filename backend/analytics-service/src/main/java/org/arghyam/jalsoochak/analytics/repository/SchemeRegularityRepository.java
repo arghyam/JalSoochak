@@ -33,14 +33,24 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                 ),
-                scheme_supply_days AS (
-                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
+                scheme_day AS (
+                    SELECT
+                        m.scheme_id,
+                        m.reading_date::date AS reading_date,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity,
+                        MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_lgd sl
                         ON sl.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading > 0
-                    GROUP BY m.scheme_id
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_supply_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        COUNT(*) FILTER (WHERE sd.has_supply = 1)::int AS supply_days
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
@@ -69,15 +79,25 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
                 ),
-                scheme_supply_days AS (
-                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
+                scheme_day AS (
+                    SELECT
+                        m.scheme_id,
+                        m.reading_date::date AS reading_date,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity,
+                        MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_lgd sl
                         ON sl.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading > 0
                       AND m.tenant_id = ?
-                    GROUP BY m.scheme_id
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_supply_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        COUNT(*) FILTER (WHERE sd.has_supply = 1)::int AS supply_days
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
@@ -104,14 +124,23 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                 ),
-                scheme_submission_days AS (
-                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
+                scheme_day AS (
+                    SELECT
+                        m.scheme_id,
+                        m.reading_date::date AS reading_date,
+                        MAX(CASE WHEN m.confirmed_reading >= 0 THEN 1 ELSE 0 END)::int AS has_submission
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_lgd sl
                         ON sl.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading >= 0
-                    GROUP BY m.scheme_id
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_submission_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        COUNT(*) FILTER (WHERE sd.has_submission = 1)::int AS submission_days
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
@@ -140,15 +169,24 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
                 ),
-                scheme_submission_days AS (
-                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
+                scheme_day AS (
+                    SELECT
+                        m.scheme_id,
+                        m.reading_date::date AS reading_date,
+                        MAX(CASE WHEN m.confirmed_reading >= 0 THEN 1 ELSE 0 END)::int AS has_submission
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_lgd sl
                         ON sl.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading >= 0
                       AND m.tenant_id = ?
-                    GROUP BY m.scheme_id
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_submission_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        COUNT(*) FILTER (WHERE sd.has_submission = 1)::int AS submission_days
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
@@ -177,14 +215,24 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                 ),
-                scheme_supply_days AS (
-                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
+                scheme_day AS (
+                    SELECT
+                        m.scheme_id,
+                        m.reading_date::date AS reading_date,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity,
+                        MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_department sd
                         ON sd.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading > 0
-                    GROUP BY m.scheme_id
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_supply_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        COUNT(*) FILTER (WHERE sd.has_supply = 1)::int AS supply_days
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
@@ -214,15 +262,25 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
                 ),
-                scheme_supply_days AS (
-                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
+                scheme_day AS (
+                    SELECT
+                        m.scheme_id,
+                        m.reading_date::date AS reading_date,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity,
+                        MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_department sd
                         ON sd.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading > 0
                       AND m.tenant_id = ?
-                    GROUP BY m.scheme_id
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_supply_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        COUNT(*) FILTER (WHERE sd.has_supply = 1)::int AS supply_days
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
@@ -252,14 +310,23 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                 ),
-                scheme_submission_days AS (
-                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
+                scheme_day AS (
+                    SELECT
+                        m.scheme_id,
+                        m.reading_date::date AS reading_date,
+                        MAX(CASE WHEN m.confirmed_reading >= 0 THEN 1 ELSE 0 END)::int AS has_submission
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_department sd
                         ON sd.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading >= 0
-                    GROUP BY m.scheme_id
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_submission_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        COUNT(*) FILTER (WHERE sd.has_submission = 1)::int AS submission_days
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
@@ -289,15 +356,24 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
                 ),
-                scheme_submission_days AS (
-                    SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
+                scheme_day AS (
+                    SELECT
+                        m.scheme_id,
+                        m.reading_date::date AS reading_date,
+                        MAX(CASE WHEN m.confirmed_reading >= 0 THEN 1 ELSE 0 END)::int AS has_submission
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_department sd
                         ON sd.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading >= 0
                       AND m.tenant_id = ?
-                    GROUP BY m.scheme_id
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_submission_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        COUNT(*) FILTER (WHERE sd.has_submission = 1)::int AS submission_days
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
@@ -4639,7 +4715,7 @@ public class SchemeRegularityRepository {
             LocalDate startDate,
             LocalDate endDate,
             PeriodScale scale) {
-        PeriodSqlParts sqlParts = buildPeriodSqlPartsForMeterReadings(scale);
+        PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
         String sql = String.format("""
                 WITH schemes_in_scope AS (
                     SELECT
@@ -4654,18 +4730,25 @@ public class SchemeRegularityRepository {
                         %4$s AS scope
                     FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
-                scheme_supply_days AS (
+                scheme_day AS (
                     SELECT
                         m.scheme_id,
-                        %5$s AS period_start_date,
-                        COUNT(DISTINCT m.reading_date)::int AS supply_days,
-                        COALESCE(SUM(m.confirmed_reading), 0)::bigint AS total_water_quantity
+                        m.reading_date::date AS reading_date,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope s
                         ON s.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading > 0
-                    GROUP BY m.scheme_id, %5$s
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_supply_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        %5$s AS period_start_date,
+                        COUNT(*) FILTER (WHERE sd.day_water_quantity > 0)::int AS supply_days,
+                        COALESCE(SUM(sd.day_water_quantity), 0)::bigint AS total_water_quantity
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id, %5$s
                 ),
                 period_supply AS (
                     SELECT
@@ -4714,7 +4797,7 @@ public class SchemeRegularityRepository {
             LocalDate startDate,
             LocalDate endDate,
             PeriodScale scale) {
-        PeriodSqlParts sqlParts = buildPeriodSqlPartsForMeterReadings(scale);
+        PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
         String sql = String.format("""
                 WITH schemes_in_scope AS (
                     SELECT
@@ -4730,19 +4813,26 @@ public class SchemeRegularityRepository {
                         %4$s AS scope
                     FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
-                scheme_supply_days AS (
+                scheme_day AS (
                     SELECT
                         m.scheme_id,
-                        %5$s AS period_start_date,
-                        COUNT(DISTINCT m.reading_date)::int AS supply_days,
-                        COALESCE(SUM(m.confirmed_reading), 0)::bigint AS total_water_quantity
+                        m.reading_date::date AS reading_date,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope s
                         ON s.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
-                      AND m.confirmed_reading > 0
                       AND m.tenant_id = ?
-                    GROUP BY m.scheme_id, %5$s
+                    GROUP BY m.scheme_id, m.reading_date::date
+                ),
+                scheme_supply_days AS (
+                    SELECT
+                        sd.scheme_id,
+                        %5$s AS period_start_date,
+                        COUNT(*) FILTER (WHERE sd.day_water_quantity > 0)::int AS supply_days,
+                        COALESCE(SUM(sd.day_water_quantity), 0)::bigint AS total_water_quantity
+                    FROM scheme_day sd
+                    GROUP BY sd.scheme_id, %5$s
                 ),
                 period_supply AS (
                     SELECT
@@ -5298,6 +5388,26 @@ public class SchemeRegularityRepository {
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
                     "TO_CHAR(DATE_TRUNC('month', g.day_date)::date, 'YYYY-MM')",
                     "DATE_TRUNC('month', m.reading_date)::date");
+        };
+    }
+
+    private PeriodSqlParts buildPeriodSqlPartsForSchemeDay(PeriodScale scale) {
+        return switch (scale) {
+            case DAY -> new PeriodSqlParts(
+                    "g.day_date::date",
+                    "g.day_date::date",
+                    "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
+                    "sd.reading_date::date");
+            case WEEK -> new PeriodSqlParts(
+                    "DATE_TRUNC('week', g.day_date)::date",
+                    "(DATE_TRUNC('week', g.day_date)::date + 6)",
+                    "TO_CHAR(DATE_TRUNC('week', g.day_date)::date, 'IYYY-\"W\"IW')",
+                    "DATE_TRUNC('week', sd.reading_date)::date");
+            case MONTH -> new PeriodSqlParts(
+                    "DATE_TRUNC('month', g.day_date)::date",
+                    "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('month', g.day_date)::date, 'YYYY-MM')",
+                    "DATE_TRUNC('month', sd.reading_date)::date");
         };
     }
 
