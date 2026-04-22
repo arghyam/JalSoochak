@@ -341,14 +341,14 @@ public class BfmReadingService {
         String readingText = finalReading != null ? finalReading.stripTrailingZeros().toPlainString() : null;
         if (isValid) {
             if (ocrResult != null && readingText != null) {
-                finalMessage = buildReadingSummaryMessage(finalReading, lastConfirmedReading);
+                finalMessage = "Reading captured successfully. Extracted reading: " + readingText;
             } else {
                 finalMessage = "Reading captured successfully";
             }
         } else if (!hasPositiveReading) {
             finalMessage = "Invalid reading value";
         } else if (ocrResult != null && readingText != null) {
-            finalMessage = buildReadingSummaryMessage(finalReading, lastConfirmedReading) + " Please confirm reading.";
+            finalMessage = "Low OCR confidence. Extracted reading: " + readingText + ". Please confirm reading.";
         } else {
             finalMessage = "Low OCR confidence. Please confirm reading.";
         }
@@ -404,15 +404,6 @@ public class BfmReadingService {
             return fallbackMessage;
         }
         return fallbackMessage;
-    }
-
-    private String buildReadingSummaryMessage(BigDecimal extractedReading, BigDecimal lastConfirmedReading) {
-        String extracted = toPlain(extractedReading);
-        if (lastConfirmedReading == null) {
-            return "This is your extracted reading " + extracted + ".";
-        }
-        return "This is your extracted reading " + extracted
-                + ". Your last confirmed reading was " + toPlain(lastConfirmedReading) + ".";
     }
 
     private Optional<BigDecimal> loadWaterNorm(Integer tenantId) {
