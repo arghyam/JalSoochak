@@ -742,13 +742,11 @@ public class TelemetryTenantRepository {
                     WHERE id = ?
                     """, schemaName, timeColumn);
             jdbcTemplate.update(sql, readingAt, LocalDate.from(readingAt), reason, operatorId, pending.get().id());
-            cleanupOtherPendingIssueReportRecords(schemaName, schemeId, operatorId, pending.get().id(), operatorId);
             return pending.get().correlationId();
         }
 
         String correlationId = "issue-report-" + UUID.randomUUID();
-        Long createdId = createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
-        cleanupOtherPendingIssueReportRecords(schemaName, schemeId, operatorId, createdId, operatorId);
+        createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
         return correlationId;
     }
 
@@ -769,29 +767,6 @@ public class TelemetryTenantRepository {
                   AND extracted_reading = 0
                   AND confirmed_reading = 0
                   AND meter_change_reason IS NOT NULL
-                  AND deleted_at IS NULL
-                  AND id <> ?
-                """, schemaName);
-        jdbcTemplate.update(sql, updatedBy, updatedBy, schemeId, operatorId, keepId);
-    }
-
-    private void cleanupOtherPendingIssueReportRecords(String schemaName,
-                                                       Long schemeId,
-                                                       Long operatorId,
-                                                       Long keepId,
-                                                       Long updatedBy) {
-        validateSchemaName(schemaName);
-        String sql = String.format("""
-                UPDATE %s.flow_reading_table
-                SET deleted_at = NOW(),
-                    deleted_by = ?,
-                    updated_by = ?,
-                    updated_at = NOW()
-                WHERE scheme_id = ?
-                  AND created_by = ?
-                  AND extracted_reading = 0
-                  AND confirmed_reading = 0
-                  AND issue_report_reason IS NOT NULL
                   AND deleted_at IS NULL
                   AND id <> ?
                 """, schemaName);
