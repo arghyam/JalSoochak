@@ -28,8 +28,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Map;
-
 @RestController
 @RequestMapping("/api/v1/telemetry")
 public class GlificWebhookController {
@@ -45,22 +43,24 @@ public class GlificWebhookController {
             consumes = "application/json",
             produces = "application/json"
     )
-    public ResponseEntity<Map<String, Object>> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
+    public ResponseEntity<CreateReadingResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
         try {
-            String jobId = glificWebhookService.enqueueImageProcessing(glificWebhookRequest);
-            return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "job_id", jobId
-            ));
+            CreateReadingResponse response = glificWebhookService.processImage(glificWebhookRequest);
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
             String safeContactId = glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null;
             log.error("Error processing webhook: {}", e.getMessage(), e);
             log.debug("Error processing webhook for contactId {}: {}", safeContactId, e.getMessage());
 
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
-                    "success", false,
-                    "contact_id", safeContactId == null ? "" : safeContactId
-            ));
+            CreateReadingResponse errorResponse = CreateReadingResponse.builder()
+                    .correlationId(safeContactId)
+                    .meterReading(null)
+                    .qualityStatus("REJECTED")
+                    .qualityConfidence(null)
+                    .lastConfirmedReading(null)
+                    .build();
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
 
     }

@@ -2,7 +2,6 @@ package org.arghyam.jalsoochak.telemetry.controller;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
-import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
@@ -12,7 +11,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import java.math.BigDecimal;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -81,34 +79,14 @@ class GlificWebhookControllerUnitTest {
         assertEquals("location-ok", response.getBody().getMessage());
     }
 
-    @Test
-    void receiveReturnsImmediateAckWithJobId() {
-        GlificWebhookService service = new StubGlificWebhookService(false, false);
-        GlificWebhookController controller = new GlificWebhookController(service);
-
-        ResponseEntity<Map<String, Object>> response = controller.receive(
-                GlificWebhookRequest.builder().contactId("919999999999").mediaId("m1").build()
-        );
-
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertNotNull(response.getBody());
-        assertEquals(true, response.getBody().get("success"));
-        assertEquals("job-123", response.getBody().get("job_id"));
-    }
-
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean throwLanguageSelection;
         private final boolean throwSelectedChannel;
 
         private StubGlificWebhookService(boolean throwLanguageSelection, boolean throwSelectedChannel) {
-            super(null, null, null, null, null);
+            super(null, null, null, null);
             this.throwLanguageSelection = throwLanguageSelection;
             this.throwSelectedChannel = throwSelectedChannel;
-        }
-
-        @Override
-        public String enqueueImageProcessing(GlificWebhookRequest glificWebhookRequest) {
-            return "job-123";
         }
 
         @Override

@@ -46,10 +46,6 @@ glific:
     user:
       phone: ${GLIFIC_SYNC_USER_PHONE:}
       password: ${GLIFIC_SYNC_USER_PASSWORD:}
-  readings:
-    resume:
-      enabled: ${GLIFIC_READINGS_RESUME_ENABLED:true}
-      flow-id: ${GLIFIC_READINGS_RESUME_FLOW_ID:37172}
 
 flowvision:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
