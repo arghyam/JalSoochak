@@ -59,10 +59,7 @@ public class GlificWebhookController {
 
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                     "success", false,
-                    "contact_id", safeContactId == null ? "" : safeContactId,
-                    "correlationId", safeContactId == null ? "" : safeContactId,
-                    "qualityStatus", "REJECTED",
-                    "message", "We could not accept this reading request right now. Please try again."
+                    "contact_id", safeContactId == null ? "" : safeContactId
             ));
         }
 
