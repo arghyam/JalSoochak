@@ -92,6 +92,10 @@ logging:
   # Plain console: key=value pairs from SLF4J 2 (see logback-spring.xml). JSON lines: add profile "json-logs".
   pattern:
     level: "service=${spring.application.name} %5p"
+    
+# single tenant mode is disabled by default
+analytics:
+  single-tenant-mode: ${SINGLE_TENANT_MODE:false}
 
 ---
 # One JSON object per line (ELK/Loki-friendly). Example: SPRING_PROFILES_ACTIVE=json-logs

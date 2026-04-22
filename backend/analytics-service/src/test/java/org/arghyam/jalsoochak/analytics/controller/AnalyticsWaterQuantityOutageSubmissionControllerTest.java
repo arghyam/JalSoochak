@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicWaterQuantityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResponse;
@@ -27,6 +28,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -64,6 +66,101 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
 
     @MockBean
     private AuthenticatedRequestContextService authenticatedRequestContextService;
+
+    @ParameterizedTest
+    @MethodSource("waterSupplyCombinationMatrix")
+    void getAverageWaterSupplyPerRegion_combinationMatrix(
+            String scope,
+            String tenantId,
+            String parentLgdId,
+            String parentDepartmentId,
+            int expectedStatus) throws Exception {
+        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionForCurrentScope(any(), any(), any()))
+                .thenReturn(averageWaterSupplyResponse());
+        when(schemeRegularityService.getAverageWaterSupplyPerNationForChildScope(any(), any()))
+                .thenReturn(averageWaterSupplyResponse());
+        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionByLgdForChildScope(any(), any(), any(), any()))
+                .thenReturn(averageWaterSupplyResponse());
+        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(any(), any(), any(), any()))
+                .thenReturn(averageWaterSupplyResponse());
+
+        MockHttpServletRequestBuilder request = get(BASE + "/water-supply/average-per-region")
+                .param("scope", scope)
+                .param("start_date", START.toString())
+                .param("end_date", END.toString());
+        if (tenantId != null) {
+            request.param("tenant_id", tenantId);
+        }
+        if (parentLgdId != null) {
+            request.param("parent_lgd_id", parentLgdId);
+        }
+        if (parentDepartmentId != null) {
+            request.param("parent_department_id", parentDepartmentId);
+        }
+
+        if (expectedStatus >= 200 && expectedStatus < 300) {
+            mockMvc.perform(request)
+                    .andExpect(status().is(expectedStatus))
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data").exists());
+        } else if (tenantId == null) {
+            // Missing required request param is rejected by Spring before controller,
+            // so response body is not our ApiResponse wrapper.
+            mockMvc.perform(request)
+                    .andExpect(status().is(expectedStatus));
+        } else {
+            mockMvc.perform(request)
+                    .andExpect(status().is(expectedStatus))
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.data").value(nullValue()));
+        }
+    }
+
+    @Test
+    void getAverageWaterSupplyPerRegion_invalidScope_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/water-supply/average-per-region")
+                        .param("scope", "invalid")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("tenant_id", "10"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getAverageWaterSupplyPerRegion_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionForCurrentScope(any(), any(), any()))
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/water-supply/average-per-region")
+                        .param("scope", "current")
+                        .param("tenant_id", "10")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getAverageWaterSupplyPerRegion_scopeChildWithDepartmentId_routesToDepartmentService() throws Exception {
+        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(any(), any(), any(), any()))
+                .thenReturn(averageWaterSupplyResponse());
+
+        mockMvc.perform(get(BASE + "/water-supply/average-per-region")
+                        .param("scope", "child")
+                        .param("tenant_id", "10")
+                        .param("parent_department_id", "201")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").exists());
+
+        verify(schemeRegularityService, times(1))
+                .getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(10, 201, START, END);
+    }
 
     @ParameterizedTest
     @MethodSource("regionWiseValidRoutes")
@@ -701,6 +798,18 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
         );
     }
 
+    private static Stream<Arguments> waterSupplyCombinationMatrix() {
+        return Stream.of(
+                Arguments.of("current", "10", null, null, 200),
+                Arguments.of("current", null, null, null, 400),
+                Arguments.of("current", "10", "101", "201", 400),
+                Arguments.of("child", null, null, null, 400),
+                Arguments.of("child", "10", "101", null, 200),
+                Arguments.of("child", "10", null, null, 400),
+                Arguments.of("child", "10", "101", "201", 400)
+        );
+    }
+
     private static JwtAuthenticationToken buildJwtAuthentication() {
         Jwt jwt = Jwt.withTokenValue("token")
                 .header("alg", "none")
@@ -730,6 +839,15 @@ class AnalyticsWaterQuantityOutageSubmissionControllerTest {
                 .expiresAt(Instant.now().plusSeconds(3600))
                 .build();
         return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
+    }
+
+    private static AverageWaterSupplyResponse averageWaterSupplyResponse() {
+        return AverageWaterSupplyResponse.builder()
+                .schemeCount(0)
+                .childRegionCount(0)
+                .schemes(List.of())
+                .childRegions(List.of())
+                .build();
     }
 
     private static RegionWiseWaterQuantityResponse regionWiseWaterQuantityResponse() {
