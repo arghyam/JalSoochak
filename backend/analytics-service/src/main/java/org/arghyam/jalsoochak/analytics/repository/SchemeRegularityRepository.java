@@ -3629,12 +3629,13 @@ public class SchemeRegularityRepository {
                 ),
                 ewater_by_scheme_day AS (
                     SELECT
+                        f.tenant_id,
                         f.scheme_id,
                         f.date,
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
-                    GROUP BY f.scheme_id, f.date
+                    GROUP BY f.tenant_id, f.scheme_id, f.date
                 ),
                 tenant_supply_days AS (
                     SELECT
@@ -3658,7 +3659,8 @@ public class SchemeRegularityRepository {
                     FROM schemes_in_scope s
                     CROSS JOIN dates_in_range dr
                     LEFT JOIN ewater_by_scheme_day wd
-                        ON wd.scheme_id = s.scheme_id
+                        ON wd.tenant_id = s.tenant_id
+                        AND wd.scheme_id = s.scheme_id
                         AND wd.date = dr.date
                     JOIN tenant_cfg tc
                         ON tc.tenant_id = s.tenant_id
@@ -4248,6 +4250,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
+                      AND s.tenant_id = ?
                 ),
                 dates_in_range AS (
                     SELECT d.full_date AS date
@@ -4260,6 +4263,7 @@ public class SchemeRegularityRepository {
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS total_ewater_quantity
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
                     GROUP BY f.scheme_id
                 ),
                 region_scheme_agg AS (
@@ -4281,6 +4285,7 @@ public class SchemeRegularityRepository {
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
                     GROUP BY f.scheme_id, f.date
                 ),
                 region_supply_days AS (
@@ -4350,12 +4355,15 @@ public class SchemeRegularityRepository {
                 parentLgdId,
                 tenantId,
                 parentLgdId,
+                tenantId,
                 startDate,
                 endDate,
                 startDate,
                 endDate,
+                tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<ChildRegionWaterQuantityMetrics> getRegionWiseWaterQuantityByDepartment(
@@ -4826,6 +4834,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
+                      AND s.tenant_id = ?
                 ),
                 dates_in_range AS (
                     SELECT d.full_date AS date
@@ -4838,6 +4847,7 @@ public class SchemeRegularityRepository {
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS total_ewater_quantity
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
                     GROUP BY f.scheme_id
                 ),
                 region_scheme_agg AS (
@@ -4859,6 +4869,7 @@ public class SchemeRegularityRepository {
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
                     GROUP BY f.scheme_id, f.date
                 ),
                 region_supply_days AS (
@@ -4928,12 +4939,17 @@ public class SchemeRegularityRepository {
                 parentDepartmentId,
                 tenantId,
                 parentDepartmentId,
+                tenantId,
                 startDate,
                 endDate,
+                tenantId,
                 startDate,
                 endDate,
+                tenantId,
+                tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityByLgdId(

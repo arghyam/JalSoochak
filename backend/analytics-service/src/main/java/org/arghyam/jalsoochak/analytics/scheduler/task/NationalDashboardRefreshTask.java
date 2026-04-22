@@ -33,8 +33,11 @@ public class NationalDashboardRefreshTask implements AnalyticsScheduledTask {
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
         int sanitizedLookbackDays = Math.max(0, lookbackDays);
-        LocalDate endDate = LocalDate.now(IST_ZONE);
-        LocalDate startDate = endDate.minusDays(sanitizedLookbackDays);
+        // Stable window for 7PM→7PM: anchor to yesterday (IST) to avoid midnight drift.
+        LocalDate endDate = LocalDate.now(IST_ZONE).minusDays(1);
+        LocalDate startDate = (sanitizedLookbackDays <= 0)
+                ? endDate
+                : endDate.minusDays(sanitizedLookbackDays - 1L);
 
         log.info("Running scheduled task '{}' for range {} to {}", taskName(), startDate, endDate);
         schemeRegularityService.refreshNationalDashboard(startDate, endDate);

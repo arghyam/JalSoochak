@@ -197,3 +197,41 @@ CREATE TABLE tenant_mp.user_scheme_mapping_table (
 CREATE UNIQUE INDEX uq_tenant_mp_user_scheme_active
     ON tenant_mp.user_scheme_mapping_table (user_id, scheme_id)
     WHERE deleted_at IS NULL;
+
+-- ── Flow reading table (tenant_mp) ────────────────────────────────────────────
+
+CREATE TABLE tenant_mp.flow_reading_table (
+    id                SERIAL          PRIMARY KEY,
+    uuid              VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    scheme_id         INTEGER         NOT NULL REFERENCES tenant_mp.scheme_master_table(id),
+    reading_at        TIMESTAMP       NOT NULL,
+    reading_date      DATE            NOT NULL,
+    extracted_reading NUMERIC         NOT NULL,
+    confirmed_reading NUMERIC         NOT NULL,
+    correlation_id    VARCHAR(255)    NOT NULL,
+    quantity          NUMERIC         NOT NULL DEFAULT 0,
+    channel           INTEGER,
+    image_url         TEXT            DEFAULT '',
+    created_by        INTEGER         NOT NULL REFERENCES tenant_mp.user_table(id),
+    created_at        TIMESTAMP       NOT NULL DEFAULT NOW(),
+    updated_by        INTEGER         NOT NULL REFERENCES tenant_mp.user_table(id),
+    updated_at        TIMESTAMP       NOT NULL DEFAULT NOW(),
+    deleted_at        TIMESTAMP,
+    deleted_by        INTEGER
+);
+
+-- ── Tenant config master table ────────────────────────────────────────────────
+
+CREATE TABLE common_schema.tenant_config_master_table (
+    id           SERIAL      PRIMARY KEY,
+    uuid         VARCHAR(36) NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    tenant_id    INTEGER     NOT NULL REFERENCES common_schema.tenant_master_table(id),
+    config_key   TEXT,
+    config_value TEXT,
+    created_at   TIMESTAMP   NOT NULL DEFAULT NOW(),
+    created_by   INTEGER,
+    updated_at   TIMESTAMP   NOT NULL DEFAULT NOW(),
+    updated_by   INTEGER,
+    deleted_at   TIMESTAMP,
+    deleted_by   INTEGER
+);

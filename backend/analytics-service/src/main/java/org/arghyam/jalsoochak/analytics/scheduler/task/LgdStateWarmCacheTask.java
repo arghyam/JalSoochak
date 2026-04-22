@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -20,7 +21,14 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
 
     private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
     private static final int STATE_LGD_LEVEL = 1;
-    private static final int LOOKBACK_DAYS = 30;
+    /**
+     * Warm-cache runs at 7PM IST and should serve the same cached data until the next 7PM run.
+     * To avoid cache-key drift after midnight, anchor the date window to "yesterday" (IST).
+     *
+     * Window size is inclusive of both start and end dates.
+     */
+    @Value("${analytics.scheduler.national-dashboard.lookback-days:30}")
+    private int lookbackDays;
 
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final SchemeRegularityService schemeRegularityService;
@@ -35,8 +43,10 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.common.cron:0 0 19 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
-        LocalDate endDate = LocalDate.now(IST_ZONE);
-        LocalDate startDate = endDate.minusDays(LOOKBACK_DAYS);
+        int sanitizedLookbackDays = Math.max(1, lookbackDays);
+        // Stable 30-day window ending yesterday (IST): [end-29, end]
+        LocalDate endDate = LocalDate.now(IST_ZONE).minusDays(1);
+        LocalDate startDate = endDate.minusDays(sanitizedLookbackDays - 1L);
         PeriodScale scale = PeriodScale.DAY;
 
         List<DimLgdLocation> states = dimLgdLocationRepository.findByLgdLevel(STATE_LGD_LEVEL);
