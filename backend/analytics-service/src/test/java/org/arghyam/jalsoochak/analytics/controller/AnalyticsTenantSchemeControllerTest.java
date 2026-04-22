@@ -233,10 +233,13 @@ class AnalyticsTenantSchemeControllerTest {
     }
 
     @Test
-    void getMeterReadings_withTenantAndScheme_withoutDates_defaultsToTodayAndTodayMinus30Days() throws Exception {
-        LocalDate now = LocalDate.now();
-        LocalDate defaultEnd = now.minusDays(30);
-        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, now, defaultEnd))
+    void getMeterReadings_withTenantAndScheme_withoutDates_defaultsToYesterdayAnd30DayWindow() throws Exception {
+        // Controller defaults are anchored to "yesterday" in the configured zone (Asia/Kolkata by default)
+        // to keep the window stable across the warm-cache 7PM→7PM cycle.
+        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Kolkata");
+        LocalDate defaultStart = LocalDate.now(zone).minusDays(1);
+        LocalDate defaultEnd = defaultStart.minusDays(29);
+        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, defaultStart, defaultEnd))
                 .thenReturn(List.of());
 
         mockMvc.perform(get(BASE + "/meter-readings")
@@ -247,7 +250,7 @@ class AnalyticsTenantSchemeControllerTest {
                 .andExpect(jsonPath("$.data").isArray());
 
         verify(meterReadingRepository, times(1))
-                .findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, now, defaultEnd);
+                .findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, defaultStart, defaultEnd);
     }
 
     @Test
