@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
+import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
@@ -63,6 +64,32 @@ public class GlificWebhookController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
 
+    }
+
+    @PostMapping(
+            value = "/readings/assam",
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<CreateReadingResponse> receiveAssamReading(@RequestBody @Valid AssamReadingRequest request) {
+        try {
+            CreateReadingResponse response = glificWebhookService.processAssamReading(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            String safeContactId = request != null ? request.getPhoneNumber() : null;
+            log.error("Error processing Assam reading: {}", e.getMessage(), e);
+            log.debug("Error processing Assam reading for phoneNumber {}: {}", safeContactId, e.getMessage());
+
+            CreateReadingResponse errorResponse = CreateReadingResponse.builder()
+                    .correlationId(safeContactId)
+                    .meterReading(null)
+                    .qualityStatus("REJECTED")
+                    .qualityConfidence(null)
+                    .lastConfirmedReading(null)
+                    .build();
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
     }
 
     @PostMapping("/intro")
