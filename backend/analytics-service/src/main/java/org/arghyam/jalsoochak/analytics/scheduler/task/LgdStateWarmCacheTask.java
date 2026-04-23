@@ -43,6 +43,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.common.cron:0 0 19 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
+        log.info("Scheduler START '{}'", taskName());
         int sanitizedLookbackDays = Math.max(1, lookbackDays);
         // Stable 30-day window ending yesterday (IST): [end-29, end]
         LocalDate endDate = LocalDate.now(IST_ZONE).minusDays(1);
@@ -111,6 +112,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
         }
 
         log.info("Completed scheduled task '{}' for range {} to {}", taskName(), startDate, endDate);
+        log.info("Scheduler END '{}'", taskName());
     }
 }
 

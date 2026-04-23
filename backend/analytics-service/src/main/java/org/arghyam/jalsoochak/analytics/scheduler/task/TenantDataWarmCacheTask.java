@@ -7,12 +7,11 @@ import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
-import org.springframework.beans.factory.annotation.Value;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -32,12 +31,7 @@ public class TenantDataWarmCacheTask implements AnalyticsScheduledTask {
     private final DimTenantRepository dimTenantRepository;
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final TenantDetailsService tenantDetailsService;
-
-    @Value("${analytics.scheduler.common.zone:Asia/Kolkata}")
-    private String schedulerZone;
-
-    @Value("${analytics.scheduler.national-dashboard.lookback-days:30}")
-    private int lookbackDays;
+    private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
     @Override
     public String taskName() {
@@ -49,12 +43,11 @@ public class TenantDataWarmCacheTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.common.cron:0 0 19 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
-        ZoneId zone = ZoneId.of(schedulerZone);
-        int sanitizedLookbackDays = Math.max(1, lookbackDays);
-
-        // Stable inclusive window: [end-(N-1), end], with end anchored to yesterday.
-        LocalDate endDate = LocalDate.now(zone).minusDays(1);
-        LocalDate startDate = endDate.minusDays(sanitizedLookbackDays - 1L);
+        log.info("Scheduler START '{}'", taskName());
+        DefaultAnalyticsDateWindowProvider.DateWindow window =
+                defaultAnalyticsDateWindowProvider.defaultWindow();
+        LocalDate startDate = window.startDate();
+        LocalDate endDate = window.endDate();
 
         List<DimTenant> tenants = dimTenantRepository.findByTenantIdGreaterThan(0);
         log.info("Running scheduled task '{}' for {} tenants, range {} to {}",
@@ -86,6 +79,7 @@ public class TenantDataWarmCacheTask implements AnalyticsScheduledTask {
         }
 
         log.info("Completed scheduled task '{}' for range {} to {}", taskName(), startDate, endDate);
+        log.info("Scheduler END '{}'", taskName());
     }
 }
 

@@ -38,7 +38,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/jalsoochak}
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:https://jalsoochak.beehyv.com/keycloak/realms/jalsoochak-realm}
 
   data:
     redis:
@@ -92,20 +92,11 @@ logging:
   # Plain console: key=value pairs from SLF4J 2 (see logback-spring.xml). JSON lines: add profile "json-logs".
   pattern:
     level: "service=${spring.application.name} %5p"
-    
+
 # single tenant mode is disabled by default
 analytics:
   single-tenant-mode: ${SINGLE_TENANT_MODE:false}
 
----
-# One JSON object per line (ELK/Loki-friendly). Example: SPRING_PROFILES_ACTIVE=json-logs
-spring:
-  config:
-    activate:
-      on-profile: json-logs
-# logback-spring.xml picks up profile "json-logs" automatically; no extra properties required here.
-
-analytics:
   scheduler:
     common:
       cron: ${ANALYTICS_SCHEDULER_CRON:0 0 19 * * *}
@@ -116,3 +107,11 @@ analytics:
       inactive-after-days: ${ANALYTICS_SCHEME_STATUS_INACTIVE_AFTER_DAYS:30}
     dim-date-backfill:
       cron: ${ANALYTICS_DIM_DATE_BACKFILL_CRON:0 10 0 * * *}
+
+---
+# One JSON object per line (ELK/Loki-friendly). Example: SPRING_PROFILES_ACTIVE=json-logs
+spring:
+  config:
+    activate:
+      on-profile: json-logs
+# logback-spring.xml picks up profile "json-logs" automatically; no extra properties required here.
