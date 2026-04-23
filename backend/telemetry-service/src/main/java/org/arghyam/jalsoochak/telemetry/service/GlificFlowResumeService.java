@@ -171,10 +171,13 @@ public class GlificFlowResumeService {
         resultPayload.put("quality_confidence", result != null ? result.getQualityConfidence() : null);
         resultPayload.put("last_confirmed_reading", result != null ? result.getLastConfirmedReading() : null);
 
+        Map<String, Object> wrappedResult = new HashMap<>();
+        wrappedResult.put("result", resultPayload);
+
         Map<String, Object> variables = new HashMap<>();
         variables.put("flowId", flowId);
         variables.put("contactId", glificContactId);
-        variables.put("result", resultPayload);
+        variables.put("result", wrappedResult);
 
         Map<String, Object> body = new HashMap<>();
         body.put("query", mutation);
