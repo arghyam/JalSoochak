@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -11,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -79,6 +81,28 @@ class GlificWebhookControllerUnitTest {
         assertEquals("location-ok", response.getBody().getMessage());
     }
 
+    @Test
+    void assamReadingsReturnsOkWhenServiceSucceeds() {
+        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookController controller = new GlificWebhookController(service);
+
+        ResponseEntity<CreateReadingResponse> response = controller.receiveAssamReading(
+                AssamReadingRequest.builder()
+                        .readingUrl("https://example.com/meter.jpg")
+                        .confirmedReading(new BigDecimal("123.4"))
+                        .stateSchemeId(30178236L)
+                        .centreSchemeId(30244993L)
+                        .phoneNumber("919999999999")
+                        .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(true, response.getBody().isSuccess());
+        assertEquals("assam-reading-ok", response.getBody().getMessage());
+    }
+
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean throwLanguageSelection;
         private final boolean throwSelectedChannel;
@@ -110,6 +134,14 @@ class GlificWebhookControllerUnitTest {
             return CreateReadingResponse.builder()
                     .success(true)
                     .message("location-ok")
+                    .build();
+        }
+
+        @Override
+        public CreateReadingResponse processAssamReading(AssamReadingRequest request) {
+            return CreateReadingResponse.builder()
+                    .success(true)
+                    .message("assam-reading-ok")
                     .build();
         }
     }
