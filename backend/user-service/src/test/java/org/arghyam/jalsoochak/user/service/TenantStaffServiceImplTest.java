@@ -467,7 +467,7 @@ class TenantStaffServiceImplTest {
 
             service.deactivateStaff(10L, "mp", auth);
 
-            verify(staffKeycloakService).revokeKeycloakAccount(SECTION_OFFICER, "tenant_mp");
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
             verify(userTenantRepository).deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull());
             verify(userAnalyticsEventPublisher).publishStaffUserUpdatedAfterCommit(
                     eq(10L), eq(1), anyInt(), anyString(), anyString(), anyInt());
@@ -495,7 +495,7 @@ class TenantStaffServiceImplTest {
 
             service.deactivateStaff(10L, "mp", auth);
 
-            verify(staffKeycloakService).revokeKeycloakAccount(SECTION_OFFICER, "tenant_mp");
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
             verify(userTenantRepository).deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull());
         }
 
@@ -537,7 +537,7 @@ class TenantStaffServiceImplTest {
 
             service.deactivateStaff(10L, "mp", auth);
 
-            verify(staffKeycloakService).revokeKeycloakAccount(SECTION_OFFICER, "tenant_mp");
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
             verify(userAnalyticsEventPublisher, never()).publishStaffUserUpdatedAfterCommit(
                     anyLong(), anyInt(), anyInt(), anyString(), anyString(), anyInt());
         }
@@ -555,7 +555,7 @@ class TenantStaffServiceImplTest {
             // should not throw
             service.deactivateStaff(10L, "mp", auth);
 
-            verify(staffKeycloakService).revokeKeycloakAccount(SECTION_OFFICER, "tenant_mp");
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
         }
     }
 }

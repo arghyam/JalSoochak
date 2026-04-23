@@ -81,7 +81,8 @@ public class TenantStaffController {
             @PathVariable @Positive Long id,
             @RequestParam @NotBlank String tenantCode,
             Authentication authentication) {
-        log.info("POST /api/v1/tenant/user/staff/[id]/deactivate");
+        log.info("POST /api/v1/tenant/user/staff/{}/deactivate tenantCode={} caller={}",
+                id, tenantCode, authentication != null ? authentication.getName() : "anonymous");
         tenantStaffService.deactivateStaff(id, tenantCode, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Staff user deactivated successfully"));
     }

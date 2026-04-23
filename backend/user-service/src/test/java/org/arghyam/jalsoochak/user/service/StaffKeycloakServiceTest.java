@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -723,12 +724,12 @@ class StaffKeycloakServiceTest {
             TenantUserRecord provisionedUser = new TenantUserRecord(
                     10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
                     "Test Officer", EXISTING_UUID, 1, null);
-            when(userTenantRepository.resetKeycloakCredentials("tenant_mp", 10L)).thenReturn(1);
+            when(userTenantRepository.resetKeycloakCredentials(eq("tenant_mp"), eq(10L), any())).thenReturn(1);
 
-            service.revokeKeycloakAccount(provisionedUser, "tenant_mp");
+            service.revokeKeycloakAccount(provisionedUser, "tenant_mp", null);
 
             verify(keycloakAdminHelper).deleteUser(EXISTING_UUID);
-            verify(userTenantRepository).resetKeycloakCredentials("tenant_mp", 10L);
+            verify(userTenantRepository).resetKeycloakCredentials(eq("tenant_mp"), eq(10L), isNull());
         }
 
         @Test
@@ -737,12 +738,12 @@ class StaffKeycloakServiceTest {
             TenantUserRecord unprovisionedUser = new TenantUserRecord(
                     10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
                     "Test Officer", null, 1, null);
-            when(userTenantRepository.resetKeycloakCredentials("tenant_mp", 10L)).thenReturn(1);
+            when(userTenantRepository.resetKeycloakCredentials(eq("tenant_mp"), eq(10L), any())).thenReturn(1);
 
-            service.revokeKeycloakAccount(unprovisionedUser, "tenant_mp");
+            service.revokeKeycloakAccount(unprovisionedUser, "tenant_mp", null);
 
             verify(keycloakAdminHelper, never()).deleteUser(anyString());
-            verify(userTenantRepository).resetKeycloakCredentials("tenant_mp", 10L);
+            verify(userTenantRepository).resetKeycloakCredentials(eq("tenant_mp"), eq(10L), isNull());
         }
 
         @Test
@@ -753,12 +754,12 @@ class StaffKeycloakServiceTest {
                     "Test Officer", EXISTING_UUID, 1, null);
             // keycloakAdminHelper.deleteUser is best-effort (swallows exceptions internally),
             // so we verify the DB reset still happens regardless.
-            when(userTenantRepository.resetKeycloakCredentials("tenant_mp", 10L)).thenReturn(1);
+            when(userTenantRepository.resetKeycloakCredentials(eq("tenant_mp"), eq(10L), any())).thenReturn(1);
 
-            service.revokeKeycloakAccount(provisionedUser, "tenant_mp");
+            service.revokeKeycloakAccount(provisionedUser, "tenant_mp", null);
 
             verify(keycloakAdminHelper).deleteUser(EXISTING_UUID);
-            verify(userTenantRepository).resetKeycloakCredentials("tenant_mp", 10L);
+            verify(userTenantRepository).resetKeycloakCredentials(eq("tenant_mp"), eq(10L), isNull());
         }
 
         @Test
@@ -767,12 +768,12 @@ class StaffKeycloakServiceTest {
             TenantUserRecord blankUuidUser = new TenantUserRecord(
                     10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
                     "Test Officer", "   ", 1, null);
-            when(userTenantRepository.resetKeycloakCredentials("tenant_mp", 10L)).thenReturn(1);
+            when(userTenantRepository.resetKeycloakCredentials(eq("tenant_mp"), eq(10L), any())).thenReturn(1);
 
-            service.revokeKeycloakAccount(blankUuidUser, "tenant_mp");
+            service.revokeKeycloakAccount(blankUuidUser, "tenant_mp", null);
 
             verify(keycloakAdminHelper, never()).deleteUser(anyString());
-            verify(userTenantRepository).resetKeycloakCredentials("tenant_mp", 10L);
+            verify(userTenantRepository).resetKeycloakCredentials(eq("tenant_mp"), eq(10L), isNull());
         }
     }
 }

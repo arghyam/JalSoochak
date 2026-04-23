@@ -173,7 +173,6 @@ public class TenantStaffServiceImpl implements TenantStaffService {
     }
 
     @Override
-    @Transactional
     public void deactivateStaff(Long id, String tenantCode, Authentication caller) {
         String callerTenantCode = SecurityUtils.extractTenantCode(caller);
         String callerRole = SecurityUtils.extractRole(caller).orElse(null);
@@ -191,29 +190,33 @@ public class TenantStaffServiceImpl implements TenantStaffService {
             throw new BadRequestException("Staff user is already deactivated");
         }
 
-        // Revoke Keycloak credentials before deactivation so the user cannot log in
-        // even if there is a brief window between the DB write and token expiry.
-        staffKeycloakService.revokeKeycloakAccount(user, schema);
-
         Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode).orElse(null);
         Long actorId = resolveActorId(caller, tenantId);
 
+        // Deactivate in DB first (auto-commits via JdbcTemplate) before touching Keycloak,
+        // so DB and Keycloak states do not diverge on transaction rollback.
         int affected = userTenantRepository.deactivateStaffUser(schema, id, actorId);
         if (affected == 0) {
             // Concurrent deactivation won the race — not an error, outcome is the same.
             log.info("Staff deactivation: user already deactivated by a concurrent request — staffUserId={}", id);
         }
 
-        if (tenantId != null) {
-            userAnalyticsEventPublisher.publishStaffUserUpdatedAfterCommit(
-                    id, tenantId,
-                    user.userTypeId() != null ? user.userTypeId().intValue() : null,
-                    user.keycloakUuid(),
-                    user.email(),
-                    TenantUserStatus.INACTIVE.code
-            );
-        } else {
-            log.warn("Cannot publish staff deactivation analytics: tenantId not found for tenantCode={}", tenantCode);
+        // Revoke Keycloak account outside the transactional boundary. Best-effort — failure is
+        // logged inside revokeKeycloakAccount but does not roll back the already-committed DB change.
+        staffKeycloakService.revokeKeycloakAccount(user, schema, actorId);
+
+        if (affected > 0) {
+            if (tenantId != null) {
+                userAnalyticsEventPublisher.publishStaffUserUpdatedAfterCommit(
+                        id, tenantId,
+                        user.userTypeId() != null ? user.userTypeId().intValue() : null,
+                        user.keycloakUuid(),
+                        user.email(),
+                        TenantUserStatus.INACTIVE.code
+                );
+            } else {
+                log.warn("Cannot publish staff deactivation analytics: tenantId not found for tenantCode={}", tenantCode);
+            }
         }
 
         log.info("Staff user deactivated: staffUserId={} tenantCode={}", id, tenantCode);
@@ -235,7 +238,7 @@ public class TenantStaffServiceImpl implements TenantStaffService {
             return null;
         }
         // Staff callers are in the tenant schema; look up by Keycloak UUID.
-        String schema = "tenant_" + callerTenantCode.toLowerCase(java.util.Locale.ROOT);
+        String schema = TenantSchemaResolver.requireSchemaNameFromTenantCode(callerTenantCode);
         return userTenantRepository.findUserByKeycloakUuid(schema, callerUuid)
                 .map(TenantUserRecord::id)
                 .orElse(null);

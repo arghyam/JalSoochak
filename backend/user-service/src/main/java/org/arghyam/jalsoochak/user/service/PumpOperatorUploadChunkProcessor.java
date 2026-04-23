@@ -137,7 +137,7 @@ public class PumpOperatorUploadChunkProcessor {
                     // In the current CSV flow matching is by phone so this is always a no-op,
                     // but the guard is critical for any future in-place phone-change path.
                     if (!normalizedPhone.equals(user.phoneNumber())) {
-                        staffKeycloakService.revokeKeycloakAccount(user, schemaName);
+                        staffKeycloakService.revokeKeycloakAccount(user, schemaName, actor.id());
                     }
                     userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
                     userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);

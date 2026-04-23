@@ -261,7 +261,7 @@ class PumpOperatorUploadChunkProcessorTest {
             processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), 1, 1,
                     List.of(uploadRow), schemeCache, new HashSet<>());
 
-            verify(staffKeycloakService).revokeKeycloakAccount(existingUserDiffPhone, SCHEMA);
+            verify(staffKeycloakService).revokeKeycloakAccount(existingUserDiffPhone, SCHEMA, ACTOR.id());
             verify(userTenantRepository).updateUserProfile(SCHEMA, 55L, "New Name", "919876543214");
         }
 
@@ -284,7 +284,7 @@ class PumpOperatorUploadChunkProcessorTest {
             processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), 1, 1,
                     List.of(uploadRow), schemeCache, new HashSet<>());
 
-            verify(staffKeycloakService, never()).revokeKeycloakAccount(any(), anyString());
+            verify(staffKeycloakService, never()).revokeKeycloakAccount(any(), anyString(), anyLong());
         }
 
         @Test

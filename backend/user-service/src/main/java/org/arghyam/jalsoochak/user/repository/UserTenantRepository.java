@@ -397,14 +397,14 @@ public class UserTenantRepository {
      * @return number of rows updated (1 if the row existed, 0 if not found)
      */
     @SuppressWarnings("java:S2077")
-    public int resetKeycloakCredentials(String schemaName, Long userId) {
+    public int resetKeycloakCredentials(String schemaName, Long userId, Long actorId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
                 UPDATE %s.user_table
-                SET password = 'CSV_ONBOARDED', updated_at = NOW()
+                SET password = 'CSV_ONBOARDED', updated_by = ?, updated_at = NOW()
                 WHERE id = ?
                 """, schemaName);
-        return jdbcTemplate.update(sql, userId);
+        return jdbcTemplate.update(sql, actorId, userId);
     }
 
     /**
@@ -420,7 +420,7 @@ public class UserTenantRepository {
         String sql = String.format("""
                 UPDATE %s.user_table
                 SET status = ?, updated_by = ?, updated_at = NOW()
-                WHERE id = ? AND status != ?
+                WHERE id = ? AND status != ? AND deleted_at IS NULL
                 """, schemaName);
         return jdbcTemplate.update(sql,
                 TenantUserStatus.INACTIVE.code, actorId, userId, TenantUserStatus.INACTIVE.code);

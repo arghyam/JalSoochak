@@ -20,6 +20,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -104,12 +105,31 @@ public class StaffKeycloakService {
      * @param user   the staff user record
      * @param schema the tenant schema name (e.g. "tenant_mp")
      */
-    public void revokeKeycloakAccount(TenantUserRecord user, String schema) {
+    public void revokeKeycloakAccount(TenantUserRecord user, String schema, Long actorId) {
         String uuid = user.keycloakUuid();
         if (uuid != null && !uuid.isBlank()) {
             keycloakAdminHelper.deleteUser(uuid);  // best-effort; logs on failure, does not throw
+        } else {
+            // UUID is absent — attempt a phone-based lookup and deletion so a Keycloak user
+            // that was created with this staff phone as username does not linger.
+            String phone = user.phoneNumber();
+            if (phone != null && !phone.isBlank()) {
+                try {
+                    var usersResource = keycloakProvider.getAdminInstance()
+                            .realm(keycloakProvider.getRealm()).users();
+                    List<UserRepresentation> matches = usersResource.searchByUsername(phone, true);
+                    if (!matches.isEmpty()) {
+                        String foundId = matches.get(0).getId();
+                        keycloakAdminHelper.deleteUser(foundId);
+                        log.info("Revoked orphaned Keycloak user found by phone for staffUserId={}", user.id());
+                    }
+                } catch (Exception e) {
+                    log.warn("Phone-based Keycloak lookup/delete failed for staffUserId={}: {}",
+                            user.id(), e.getMessage());
+                }
+            }
         }
-        userTenantRepository.resetKeycloakCredentials(schema, user.id());
+        userTenantRepository.resetKeycloakCredentials(schema, user.id(), actorId);
         log.info("Keycloak account revoked for staffUserId={} schema={}", user.id(), schema);
     }
 
@@ -371,7 +391,7 @@ public class StaffKeycloakService {
                 if (storedUserId != null) {
                     TenantUserRecord owner = userTenantRepository.findUserById(schema, storedUserId).orElse(null);
                     boolean ownerIsActive = owner != null
-                            && user.phoneNumber().equals(owner.phoneNumber())
+                            && Objects.equals(user.phoneNumber(), owner.phoneNumber())
                             && owner.status() != null
                             && owner.status() == TenantUserStatus.ACTIVE.code;
                     if (ownerIsActive) {

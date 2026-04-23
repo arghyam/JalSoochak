@@ -405,7 +405,7 @@ class UserTenantRepositoryIntegrationTest {
             TenantUserRecord before = repo.findUserById(SCHEMA, id).orElseThrow();
             assertThat(before.keycloakUuid()).isEqualTo("uuid-reset-kc");
 
-            int affected = repo.resetKeycloakCredentials(SCHEMA, id);
+            int affected = repo.resetKeycloakCredentials(SCHEMA, id, 1L);
             assertThat(affected).isEqualTo(1);
 
             Optional<String> pw = repo.findPasswordByUserId(SCHEMA, id);
@@ -419,7 +419,7 @@ class UserTenantRepositoryIntegrationTest {
         @Test
         @DisplayName("returns 0 when user does not exist")
         void resetCredentials_notFound() {
-            int affected = repo.resetKeycloakCredentials(SCHEMA, 99999L);
+            int affected = repo.resetKeycloakCredentials(SCHEMA, 99999L, 1L);
             assertThat(affected).isZero();
         }
     }
