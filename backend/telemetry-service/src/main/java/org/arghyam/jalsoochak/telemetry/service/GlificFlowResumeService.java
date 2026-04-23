@@ -10,9 +10,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @Slf4j
@@ -68,24 +71,34 @@ public class GlificFlowResumeService {
                 return;
             }
 
-            log.info("Calling Glific resumeContactFlow (flowId={}, contactId={}, jobId={})", flowId, contactId, jobId);
-            Map<String, Object> responseBody = executeResumeMutation(accessToken, contactId, jobId, result);
+            String glificContactId = resolveGlificContactId(accessToken, contactId, jobId);
+            if (glificContactId == null || glificContactId.isBlank()) {
+                log.warn("Skipping Glific resume because contact id could not be resolved from phone {} (jobId={})",
+                        contactId, jobId);
+                return;
+            }
+
+            log.info("Calling Glific resumeContactFlow (flowId={}, phone={}, glificContactId={}, jobId={})",
+                    flowId, contactId, glificContactId, jobId);
+            Map<String, Object> responseBody = executeResumeMutation(accessToken, glificContactId, jobId, result);
             if (responseBody == null) {
                 log.warn("Glific resume response body was empty (jobId={})", jobId);
                 return;
             }
 
             if (hasErrors(responseBody)) {
-                log.warn("Glific resume returned GraphQL errors for contactId {} (jobId={})", contactId, jobId);
+                log.warn("Glific resume returned GraphQL errors for phone {} (jobId={}): {}",
+                        contactId, jobId, extractErrorsSummary(responseBody));
                 return;
             }
 
             if (!isResumeSuccess(responseBody)) {
-                log.warn("Glific resume reported unsuccessful mutation for contactId {} (jobId={})", contactId, jobId);
+                log.warn("Glific resume reported unsuccessful mutation for phone {} (jobId={})", contactId, jobId);
                 return;
             }
 
-            log.info("Successfully resumed Glific flow {} for contactId {} (jobId={})", flowId, contactId, jobId);
+            log.info("Successfully resumed Glific flow {} for phone {} with glificContactId {} (jobId={})",
+                    flowId, contactId, glificContactId, jobId);
         } catch (Exception e) {
             log.error("Failed to resume Glific flow for contactId {} (jobId={}): {}", contactId, jobId, e.getMessage(), e);
         }
@@ -129,7 +142,7 @@ public class GlificFlowResumeService {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> executeResumeMutation(String accessToken,
-                                                      String contactId,
+                                                      String glificContactId,
                                                       String jobId,
                                                       CreateReadingResponse result) {
         HttpHeaders headers = new HttpHeaders();
@@ -160,7 +173,7 @@ public class GlificFlowResumeService {
 
         Map<String, Object> variables = new HashMap<>();
         variables.put("flowId", flowId);
-        variables.put("contactId", contactId);
+        variables.put("contactId", glificContactId);
         variables.put("result", resultPayload);
 
         Map<String, Object> body = new HashMap<>();
@@ -178,6 +191,118 @@ public class GlificFlowResumeService {
     private boolean hasErrors(Map<String, Object> responseBody) {
         Object errors = responseBody.get("errors");
         return errors instanceof List<?> errorList && !errorList.isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String resolveGlificContactId(String accessToken, String phone, String jobId) {
+        if (phone == null || phone.isBlank()) {
+            return null;
+        }
+
+        for (String candidate : buildPhoneCandidates(phone)) {
+            Map<String, Object> responseBody = executeContactByPhoneQuery(accessToken, candidate);
+            if (responseBody == null) {
+                continue;
+            }
+            if (hasErrors(responseBody)) {
+                log.warn("Glific contactByPhone returned errors for phone {} (jobId={}): {}",
+                        candidate, jobId, extractErrorsSummary(responseBody));
+                continue;
+            }
+
+            Object data = responseBody.get("data");
+            if (!(data instanceof Map<?, ?> dataMap)) {
+                continue;
+            }
+            Object contactByPhone = dataMap.get("contactByPhone");
+            if (!(contactByPhone instanceof Map<?, ?> contactByPhoneMap)) {
+                continue;
+            }
+            Object contact = contactByPhoneMap.get("contact");
+            if (!(contact instanceof Map<?, ?> contactMap)) {
+                continue;
+            }
+            Object id = contactMap.get("id");
+            if (id == null) {
+                continue;
+            }
+            String glificContactId = String.valueOf(id).trim();
+            if (!glificContactId.isBlank()) {
+                log.info("Resolved Glific contact id {} for phone {} (jobId={})", glificContactId, candidate, jobId);
+                return glificContactId;
+            }
+        }
+
+        return null;
+    }
+
+    private List<String> buildPhoneCandidates(String phone) {
+        String raw = phone.trim();
+        String noPlus = raw.startsWith("+") ? raw.substring(1) : raw;
+
+        Set<String> candidates = new LinkedHashSet<>();
+        if (!raw.isBlank()) {
+            candidates.add(raw);
+        }
+        if (!noPlus.isBlank()) {
+            candidates.add(noPlus);
+            candidates.add("+" + noPlus);
+        }
+        return new ArrayList<>(candidates);
+    }
+
+    private Map<String, Object> executeContactByPhoneQuery(String accessToken, String phone) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", accessToken);
+
+        String query = """
+                query contactByPhone($phone: String!) {
+                  contactByPhone(phone: $phone) {
+                    contact {
+                      id
+                    }
+                  }
+                }
+                """;
+
+        Map<String, Object> variables = Map.of("phone", phone);
+        Map<String, Object> body = Map.of("query", query, "variables", variables);
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+        ResponseEntity<Map> response = restTemplate.postForEntity(resolveUrl(GRAPHQL_PATH), request, Map.class);
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            return null;
+        }
+        return response.getBody();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String extractErrorsSummary(Map<String, Object> responseBody) {
+        Object errors = responseBody.get("errors");
+        if (!(errors instanceof List<?> errorList) || errorList.isEmpty()) {
+            return "unknown";
+        }
+
+        List<String> parts = new ArrayList<>();
+        for (Object errorObj : errorList) {
+            if (errorObj instanceof Map<?, ?> errorMap) {
+                Object key = errorMap.get("key");
+                Object message = errorMap.get("message");
+                if (message == null) {
+                    message = errorMap.get("msg");
+                }
+                if (message == null) {
+                    message = errorMap.get("details");
+                }
+                String segment = (key != null ? String.valueOf(key) + ":" : "") + String.valueOf(message);
+                parts.add(segment);
+            } else {
+                parts.add(String.valueOf(errorObj));
+            }
+        }
+
+        return String.join(" | ", parts);
     }
 
     @SuppressWarnings("unchecked")
