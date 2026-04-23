@@ -44,6 +44,7 @@ public class GlificFlowResumeService {
 
     public void resumeReadingsFlow(String contactId, String jobId, CreateReadingResponse result) {
         if (!resumeEnabled) {
+            log.debug("Glific flow resume is disabled; skipping (jobId={})", jobId);
             return;
         }
         if (contactId == null || contactId.isBlank()) {
@@ -67,6 +68,7 @@ public class GlificFlowResumeService {
                 return;
             }
 
+            log.info("Calling Glific resumeContactFlow (flowId={}, contactId={}, jobId={})", flowId, contactId, jobId);
             Map<String, Object> responseBody = executeResumeMutation(accessToken, contactId, jobId, result);
             if (responseBody == null) {
                 log.warn("Glific resume response body was empty (jobId={})", jobId);
@@ -91,6 +93,7 @@ public class GlificFlowResumeService {
 
     @SuppressWarnings("unchecked")
     private String fetchAccessToken() {
+        log.info("Attempting Glific login for flow resume (baseUrl={})", glificBaseUrl);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
@@ -105,6 +108,7 @@ public class GlificFlowResumeService {
         ResponseEntity<Map> response = restTemplate.postForEntity(resolveUrl(SESSION_PATH), request, Map.class);
 
         if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            log.warn("Glific login failed for flow resume (status={})", response.getStatusCode());
             return null;
         }
 
@@ -113,7 +117,14 @@ public class GlificFlowResumeService {
             return null;
         }
         Object token = dataMap.get("access_token");
-        return token == null ? null : String.valueOf(token);
+        String accessToken = token == null ? null : String.valueOf(token);
+        if (accessToken == null || accessToken.isBlank()) {
+            log.warn("Glific login succeeded but access token was missing/blank for flow resume");
+            return null;
+        }
+
+        log.info("Glific login successful for flow resume");
+        return accessToken;
     }
 
     @SuppressWarnings("unchecked")
