@@ -47,7 +47,7 @@ glific:
       phone: ${GLIFIC_SYNC_USER_PHONE:}
       password: ${GLIFIC_SYNC_USER_PASSWORD:}
   resume:
-    enabled: ${GLIFIC_RESUME_ENABLED:false}
+    enabled: ${GLIFIC_RESUME_ENABLED:true}
     base-url: ${GLIFIC_RESUME_BASE_URL:https://api.arghyam.glific.com}
     flow-id: ${GLIFIC_RESUME_FLOW_ID:37172}
     user:
