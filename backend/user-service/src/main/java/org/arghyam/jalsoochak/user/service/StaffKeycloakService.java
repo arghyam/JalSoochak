@@ -109,24 +109,22 @@ public class StaffKeycloakService {
         String uuid = user.keycloakUuid();
         if (uuid != null && !uuid.isBlank()) {
             keycloakAdminHelper.deleteUser(uuid);  // best-effort; logs on failure, does not throw
-        } else {
-            // UUID is absent — attempt a phone-based lookup and deletion so a Keycloak user
-            // that was created with this staff phone as username does not linger.
-            String phone = user.phoneNumber();
-            if (phone != null && !phone.isBlank()) {
-                try {
-                    var usersResource = keycloakProvider.getAdminInstance()
-                            .realm(keycloakProvider.getRealm()).users();
-                    List<UserRepresentation> matches = usersResource.searchByUsername(phone, true);
-                    if (!matches.isEmpty()) {
-                        String foundId = matches.get(0).getId();
-                        keycloakAdminHelper.deleteUser(foundId);
-                        log.info("Revoked orphaned Keycloak user found by phone for staffUserId={}", user.id());
-                    }
-                } catch (Exception e) {
-                    log.warn("Phone-based Keycloak lookup/delete failed for staffUserId={}: {}",
-                            user.id(), e.getMessage());
+        }
+        // Always run phone-based cleanup to remove any orphaned Keycloak accounts
+        // provisioned with this phone as username, including duplicates.
+        String phone = user.phoneNumber();
+        if (phone != null && !phone.isBlank()) {
+            try {
+                var usersResource = keycloakProvider.getAdminInstance()
+                        .realm(keycloakProvider.getRealm()).users();
+                List<UserRepresentation> matches = usersResource.searchByUsername(phone, true);
+                for (UserRepresentation found : matches) {
+                    keycloakAdminHelper.deleteUser(found.getId());
+                    log.info("Revoked orphaned Keycloak user found by phone for staffUserId={}", user.id());
                 }
+            } catch (Exception e) {
+                log.warn("Phone-based Keycloak lookup/delete failed for staffUserId={}: {}",
+                        user.id(), e.getMessage());
             }
         }
         userTenantRepository.resetKeycloakCredentials(schema, user.id(), actorId);

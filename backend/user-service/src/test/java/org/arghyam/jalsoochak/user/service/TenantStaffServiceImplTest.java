@@ -480,7 +480,7 @@ class TenantStaffServiceImplTest {
 
             assertThatThrownBy(() -> service.deactivateStaff(10L, "mp", auth))
                     .isInstanceOf(ForbiddenAccessException.class)
-                    .hasMessageContaining("own state");
+                    .hasMessageContaining("own tenant");
         }
 
         @Test

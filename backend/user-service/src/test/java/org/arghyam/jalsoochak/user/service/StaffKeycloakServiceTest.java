@@ -733,16 +733,45 @@ class StaffKeycloakServiceTest {
         }
 
         @Test
-        @DisplayName("skips Keycloak deletion and only resets DB when uuid is null (never provisioned)")
+        @DisplayName("skips Keycloak deletion and only resets DB when uuid is null and phone search returns empty")
         void skipsKeycloakDeletionWhenUuidIsNull() {
             TenantUserRecord unprovisionedUser = new TenantUserRecord(
                     10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
                     "Test Officer", null, 1, null);
+            Keycloak mockAdmin = mock(Keycloak.class, Answers.RETURNS_DEEP_STUBS);
+            UsersResource usersResource = mock(UsersResource.class);
+            when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
+            when(keycloakProvider.getRealm()).thenReturn("realm");
+            when(mockAdmin.realm("realm").users()).thenReturn(usersResource);
+            when(usersResource.searchByUsername("919876543210", true)).thenReturn(List.of());
             when(userTenantRepository.resetKeycloakCredentials(eq("tenant_mp"), eq(10L), any())).thenReturn(1);
 
             service.revokeKeycloakAccount(unprovisionedUser, "tenant_mp", null);
 
             verify(keycloakAdminHelper, never()).deleteUser(anyString());
+            verify(userTenantRepository).resetKeycloakCredentials(eq("tenant_mp"), eq(10L), isNull());
+        }
+
+        @Test
+        @DisplayName("deletes orphaned Keycloak user found by phone when uuid is null")
+        void deletesOrphanedKeycloakUserFoundByPhone() {
+            String foundId = "cccccccc-0000-1111-2222-000000000003";
+            TenantUserRecord unprovisionedUser = new TenantUserRecord(
+                    10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
+                    "Test Officer", null, 1, null);
+            Keycloak mockAdmin = mock(Keycloak.class, Answers.RETURNS_DEEP_STUBS);
+            UsersResource usersResource = mock(UsersResource.class);
+            UserRepresentation found = new UserRepresentation();
+            found.setId(foundId);
+            when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
+            when(keycloakProvider.getRealm()).thenReturn("realm");
+            when(mockAdmin.realm("realm").users()).thenReturn(usersResource);
+            when(usersResource.searchByUsername("919876543210", true)).thenReturn(List.of(found));
+            when(userTenantRepository.resetKeycloakCredentials(eq("tenant_mp"), eq(10L), any())).thenReturn(1);
+
+            service.revokeKeycloakAccount(unprovisionedUser, "tenant_mp", null);
+
+            verify(keycloakAdminHelper).deleteUser(foundId);
             verify(userTenantRepository).resetKeycloakCredentials(eq("tenant_mp"), eq(10L), isNull());
         }
 
@@ -763,11 +792,17 @@ class StaffKeycloakServiceTest {
         }
 
         @Test
-        @DisplayName("skips Keycloak deletion and only resets DB when uuid is blank (whitespace-only)")
+        @DisplayName("skips Keycloak deletion and only resets DB when uuid is blank and phone search returns empty")
         void skipsKeycloakDeletionWhenUuidIsBlank() {
             TenantUserRecord blankUuidUser = new TenantUserRecord(
                     10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
                     "Test Officer", "   ", 1, null);
+            Keycloak mockAdmin = mock(Keycloak.class, Answers.RETURNS_DEEP_STUBS);
+            UsersResource usersResource = mock(UsersResource.class);
+            when(keycloakProvider.getAdminInstance()).thenReturn(mockAdmin);
+            when(keycloakProvider.getRealm()).thenReturn("realm");
+            when(mockAdmin.realm("realm").users()).thenReturn(usersResource);
+            when(usersResource.searchByUsername("919876543210", true)).thenReturn(List.of());
             when(userTenantRepository.resetKeycloakCredentials(eq("tenant_mp"), eq(10L), any())).thenReturn(1);
 
             service.revokeKeycloakAccount(blankUuidUser, "tenant_mp", null);

@@ -178,8 +178,9 @@ public class TenantStaffServiceImpl implements TenantStaffService {
         String callerRole = SecurityUtils.extractRole(caller).orElse(null);
 
         boolean isSuperUser = "SUPER_USER".equalsIgnoreCase(callerRole);
-        if (!isSuperUser && (callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(tenantCode))) {
-            throw new ForbiddenAccessException("State admin can only deactivate staff within their own state");
+        boolean isStateAdmin = "STATE_ADMIN".equalsIgnoreCase(callerRole);
+        if (!isSuperUser && (!isStateAdmin || callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(tenantCode))) {
+            throw new ForbiddenAccessException("Only a STATE_ADMIN within their own tenant or a SUPER_USER may deactivate staff");
         }
 
         String schema = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
