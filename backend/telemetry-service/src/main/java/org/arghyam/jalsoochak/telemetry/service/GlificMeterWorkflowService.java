@@ -498,7 +498,7 @@ public class GlificMeterWorkflowService {
                     selectedReason
             );
 
-            String fallbackMessage = "Successfully selected.";
+            String fallbackMessage = "Successfully submitted.";
             String confirmationMessage = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "METER_CHANGE", languageKey)
                     .or(() -> tenantConfigRepository.findMeterChangeConfirmationTemplate(tenantId, languageKey))

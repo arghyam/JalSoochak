@@ -345,6 +345,10 @@ public class BfmReadingService {
             } else {
                 finalMessage = "Reading captured successfully";
             }
+            if (lastConfirmedReading != null) {
+                finalMessage = finalMessage + " Your last confirmed reading was "
+                        + lastConfirmedReading.stripTrailingZeros().toPlainString() + ".";
+            }
         } else if (!hasPositiveReading) {
             finalMessage = "Invalid reading value";
         } else if (ocrResult != null && readingText != null) {
