@@ -2,10 +2,13 @@ package org.arghyam.jalsoochak.telemetry.controller;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
+import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -18,6 +21,28 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class GlificWebhookControllerUnitTest {
+
+    @Test
+    void readingsReturnsImmediateAckAndJobId() {
+        StubGlificReadingsAsyncService asyncService = new StubGlificReadingsAsyncService();
+        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookController controller = new GlificWebhookController(service, asyncService);
+
+        ResponseEntity<ReadingWebhookAckResponse> response = controller.receive(
+                GlificWebhookRequest.builder()
+                        .contactId("919999999999")
+                        .mediaId("media-123")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(true, response.getBody().isSuccess());
+        assertEquals("accepted", response.getBody().getStatus());
+        assertNotNull(response.getBody().getJobId());
+        assertEquals(true, asyncService.wasCalled);
+        assertEquals("919999999999", asyncService.lastContactId);
+    }
 
     @Test
     void languageSelectionReturnsOkWhenServiceSucceeds() {
@@ -143,6 +168,21 @@ class GlificWebhookControllerUnitTest {
                     .success(true)
                     .message("assam-reading-ok")
                     .build();
+        }
+    }
+
+    private static final class StubGlificReadingsAsyncService extends GlificReadingsAsyncService {
+        private boolean wasCalled;
+        private String lastContactId;
+
+        private StubGlificReadingsAsyncService() {
+            super(null, null, Runnable::run);
+        }
+
+        @Override
+        public void enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
+            this.wasCalled = true;
+            this.lastContactId = request != null ? request.getContactId() : null;
         }
     }
 }

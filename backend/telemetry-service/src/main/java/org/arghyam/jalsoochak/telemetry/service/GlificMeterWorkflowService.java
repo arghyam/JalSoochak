@@ -56,7 +56,7 @@ public class GlificMeterWorkflowService {
     private static final String TELEMETRY_ISSUE_PROMPT_HINDI =
             "कृपया अपनी समस्या चुनें।";
     private static final String DEFAULT_METER_CHANGE_PROMPT_ENGLISH =
-            "Please select the reason";
+            "Please select the no submission reasons by typing any of the number";
     private static final String DEFAULT_METER_CHANGE_PROMPT_HINDI =
             "कृपया नंबर टाइप करके सबमिशन न होने के कारण चुनें";
 
@@ -498,7 +498,7 @@ public class GlificMeterWorkflowService {
                     selectedReason
             );
 
-            String fallbackMessage = "Successfully submitted.";
+            String fallbackMessage = "Successfully selected.";
             String confirmationMessage = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "METER_CHANGE", languageKey)
                     .or(() -> tenantConfigRepository.findMeterChangeConfirmationTemplate(tenantId, languageKey))

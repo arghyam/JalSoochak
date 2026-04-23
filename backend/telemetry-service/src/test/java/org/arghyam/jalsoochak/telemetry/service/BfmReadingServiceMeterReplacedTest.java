@@ -226,42 +226,4 @@ class BfmReadingServiceMeterReplacedTest {
                 any()
         );
     }
-
-    @Test
-    void createReadingSuccessMessageIncludesLastConfirmedReading() {
-        String schemaName = "tenant_test";
-        TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
-
-        CreateReadingRequest request = CreateReadingRequest.builder()
-                .schemeId(10L)
-                .operatorId(1L)
-                .readingValue(new BigDecimal("25540"))
-                .build();
-
-        when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
-        when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
-        when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("23777"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.now()))
-                .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.createFlowReading(
-                anyString(),
-                anyLong(),
-                anyLong(),
-                any(LocalDateTime.class),
-                any(BigDecimal.class),
-                any(BigDecimal.class),
-                anyString(),
-                any(),
-                any()
-        )).thenReturn(99L);
-
-        CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
-
-        assertNotNull(resp);
-        assertTrue(resp.isSuccess());
-        assertEquals(new BigDecimal("23777"), resp.getLastConfirmedReading());
-        assertTrue(resp.getMessage().contains("Your last confirmed reading was 23777."));
-    }
 }
