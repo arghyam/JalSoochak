@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller;
 import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
@@ -18,9 +19,11 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -29,14 +32,24 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.UUID;
+
 @RestController
 @RequestMapping("/api/v1/telemetry")
 public class GlificWebhookController {
     private static final Logger log = LoggerFactory.getLogger(GlificWebhookController.class);
     private final GlificWebhookService glificWebhookService;
+    private final GlificReadingsAsyncService glificReadingsAsyncService;
 
     public GlificWebhookController(GlificWebhookService glificWebhookService) {
+        this(glificWebhookService, null);
+    }
+
+    @Autowired
+    public GlificWebhookController(GlificWebhookService glificWebhookService,
+                                   GlificReadingsAsyncService glificReadingsAsyncService) {
         this.glificWebhookService = glificWebhookService;
+        this.glificReadingsAsyncService = glificReadingsAsyncService;
     }
 
     @PostMapping(
@@ -44,21 +57,33 @@ public class GlificWebhookController {
             consumes = "application/json",
             produces = "application/json"
     )
-    public ResponseEntity<CreateReadingResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
+    public ResponseEntity<ReadingWebhookAckResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
         try {
-            CreateReadingResponse response = glificWebhookService.processImage(glificWebhookRequest);
-            return ResponseEntity.ok(response);
+            String jobId = UUID.randomUUID().toString();
+            if (glificReadingsAsyncService != null) {
+                glificReadingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
+            } else {
+                glificWebhookService.processImage(glificWebhookRequest);
+            }
+
+            return ResponseEntity.ok(
+                    ReadingWebhookAckResponse.builder()
+                            .success(true)
+                            .status("accepted")
+                            .jobId(jobId)
+                            .message("Reading request accepted for asynchronous processing.")
+                            .build()
+            );
         } catch (Exception e) {
             String safeContactId = glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null;
             log.error("Error processing webhook: {}", e.getMessage(), e);
             log.debug("Error processing webhook for contactId {}: {}", safeContactId, e.getMessage());
 
-            CreateReadingResponse errorResponse = CreateReadingResponse.builder()
-                    .correlationId(safeContactId)
-                    .meterReading(null)
-                    .qualityStatus("REJECTED")
-                    .qualityConfidence(null)
-                    .lastConfirmedReading(null)
+            ReadingWebhookAckResponse errorResponse = ReadingWebhookAckResponse.builder()
+                    .success(false)
+                    .status("error")
+                    .jobId(null)
+                    .message("Unable to accept webhook request.")
                     .build();
 
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
