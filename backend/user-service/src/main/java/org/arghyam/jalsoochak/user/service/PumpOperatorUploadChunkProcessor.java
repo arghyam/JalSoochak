@@ -33,6 +33,7 @@ public class PumpOperatorUploadChunkProcessor {
     private final UserUploadRepository userUploadRepository;
     private final UserEventPublisher userEventPublisher;
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+    private final StaffKeycloakService staffKeycloakService;
 
     public record UploadRow(
             int rowNumber,
@@ -131,6 +132,13 @@ public class PumpOperatorUploadChunkProcessor {
                         continue;
                     }
                     userId = user.id();
+                    // Revoke the Keycloak account if the phone number has changed so the next
+                    // OTP login re-provisions with the new phone as the Keycloak username.
+                    // In the current CSV flow matching is by phone so this is always a no-op,
+                    // but the guard is critical for any future in-place phone-change path.
+                    if (!normalizedPhone.equals(user.phoneNumber())) {
+                        staffKeycloakService.revokeKeycloakAccount(user, schemaName);
+                    }
                     userTenantRepository.updateUserProfile(schemaName, userId, title, normalizedPhone);
                     userTenantRepository.updateUserLanguageId(schemaName, userId, preferredLanguageId);
                     userUuid = null;

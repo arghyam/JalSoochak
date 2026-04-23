@@ -328,20 +328,94 @@ class StaffKeycloakServiceTest {
         }
 
         @Test
-        @DisplayName("throws on orphan recovery when database_user_id is present but belongs to a different user in the same tenant")
+        @DisplayName("throws on orphan recovery when database_user_id belongs to a different user who still holds the same phone (genuine conflict)")
         void throwsOnOrphanRecoveryWhenDatabaseUserIdMismatch() {
             when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
             UsersResource usersResource = stubKeycloakAdmin();
             stubKeycloak409(usersResource);
-            // Tenant matches but database_user_id belongs to a different user (id=99, not 10)
+            // Tenant matches but database_user_id=99, not 10 — and user 99 is still active with same phone
             UserResource orphanResource = stubOrphan(usersResource, Map.of(
                     "tenant_state_code", List.of("MP"),
                     "database_user_id", List.of("99")));
+            // Genuine conflict: user 99 still holds the same phone number
+            TenantUserRecord conflictingUser = new TenantUserRecord(
+                    99L, 1, USER.phoneNumber(), null, 3L, "SECTION_OFFICER", "Other Officer", null, 1, null);
+            when(userTenantRepository.findUserById("tenant_mp", 99L))
+                    .thenReturn(Optional.of(conflictingUser));
 
             assertThatThrownBy(() -> service.ensureKeycloakAccount(USER, "MP", "tenant_mp"))
                     .isInstanceOf(KeycloakOperationException.class)
                     .hasMessageContaining("database user");
             verify(orphanResource, never()).resetPassword(any());
+        }
+
+        @Test
+        @DisplayName("deletes stale orphan and provisions fresh account when old owner is INACTIVE (deactivated without Keycloak cleanup)")
+        void deletesStaleOrphanAndProvisionsFreshAccountWhenOwnerInactive() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
+            UsersResource usersResource = stubKeycloakAdmin();
+            stubOrphan(usersResource, Map.of(
+                    "tenant_state_code", List.of("MP"),
+                    "database_user_id", List.of("99")));
+            // Old owner exists in DB but is INACTIVE — should be treated as stale, not a genuine conflict
+            TenantUserRecord inactiveOwner = new TenantUserRecord(
+                    99L, 1, USER.phoneNumber(), null, 3L, "SECTION_OFFICER", "Old Officer", null, 0, null);
+            when(userTenantRepository.findUserById("tenant_mp", 99L)).thenReturn(Optional.of(inactiveOwner));
+
+            String freshUuid = "cccccccc-dddd-eeee-ffff-000000000004";
+            Response conflictResponse = mock(Response.class);
+            when(conflictResponse.getStatus()).thenReturn(409);
+            Response freshResponse = mock(Response.class);
+            when(freshResponse.getStatus()).thenReturn(201);
+            when(freshResponse.getLocation()).thenReturn(URI.create("http://kc/users/" + freshUuid));
+            when(usersResource.create(any())).thenReturn(conflictResponse).thenReturn(freshResponse);
+
+            UserResource freshResource = mock(UserResource.class);
+            when(usersResource.get(freshUuid)).thenReturn(freshResource);
+            doNothing().when(freshResource).resetPassword(any());
+            when(passwordCipher.encrypt(anyString())).thenReturn("encrypted-fresh-inactive");
+
+            ProvisionResult result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+
+            assertThat(result.keycloakUuid()).isEqualTo(UUID.fromString(freshUuid));
+            assertThat(result.managedPassword()).isNotBlank();
+            verify(keycloakAdminHelper).deleteUser(ORPHAN_KC_UUID);
+            verify(userTenantRepository).updateKeycloakUuidAndPassword(
+                    eq("tenant_mp"), eq(10L), eq(freshUuid), eq("encrypted-fresh-inactive"));
+        }
+
+        @Test
+        @DisplayName("deletes stale orphan and provisions fresh account when old owner no longer holds the phone")
+        void deletesStaleOrphanAndProvisionsFreshAccountWhenOwnerGone() {
+            when(userTenantRepository.findPasswordByUserId("tenant_mp", 10L)).thenReturn(Optional.empty());
+            UsersResource usersResource = stubKeycloakAdmin();
+            // database_user_id=99 doesn't match current user (id=10); old owner is gone from DB
+            stubOrphan(usersResource, Map.of(
+                    "tenant_state_code", List.of("MP"),
+                    "database_user_id", List.of("99")));
+            when(userTenantRepository.findUserById("tenant_mp", 99L)).thenReturn(Optional.empty());
+
+            // First create call returns 409 (triggers orphan recovery); second returns 201 (fresh account)
+            String freshUuid = "cccccccc-dddd-eeee-ffff-000000000003";
+            Response conflictResponse = mock(Response.class);
+            when(conflictResponse.getStatus()).thenReturn(409);
+            Response freshResponse = mock(Response.class);
+            when(freshResponse.getStatus()).thenReturn(201);
+            when(freshResponse.getLocation()).thenReturn(URI.create("http://kc/users/" + freshUuid));
+            when(usersResource.create(any())).thenReturn(conflictResponse).thenReturn(freshResponse);
+
+            UserResource freshResource = mock(UserResource.class);
+            when(usersResource.get(freshUuid)).thenReturn(freshResource);
+            doNothing().when(freshResource).resetPassword(any());
+            when(passwordCipher.encrypt(anyString())).thenReturn("encrypted-fresh");
+
+            ProvisionResult result = service.ensureKeycloakAccount(USER, "MP", "tenant_mp");
+
+            assertThat(result.keycloakUuid()).isEqualTo(UUID.fromString(freshUuid));
+            assertThat(result.managedPassword()).isNotBlank();
+            verify(keycloakAdminHelper).deleteUser(ORPHAN_KC_UUID);
+            verify(userTenantRepository).updateKeycloakUuidAndPassword(
+                    eq("tenant_mp"), eq(10L), eq(freshUuid), eq("encrypted-fresh"));
         }
 
         // ── orphan recovery – conditional DB write ───────────────────────────────
@@ -402,6 +476,57 @@ class StaffKeycloakServiceTest {
             assertThatThrownBy(() -> service.ensureKeycloakAccount(USER, "MP", "tenant_mp"))
                     .isInstanceOf(KeycloakOperationException.class)
                     .hasMessageContaining("409");
+        }
+    }
+
+    @Nested
+    @DisplayName("revokeKeycloakAccount")
+    class RevokeKeycloakAccount {
+
+        private static final String EXISTING_UUID = "ffffffff-0000-1111-2222-000000000001";
+
+        @Test
+        @DisplayName("deletes Keycloak user and resets DB credentials when uuid is present")
+        void deletesKeycloakUserAndResetCredentials() {
+            TenantUserRecord provisionedUser = new TenantUserRecord(
+                    10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
+                    "Test Officer", EXISTING_UUID, 1, null);
+            when(userTenantRepository.resetKeycloakCredentials("tenant_mp", 10L)).thenReturn(1);
+
+            service.revokeKeycloakAccount(provisionedUser, "tenant_mp");
+
+            verify(keycloakAdminHelper).deleteUser(EXISTING_UUID);
+            verify(userTenantRepository).resetKeycloakCredentials("tenant_mp", 10L);
+        }
+
+        @Test
+        @DisplayName("skips Keycloak deletion and only resets DB when uuid is null (never provisioned)")
+        void skipsKeycloakDeletionWhenUuidIsNull() {
+            TenantUserRecord unprovisionedUser = new TenantUserRecord(
+                    10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
+                    "Test Officer", null, 1, null);
+            when(userTenantRepository.resetKeycloakCredentials("tenant_mp", 10L)).thenReturn(1);
+
+            service.revokeKeycloakAccount(unprovisionedUser, "tenant_mp");
+
+            verify(keycloakAdminHelper, never()).deleteUser(anyString());
+            verify(userTenantRepository).resetKeycloakCredentials("tenant_mp", 10L);
+        }
+
+        @Test
+        @DisplayName("still resets DB credentials even when Keycloak deletion fails")
+        void stillResetDbEvenWhenKeycloakDeletionFails() {
+            TenantUserRecord provisionedUser = new TenantUserRecord(
+                    10L, 1, "919876543210", null, 3L, "SECTION_OFFICER",
+                    "Test Officer", EXISTING_UUID, 1, null);
+            // keycloakAdminHelper.deleteUser is best-effort (swallows exceptions internally),
+            // so we verify the DB reset still happens regardless.
+            when(userTenantRepository.resetKeycloakCredentials("tenant_mp", 10L)).thenReturn(1);
+
+            service.revokeKeycloakAccount(provisionedUser, "tenant_mp");
+
+            verify(keycloakAdminHelper).deleteUser(EXISTING_UUID);
+            verify(userTenantRepository).resetKeycloakCredentials("tenant_mp", 10L);
         }
     }
 }

@@ -7,7 +7,9 @@ import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.user.dto.request.UpdateStaffRoleRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
+import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
+import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
@@ -15,6 +17,7 @@ import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
+import org.arghyam.jalsoochak.user.service.StaffKeycloakService;
 import org.arghyam.jalsoochak.user.service.TenantStaffService;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
 import org.arghyam.jalsoochak.user.util.TenantSchemaResolver;
@@ -43,6 +46,7 @@ public class TenantStaffServiceImpl implements TenantStaffService {
     private final KeycloakAdminHelper keycloakAdminHelper;
     private final KeycloakProvider keycloakProvider;
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+    private final StaffKeycloakService staffKeycloakService;
 
     @Value("${staff.allowed-update-roles:SECTION_OFFICER,DISTRICT_OFFICER}")
     private List<String> allowedUpdateRoles;
@@ -166,6 +170,75 @@ public class TenantStaffServiceImpl implements TenantStaffService {
             }
             throw e;
         }
+    }
+
+    @Override
+    @Transactional
+    public void deactivateStaff(Long id, String tenantCode, Authentication caller) {
+        String callerTenantCode = SecurityUtils.extractTenantCode(caller);
+        String callerRole = SecurityUtils.extractRole(caller).orElse(null);
+
+        boolean isSuperUser = "SUPER_USER".equalsIgnoreCase(callerRole);
+        if (!isSuperUser && (callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(tenantCode))) {
+            throw new ForbiddenAccessException("State admin can only deactivate staff within their own state");
+        }
+
+        String schema = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        TenantUserRecord user = userTenantRepository.findUserById(schema, id)
+                .orElseThrow(() -> new ResourceNotFoundException("Staff user not found: " + id));
+
+        if (user.status() != null && user.status() == TenantUserStatus.INACTIVE.code) {
+            throw new BadRequestException("Staff user is already deactivated");
+        }
+
+        // Revoke Keycloak credentials before deactivation so the user cannot log in
+        // even if there is a brief window between the DB write and token expiry.
+        staffKeycloakService.revokeKeycloakAccount(user, schema);
+
+        Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode).orElse(null);
+        Long actorId = resolveActorId(caller, tenantId);
+
+        int affected = userTenantRepository.deactivateStaffUser(schema, id, actorId);
+        if (affected == 0) {
+            // Concurrent deactivation won the race — not an error, outcome is the same.
+            log.info("Staff deactivation: user already deactivated by a concurrent request — staffUserId={}", id);
+        }
+
+        if (tenantId != null) {
+            userAnalyticsEventPublisher.publishStaffUserUpdatedAfterCommit(
+                    id, tenantId,
+                    user.userTypeId() != null ? user.userTypeId().intValue() : null,
+                    user.keycloakUuid(),
+                    user.email(),
+                    TenantUserStatus.INACTIVE.code
+            );
+        } else {
+            log.warn("Cannot publish staff deactivation analytics: tenantId not found for tenantCode={}", tenantCode);
+        }
+
+        log.info("Staff user deactivated: staffUserId={} tenantCode={}", id, tenantCode);
+    }
+
+    /** Resolves the DB actor id from the JWT; falls back to null (system action) if not found. */
+    private Long resolveActorId(Authentication caller, Integer tenantId) {
+        if (tenantId == null) {
+            return null;
+        }
+        String callerTenantCode = SecurityUtils.extractTenantCode(caller);
+        if (callerTenantCode == null) {
+            return null;  // SUPER_USER has no tenant — actor id not resolvable from tenant schema
+        }
+        String callerUuid;
+        try {
+            callerUuid = SecurityUtils.getKeycloakId(caller);
+        } catch (Exception e) {
+            return null;
+        }
+        // Staff callers are in the tenant schema; look up by Keycloak UUID.
+        String schema = "tenant_" + callerTenantCode.toLowerCase(java.util.Locale.ROOT);
+        return userTenantRepository.findUserByKeycloakUuid(schema, callerUuid)
+                .map(TenantUserRecord::id)
+                .orElse(null);
     }
 
     private int clampLimit(int limit) {
