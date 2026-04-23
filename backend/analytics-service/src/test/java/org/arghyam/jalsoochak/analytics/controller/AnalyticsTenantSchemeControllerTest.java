@@ -8,9 +8,11 @@ import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -58,9 +60,21 @@ class AnalyticsTenantSchemeControllerTest {
     @MockBean
     private TenantDetailsService tenantDetailsService;
 
+    @MockBean
+    private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
+
     // not used by this controller, but present in older combined test; keep explicit no-interaction checks
     @MockBean
     private SchemeRegularityService schemeRegularityService;
+
+    @BeforeEach
+    void stubDefaultWindow() {
+        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Kolkata");
+        LocalDate end = LocalDate.now(zone).minusDays(1);
+        LocalDate start = end.minusDays(29);
+        when(defaultAnalyticsDateWindowProvider.defaultWindow())
+                .thenReturn(new DefaultAnalyticsDateWindowProvider.DateWindow(start, end));
+    }
 
     @Test
     void getTenants_wrapsSuccessAndData() throws Exception {

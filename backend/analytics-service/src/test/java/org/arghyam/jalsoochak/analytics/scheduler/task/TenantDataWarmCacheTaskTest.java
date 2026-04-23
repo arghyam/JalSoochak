@@ -5,8 +5,8 @@ import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -24,14 +24,15 @@ class TenantDataWarmCacheTaskTest {
         DimTenantRepository dimTenantRepository = mock(DimTenantRepository.class);
         DimLgdLocationRepository dimLgdLocationRepository = mock(DimLgdLocationRepository.class);
         TenantDetailsService tenantDetailsService = mock(TenantDetailsService.class);
+        DefaultAnalyticsDateWindowProvider windowProvider =
+                new DefaultAnalyticsDateWindowProvider("Asia/Kolkata", 30);
 
         TenantDataWarmCacheTask task = new TenantDataWarmCacheTask(
                 dimTenantRepository,
                 dimLgdLocationRepository,
-                tenantDetailsService
+                tenantDetailsService,
+                windowProvider
         );
-        ReflectionTestUtils.setField(task, "schedulerZone", "Asia/Kolkata");
-        ReflectionTestUtils.setField(task, "lookbackDays", 30);
 
         DimTenant tenantA = new DimTenant();
         tenantA.setTenantId(17);
@@ -65,14 +66,15 @@ class TenantDataWarmCacheTaskTest {
         DimTenantRepository dimTenantRepository = mock(DimTenantRepository.class);
         DimLgdLocationRepository dimLgdLocationRepository = mock(DimLgdLocationRepository.class);
         TenantDetailsService tenantDetailsService = mock(TenantDetailsService.class);
+        DefaultAnalyticsDateWindowProvider windowProvider =
+                new DefaultAnalyticsDateWindowProvider("Asia/Kolkata", 30);
 
         TenantDataWarmCacheTask task = new TenantDataWarmCacheTask(
                 dimTenantRepository,
                 dimLgdLocationRepository,
-                tenantDetailsService
+                tenantDetailsService,
+                windowProvider
         );
-        ReflectionTestUtils.setField(task, "schedulerZone", "Asia/Kolkata");
-        ReflectionTestUtils.setField(task, "lookbackDays", 30);
 
         DimTenant tenant = new DimTenant();
         tenant.setTenantId(17);
@@ -95,14 +97,15 @@ class TenantDataWarmCacheTaskTest {
         DimTenantRepository dimTenantRepository = mock(DimTenantRepository.class);
         DimLgdLocationRepository dimLgdLocationRepository = mock(DimLgdLocationRepository.class);
         TenantDetailsService tenantDetailsService = mock(TenantDetailsService.class);
+        DefaultAnalyticsDateWindowProvider windowProvider =
+                new DefaultAnalyticsDateWindowProvider("Asia/Kolkata", 30);
 
         TenantDataWarmCacheTask task = new TenantDataWarmCacheTask(
                 dimTenantRepository,
                 dimLgdLocationRepository,
-                tenantDetailsService
+                tenantDetailsService,
+                windowProvider
         );
-        ReflectionTestUtils.setField(task, "schedulerZone", "Asia/Kolkata");
-        ReflectionTestUtils.setField(task, "lookbackDays", 30);
 
         DimTenant tenant = new DimTenant();
         tenant.setTenantId(17);
