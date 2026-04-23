@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -122,6 +123,54 @@ class TenantStaffControllerSecurityTest {
                     .andExpect(status().isForbidden());
 
             verify(welcomeMessageService, never()).sendWelcomeMessages(any(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/tenant/user/staff/{id}/deactivate — requires SUPER_USER or STATE_ADMIN")
+    class DeactivateStaffSecurity {
+
+        @Test
+        @DisplayName("returns 401 when unauthenticated")
+        void unauthenticated_returns401() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isUnauthorized());
+
+            verify(tenantStaffService, never()).deactivateStaff(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("returns 403 when authenticated but lacks required role")
+        void wrongRole_returns403() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SECTION_OFFICER")))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isForbidden());
+
+            verify(tenantStaffService, never()).deactivateStaff(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("returns 200 when authenticated as STATE_ADMIN")
+        void stateAdmin_returns200() throws Exception {
+            doNothing().when(tenantStaffService).deactivateStaff(any(), any(), any());
+
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN")))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("returns 200 when authenticated as SUPER_USER")
+        void superUser_returns200() throws Exception {
+            doNothing().when(tenantStaffService).deactivateStaff(any(), any(), any());
+
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SUPER_USER")))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isOk());
         }
     }
 }

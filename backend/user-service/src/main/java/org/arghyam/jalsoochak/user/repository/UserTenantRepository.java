@@ -383,6 +383,50 @@ public class UserTenantRepository {
     }
 
     /**
+     * Resets the managed Keycloak password for a staff user back to the placeholder
+     * {@code CSV_ONBOARDED}. Called by {@code StaffKeycloakService.revokeKeycloakAccount}
+     * on phone number change or account deactivation so the next OTP login triggers
+     * re-provisioning of a fresh Keycloak account.
+     *
+     * <p>{@code uuid} is intentionally left unchanged: after the Keycloak account is deleted
+     * the UUID becomes a dangling reference, but {@code ensureKeycloakAccount} uses the
+     * password column — not the UUID — as the authoritative signal for whether a valid
+     * managed account exists. The next successful OTP login will overwrite the UUID with
+     * the newly-provisioned Keycloak account's UUID via {@code updateKeycloakUuidAndPassword}.
+     *
+     * @return number of rows updated (1 if the row existed, 0 if not found)
+     */
+    @SuppressWarnings("java:S2077")
+    public int resetKeycloakCredentials(String schemaName, Long userId, Long actorId) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                UPDATE %s.user_table
+                SET password = 'CSV_ONBOARDED', updated_by = ?, updated_at = NOW()
+                WHERE id = ?
+                """, schemaName);
+        return jdbcTemplate.update(sql, actorId, userId);
+    }
+
+    /**
+     * Deactivates a staff user by setting {@code status} to {@code INACTIVE} (0).
+     * Only updates rows whose current {@code status} is not already {@code INACTIVE},
+     * making the operation idempotent.
+     *
+     * @return number of rows updated: 1 if deactivated, 0 if already inactive or not found
+     */
+    @SuppressWarnings("java:S2077")
+    public int deactivateStaffUser(String schemaName, Long userId, Long actorId) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                UPDATE %s.user_table
+                SET status = ?, updated_by = ?, updated_at = NOW()
+                WHERE id = ? AND status != ? AND deleted_at IS NULL
+                """, schemaName);
+        return jdbcTemplate.update(sql,
+                TenantUserStatus.INACTIVE.code, actorId, userId, TenantUserStatus.INACTIVE.code);
+    }
+
+    /**
      * Returns UUIDs of users in the given tenant schema whose {@code title_hash} matches
      * the provided HMAC-SHA256 hex value. Used for exact case-insensitive name search.
      */

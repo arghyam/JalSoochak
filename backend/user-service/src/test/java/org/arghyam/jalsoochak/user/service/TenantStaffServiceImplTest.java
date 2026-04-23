@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
+import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
@@ -59,6 +60,7 @@ class TenantStaffServiceImplTest {
     @Mock private KeycloakAdminHelper keycloakAdminHelper;
     @Mock private KeycloakProvider keycloakProvider;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+    @Mock private StaffKeycloakService staffKeycloakService;
 
     private TenantStaffServiceImpl service;
 
@@ -70,7 +72,7 @@ class TenantStaffServiceImplTest {
     void setUp() {
         service = new TenantStaffServiceImpl(
                 tenantStaffRepository, userTenantRepository, userCommonRepository,
-                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher);
+                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService);
         ReflectionTestUtils.setField(service, "allowedUpdateRoles",
                 List.of("SECTION_OFFICER", "DISTRICT_OFFICER"));
     }
@@ -429,6 +431,131 @@ class TenantStaffServiceImplTest {
             assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
                     .isInstanceOf(ResourceNotFoundException.class)
                     .hasMessageContaining("User not found during role update");
+        }
+    }
+
+    // --- deactivateStaff ---
+
+    @Nested
+    @DisplayName("deactivateStaff")
+    class DeactivateStaff {
+
+        private Authentication stateAdminAuth(String tenantCode) {
+            Authentication auth = mock(Authentication.class);
+            when(auth.getAuthorities()).thenAnswer(inv -> List.of(
+                    new SimpleGrantedAuthority("TENANT_" + tenantCode.toUpperCase()),
+                    new SimpleGrantedAuthority("ROLE_STATE_ADMIN")));
+            return auth;
+        }
+
+        private Authentication superUserAuth() {
+            Authentication auth = mock(Authentication.class);
+            when(auth.getAuthorities()).thenAnswer(inv ->
+                    List.of(new SimpleGrantedAuthority("ROLE_SUPER_USER")));
+            return auth;
+        }
+
+        @Test
+        @DisplayName("successfully deactivates active staff user")
+        void deactivatesStaffSuccessfully() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(1);
+
+            service.deactivateStaff(10L, "mp", auth);
+
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
+            verify(userTenantRepository).deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull());
+            verify(userAnalyticsEventPublisher).publishStaffUserUpdatedAfterCommit(
+                    eq(10L), eq(1), anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("throws ForbiddenAccessException when state admin targets a different tenant")
+        void throwsForbiddenWhenStateAdminDeactivatesOtherTenant() {
+            Authentication auth = stateAdminAuth("TR");
+
+            assertThatThrownBy(() -> service.deactivateStaff(10L, "mp", auth))
+                    .isInstanceOf(ForbiddenAccessException.class)
+                    .hasMessageContaining("own tenant");
+        }
+
+        @Test
+        @DisplayName("SUPER_USER can deactivate staff across tenants without tenant check")
+        void superUserCanDeactivateAcrossTenants() {
+            Authentication auth = superUserAuth();
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(1);
+
+            service.deactivateStaff(10L, "mp", auth);
+
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
+            verify(userTenantRepository).deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull());
+        }
+
+        @Test
+        @DisplayName("throws ResourceNotFoundException when user does not exist")
+        void throwsNotFoundWhenUserNotFound() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 99L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.deactivateStaff(99L, "mp", auth))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Staff user not found");
+        }
+
+        @Test
+        @DisplayName("throws BadRequestException when user is already inactive")
+        void throwsBadRequestWhenUserAlreadyInactive() {
+            Authentication auth = stateAdminAuth("MP");
+            TenantUserRecord inactiveUser = new TenantUserRecord(
+                    10L, 1, "919876543210", "officer@test.com", 3L, "SECTION_OFFICER",
+                    "Officer", "kc-uuid", TenantUserStatus.INACTIVE.code, null);
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(inactiveUser));
+
+            assertThatThrownBy(() -> service.deactivateStaff(10L, "mp", auth))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("already deactivated");
+        }
+
+        @Test
+        @DisplayName("skips analytics event when tenantId cannot be resolved")
+        void skipsAnalyticsWhenTenantIdNotFound() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.empty());
+            when(userTenantRepository.deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(1);
+
+            service.deactivateStaff(10L, "mp", auth);
+
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
+            verify(userAnalyticsEventPublisher, never()).publishStaffUserUpdatedAfterCommit(
+                    anyLong(), anyInt(), anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("logs and continues when deactivateStaffUser returns 0 (concurrent deactivation)")
+        void logsAndContinuesOnConcurrentDeactivation() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(0); // concurrent request already deactivated
+
+            // should not throw
+            service.deactivateStaff(10L, "mp", auth);
+
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
         }
     }
 }
