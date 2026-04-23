@@ -59,6 +59,7 @@ class TenantStaffServiceImplTest {
     @Mock private KeycloakAdminHelper keycloakAdminHelper;
     @Mock private KeycloakProvider keycloakProvider;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+    @Mock private StaffKeycloakService staffKeycloakService;
 
     private TenantStaffServiceImpl service;
 
@@ -70,7 +71,7 @@ class TenantStaffServiceImplTest {
     void setUp() {
         service = new TenantStaffServiceImpl(
                 tenantStaffRepository, userTenantRepository, userCommonRepository,
-                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher);
+                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService);
         ReflectionTestUtils.setField(service, "allowedUpdateRoles",
                 List.of("SECTION_OFFICER", "DISTRICT_OFFICER"));
     }

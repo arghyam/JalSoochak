@@ -39,6 +39,7 @@ class PumpOperatorUploadChunkProcessorTest {
     @Mock private UserUploadRepository userUploadRepository;
     @Mock private UserEventPublisher userEventPublisher;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+    @Mock private StaffKeycloakService staffKeycloakService;
 
     private PumpOperatorUploadChunkProcessor processor;
 
@@ -52,7 +53,7 @@ class PumpOperatorUploadChunkProcessorTest {
     void setUp() {
         processor = new PumpOperatorUploadChunkProcessor(
                 userTenantRepository, userUploadRepository,
-                userEventPublisher, userAnalyticsEventPublisher);
+                userEventPublisher, userAnalyticsEventPublisher, staffKeycloakService);
     }
 
     private Map<String, Integer> userTypeIds() {
