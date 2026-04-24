@@ -64,6 +64,7 @@ public class KafkaConfig {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
+        factory.setConcurrency(5);
 
         ExponentialBackOff backOff = new ExponentialBackOff(10_000L, 2.0);
         backOff.setMaxInterval(60_000L);      // cap at 60s per retry

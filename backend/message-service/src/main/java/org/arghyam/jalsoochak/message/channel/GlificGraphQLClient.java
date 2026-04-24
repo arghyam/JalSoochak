@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.util.Map;
@@ -43,7 +45,11 @@ public class GlificGraphQLClient {
     private static final long JITTER_MS = 1_000; // ±1s jitter on 429 backoff
 
     public JsonNode execute(String query, Map<String, Object> variables) {
-        return executeWithRetry(query, variables, false, 0);
+        // boundedElastic is designed for blocking work — keeps Thread.sleep and .block()
+        // off the Netty event-loop and Kafka listener threads.
+        return Mono.fromCallable(() -> executeWithRetry(query, variables, false, 0))
+                .subscribeOn(Schedulers.boundedElastic())
+                .block(Duration.ofMinutes(2));
     }
 
     private JsonNode executeWithRetry(String query, Map<String, Object> variables,

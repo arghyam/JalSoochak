@@ -102,8 +102,8 @@ export default function () {
   group('manual_reading', function () {
     // ManualReadingRequest requires contactId and a numeric readingValue as a string
     const payload = JSON.stringify({
-      contactId:    contactId,
-      readingValue: String((Math.random() * 900 + 100).toFixed(2)), // random 100–1000
+      contactId:     contactId,
+      manualReading: String((Math.random() * 900 + 100).toFixed(2)), // random 100–1000
     });
 
     const res = http.post(base + '/manual-reading', payload, {

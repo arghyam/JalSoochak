@@ -159,7 +159,7 @@ public class BfmReadingService {
         // For non-meter-replacement submissions, validate against the latest confirmed reading.
         // Meter-replacement submissions are treated as a new baseline.
         Optional<TelemetryConfirmedReadingSnapshot> validationBaselineOpt = isMeterReplaced
-                ? latestSnapshotOpt
+                ? Optional.empty()
                 : latestSnapshotOpt;
 
         if (!isMeterReplaced
