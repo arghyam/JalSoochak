@@ -27,8 +27,10 @@ class NationalDashboardRefreshTaskTest {
     @Test
     void runTask_refreshesNationalDashboardForConfiguredWindow() {
         ReflectionTestUtils.setField(nationalDashboardRefreshTask, "lookbackDays", 29);
-        LocalDate expectedEndDate = LocalDate.now(IST_ZONE);
-        LocalDate expectedStartDate = expectedEndDate.minusDays(29);
+        // Task anchors the end date to "yesterday" (IST) to keep the window stable until next run.
+        LocalDate expectedEndDate = LocalDate.now(IST_ZONE).minusDays(1);
+        // For lookbackDays=N, window is inclusive: [end-(N-1), end]
+        LocalDate expectedStartDate = expectedEndDate.minusDays(29 - 1L);
 
         nationalDashboardRefreshTask.runTask();
 
@@ -38,7 +40,8 @@ class NationalDashboardRefreshTaskTest {
     @Test
     void runTask_negativeLookbackDays_usesSingleDayWindow() {
         ReflectionTestUtils.setField(nationalDashboardRefreshTask, "lookbackDays", -7);
-        LocalDate expectedEndDate = LocalDate.now(IST_ZONE);
+        // Negative lookback days are sanitized to 0, which becomes a single-day window anchored to yesterday.
+        LocalDate expectedEndDate = LocalDate.now(IST_ZONE).minusDays(1);
 
         nationalDashboardRefreshTask.runTask();
 

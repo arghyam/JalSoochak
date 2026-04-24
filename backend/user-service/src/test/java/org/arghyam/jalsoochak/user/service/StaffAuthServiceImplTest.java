@@ -7,9 +7,13 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import org.arghyam.jalsoochak.user.service.StaffKeycloakService.ProvisionResult;
+
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -22,6 +26,7 @@ import org.arghyam.jalsoochak.user.dto.request.StaffOtpVerifyDTO;
 import org.arghyam.jalsoochak.user.enums.OtpType;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.event.SendLoginOtpEvent;
+import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
@@ -47,6 +52,7 @@ class StaffAuthServiceImplTest {
     @Mock StaffKeycloakService staffKeycloakService;
     @Mock KeycloakClient keycloakClient;
     @Mock UserNotificationEventPublisher eventPublisher;
+    @Mock UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock TransactionTemplate transactionTemplate;
 
     StaffAuthServiceImpl service;
@@ -76,9 +82,10 @@ class StaffAuthServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        OtpProperties otpProps = new OtpProperties(10, 5, 60, 6, "WHATSAPP");
+        OtpProperties otpProps = new OtpProperties(10, 5, 60, 6, "WHATSAPP", null);
         service = new StaffAuthServiceImpl(userCommonRepository, userTenantRepository,
-                otpProps, otpService, staffKeycloakService, keycloakClient, eventPublisher, transactionTemplate);
+                otpProps, otpService, staffKeycloakService, keycloakClient, eventPublisher,
+                userAnalyticsEventPublisher, transactionTemplate);
     }
 
     @Nested
@@ -252,15 +259,16 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("returns AuthResult with token on valid OTP")
+        @DisplayName("returns AuthResult with token on valid OTP (existing Keycloak account — no analytics event)")
         void returnsAuthResultOnSuccess() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.of(ACTIVE_USER));
             when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
+            // Fast path: existing account — keycloakUuid is null
             when(staffKeycloakService.ensureKeycloakAccount(ACTIVE_USER, "MP", "tenant_mp"))
-                    .thenReturn("managed-pw");
+                    .thenReturn(new ProvisionResult("managed-pw", null));
             when(keycloakClient.obtainToken("919876543210", "managed-pw"))
                     .thenReturn(TOKEN_RESPONSE);
 
@@ -270,6 +278,65 @@ class StaffAuthServiceImplTest {
             assertThat(result.tokenResponse().getTenantCode()).isEqualTo("MP");
             assertThat(result.tokenResponse().getRole()).isEqualTo("SECTION_OFFICER");
             assertThat(result.refreshToken()).isEqualTo("rt");
+            verifyNoInteractions(userAnalyticsEventPublisher);
+        }
+
+        @Test
+        @DisplayName("publishes USER_UPDATED analytics event when new Keycloak account is provisioned")
+        void publishesAnalyticsEventOnNewKeycloakAccount() {
+            String newKeycloakUuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
+                    .thenReturn(Optional.of(ACTIVE_USER));
+            when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
+            // Slow path: new account provisioned — keycloakUuid is set
+            when(staffKeycloakService.ensureKeycloakAccount(ACTIVE_USER, "MP", "tenant_mp"))
+                    .thenReturn(new ProvisionResult("managed-pw", UUID.fromString(newKeycloakUuid)));
+            when(keycloakClient.obtainToken("919876543210", "managed-pw"))
+                    .thenReturn(TOKEN_RESPONSE);
+
+            service.verifyOtp(request);
+
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(
+                    eq(10L),
+                    eq(1),
+                    eq(3),
+                    eq(UUID.fromString(newKeycloakUuid)),
+                    eq("test@test.com"),
+                    eq("Test Officer"),
+                    eq(TenantUserStatus.ACTIVE.code)
+            );
+        }
+
+        @Test
+        @DisplayName("publishes USER_UPDATED analytics event even when token exchange fails")
+        void publishesAnalyticsEventEvenOnTokenExchangeFailure() {
+            String newKeycloakUuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+            when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
+            when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
+                    .thenReturn(Optional.of(ACTIVE_USER));
+            when(otpService.verifyOtp(10L, 1, OtpType.LOGIN, "123456")).thenReturn(99L);
+            when(staffKeycloakService.ensureKeycloakAccount(ACTIVE_USER, "MP", "tenant_mp"))
+                    .thenReturn(new ProvisionResult("managed-pw", UUID.fromString(newKeycloakUuid)));
+            doThrow(new RuntimeException("token exchange failed"))
+                    .when(keycloakClient).obtainToken("919876543210", "managed-pw");
+
+            assertThatThrownBy(() -> service.verifyOtp(request))
+                    .isInstanceOf(RuntimeException.class);
+
+            // UUID write to DB is permanent — analytics must still be synced
+            verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(
+                    eq(10L),
+                    eq(1),
+                    eq(3),
+                    eq(UUID.fromString(newKeycloakUuid)),
+                    eq("test@test.com"),
+                    eq("Test Officer"),
+                    eq(TenantUserStatus.ACTIVE.code)
+            );
+            verify(otpService).revertOtpConsumption(99L);
         }
 
         @Test

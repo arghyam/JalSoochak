@@ -3,7 +3,9 @@ package org.arghyam.jalsoochak.telemetry.controller;
 import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
+import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
@@ -14,11 +16,14 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -27,14 +32,24 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.UUID;
+
 @RestController
 @RequestMapping("/api/v1/telemetry")
 public class GlificWebhookController {
     private static final Logger log = LoggerFactory.getLogger(GlificWebhookController.class);
     private final GlificWebhookService glificWebhookService;
+    private final GlificReadingsAsyncService glificReadingsAsyncService;
 
     public GlificWebhookController(GlificWebhookService glificWebhookService) {
+        this(glificWebhookService, null);
+    }
+
+    @Autowired
+    public GlificWebhookController(GlificWebhookService glificWebhookService,
+                                   GlificReadingsAsyncService glificReadingsAsyncService) {
         this.glificWebhookService = glificWebhookService;
+        this.glificReadingsAsyncService = glificReadingsAsyncService;
     }
 
     @PostMapping(
@@ -42,14 +57,53 @@ public class GlificWebhookController {
             consumes = "application/json",
             produces = "application/json"
     )
-    public ResponseEntity<CreateReadingResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
+    public ResponseEntity<ReadingWebhookAckResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
         try {
-            CreateReadingResponse response = glificWebhookService.processImage(glificWebhookRequest);
-            return ResponseEntity.ok(response);
+            String jobId = UUID.randomUUID().toString();
+            if (glificReadingsAsyncService != null) {
+                glificReadingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
+            } else {
+                glificWebhookService.processImage(glificWebhookRequest);
+            }
+
+            return ResponseEntity.ok(
+                    ReadingWebhookAckResponse.builder()
+                            .success(true)
+                            .status("accepted")
+                            .jobId(jobId)
+                            .message("Reading request accepted for asynchronous processing.")
+                            .build()
+            );
         } catch (Exception e) {
             String safeContactId = glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null;
             log.error("Error processing webhook: {}", e.getMessage(), e);
             log.debug("Error processing webhook for contactId {}: {}", safeContactId, e.getMessage());
+
+            ReadingWebhookAckResponse errorResponse = ReadingWebhookAckResponse.builder()
+                    .success(false)
+                    .status("error")
+                    .jobId(null)
+                    .message("Unable to accept webhook request.")
+                    .build();
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+
+    }
+
+    @PostMapping(
+            value = "/readings/assam",
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<CreateReadingResponse> receiveAssamReading(@RequestBody @Valid AssamReadingRequest request) {
+        try {
+            CreateReadingResponse response = glificWebhookService.processAssamReading(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            String safeContactId = request != null ? request.getPhoneNumber() : null;
+            log.error("Error processing Assam reading: {}", e.getMessage(), e);
+            log.debug("Error processing Assam reading for phoneNumber {}: {}", safeContactId, e.getMessage());
 
             CreateReadingResponse errorResponse = CreateReadingResponse.builder()
                     .correlationId(safeContactId)
@@ -61,7 +115,6 @@ public class GlificWebhookController {
 
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
-
     }
 
     @PostMapping("/intro")
@@ -163,6 +216,40 @@ public class GlificWebhookController {
                     IntroResponse.builder()
                             .success(false)
                             .message("Channel selection could not be saved.")
+                            .build()
+            );
+        }
+    }
+
+    @PostMapping("/schemes")
+    public ResponseEntity<IntroResponse> schemes(@RequestBody @Valid IntroRequest request) {
+        try {
+            IntroResponse response = glificWebhookService.schemeSelectionMessage(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error preparing scheme selection: {}", e.getMessage(), e);
+            log.debug("Error preparing scheme selection for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    IntroResponse.builder()
+                            .success(false)
+                            .message("Scheme selection could not be prepared.")
+                            .build()
+            );
+        }
+    }
+
+    @PostMapping("/scheme/selected")
+    public ResponseEntity<IntroResponse> selectedScheme(@RequestBody @Valid SelectedSchemeRequest request) {
+        try {
+            IntroResponse response = glificWebhookService.selectedSchemeMessage(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error processing selected scheme: {}", e.getMessage(), e);
+            log.debug("Error processing selected scheme for contactId {}: {}", request.getContactId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    IntroResponse.builder()
+                            .success(false)
+                            .message("Scheme selection could not be saved.")
                             .build()
             );
         }

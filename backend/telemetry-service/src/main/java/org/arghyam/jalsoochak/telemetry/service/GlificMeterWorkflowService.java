@@ -13,11 +13,13 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.springframework.stereotype.Service;
 
@@ -49,6 +51,10 @@ public class GlificMeterWorkflowService {
             "Please type your issue in a few words.";
     private static final String LEGACY_ISSUE_PROMPT_HINDI =
             "कृपया अपनी समस्या संक्षेप में लिखें।";
+    private static final String TELEMETRY_ISSUE_PROMPT_ENGLISH =
+            "Please select your issue.";
+    private static final String TELEMETRY_ISSUE_PROMPT_HINDI =
+            "कृपया अपनी समस्या चुनें।";
     private static final String DEFAULT_METER_CHANGE_PROMPT_ENGLISH =
             "Please select the no submission reasons by typing any of the number";
     private static final String DEFAULT_METER_CHANGE_PROMPT_HINDI =
@@ -336,7 +342,7 @@ public class GlificMeterWorkflowService {
                 b.path("sequenceOrder").asInt(Integer.MAX_VALUE)
         ));
 
-        String prompt = "hindi".equals(languageKey) ? LEGACY_ISSUE_PROMPT_HINDI : LEGACY_ISSUE_PROMPT_ENGLISH;
+        String prompt = "hindi".equals(languageKey) ? TELEMETRY_ISSUE_PROMPT_HINDI : TELEMETRY_ISSUE_PROMPT_ENGLISH;
         StringBuilder message = new StringBuilder(localizationService.localizeMessage(prompt, languageKey));
         for (int i = 0; i < reasons.size(); i++) {
             String name = reasons.get(i).path("name").asText();
@@ -464,7 +470,7 @@ public class GlificMeterWorkflowService {
             if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
                 return IntroResponse.builder()
                         .success(false)
-                        .message("Please choose a number between 1 and " + reasons.size() + ".")
+                        .message("invalid choice, please restart the flow")
                         .build();
             }
 
@@ -586,6 +592,11 @@ public class GlificMeterWorkflowService {
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            List<Long> analyticsUserIds = resolveAnalyticsUserIds(
+                    operatorWithSchema.schemaName(),
+                    schemeId,
+                    operatorWithSchema.operator().id()
+            );
 
             String correlationId = "issue-report-" + UUID.randomUUID();
             if (shouldStoreIssueAsAnomaly(anomalySelectedKey, rawIssueReason, ISSUE_REPORT_ANOMALY_SELECTION_KEYS)) {
@@ -634,15 +645,22 @@ public class GlificMeterWorkflowService {
                 );
             }
 
-            String fallbackMessage = "Issue reported. Thank you.";
-            if ("hindi".equals(languageKey)) {
-                fallbackMessage = "समस्या रिपोर्ट हो गई है। धन्यवाद।";
+            String message;
+            if ("meterReplace".equalsIgnoreCase(responseSelectedKey)
+                    || "meterReplaced".equalsIgnoreCase(responseSelectedKey)
+                    || "noWaterSupply".equalsIgnoreCase(responseSelectedKey)
+                    || "noReadingSubmission".equalsIgnoreCase(responseSelectedKey)) {
+                message = "please wait a second...";
+            } else {
+                String fallbackMessage = "Issue reported. Thank you.";
+                if ("hindi".equals(languageKey)) {
+                    fallbackMessage = "समस्या रिपोर्ट हो गई है। धन्यवाद।";
+                }
+                message = templatesService
+                        .resolveScreenConfirmationTemplate(tenantId, "ISSUE_REPORT", languageKey)
+                        .or(() -> tenantConfigRepository.findIssueReportConfirmationTemplate(tenantId, languageKey))
+                        .orElse(fallbackMessage);
             }
-
-            String message = templatesService
-                    .resolveScreenConfirmationTemplate(tenantId, "ISSUE_REPORT", languageKey)
-                    .or(() -> tenantConfigRepository.findIssueReportConfirmationTemplate(tenantId, languageKey))
-                    .orElse(fallbackMessage);
 
             return IntroResponse.builder()
                     .success(true)
@@ -777,7 +795,7 @@ public class GlificMeterWorkflowService {
                 if (selectedIndex == null || selectedIndex < 1 || selectedIndex > reasons.size()) {
                     return IntroResponse.builder()
                             .success(false)
-                            .message("Please choose a number between 1 and " + reasons.size() + ".")
+                            .message("invalid choice, please restart the flow")
                             .build();
                 }
 
@@ -798,6 +816,11 @@ public class GlificMeterWorkflowService {
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            List<Long> analyticsUserIds = resolveAnalyticsUserIds(
+                    operatorWithSchema.schemaName(),
+                    schemeId,
+                    operatorWithSchema.operator().id()
+            );
 
             String correlationId = telemetryTenantRepository.upsertPendingIssueReportRecord(
                     operatorWithSchema.schemaName(),
@@ -807,30 +830,18 @@ public class GlificMeterWorkflowService {
                     resolvedIssueReason
             );
             int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
-            telemetryTenantRepository.createTenantAnomalyRecord(
-                    operatorWithSchema.schemaName(),
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    anomalyType,
-                    resolvedIssueReason,
-                    AnomalyConstants.STATUS_OPEN
-            );
-            telemetryEventPublisher.publishAnomalyRecorded(
-                    tenantId,
-                    anomalyType,
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    null,
-                    null,
-                    null,
-                    0,
-                    null,
-                    null,
-                    0,
-                    resolvedIssueReason,
-                    AnomalyConstants.STATUS_OPEN,
-                    correlationId
-            );
+            for (Long recipientUserId : analyticsUserIds) {
+                telemetryEventPublisher.publishEscalationCreated(
+                        tenantId,
+                        schemeId,
+                        recipientUserId,
+                        anomalyType,
+                        resolvedIssueReason,
+                        correlationId,
+                        AnomalyConstants.STATUS_OPEN,
+                        null
+                );
+            }
             telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                     tenantId,
                     schemeId,
@@ -885,6 +896,11 @@ public class GlificMeterWorkflowService {
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            List<Long> analyticsUserIds = resolveAnalyticsUserIds(
+                    operatorWithSchema.schemaName(),
+                    schemeId,
+                    operatorWithSchema.operator().id()
+            );
 
             String correlationId = "issue-report-" + UUID.randomUUID();
             String issueReason = request.getIssueReason().trim();
@@ -983,8 +999,22 @@ public class GlificMeterWorkflowService {
             String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
 
             Long schemeId = telemetryTenantRepository
-                    .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
+                    .findLatestPendingSchemeSelectionForDate(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id(),
+                            LocalDate.now()
+                    )
+                    .map(TelemetrySchemeSelectionRecord::schemeId)
+                    .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
+                            operatorWithSchema.schemaName(),
+                            operatorWithSchema.operator().id()
+                    ))
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+            List<Long> analyticsUserIds = resolveAnalyticsUserIds(
+                    operatorWithSchema.schemaName(),
+                    schemeId,
+                    operatorWithSchema.operator().id()
+            );
 
             Optional<TelemetryPendingMeterChangeRecord> pendingOpt = telemetryTenantRepository.findLatestPendingMeterChangeRecord(
                     operatorWithSchema.schemaName(),
@@ -996,24 +1026,62 @@ public class GlificMeterWorkflowService {
                     : "manual-" + UUID.randomUUID();
 
             // Validation baseline:
-            // - If the meter is not replaced, compare only against yesterday's confirmed reading (if any).
-            //   This avoids rejecting a "today" reading against an older historic reading when there was no
-            //   reading yesterday.
-            // - If the meter is replaced, we still load the latest snapshot for anomaly/audit context, but we
-            //   do not reject lower readings vs the previous meter's baseline.
+            // - If the meter is not replaced, compare against the most recent confirmed reading by default.
+            // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
+            // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
             LocalDate today = LocalDate.now();
-            LocalDate yesterday = today.minusDays(1);
+            boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt = isMeterReplaced
                     ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(operatorWithSchema.schemaName(), schemeId, null)
-                    : telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(
+                    : (compareWithLatest
+                    ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(
                             operatorWithSchema.schemaName(),
                             schemeId,
-                            yesterday,
                             null
-                    );
+                    )
+                    : telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
+                            operatorWithSchema.schemaName(),
+                            schemeId,
+                            today,
+                            null
+                    ));
+
+            BigDecimal effectiveConfirmedReading = manualReadingValue;
+            if (!isMeterReplaced
+                    && previousSnapshotOpt.isPresent()
+                    && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
+                TelemetryConfirmedReadingSnapshot previousSnapshot = previousSnapshotOpt.get();
+                String reason = "Submitted reading is less than previous confirmed reading.";
+                telemetryTenantRepository.createTenantAnomalyRecord(
+                        operatorWithSchema.schemaName(),
+                        operatorWithSchema.operator().id(),
+                        schemeId,
+                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                        reason,
+                        AnomalyConstants.STATUS_OPEN
+                );
+                telemetryEventPublisher.publishAnomalyRecorded(
+                        tenantId,
+                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+                        operatorWithSchema.operator().id(),
+                        schemeId,
+                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+                        null,
+                        manualReadingValue,
+                        0,
+                        previousSnapshot.confirmedReading(),
+                        previousSnapshot.createdAt(),
+                        0,
+                        reason,
+                        AnomalyConstants.STATUS_OPEN,
+                        correlationId
+                );
+                // Keep submitted/manual value as-is for context, but clamp confirmed reading at previous confirmed.
+                effectiveConfirmedReading = previousSnapshot.confirmedReading();
+            }
 
             // Tenant-configured water supply threshold validation (relative to WATER_NORM).
-            // For manual submissions, validate the submitted value directly against thresholds, independent of previous-day readings.
+            // Validate against the effective confirmed value after baseline clamping.
             if (!isMeterReplaced) {
                 Optional<WaterSupplyThreshold> thresholdOpt = loadWaterSupplyThreshold(tenantId);
                 Optional<BigDecimal> waterNormOpt = loadWaterNorm(tenantId);
@@ -1031,7 +1099,7 @@ public class GlificMeterWorkflowService {
                     BigDecimal previousConfirmed = previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null);
                     LocalDateTime previousConfirmedAt = previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null);
 
-                    if (manualReadingValue.compareTo(minAllowed) < 0) {
+                    if (effectiveConfirmedReading.compareTo(minAllowed) < 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
                                 operatorWithSchema.operator().id(),
@@ -1047,7 +1115,7 @@ public class GlificMeterWorkflowService {
                                 schemeId,
                                 pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
                                 null,
-                                manualReadingValue,
+                                effectiveConfirmedReading,
                                 0,
                                 previousConfirmed,
                                 previousConfirmedAt,
@@ -1066,17 +1134,17 @@ public class GlificMeterWorkflowService {
                         return CreateReadingResponse.builder()
                                 .success(false)
                                 .message(localizationService.localizeMessage(
-                                        "Reading rejected because it is below the allowed minimum. Submitted: " + toPlain(manualReadingValue)
+                                        "Reading rejected because it is below the allowed minimum. Submitted: " + toPlain(effectiveConfirmedReading)
                                                 + ". Minimum allowed: " + toPlain(minAllowed) + ".",
                                         languageKey
                                 ))
                                 .qualityStatus("REJECTED")
                                 .correlationId(correlationId)
-                                .meterReading(manualReadingValue)
+                                .meterReading(effectiveConfirmedReading)
                                 .lastConfirmedReading(previousConfirmed)
                                 .build();
                     }
-                    if (manualReadingValue.compareTo(maxAllowed) > 0) {
+                    if (effectiveConfirmedReading.compareTo(maxAllowed) > 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
                                 operatorWithSchema.operator().id(),
@@ -1092,7 +1160,7 @@ public class GlificMeterWorkflowService {
                                 schemeId,
                                 pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
                                 null,
-                                manualReadingValue,
+                                effectiveConfirmedReading,
                                 0,
                                 previousConfirmed,
                                 previousConfirmedAt,
@@ -1104,13 +1172,13 @@ public class GlificMeterWorkflowService {
                         return CreateReadingResponse.builder()
                                 .success(false)
                                 .message(localizationService.localizeMessage(
-                                        "Reading rejected because it is above the allowed maximum. Submitted: " + toPlain(manualReadingValue)
+                                        "Reading rejected because it is above the allowed maximum. Submitted: " + toPlain(effectiveConfirmedReading)
                                                 + ". Maximum allowed: " + toPlain(maxAllowed) + ".",
                                         languageKey
                                 ))
                                 .qualityStatus("REJECTED")
                                 .correlationId(correlationId)
-                                .meterReading(manualReadingValue)
+                                .meterReading(effectiveConfirmedReading)
                                 .lastConfirmedReading(previousConfirmed)
                                 .build();
                     }
@@ -1122,7 +1190,7 @@ public class GlificMeterWorkflowService {
                 telemetryTenantRepository.updateConfirmedReading(
                         operatorWithSchema.schemaName(),
                         pendingOpt.get().id(),
-                        manualReadingValue,
+                        effectiveConfirmedReading,
                         operatorWithSchema.operator().id()
                 );
                 if (isMeterReplaced) {
@@ -1149,7 +1217,7 @@ public class GlificMeterWorkflowService {
                     telemetryTenantRepository.updateConfirmedReading(
                             operatorWithSchema.schemaName(),
                             todaysFlow.id(),
-                            manualReadingValue,
+                            effectiveConfirmedReading,
                             operatorWithSchema.operator().id()
                     );
                     if (isMeterReplaced) {
@@ -1171,7 +1239,7 @@ public class GlificMeterWorkflowService {
                             operatorWithSchema.operator().id(),
                             LocalDateTime.now(),
                             BigDecimal.ZERO,
-                            manualReadingValue,
+                            effectiveConfirmedReading,
                             correlationId,
                             "",
                             isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason()
@@ -1231,22 +1299,18 @@ public class GlificMeterWorkflowService {
                         "Manual overrides recorded for five or more consecutive days.",
                         AnomalyConstants.STATUS_OPEN
                 );
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS,
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                        null,
-                        manualReadingValue,
-                        0,
-                        previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null),
-                        previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null),
-                        consecutiveOverrideDays,
-                        "Manual overrides recorded for five or more consecutive days.",
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
+                for (Long recipientUserId : analyticsUserIds) {
+                    telemetryEventPublisher.publishEscalationCreated(
+                            tenantId,
+                            schemeId,
+                            recipientUserId,
+                            AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS,
+                            "Manual overrides recorded for five or more consecutive days.",
+                            correlationId,
+                            AnomalyConstants.STATUS_OPEN,
+                            null
+                    );
+                }
             }
 
             CreateReadingResponse response = CreateReadingResponse.builder()
@@ -1401,34 +1465,28 @@ public class GlificMeterWorkflowService {
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
             LocalDate today = LocalDate.now();
-            LocalDate targetDay = today.minusDays(2);
-            LocalDate dayBeforeTarget = targetDay.minusDays(1);
-            LocalDate dayAfterTarget = targetDay.plusDays(1);
 
-            // Use the richer lookup so we can validate bounds before updating.
-            Optional<TelemetryFlowReadingDetails> targetDayRecordOpt = telemetryTenantRepository
-                    .findLatestFlowReadingForDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay)
-                    .filter(r -> r.confirmedReading() != null && r.confirmedReading().compareTo(BigDecimal.ZERO) > 0);
+            Optional<TelemetryCompletedFlowReading> targetDayRecordOpt = telemetryTenantRepository
+                    .findLatestCompletedFlowReadingBeforeDate(operatorWithSchema.schemaName(), schemeId, operatorId, today);
             if (targetDayRecordOpt.isEmpty()) {
                 return CreateReadingResponse.builder()
                         .success(false)
                         .message(localizationService.localizeMessage(
-                                "No previous day reading found for " + targetDay + ". Please submit a reading for that day first.",
+                                "No previous submitted reading found. Please submit a reading first.",
                                 languageKey
                         ))
                         .qualityStatus("REJECTED")
                         .correlationId(request.getContactId())
                         .build();
             }
-            TelemetryFlowReadingDetails targetDayRecord = targetDayRecordOpt.get();
+            TelemetryCompletedFlowReading targetDayRecord = targetDayRecordOpt.get();
+            LocalDate targetDay = targetDayRecord.readingDate();
 
-            Optional<TelemetryFlowReadingDetails> dayBeforeTargetOpt = telemetryTenantRepository
-                    .findLatestFlowReadingForDate(operatorWithSchema.schemaName(), schemeId, operatorId, dayBeforeTarget)
-                    .filter(r -> r.confirmedReading() != null && r.confirmedReading().compareTo(BigDecimal.ZERO) > 0);
+            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = telemetryTenantRepository
+                    .findLatestCompletedFlowReadingBeforeDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay);
 
-            Optional<TelemetryFlowReadingDetails> dayAfterTargetOpt = telemetryTenantRepository
-                    .findLatestFlowReadingForDate(operatorWithSchema.schemaName(), schemeId, operatorId, dayAfterTarget)
-                    .filter(r -> r.confirmedReading() != null && r.confirmedReading().compareTo(BigDecimal.ZERO) > 0);
+            Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt = telemetryTenantRepository
+                    .findEarliestCompletedFlowReadingAfterDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay);
 
             // Threshold bounds (water quantity implied by the reading deltas).
             // Effective thresholds:
@@ -1466,7 +1524,7 @@ public class GlificMeterWorkflowService {
                         return CreateReadingResponse.builder()
                                 .success(false)
                                 .message(localizationService.localizeMessage(
-                                        "Updated reading implies water quantity for " + dayAfterTarget + " (" + toPlain(qtyForDayAfter)
+                                        "Updated reading implies water quantity for " + dayAfterTargetOpt.get().readingDate() + " (" + toPlain(qtyForDayAfter)
                                                 + ") outside allowed range [" + toPlain(minAllowedQty) + ", " + toPlain(maxAllowedQty) + "].",
                                         languageKey
                                 ))
@@ -1484,6 +1542,30 @@ public class GlificMeterWorkflowService {
                     readingValue,
                     operatorId
             );
+            BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
+                    .map(TelemetryCompletedFlowReading::confirmedReading)
+                    .orElse(BigDecimal.ZERO);
+            BigDecimal targetDayWaterQuantity = readingValue.subtract(previousDayConfirmedReading);
+            telemetryEventPublisher.publishWaterQuantityRecorded(
+                    tenantId,
+                    schemeId,
+                    operatorId,
+                    targetDay,
+                    targetDayWaterQuantity,
+                    1
+            );
+            if (dayAfterTargetOpt.isPresent()) {
+                TelemetryCompletedFlowReading dayAfterTarget = dayAfterTargetOpt.get();
+                BigDecimal dayAfterWaterQuantity = dayAfterTarget.confirmedReading().subtract(readingValue);
+                telemetryEventPublisher.publishWaterQuantityRecorded(
+                        tenantId,
+                        schemeId,
+                        operatorId,
+                        dayAfterTarget.readingDate(),
+                        dayAfterWaterQuantity,
+                        1
+                );
+            }
 
             String correlationId = targetDayRecord.correlationId();
             if (correlationId == null || correlationId.isBlank()) {
@@ -1725,6 +1807,23 @@ public class GlificMeterWorkflowService {
             }
         }
         return out.toString();
+    }
+
+    private List<Long> resolveAnalyticsUserIds(String schemaName, Long schemeId, Long fallbackUserId) {
+        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
+        if (subDivisionalOfficerIds != null && !subDivisionalOfficerIds.isEmpty()) {
+            return subDivisionalOfficerIds;
+        }
+        List<Long> sectionOfficerIds = telemetryTenantRepository.findSectionOfficerUserIdsForScheme(schemaName, schemeId);
+        if (sectionOfficerIds != null && !sectionOfficerIds.isEmpty()) {
+            return sectionOfficerIds;
+        }
+        return List.of(fallbackUserId);
+    }
+
+    private List<Long> resolveSdoUserIds(String schemaName, Long schemeId) {
+        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
+        return subDivisionalOfficerIds == null ? List.of() : subDivisionalOfficerIds;
     }
 
     private int calculateConsecutiveDays(List<LocalDate> dates, LocalDate startDate) {

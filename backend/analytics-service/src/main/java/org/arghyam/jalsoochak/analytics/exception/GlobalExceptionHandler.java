@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.exception;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,11 +19,14 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> handleValidationErrors(MethodArgumentNotValidException ex) {
+    public ResponseEntity<Map<String, Object>> handleValidationErrors(
+            MethodArgumentNotValidException ex,
+            HttpServletRequest request
+    ) {
         List<String> errors = ex.getBindingResult().getFieldErrors().stream()
                 .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
                 .toList();
-        log.warn("Validation failed: {}", errors);
+        log.warn("{} Validation failed: {}", formatRequest(request), errors);
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", LocalDateTime.now().toString());
@@ -33,27 +37,60 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, Object>> handleBadRequest(IllegalArgumentException ex) {
-        log.warn("Bad request: {}", ex.getMessage());
+    public ResponseEntity<Map<String, Object>> handleBadRequest(
+            IllegalArgumentException ex,
+            HttpServletRequest request
+    ) {
+        log.warn("{} Bad request: {}", formatRequest(request), ex.getMessage());
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
-    public ResponseEntity<Map<String, Object>> handleMissingRequestParam(MissingServletRequestParameterException ex) {
-        log.warn("Bad request: missing request param '{}'", ex.getParameterName());
+    public ResponseEntity<Map<String, Object>> handleMissingRequestParam(
+            MissingServletRequestParameterException ex,
+            HttpServletRequest request
+    ) {
+        log.warn("{} Bad request: missing request param '{}'", formatRequest(request), ex.getParameterName());
         return buildResponse(HttpStatus.BAD_REQUEST, "Missing required parameter: " + ex.getParameterName());
     }
 
     @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, Object>> handleConflict(IllegalStateException ex) {
-        log.warn("Conflict: {}", ex.getMessage());
+    public ResponseEntity<Map<String, Object>> handleConflict(
+            IllegalStateException ex,
+            HttpServletRequest request
+    ) {
+        log.warn("{} Conflict: {}", formatRequest(request), ex.getMessage());
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    @ExceptionHandler(SingleTenantModeAccessException.class)
+    public ResponseEntity<Map<String, Object>> handleSingleTenantModeAccess(
+            SingleTenantModeAccessException ex,
+            HttpServletRequest request
+    ) {
+        log.warn("{} Forbidden: {}", formatRequest(request), ex.getMessage());
+        return buildResponse(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleGeneral(Exception ex) {
-        log.error("Unexpected error", ex);
+    public ResponseEntity<Map<String, Object>> handleGeneral(
+            Exception ex,
+            HttpServletRequest request
+    ) {
+        log.error("{} Unexpected error", formatRequest(request), ex);
         return buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");
+    }
+
+    private static String formatRequest(HttpServletRequest request) {
+        if (request == null) {
+            return "[unknown-request]";
+        }
+        String method = request.getMethod();
+        String uri = request.getRequestURI();
+        String query = request.getQueryString();
+        return query == null || query.isBlank()
+                ? "[" + method + " " + uri + "]"
+                : "[" + method + " " + uri + "?" + query + "]";
     }
 
     private ResponseEntity<Map<String, Object>> buildResponse(HttpStatus status, String message) {

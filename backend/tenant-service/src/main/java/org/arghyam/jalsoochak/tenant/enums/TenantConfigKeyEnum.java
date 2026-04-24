@@ -88,7 +88,7 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Glific Connection Settings.
      * Contains API credentials and endpoints for WhatsApp integration.
      */
-    MESSAGE_BROKER_CONNECTION_SETTINGS(ConfigType.GENERIC, MessageBrokerConfigDTO.class, false, false, true),
+    MESSAGE_BROKER_CONNECTION_SETTINGS(ConfigType.GENERIC, MessageBrokerConfigDTO.class, false, true, false),
 
     /**
      * State IT Systems API Endpoint and Credentials.

@@ -256,6 +256,18 @@ public final class SwaggerExamples {
             }
             """;
 
+    public static final String OFFICER_DASHBOARD_TOTALS_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "totalEscalationCount": 12,
+                "totalAnomalyCount": 3,
+                "totalMappedSchemeCount": 8,
+                "totalWaterSupplied": 145000
+              }
+            }
+            """;
+
     public static final String WATER_QUANTITY_REGION_WISE_SUCCESS = """
             {
               "success": true,
@@ -456,10 +468,6 @@ public final class SwaggerExamples {
                     "tenantId": 10,
                     "lgdId": 23001428,
                     "tenantStatus": 1,
-                    "boundary": {
-                      "type": "Polygon",
-                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
-                    },
                     "stateCode": "MP",
                     "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
@@ -475,10 +483,6 @@ public final class SwaggerExamples {
                     "tenantId": 10,
                     "lgdId": 23001428,
                     "tenantStatus": 1,
-                    "boundary": {
-                      "type": "Polygon",
-                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
-                    },
                     "stateCode": "MP",
                     "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
@@ -491,10 +495,6 @@ public final class SwaggerExamples {
                     "tenantId": 10,
                     "lgdId": 23001428,
                     "tenantStatus": 1,
-                    "boundary": {
-                      "type": "Polygon",
-                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
-                    },
                     "stateCode": "MP",
                     "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
@@ -503,6 +503,31 @@ public final class SwaggerExamples {
                   }
                 ],
                 "overallOutageReasonDistribution": {}
+              }
+            }
+            """;
+
+    public static final String NATIONAL_DASHBOARD_BOUNDARY_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "nationalBoundary": {
+                  "type": "Polygon",
+                  "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                },
+                "stateWiseBoundaries": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001428,
+                    "tenantStatus": 1,
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "boundary": {
+                      "type": "Polygon",
+                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                    }
+                  }
+                ]
               }
             }
             """;

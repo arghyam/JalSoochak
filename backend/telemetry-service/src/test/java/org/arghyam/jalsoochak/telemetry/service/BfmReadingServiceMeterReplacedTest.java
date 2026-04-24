@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -52,7 +53,7 @@ class BfmReadingServiceMeterReplacedTest {
     private BfmReadingService service;
 
     @Test
-    void createReadingAcceptsLowerReadingWhenMeterNotReplacedIfAboveThreshold() {
+    void createReadingClampsConfirmedReadingWhenLowerThanPreviousAndMeterNotReplaced() {
         String schemaName = "tenant_test";
         TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
 
@@ -65,28 +66,63 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
-
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(schemaName, 10L, LocalDate.now().minusDays(1), null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
+        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.createFlowReading(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                any(LocalDateTime.class),
+                any(BigDecimal.class),
+                any(BigDecimal.class),
+                anyString(),
+                any(),
+                any()
+        )).thenReturn(99L);
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("CONFIRMED", resp.getQualityStatus());
+        assertEquals(new BigDecimal("100"), resp.getMeterReading());
 
         verify(telemetryTenantRepository).createFlowReading(
                 anyString(),
                 anyLong(),
                 anyLong(),
-                any(),
-                any(),
-                any(),
+                any(LocalDateTime.class),
+                org.mockito.ArgumentMatchers.eq(new BigDecimal("100")),
+                org.mockito.ArgumentMatchers.eq(new BigDecimal("200")),
                 anyString(),
                 any(),
                 any()
+        );
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
+                anyString(),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+        );
+        verify(telemetryEventPublisher).publishAnomalyRecorded(
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq(10L),
+                any(),
+                any(),
+                any(),
+                org.mockito.ArgumentMatchers.eq(0),
+                any(),
+                any(),
+                org.mockito.ArgumentMatchers.eq(0),
+                anyString(),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
+                anyString()
         );
     }
 
@@ -98,7 +134,7 @@ class BfmReadingServiceMeterReplacedTest {
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(10L)
                 .operatorId(1L)
-                .readingValue(new BigDecimal("800"))
+                .readingValue(new BigDecimal("850"))
                 .build();
 
         when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
@@ -106,9 +142,7 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("1200"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate(schemaName, 10L, LocalDate.now().minusDays(1), null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("1200"), LocalDateTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("800"), LocalDateTime.now().minusDays(1))));
 
         when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
                 .thenReturn(Optional.empty());

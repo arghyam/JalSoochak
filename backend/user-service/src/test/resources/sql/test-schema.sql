@@ -20,7 +20,9 @@ CREATE TABLE common_schema.tenant_master_table (
     id         SERIAL PRIMARY KEY,
     state_code VARCHAR(10)  NOT NULL UNIQUE,
     title      VARCHAR(200) NOT NULL,
-    status     INTEGER      NOT NULL DEFAULT 3
+    status     INTEGER      NOT NULL DEFAULT 3,
+    deleted_at TIMESTAMP,
+    deleted_by INTEGER
 );
 
 INSERT INTO common_schema.tenant_master_table (id, state_code, title, status)
@@ -88,7 +90,9 @@ CREATE TABLE common_schema.admin_user_token_table (
         REFERENCES common_schema.tenant_admin_user_master_table(id)
 );
 
-CREATE UNIQUE INDEX uq_active_admin_token
+-- V25 dropped this unique index to allow multiple active tokens per (email, token_type).
+-- Replaced with a non-unique index for fast lookups.
+CREATE INDEX idx_admin_token_active
     ON common_schema.admin_user_token_table(email, token_type)
     WHERE used_at IS NULL AND deleted_at IS NULL;
 
@@ -148,3 +152,86 @@ CREATE INDEX idx_otp_tenant  ON common_schema.otp_table(tenant_id);
 CREATE INDEX idx_otp_user_tenant_type_active
     ON common_schema.otp_table(user_id, tenant_id, otp_type, expires_at)
     WHERE used_at IS NULL;
+
+-- ── Scheme table (tenant_mp) ───────────────────────────────────────────────
+
+CREATE TABLE tenant_mp.scheme_master_table (
+    id               SERIAL        PRIMARY KEY,
+    uuid             VARCHAR(36)   NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    state_scheme_id  VARCHAR(255)  NOT NULL,
+    centre_scheme_id VARCHAR(255)  NOT NULL,
+    scheme_name      VARCHAR(255)  NOT NULL,
+    fhtc_count       INTEGER       NOT NULL DEFAULT 0,
+    planned_fhtc     INTEGER       NOT NULL DEFAULT 0,
+    house_hold_count INTEGER       NOT NULL DEFAULT 0,
+    latitude         DOUBLE PRECISION,
+    longitude        DOUBLE PRECISION,
+    channel          INTEGER,
+    work_status      INTEGER       NOT NULL DEFAULT 1,
+    operating_status INTEGER       NOT NULL DEFAULT 1,
+    created_at       TIMESTAMP     NOT NULL DEFAULT NOW(),
+    created_by       INTEGER,
+    updated_at       TIMESTAMP     NOT NULL DEFAULT NOW(),
+    updated_by       INTEGER,
+    deleted_at       TIMESTAMP,
+    deleted_by       INTEGER
+);
+
+-- ── User–Scheme mapping table (tenant_mp) ─────────────────────────────────
+
+CREATE TABLE tenant_mp.user_scheme_mapping_table (
+    id         SERIAL    PRIMARY KEY,
+    uuid       VARCHAR(36) NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    user_id    INTEGER   NOT NULL REFERENCES tenant_mp.user_table(id),
+    scheme_id  INTEGER   NOT NULL REFERENCES tenant_mp.scheme_master_table(id),
+    status     INTEGER   NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INTEGER,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_by INTEGER,
+    deleted_at TIMESTAMP,
+    deleted_by INTEGER
+);
+
+-- Ensures ON CONFLICT DO NOTHING in insertUserSchemeMappings suppresses duplicate active mappings.
+CREATE UNIQUE INDEX uq_tenant_mp_user_scheme_active
+    ON tenant_mp.user_scheme_mapping_table (user_id, scheme_id)
+    WHERE deleted_at IS NULL;
+
+-- ── Flow reading table (tenant_mp) ────────────────────────────────────────────
+
+CREATE TABLE tenant_mp.flow_reading_table (
+    id                SERIAL          PRIMARY KEY,
+    uuid              VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    scheme_id         INTEGER         NOT NULL REFERENCES tenant_mp.scheme_master_table(id),
+    reading_at        TIMESTAMP       NOT NULL,
+    reading_date      DATE            NOT NULL,
+    extracted_reading NUMERIC         NOT NULL,
+    confirmed_reading NUMERIC         NOT NULL,
+    correlation_id    VARCHAR(255)    NOT NULL,
+    quantity          NUMERIC         NOT NULL DEFAULT 0,
+    channel           INTEGER,
+    image_url         TEXT            DEFAULT '',
+    created_by        INTEGER         NOT NULL REFERENCES tenant_mp.user_table(id),
+    created_at        TIMESTAMP       NOT NULL DEFAULT NOW(),
+    updated_by        INTEGER         NOT NULL REFERENCES tenant_mp.user_table(id),
+    updated_at        TIMESTAMP       NOT NULL DEFAULT NOW(),
+    deleted_at        TIMESTAMP,
+    deleted_by        INTEGER
+);
+
+-- ── Tenant config master table ────────────────────────────────────────────────
+
+CREATE TABLE common_schema.tenant_config_master_table (
+    id           SERIAL      PRIMARY KEY,
+    uuid         VARCHAR(36) NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    tenant_id    INTEGER     NOT NULL REFERENCES common_schema.tenant_master_table(id),
+    config_key   TEXT,
+    config_value TEXT,
+    created_at   TIMESTAMP   NOT NULL DEFAULT NOW(),
+    created_by   INTEGER,
+    updated_at   TIMESTAMP   NOT NULL DEFAULT NOW(),
+    updated_by   INTEGER,
+    deleted_at   TIMESTAMP,
+    deleted_by   INTEGER
+);

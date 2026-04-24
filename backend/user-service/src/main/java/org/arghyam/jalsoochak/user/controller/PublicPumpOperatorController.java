@@ -19,6 +19,7 @@ import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
 import org.arghyam.jalsoochak.user.service.PersonSchemeService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -190,8 +192,13 @@ public class PublicPumpOperatorController {
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Integer durationDays,
-            @RequestParam(required = false) Integer duration
+            @RequestParam(required = false) Integer duration,
+            @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
+        if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+            throw new IllegalArgumentException("start_date must be on or before end_date");
+        }
         Integer effectiveDurationDays = duration != null ? duration : durationDays;
         PageResponseDTO<PumpOperatorSummaryWithMetricsDTO> rows = personSchemeService.listPumpOperatorsByPerson(
                 tenantCode,
@@ -199,6 +206,8 @@ public class PublicPumpOperatorController {
                 name,
                 status,
                 effectiveDurationDays,
+                startDate,
+                endDate,
                 sortBy,
                 sortDir,
                 page,

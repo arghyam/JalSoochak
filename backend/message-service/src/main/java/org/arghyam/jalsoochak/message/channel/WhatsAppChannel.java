@@ -103,7 +103,7 @@ public class WhatsAppChannel implements NotificationChannel {
     public long onboardOperator(String phone, int glificLanguageId) {
         long contactId = glificWhatsAppService.optIn(phone);
         glificWhatsAppService.updateContactLanguage(contactId, glificLanguageId);
-        glificWhatsAppService.startWelcomeFlow(contactId);
+        glificWhatsAppService.startWelcomeFlow(contactId, null, null);
         log.info("[WHATSAPP] Operator onboarded to Glific");
         String phoneSuffix = phone != null && phone.length() >= 4
                 ? phone.substring(phone.length() - 4)

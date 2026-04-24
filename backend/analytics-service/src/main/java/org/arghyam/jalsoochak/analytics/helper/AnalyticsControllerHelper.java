@@ -9,6 +9,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 public final class AnalyticsControllerHelper {
+
     private static final Pattern NON_FILENAME_SAFE_CHARS = Pattern.compile("[^a-zA-Z0-9._-]");
     private static final Pattern MULTIPLE_UNDERSCORES = Pattern.compile("_+");
 
@@ -65,18 +66,18 @@ public final class AnalyticsControllerHelper {
         Map<String, Object> claims = authentication.getToken().getClaims();
         Integer userIdFromClaim = parsePositiveInteger(claims.get("user_id"));
         if (userIdFromClaim != null) {
-            return new AuthenticatedUserRef(userIdFromClaim, null);
+            return new AuthenticatedUserRef(userIdFromClaim, null, null);
         }
 
         String subject = authentication.getToken().getSubject();
         Integer userIdFromSubject = parsePositiveInteger(subject);
         if (userIdFromSubject != null) {
-            return new AuthenticatedUserRef(userIdFromSubject, null);
+            return new AuthenticatedUserRef(userIdFromSubject, null, null);
         }
 
         if (subject != null && !subject.isBlank()) {
             try {
-                return new AuthenticatedUserRef(null, UUID.fromString(subject));
+                return new AuthenticatedUserRef(null, UUID.fromString(subject), null);
             } catch (IllegalArgumentException ignored) {
                 // Try explicit uuid claim before failing.
             }
@@ -85,13 +86,37 @@ public final class AnalyticsControllerHelper {
         Object uuidClaim = claims.get("uuid");
         if (uuidClaim instanceof String uuidText && !uuidText.isBlank()) {
             try {
-                return new AuthenticatedUserRef(null, UUID.fromString(uuidText));
+                return new AuthenticatedUserRef(null, UUID.fromString(uuidText), null);
             } catch (IllegalArgumentException ignored) {
                 // fall through to throw below
             }
         }
 
         throw new IllegalArgumentException("Authenticated user reference is invalid");
+    }
+
+    /**
+     * Gets the current user's tenant state code from the JWT
+     * {@code tenant_state_code} claim. Returns {@code null} if the claim is
+     * absent (e.g. for SUPER_USER tokens that carry no tenant). Throws if
+     * called outside an authenticated request context.
+     */
+    /**
+     * Gets the current user's tenant state code from the JWT
+     * {@code tenant_state_code} claim. Returns {@code null} if the claim is
+     * absent (e.g. for SUPER_USER tokens that carry no tenant). Throws if
+     * called outside an authenticated request context.
+     */
+    public static String getCurrentUserTenantStateCode(JwtAuthenticationToken authentication) {
+        if (authentication == null || authentication.getToken() == null) {
+            throw new IllegalArgumentException("getCurrentUserTenantStateCode() called outside an authenticated request context");
+        }
+        Map<String, Object> claims = authentication.getToken().getClaims();
+        Object tenantStateCode = claims.get("tenant_state_code");
+        if (tenantStateCode instanceof String s && !s.isBlank()) {
+            return s;
+        }
+        return null; // explicitly allow null for cases where the claim isn't present
     }
 
     private static Integer parsePositiveInteger(Object value) {
@@ -117,7 +142,8 @@ public final class AnalyticsControllerHelper {
         return null;
     }
 
-    public record AuthenticatedUserRef(Integer userId, UUID userUuid) {
+    public record AuthenticatedUserRef(Integer userId, UUID userUuid, Integer tenantId) {
+
     }
 
     private static String sanitizeFilenamePart(String input) {

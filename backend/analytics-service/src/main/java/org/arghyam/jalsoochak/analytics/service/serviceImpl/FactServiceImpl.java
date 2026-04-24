@@ -52,6 +52,7 @@ public class FactServiceImpl implements FactService {
      * Must match the value produced by EscalationSchedulerService (tenant-service).
      */
     public static final String LAST_RECORDED_BFM_DATE_NEVER = "Never";
+    private static final String NEVER_SUBMITTED_READING_PHRASE = "has never submitted a reading";
 
     /**
      * Maximum length for anomaly type strings before persisting to database.
@@ -107,19 +108,34 @@ public class FactServiceImpl implements FactService {
         LocalDate date = parseDate(event.getDate());
         ensureDateExists(date);
         LocalDateTime now = LocalDateTime.now();
-
-        FactWaterQuantity fact = FactWaterQuantity.builder()
-                .tenantId(event.getTenantId())
-                .schemeId(event.getSchemeId())
-                .userId(event.getUserId())
-                .waterQuantity(event.getWaterQuantity())
-                .submissionStatus(event.getSubmissionStatus())
-                .outageReason(event.getOutageReason())
-                .nonSubmissionReason(event.getNonSubmissionReason())
-                .date(date)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
+        int normalizedWaterQuantity = Math.max(0, event.getWaterQuantity() != null ? event.getWaterQuantity() : 0);
+        FactWaterQuantity fact = waterQuantityRepository
+                .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                        event.getTenantId(),
+                        event.getSchemeId(),
+                        date
+                )
+                .map(existing -> {
+                    existing.setUserId(event.getUserId());
+                    existing.setWaterQuantity(normalizedWaterQuantity);
+                    existing.setSubmissionStatus(event.getSubmissionStatus());
+                    existing.setOutageReason(event.getOutageReason());
+                    existing.setNonSubmissionReason(event.getNonSubmissionReason());
+                    existing.setUpdatedAt(now);
+                    return existing;
+                })
+                .orElseGet(() -> FactWaterQuantity.builder()
+                        .tenantId(event.getTenantId())
+                        .schemeId(event.getSchemeId())
+                        .userId(event.getUserId())
+                        .waterQuantity(normalizedWaterQuantity)
+                        .submissionStatus(event.getSubmissionStatus())
+                        .outageReason(event.getOutageReason())
+                        .nonSubmissionReason(event.getNonSubmissionReason())
+                        .date(date)
+                        .createdAt(now)
+                        .updatedAt(now)
+                        .build());
 
         waterQuantityRepository.save(fact);
         log.info("Ingested fact_water_quantity_table for scheme={} tenant={}", event.getSchemeId(), event.getTenantId());
@@ -134,8 +150,9 @@ public class FactServiceImpl implements FactService {
         FactEscalation fact = FactEscalation.builder()
                 .tenantId(event.getTenantId())
                 .schemeId(event.getSchemeId())
-                .escalationType(intCodeToVarchar(event.getEscalationType()))
+                .escalationType(resolveEscalationTypeForPersist(event.getEscalationType(), event.getMessage()))
                 .message(event.getMessage())
+                .correlationId(event.getCorrelationId())
                 .userId(event.getUserId())
                 .resolutionStatus(event.getResolutionStatus())
                 .remark(event.getRemark())
@@ -255,7 +272,7 @@ public class FactServiceImpl implements FactService {
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(0);
 
-        int waterQuantity = currentReading - (previousReading != null ? previousReading : 0);
+        int waterQuantity = Math.max(0, currentReading - (previousReading != null ? previousReading : 0));
         LocalDateTime now = LocalDateTime.now();
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
@@ -299,12 +316,7 @@ public class FactServiceImpl implements FactService {
 
         String resolvedAnomalyType;
         if (event.getAnomalyType() != null && !event.getAnomalyType().isBlank()) {
-            // Normalize: trim whitespace and convert to lowercase
-            String normalized = event.getAnomalyType().trim().toLowerCase(Locale.ROOT);
-            // Truncate to maximum allowed length
-            resolvedAnomalyType = normalized.length() > MAX_ANOMALY_TYPE_LENGTH
-                    ? normalized.substring(0, MAX_ANOMALY_TYPE_LENGTH)
-                    : normalized;
+            resolvedAnomalyType = normalizeAnomalyTypeForPersist(event.getAnomalyType().trim());
         } else {
             // Fall back to NO_SUBMISSION when null or blank
             resolvedAnomalyType = intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
@@ -350,11 +362,14 @@ public class FactServiceImpl implements FactService {
                 String escalationMessage = neverUploaded
                         ? op.getName() + " has never submitted a reading"
                         : op.getName() + " has not submitted for " + op.getConsecutiveDaysMissed() + " consecutive days";
+                String escalationTypeForPersist = neverUploaded
+                        ? intCodeToVarchar(EscalationType.NO_SUBMISSION.code)
+                        : resolvedAnomalyType;
                 try {
                     FactEscalation escalationFact = FactEscalation.builder()
                             .tenantId(event.getTenantId())
                             .schemeId(schemeId)
-                            .escalationType(resolvedAnomalyType)
+                            .escalationType(escalationTypeForPersist)
                             .message(escalationMessage)
                             .correlationId(correlationId)
                             .userId(event.getOfficerId().intValue())
@@ -426,6 +441,12 @@ public class FactServiceImpl implements FactService {
             log.warn("Water anomaly missing correlationId, derived correlationId={} (uuid={})", correlationId, uuid);
         }
 
+        if (anomalyRepository.existsByUuid(uuid)) {
+            anomalyRepository.touchByUuid(uuid, now);
+            log.info("Touched anomaly_table row for duplicate anomaly uuid={}", uuid);
+            return;
+        }
+
         Anomaly anomaly = Anomaly.builder()
                 .uuid(uuid)
                 .type(intCodeToVarchar(event.getType()))
@@ -451,7 +472,9 @@ public class FactServiceImpl implements FactService {
             log.info("Ingested anomaly_table row for scheme={} tenant={} uuid={}",
                     event.getSchemeId(), event.getTenantId(), event.getUuid());
         } catch (DataIntegrityViolationException e) {
-            log.debug("Skipping duplicate anomaly uuid={} (unique constraint)", event.getUuid());
+            anomalyRepository.touchByUuid(uuid, now);
+            log.debug("Touched duplicate anomaly uuid={} (unique constraint)", event.getUuid());
+            return;
         }
 
         if (isWaterAnomaly(event.getType())) {
@@ -553,12 +576,7 @@ public class FactServiceImpl implements FactService {
         if (type == null) {
             return String.valueOf(code);
         }
-        return switch (type) {
-            case NO_WATER_SUPPLY -> "no_supply";
-            case LOW_WATER_SUPPLY -> "under_supply";
-            case OVER_WATER_SUPPLY -> "over_supply";
-            default -> type.label.toLowerCase(Locale.ROOT);
-        };
+        return type.label;
     }
 
     private boolean isWaterAnomaly(Integer type) {
@@ -582,5 +600,43 @@ public class FactServiceImpl implements FactService {
             }
         }
         return event.getUuid();
+    }
+
+    private String resolveEscalationTypeForPersist(Integer escalationType, String message) {
+        if (message != null && message.toLowerCase(Locale.ROOT).contains(NEVER_SUBMITTED_READING_PHRASE)) {
+            return intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
+        }
+        return intCodeToVarchar(escalationType);
+    }
+
+    private String normalizeAnomalyTypeForPersist(String rawType) {
+        if (rawType == null || rawType.isBlank()) {
+            return intCodeToVarchar(EscalationType.NO_SUBMISSION.code);
+        }
+
+        String normalized = rawType.trim();
+        try {
+            return intCodeToVarchar(Integer.parseInt(normalized));
+        } catch (NumberFormatException ignored) {
+            // Ignore non-numeric values and continue with text normalization.
+        }
+
+        String upper = normalized.toUpperCase(Locale.ROOT);
+        if ("UNDER_SUPPLY".equals(upper)) {
+            return EscalationType.LOW_WATER_SUPPLY.label;
+        }
+        if ("OVER_SUPPLY".equals(upper)) {
+            return EscalationType.OVER_WATER_SUPPLY.label;
+        }
+
+        try {
+            return EscalationType.valueOf(upper).label;
+        } catch (IllegalArgumentException ignored) {
+            // Keep unknown values as-is while preserving max-length protection.
+        }
+
+        return normalized.length() > MAX_ANOMALY_TYPE_LENGTH
+                ? normalized.substring(0, MAX_ANOMALY_TYPE_LENGTH)
+                : normalized;
     }
 }

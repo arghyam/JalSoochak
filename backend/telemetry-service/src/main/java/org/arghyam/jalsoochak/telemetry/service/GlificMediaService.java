@@ -8,10 +8,13 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
+import java.util.function.Supplier;
 
 @Slf4j
 @Service
@@ -23,12 +26,16 @@ public class GlificMediaService {
     private final String glificMediaBaseUrl;
     private final int mediaDownloadRetryMaxAttempts;
     private final long mediaDownloadRetryInitialBackoffMs;
+    private final long mediaDownloadRetryMaxBackoffMs;
+    private final long mediaDownloadRetryMaxTotalBackoffMs;
 
     public GlificMediaService(MinioService minioService,
                               RestTemplate restTemplate,
                               @Value("${glific.media-base-url:https://api.glific.org/v1/media}") String glificMediaBaseUrl,
                               @Value("${media-download.retry.max-attempts:3}") int mediaDownloadRetryMaxAttempts,
                               @Value("${media-download.retry.initial-backoff-ms:300}") long mediaDownloadRetryInitialBackoffMs,
+                              @Value("${media-download.retry.max-backoff-ms:200}") long mediaDownloadRetryMaxBackoffMs,
+                              @Value("${media-download.retry.max-total-backoff-ms:400}") long mediaDownloadRetryMaxTotalBackoffMs,
                               @Value("${glific.api-token:}") String glificApiToken) {
         this.minioService = minioService;
         this.restTemplate = restTemplate;
@@ -37,6 +44,8 @@ public class GlificMediaService {
                 : glificMediaBaseUrl;
         this.mediaDownloadRetryMaxAttempts = Math.max(1, mediaDownloadRetryMaxAttempts);
         this.mediaDownloadRetryInitialBackoffMs = Math.max(0L, mediaDownloadRetryInitialBackoffMs);
+        this.mediaDownloadRetryMaxBackoffMs = Math.max(0L, mediaDownloadRetryMaxBackoffMs);
+        this.mediaDownloadRetryMaxTotalBackoffMs = Math.max(0L, mediaDownloadRetryMaxTotalBackoffMs);
         this.glificApiToken = glificApiToken;
     }
 
@@ -59,66 +68,83 @@ public class GlificMediaService {
     }
 
     private byte[] downloadImageFromGlific(String mediaId) throws IOException {
-        for (int attempt = 1; attempt <= mediaDownloadRetryMaxAttempts; attempt++) {
-            try {
-                HttpHeaders headers = new HttpHeaders();
-                if (glificApiToken != null && !glificApiToken.isBlank()) {
-                    headers.setBearerAuth(glificApiToken);
-                }
-                headers.set(HttpHeaders.USER_AGENT, "WaterSupplyBot/1.0");
-                HttpEntity<Void> entity = new HttpEntity<>(headers);
-
-                ResponseEntity<byte[]> response = restTemplate.exchange(
-                        glificMediaBaseUrl + "/" + mediaId,
-                        HttpMethod.GET,
-                        entity,
-                        byte[].class
-                );
-
-                if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
-                    throw new IOException("Failed to download image from Glific, status: " + response.getStatusCode());
-                }
-                return response.getBody();
-            } catch (RestClientException e) {
-                if (attempt == mediaDownloadRetryMaxAttempts) {
-                    throw new IOException("Failed to download image from Glific after " + attempt + " attempts: " + e.getMessage(), e);
-                }
-                long backoffMs = mediaDownloadRetryInitialBackoffMs * (1L << (attempt - 1));
-                log.warn("Glific media download attempt {} failed for mediaId {}. Retrying in {} ms", attempt, mediaId, backoffMs);
-                sleepBackoff(backoffMs);
-            }
+        HttpHeaders headers = new HttpHeaders();
+        if (glificApiToken != null && !glificApiToken.isBlank()) {
+            headers.setBearerAuth(glificApiToken);
         }
-        throw new IOException("Failed to download image from Glific");
+        headers.set(HttpHeaders.USER_AGENT, "WaterSupplyBot/1.0");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        return executeDownloadWithRetry(
+                () -> restTemplate.exchange(glificMediaBaseUrl + "/" + mediaId, HttpMethod.GET, entity, byte[].class),
+                "Glific mediaId " + mediaId,
+                "Failed to download image from Glific"
+        );
     }
 
     private byte[] downloadImageFromUrl(String url) throws IOException {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.USER_AGENT, "WaterSupplyBot/1.0");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        return executeDownloadWithRetry(
+                () -> restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class),
+                "URL " + url,
+                "Failed to download image"
+        );
+    }
+
+    private byte[] executeDownloadWithRetry(Supplier<ResponseEntity<byte[]>> requestSupplier,
+                                            String targetLabel,
+                                            String failurePrefix) throws IOException {
+        long totalBackoffMs = 0L;
         for (int attempt = 1; attempt <= mediaDownloadRetryMaxAttempts; attempt++) {
             try {
-                HttpHeaders headers = new HttpHeaders();
-                headers.set(HttpHeaders.USER_AGENT, "WaterSupplyBot/1.0");
-                HttpEntity<Void> entity = new HttpEntity<>(headers);
-
-                ResponseEntity<byte[]> response = restTemplate.exchange(
-                        url,
-                        HttpMethod.GET,
-                        entity,
-                        byte[].class
-                );
+                ResponseEntity<byte[]> response = requestSupplier.get();
 
                 if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
-                    throw new IOException("Failed to download image, status: " + response.getStatusCode());
+                    throw new IOException(failurePrefix + ", status: " + response.getStatusCode());
                 }
                 return response.getBody();
             } catch (RestClientException e) {
-                if (attempt == mediaDownloadRetryMaxAttempts) {
-                    throw new IOException("Failed to download image after " + attempt + " attempts: " + e.getMessage(), e);
+                boolean retriable = isRetriableException(e);
+                if (!retriable) {
+                    throw new IOException(failurePrefix + " due to non-retriable error: " + e.getMessage(), e);
                 }
-                long backoffMs = mediaDownloadRetryInitialBackoffMs * (1L << (attempt - 1));
-                log.warn("Media download attempt {} failed for URL {}. Retrying in {} ms", attempt, url, backoffMs);
+                if (attempt == mediaDownloadRetryMaxAttempts) {
+                    throw new IOException(failurePrefix + " after " + attempt + " attempts: " + e.getMessage(), e);
+                }
+                long backoffMs = computeBackoffMs(attempt, totalBackoffMs);
+                totalBackoffMs += backoffMs;
+                log.warn("Media download attempt {} failed for {}. Retrying in {} ms", attempt, targetLabel, backoffMs);
                 sleepBackoff(backoffMs);
             }
         }
-        throw new IOException("Failed to download image");
+        throw new IOException(failurePrefix);
+    }
+
+    private boolean isRetriableException(RestClientException exception) {
+        if (exception instanceof ResourceAccessException) {
+            return true;
+        }
+        if (exception instanceof RestClientResponseException responseException) {
+            int statusCode = responseException.getRawStatusCode();
+            return statusCode == 429 || statusCode >= 500;
+        }
+        return true;
+    }
+
+    private long computeBackoffMs(int attempt, long totalBackoffMs) {
+        if (mediaDownloadRetryInitialBackoffMs <= 0L || mediaDownloadRetryMaxBackoffMs <= 0L || mediaDownloadRetryMaxTotalBackoffMs <= 0L) {
+            return 0L;
+        }
+        long exponentialBackoff = mediaDownloadRetryInitialBackoffMs;
+        for (int i = 1; i < attempt; i++) {
+            exponentialBackoff = Math.min(Long.MAX_VALUE / 2, exponentialBackoff * 2);
+        }
+        long cappedPerAttemptBackoff = Math.min(exponentialBackoff, mediaDownloadRetryMaxBackoffMs);
+        long remainingBackoffBudget = Math.max(0L, mediaDownloadRetryMaxTotalBackoffMs - totalBackoffMs);
+        return Math.min(cappedPerAttemptBackoff, remainingBackoffBudget);
     }
 
     private void sleepBackoff(long backoffMs) {

@@ -74,7 +74,6 @@ class TenantConfigKeyEnumTest {
                     TenantConfigKeyEnum.METER_CHANGE_REASONS,
                     TenantConfigKeyEnum.SUPPORTED_LANGUAGES,
                     TenantConfigKeyEnum.LOCATION_CHECK_REQUIRED,
-                    TenantConfigKeyEnum.MESSAGE_BROKER_CONNECTION_SETTINGS,
                     TenantConfigKeyEnum.WATER_NORM,
                     TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD,
                     TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME,
@@ -93,6 +92,8 @@ class TenantConfigKeyEnumTest {
             assertThat(TenantConfigKeyEnum.STATE_IT_SYSTEM_CONNECTION.isMandatory()).isFalse();
             assertThat(TenantConfigKeyEnum.STATE_DATA_RECONCILIATION_TIME.isMandatory()).isFalse();
             assertThat(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.isMandatory()).isFalse();
+            assertThat(TenantConfigKeyEnum.MESSAGE_BROKER_CONNECTION_SETTINGS.isMandatory()).isFalse();
+            assertThat(TenantConfigKeyEnum.MESSAGE_BROKER_CONNECTION_SETTINGS.isManagedValue()).isTrue();
         }
 
         @Test

@@ -103,6 +103,37 @@ class FactServiceImplTest {
     }
 
     @Test
+    void ingestMeterReading_whenComputedWaterQuantityIsNegative_storesZero() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setConfirmedReading(95);
+        event.setReadingAt("2026-01-02T10:15:00");
+        event.setReadingDate("2026-01-02");
+        event.setSubmissionStatus(1);
+        event.setReadingType(0);
+
+        FactMeterReading previousDayReading = FactMeterReading.builder()
+                .confirmedReading(100)
+                .build();
+
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
+                .thenReturn(Optional.of(previousDayReading));
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(0);
+    }
+
+    @Test
     void ingestWaterQuantity_whenInvalidDate_fallsBackToToday() {
         WaterQuantityEvent event = new WaterQuantityEvent();
         event.setTenantId(1);
@@ -113,6 +144,8 @@ class FactServiceImplTest {
         event.setOutageReason("no_electricity");
         event.setDate("invalid-date");
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
 
         service.ingestWaterQuantity(event);
 
@@ -120,6 +153,65 @@ class FactServiceImplTest {
         verify(waterQuantityRepository, times(1)).save(captor.capture());
         assertThat(captor.getValue().getDate()).isEqualTo(LocalDate.now());
         assertThat(captor.getValue().getOutageReason()).isEqualTo("no_electricity");
+    }
+
+    @Test
+    void ingestWaterQuantity_whenExistingRecord_updatesExistingRow() {
+        WaterQuantityEvent event = new WaterQuantityEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(22);
+        event.setWaterQuantity(200);
+        event.setSubmissionStatus(1);
+        event.setDate("2026-01-05");
+
+        FactWaterQuantity existing = FactWaterQuantity.builder()
+                .id(99L)
+                .tenantId(1)
+                .schemeId(11)
+                .userId(10)
+                .waterQuantity(100)
+                .submissionStatus(0)
+                .date(LocalDate.of(2026, 1, 5))
+                .createdAt(LocalDateTime.now().minusDays(1))
+                .updatedAt(LocalDateTime.now().minusDays(1))
+                .build();
+
+        when(dimDateRepository.findByFullDate(LocalDate.of(2026, 1, 5))).thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                1, 11, LocalDate.of(2026, 1, 5)))
+                .thenReturn(Optional.of(existing));
+
+        service.ingestWaterQuantity(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getId()).isEqualTo(99L);
+        assertThat(captor.getValue().getUserId()).isEqualTo(22);
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(200);
+        assertThat(captor.getValue().getSubmissionStatus()).isEqualTo(1);
+    }
+
+    @Test
+    void ingestWaterQuantity_whenIncomingWaterQuantityIsNegative_storesZero() {
+        WaterQuantityEvent event = new WaterQuantityEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(22);
+        event.setWaterQuantity(-25);
+        event.setSubmissionStatus(1);
+        event.setDate("2026-01-05");
+
+        when(dimDateRepository.findByFullDate(LocalDate.of(2026, 1, 5))).thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                1, 11, LocalDate.of(2026, 1, 5)))
+                .thenReturn(Optional.empty());
+
+        service.ingestWaterQuantity(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(0);
     }
 
     @Test
@@ -137,8 +229,25 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getEscalationType()).isEqualTo("consecutive_override_5_days");
+        assertThat(captor.getValue().getEscalationType()).isEqualTo("CONSECUTIVE_OVERRIDE_5_DAYS");
         assertThat(captor.getValue().getResolutionStatus()).isEqualTo(0);
+    }
+
+    @Test
+    void ingestEscalation_neverSubmittedMessage_persistsNoSubmissionLabel() {
+        EscalationEvent event = new EscalationEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setEscalationType(EscalationType.NO_WATER_SUPPLY.code);
+        event.setMessage("pump_operator has never submitted a reading");
+        event.setUserId(21);
+        event.setResolutionStatus(1);
+
+        service.ingestEscalation(event);
+
+        ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
+        verify(escalationRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
     }
 
     @Test
@@ -158,9 +267,64 @@ class FactServiceImplTest {
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
         FactEscalation saved = captor.getValue();
-        assertThat(saved.getEscalationType()).isEqualTo("no_supply");
+        assertThat(saved.getEscalationType()).isEqualTo("NO_WATER_SUPPLY");
         assertThat(saved.getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_WATER_SUPPLY, 21, 1, 11));
+    }
+
+    @Test
+    void ingestAnomalyRecorded_forImageAnomaly_savesOnlyAnomaly() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-image-1");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(EscalationType.UNREADABLE_IMAGE.code);
+        event.setReason("Unreadable image");
+        event.setStatus(1);
+
+        service.ingestAnomalyRecorded(event);
+
+        verify(anomalyRepository, times(1)).save(any());
+        verify(escalationRepository, never()).save(any());
+    }
+
+    @Test
+    void ingestAnomalyRecorded_duplicateUuid_touchesExistingAnomalyAndSkipsInsert() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-image-dup");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(EscalationType.UNREADABLE_IMAGE.code);
+        event.setReason("Unreadable image");
+        event.setStatus(1);
+        when(anomalyRepository.existsByUuid("uuid-image-dup")).thenReturn(true);
+
+        service.ingestAnomalyRecorded(event);
+
+        verify(anomalyRepository, never()).save(any());
+        verify(anomalyRepository, times(1)).touchByUuid(org.mockito.ArgumentMatchers.eq("uuid-image-dup"), any());
+        verify(escalationRepository, never()).save(any());
+    }
+
+    @Test
+    void ingestAnomalyRecorded_duplicateOnInsert_touchesExistingAnomaly() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-image-race");
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setType(EscalationType.UNREADABLE_IMAGE.code);
+        event.setReason("Unreadable image");
+        event.setStatus(1);
+        when(anomalyRepository.save(any())).thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+        service.ingestAnomalyRecorded(event);
+
+        verify(anomalyRepository, times(1)).save(any());
+        verify(anomalyRepository, times(1)).touchByUuid(org.mockito.ArgumentMatchers.eq("uuid-image-race"), any());
+        verify(escalationRepository, never()).save(any());
     }
 
     // ── ingestTenantEscalation ───────────────────────────────────────────────
@@ -206,7 +370,7 @@ class FactServiceImplTest {
         verify(escalationRepository, times(1)).save(escCaptor.capture());
         assertThat(escCaptor.getValue().getUserId()).isEqualTo(99); // officerId
         assertThat(escCaptor.getValue().getSchemeId()).isEqualTo(11);
-        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
         assertThat(escCaptor.getValue().getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_SUBMISSION, 21, 1, 11));
 
@@ -214,7 +378,7 @@ class FactServiceImplTest {
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
         assertThat(anomalyCaptor.getValue().getUserId()).isEqualTo(21); // operator userId
         assertThat(anomalyCaptor.getValue().getConsecutiveDaysMissed()).isEqualTo(5);
-        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("NO_SUBMISSION");
     }
 
     @Test
@@ -227,11 +391,11 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> escCaptor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(escCaptor.capture());
-        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
 
         ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
-        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("NO_SUBMISSION");
     }
 
     @Test
@@ -245,11 +409,11 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactEscalation> escCaptor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(escCaptor.capture());
-        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("no_submission");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
 
         ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
-        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("no_submission");
+        assertThat(anomalyCaptor.getValue().getType()).isEqualTo("NO_SUBMISSION");
     }
 
     @Test
@@ -332,12 +496,111 @@ class FactServiceImplTest {
         assertThat(escCaptor.getValue().getCorrelationId())
                 .isEqualTo(service.buildCorrelationId(EscalationType.NO_SUBMISSION, 21, 1, 11));
         assertThat(escCaptor.getValue().getMessage()).contains("never submitted");
+        assertThat(escCaptor.getValue().getEscalationType()).isEqualTo("NO_SUBMISSION");
 
         ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
         verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
         assertThat(anomalyCaptor.getValue().getConsecutiveDaysMissed()).isNull();
         assertThat(anomalyCaptor.getValue().getPreviousReadingDate()).isNull();
         assertThat(anomalyCaptor.getValue().getReason()).contains("never uploaded");
+    }
+
+    @Test
+    void ingestMeterReading_nullSubmissionStatus_defaultsToSubmitted() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setReadingAt("2026-01-01T10:00:00");
+        event.setReadingDate("2026-01-01");
+        event.setSubmissionStatus(null);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
+        verify(meterReadingRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getSubmissionStatus()).isEqualTo(1); // SUBMITTED
+    }
+
+    @Test
+    void ingestMeterReading_nullReadingType_defaultsToZero() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setReadingAt("2026-01-01T10:00:00");
+        event.setReadingDate("2026-01-01");
+        event.setReadingType(null);
+        event.setSubmissionStatus(1);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(false);
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactMeterReading> captor = ArgumentCaptor.forClass(FactMeterReading.class);
+        verify(meterReadingRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getReadingType()).isEqualTo(0);
+    }
+
+    @Test
+    void ingestMeterReading_existingOperatorAttendance_doesNotSaveDuplicate() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setReadingAt("2026-01-01T10:00:00");
+        event.setReadingDate("2026-01-01");
+        event.setSubmissionStatus(1);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.of(new org.arghyam.jalsoochak.analytics.entity.DimDate()));
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any())).thenReturn(true);
+
+        service.ingestMeterReading(event);
+
+        verify(dimOperatorAttendanceRepository, never()).save(any());
+    }
+
+    @Test
+    void ingestAnomalyRecorded_blankUuid_generatesNewUuid() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("   ");
+        event.setStatus(1);
+        event.setType(100); // non-water anomaly type
+        when(anomalyRepository.existsByUuid(any())).thenReturn(false);
+
+        service.ingestAnomalyRecorded(event);
+
+        ArgumentCaptor<Anomaly> captor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getUuid()).isNotBlank().isNotEqualTo("   ");
+    }
+
+    @Test
+    void ingestAnomalyRecorded_nullStatus_defaultsToOpen() {
+        AnomalyEvent event = new AnomalyEvent();
+        event.setUuid("uuid-null-status");
+        event.setStatus(null);
+        event.setType(100);
+        when(anomalyRepository.existsByUuid("uuid-null-status")).thenReturn(false);
+
+        service.ingestAnomalyRecorded(event);
+
+        ArgumentCaptor<Anomaly> captor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(1); // OPEN
+    }
+
+    @Test
+    void ingestTenantEscalation_nullOfficerId_skipsEscalationFact() {
+        TenantEscalationEvent event = buildEscalationEvent(buildOp(21, 5, "corr-no-officer", "11"));
+        event.setOfficerId(null);
+        when(dimTenantRepository.existsById(1)).thenReturn(true);
+
+        service.ingestTenantEscalation(event);
+
+        verify(escalationRepository, never()).save(any());
+        verify(anomalyRepository, times(1)).save(any()); // anomaly still saved
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Resolves Glific UI messages/options from the consolidated tenant config:
@@ -28,6 +30,11 @@ public class GlificMessageTemplatesService {
 
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
+    @Value("${telemetry.cache.templates.enabled:true}")
+    private boolean templatesCacheEnabled = true;
+    @Value("${telemetry.cache.templates.ttl-ms:120000}")
+    private long templatesCacheTtlMs = 120_000L;
+    private final Map<Integer, TimedCacheValue<Optional<JsonNode>>> templatesCache = new ConcurrentHashMap<>();
 
     public GlificMessageTemplatesService(TenantConfigRepository tenantConfigRepository, ObjectMapper objectMapper) {
         this.tenantConfigRepository = tenantConfigRepository;
@@ -38,19 +45,28 @@ public class GlificMessageTemplatesService {
         if (tenantId == null) {
             return Optional.empty();
         }
-        return tenantConfigRepository.findConfigValue(tenantId, CONFIG_KEY)
-                .flatMap(raw -> {
-                    try {
-                        JsonNode root = objectMapper.readTree(raw);
-                        if (root == null || root.isNull()) {
-                            return Optional.empty();
-                        }
-                        return Optional.of(root);
-                    } catch (Exception e) {
-                        log.warn("Invalid {} JSON for tenantId {}: {}", CONFIG_KEY, tenantId, e.getMessage());
-                        return Optional.empty();
-                    }
-                });
+        if (!templatesCacheEnabled || templatesCacheTtlMs <= 0L) {
+            return loadTemplatesFromRepository(tenantId);
+        }
+        long now = System.currentTimeMillis();
+        TimedCacheValue<Optional<JsonNode>> cached = templatesCache.get(tenantId);
+        if (cached != null && !cached.isExpired(now)) {
+            return cached.value();
+        }
+        Optional<JsonNode> refreshed = loadTemplatesFromRepository(tenantId);
+        templatesCache.put(tenantId, new TimedCacheValue<>(refreshed, now + templatesCacheTtlMs));
+        return refreshed;
+    }
+
+    public void invalidateTemplatesCache(Integer tenantId) {
+        if (tenantId == null) {
+            return;
+        }
+        templatesCache.remove(tenantId);
+    }
+
+    public void invalidateAllTemplatesCache() {
+        templatesCache.clear();
     }
 
     public Optional<String> resolveScreenText(Integer tenantId,
@@ -230,5 +246,26 @@ public class GlificMessageTemplatesService {
             return canonicalLabel() != null && canonicalLabel().equalsIgnoreCase(trimmed);
         }
     }
-}
 
+    private Optional<JsonNode> loadTemplatesFromRepository(Integer tenantId) {
+        return tenantConfigRepository.findConfigValue(tenantId, CONFIG_KEY)
+                .flatMap(raw -> {
+                    try {
+                        JsonNode root = objectMapper.readTree(raw);
+                        if (root == null || root.isNull()) {
+                            return Optional.empty();
+                        }
+                        return Optional.of(root);
+                    } catch (Exception e) {
+                        log.warn("Invalid {} JSON for tenantId {}: {}", CONFIG_KEY, tenantId, e.getMessage());
+                        return Optional.empty();
+                    }
+                });
+    }
+
+    private record TimedCacheValue<T>(T value, long expiresAtMs) {
+        private boolean isExpired(long nowMs) {
+            return nowMs >= expiresAtMs;
+        }
+    }
+}

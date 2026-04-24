@@ -31,6 +31,7 @@ import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -75,7 +76,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
@@ -130,7 +131,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
@@ -172,7 +173,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
-    void manualReadingAcceptsLowerReadingWhenMeterNotReplacedIfAboveThreshold() {
+    void manualReadingClampsConfirmedReadingWhenLowerThanPreviousAndMeterNotReplaced() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -185,14 +186,28 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
-                .thenReturn(Optional.empty());
-        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L,
+                        "bfm-1",
+                        1L,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO
+                )));
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
+        doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                anyInt(),
+                anyString(),
+                anyInt()
+        );
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
 
-        // Lower than yesterday should be accepted as long as it is above threshold.
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
                 .manualReading("100")
@@ -202,11 +217,36 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("CONFIRMED", resp.getQualityStatus());
+        assertEquals(new BigDecimal("100"), resp.getMeterReading());
 
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("200"), 1L);
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
-        verify(telemetryTenantRepository).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
+                anyString(),
+                ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+        );
+        verify(telemetryEventPublisher).publishAnomalyRecorded(
+                ArgumentMatchers.eq(1),
+                ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
+                ArgumentMatchers.eq(1L),
+                ArgumentMatchers.eq(10L),
+                any(),
+                any(),
+                ArgumentMatchers.eq(new BigDecimal("100")),
+                ArgumentMatchers.eq(0),
+                any(),
+                any(),
+                ArgumentMatchers.eq(0),
+                anyString(),
+                ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
+                anyString()
+        );
     }
 
     @Test
@@ -225,7 +265,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.empty());
 
         // Snapshot is optional for this validation; it's only used as context in the anomaly record.
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
         // Thresholds: undersupply 50% of water norm (oversupply 0%).
@@ -280,7 +320,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
         // Oversupply 10% above water norm.
@@ -313,7 +353,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
-    void manualReadingWhenNoYesterdaySnapshotDoesNotRejectAgainstHistoricReadings() {
+    void manualReadingWhenNoPreviousSnapshotBeforeTodayAllowsSubmission() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -327,8 +367,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
 
-        // No confirmed reading yesterday => do not reject today's manual reading against any older history.
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null))
+        // No confirmed reading before today => allow today's manual reading.
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null))
                 .thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
@@ -366,8 +406,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertEquals(new BigDecimal("1000"), resp.getMeterReading());
         assertEquals("bfm-1", resp.getCorrelationId());
 
-        verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotForDate("tenant_test", 10L, LocalDate.now().minusDays(1), null);
-        verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null);
+        verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null);
         verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshot("tenant_test", 10L, null);
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1000"), 1L);
     }
@@ -426,5 +465,104 @@ class GlificMeterWorkflowServiceManualReadingTest {
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("100"), 1L);
         verify(telemetryTenantRepository).updateMeterChangeReason("tenant_test", 55L, "METER_REPLACED", 1L);
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void manualReadingAfterFiveConsecutiveOverridesPublishesEscalationEvent() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of());
+        when(telemetryTenantRepository.findSectionOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L, 100L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L,
+                        "bfm-1",
+                        1L,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO
+                )));
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt()))
+                .thenReturn(List.of(
+                        LocalDate.now(),
+                        LocalDate.now().minusDays(1),
+                        LocalDate.now().minusDays(2),
+                        LocalDate.now().minusDays(3),
+                        LocalDate.now().minusDays(4)
+                ));
+
+        doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                anyInt(),
+                anyString(),
+                anyInt()
+        );
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
+
+        verify(telemetryEventPublisher, times(2)).publishEscalationCreated(
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(10L),
+                ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS),
+                org.mockito.ArgumentMatchers.eq("Manual overrides recorded for five or more consecutive days."),
+                org.mockito.ArgumentMatchers.eq("bfm-1"),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
+                org.mockito.ArgumentMatchers.isNull()
+        );
+        verify(telemetryEventPublisher, times(1)).publishAnomalyRecorded(
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_MANUAL_OVERRIDE),
+                ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.eq(10L),
+                any(),
+                any(),
+                any(),
+                anyInt(),
+                any(),
+                any(),
+                anyInt(),
+                org.mockito.ArgumentMatchers.eq("Manual reading submitted as override."),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
+                any()
+        );
+        verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS),
+                anyLong(),
+                anyLong(),
+                any(),
+                any(),
+                any(),
+                anyInt(),
+                any(),
+                any(),
+                anyInt(),
+                anyString(),
+                anyInt(),
+                any()
+        );
     }
 }

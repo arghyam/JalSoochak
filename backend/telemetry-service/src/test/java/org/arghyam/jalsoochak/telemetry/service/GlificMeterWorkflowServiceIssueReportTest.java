@@ -65,11 +65,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
-        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
                 .issueReason("2")
@@ -94,6 +91,22 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.any(),
                 eq(AnomalyConstants.TYPE_NO_SUBMISSION)
         );
+        verify(telemetryEventPublisher).publishAnomalyRecorded(
+                eq(1),
+                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
+                eq(1L),
+                eq(10L),
+                isNull(),
+                isNull(),
+                isNull(),
+                eq(0),
+                isNull(),
+                isNull(),
+                eq(0),
+                eq("Meter not working"),
+                eq(AnomalyConstants.STATUS_OPEN),
+                org.mockito.ArgumentMatchers.anyString()
+        );
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 eq("tenant_test"),
                 eq(10L),
@@ -117,8 +130,6 @@ class GlificMeterWorkflowServiceIssueReportTest {
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
-        when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
-        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
@@ -130,6 +141,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("meterReplaced", resp.getSelected());
+        assertEquals("please wait a second...", resp.getMessage());
 
         verify(telemetryTenantRepository).createIssueReportRecord(
                 eq("tenant_test"),
@@ -221,8 +233,6 @@ class GlificMeterWorkflowServiceIssueReportTest {
         );
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(templateReasons);
-        when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
-        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
@@ -346,6 +356,14 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L)).thenReturn(List.of(99L));
+        when(telemetryTenantRepository.upsertPendingIssueReportRecord(
+                eq("tenant_test"),
+                eq(10L),
+                eq(1L),
+                org.mockito.ArgumentMatchers.any(),
+                eq("No Water Supply")
+        )).thenReturn("corr-telemetry-1");
 
         IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -356,14 +374,15 @@ class GlificMeterWorkflowServiceIssueReportTest {
         assertEquals(true, resp.isSuccess());
         assertEquals("noWaterSupplied", resp.getSelected());
 
-        // Telemetry submit: "No Water Supply" should be tracked as an issue anomaly.
-        verify(telemetryTenantRepository).createTenantAnomalyRecord(
-                eq("tenant_test"),
-                eq(1L),
+        verify(telemetryEventPublisher).publishEscalationCreated(
+                eq(1),
                 eq(10L),
+                eq(99L),
                 eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY),
                 eq("No Water Supply"),
-                eq(AnomalyConstants.STATUS_OPEN)
+                eq("corr-telemetry-1"),
+                eq(AnomalyConstants.STATUS_OPEN),
+                isNull()
         );
         verify(telemetryEventPublisher).publishOutageOrNonSubmissionReason(
                 eq(1),
@@ -371,6 +390,14 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
                 eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY)
+        );
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt()
         );
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 org.mockito.ArgumentMatchers.anyString(),

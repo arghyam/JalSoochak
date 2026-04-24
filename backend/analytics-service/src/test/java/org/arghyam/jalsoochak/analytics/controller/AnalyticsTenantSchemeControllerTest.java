@@ -8,9 +8,11 @@ import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -58,9 +60,21 @@ class AnalyticsTenantSchemeControllerTest {
     @MockBean
     private TenantDetailsService tenantDetailsService;
 
+    @MockBean
+    private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
+
     // not used by this controller, but present in older combined test; keep explicit no-interaction checks
     @MockBean
     private SchemeRegularityService schemeRegularityService;
+
+    @BeforeEach
+    void stubDefaultWindow() {
+        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Kolkata");
+        LocalDate end = LocalDate.now(zone).minusDays(1);
+        LocalDate start = end.minusDays(29);
+        when(defaultAnalyticsDateWindowProvider.defaultWindow())
+                .thenReturn(new DefaultAnalyticsDateWindowProvider.DateWindow(start, end));
+    }
 
     @Test
     void getTenants_wrapsSuccessAndData() throws Exception {
@@ -74,7 +88,7 @@ class AnalyticsTenantSchemeControllerTest {
         tenant.setCreatedAt(LocalDateTime.of(2026, 4, 1, 10, 15, 30));
         tenant.setUpdatedAt(LocalDateTime.of(2026, 4, 1, 10, 15, 30));
 
-        when(dimTenantRepository.findAll()).thenReturn(List.of(tenant));
+        when(dimTenantRepository.findByTenantIdGreaterThan(0)).thenReturn(List.of(tenant));
 
         mockMvc.perform(get(BASE + "/tenants"))
                 .andExpect(status().isOk())
@@ -86,7 +100,7 @@ class AnalyticsTenantSchemeControllerTest {
 
     @Test
     void getTenants_onException_returnsFailureWrapper() throws Exception {
-        when(dimTenantRepository.findAll()).thenThrow(new RuntimeException("db down"));
+        when(dimTenantRepository.findByTenantIdGreaterThan(0)).thenThrow(new RuntimeException("db down"));
 
         mockMvc.perform(get(BASE + "/tenants"))
                 .andExpect(status().isInternalServerError())
@@ -233,10 +247,13 @@ class AnalyticsTenantSchemeControllerTest {
     }
 
     @Test
-    void getMeterReadings_withTenantAndScheme_withoutDates_defaultsToTodayAndTodayMinus30Days() throws Exception {
-        LocalDate now = LocalDate.now();
-        LocalDate defaultEnd = now.minusDays(30);
-        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, now, defaultEnd))
+    void getMeterReadings_withTenantAndScheme_withoutDates_defaultsToYesterdayAnd30DayWindow() throws Exception {
+        // Controller defaults are anchored to "yesterday" in the configured zone (Asia/Kolkata by default)
+        // to keep the window stable across the warm-cache 7PM→7PM cycle.
+        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Kolkata");
+        LocalDate defaultStart = LocalDate.now(zone).minusDays(1);
+        LocalDate defaultEnd = defaultStart.minusDays(29);
+        when(meterReadingRepository.findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, defaultStart, defaultEnd))
                 .thenReturn(List.of());
 
         mockMvc.perform(get(BASE + "/meter-readings")
@@ -247,7 +264,7 @@ class AnalyticsTenantSchemeControllerTest {
                 .andExpect(jsonPath("$.data").isArray());
 
         verify(meterReadingRepository, times(1))
-                .findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, now, defaultEnd);
+                .findByTenantIdAndSchemeIdAndReadingDateBetween(10, 11, defaultStart, defaultEnd);
     }
 
     @Test

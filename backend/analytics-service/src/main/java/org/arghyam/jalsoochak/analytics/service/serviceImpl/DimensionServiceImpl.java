@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
@@ -23,11 +24,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.io.geojson.GeoJsonReader;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -39,6 +44,7 @@ public class DimensionServiceImpl implements DimensionService {
     private final DimSchemeRepository dimSchemeRepository;
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final DimDepartmentLocationRepository dimDepartmentLocationRepository;
+    private final JdbcTemplate jdbcTemplate;
 
     @Override
     @Transactional
@@ -67,23 +73,14 @@ public class DimensionServiceImpl implements DimensionService {
             return;
         }
 
-        // Prefer UUID-based lookup (globally unique across tenants). Fall back to
-        // (tenantId, userId) composite when uuid is absent — never userId alone,
-        // since tenant-scoped ids collide across tenants.
-        DimUser user;
-        if (event.getUuid() != null) {
-            user = dimUserRepository.findByUuid(event.getUuid())
-                    .orElse(DimUser.builder()
-                            .userId(event.getUserId())
-                            .createdAt(LocalDateTime.now())
-                            .build());
-        } else {
-            user = dimUserRepository.findByTenantIdAndUserId(event.getTenantId(), event.getUserId())
-                    .orElse(DimUser.builder()
-                            .userId(event.getUserId())
-                            .createdAt(LocalDateTime.now())
-                            .build());
-        }
+        // Tenant-scoped key is the source of truth for user upsert.
+        // Use top-by-updated ordering to avoid crashes when legacy duplicates exist.
+        DimUser user = dimUserRepository.findTopByTenantIdAndUserIdOrderByUpdatedAtDescCreatedAtDesc(
+                        event.getTenantId(), event.getUserId())
+                .orElse(DimUser.builder()
+                        .userId(event.getUserId())
+                        .createdAt(LocalDateTime.now())
+                        .build());
 
         user.setTenantId(event.getTenantId());
         user.setEmail(event.getEmail());
@@ -101,8 +98,48 @@ public class DimensionServiceImpl implements DimensionService {
 
     @Override
     @Transactional
+    public void replaceUserSchemeMappings(UserSchemeMappingsReplacedEvent event) {
+        Integer userId = event.getUserId();
+        Integer tenantId = event.getTenantId();
+        if (userId == null || tenantId == null) {
+            log.debug("Skipping dim_user_scheme_mapping replace: missing userId/tenantId");
+            return;
+        }
+
+        int mappingStatus = event.getStatus() != null ? event.getStatus() : 1;
+        Set<Integer> schemeIds = new LinkedHashSet<>();
+        if (event.getSchemeIds() != null) {
+            for (Integer schemeId : event.getSchemeIds()) {
+                if (schemeId != null) {
+                    schemeIds.add(schemeId);
+                }
+            }
+        }
+
+        jdbcTemplate.update("""
+                        DELETE FROM analytics_schema.dim_user_scheme_mapping_table
+                        WHERE tenant_id = ? AND user_id = ?
+                        """,
+                tenantId, userId);
+
+        for (Integer schemeId : schemeIds) {
+            jdbcTemplate.update("""
+                            INSERT INTO analytics_schema.dim_user_scheme_mapping_table
+                                (uuid, user_id, scheme_id, status, tenant_id, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                            """,
+                    UUID.randomUUID(), userId, schemeId, mappingStatus, tenantId);
+        }
+
+        log.info("Replaced dim_user_scheme_mapping_table rows [tenantId={}, userId={}, schemeCount={}]",
+                tenantId, userId, schemeIds.size());
+    }
+
+    @Override
+    @Transactional
     public void upsertScheme(SchemeEvent event) {
-        DimScheme scheme = dimSchemeRepository.findById(event.getSchemeId())
+        DimScheme scheme = dimSchemeRepository.findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc(
+                        event.getTenantId(), event.getSchemeId())
                 .orElse(DimScheme.builder()
                         .schemeId(event.getSchemeId())
                         .createdAt(LocalDateTime.now())

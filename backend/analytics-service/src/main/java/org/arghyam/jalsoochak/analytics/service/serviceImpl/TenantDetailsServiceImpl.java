@@ -54,7 +54,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         String cacheKey = TENANT_DETAILS_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":parent:" + parentSegment
-                + ":v3";
+                + ":v4";
         TenantDetailsResponse cached = readFromCache(cacheKey);
         if (cached != null) {
             return cached;
@@ -109,7 +109,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         String cacheKey = TENANT_DETAILS_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":parent_department:" + parentDepartmentId
-                + ":v2";
+                + ":v4";
         TenantDetailsResponse cached = readFromCache(cacheKey);
         if (cached != null) {
             return cached;
@@ -144,13 +144,19 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         Map<String, Object> mergedBoundaryResult = tenantDepartmentBoundaryRepository
                 .getMergedBoundaryByParentDepartment(tenantId, parentDepartmentId, parentLevel);
 
+        String parentBoundaryGeoJson =
+                tenantDepartmentBoundaryRepository.getBoundaryGeoJsonByDepartmentId(tenantId, parentDepartmentId);
+        String boundaryGeoJson = (parentBoundaryGeoJson != null && !parentBoundaryGeoJson.isBlank())
+                ? parentBoundaryGeoJson
+                : (String) mergedBoundaryResult.get("boundary_geojson");
+
         TenantDetailsResponse response = TenantDetailsResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
                 .parentLgdLevel(null)
                 .parentDepartmentLevel(parentLevel)
                 .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
-                .boundaryGeoJson((String) mergedBoundaryResult.get("boundary_geojson"))
+                .boundaryGeoJson(boundaryGeoJson)
                 .childRegions(childRegions)
                 .build();
 
@@ -161,14 +167,26 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
     @Override
     public TenantDetailsResponse getTenantDetailsWithAggregatedMetrics(
             Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        String cacheKey = TENANT_DETAILS_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":parent:" + (parentLgdId == null ? "all" : parentLgdId)
+                + ":from:" + startDate
+                + ":to:" + endDate
+                + ":v4";
+
+        TenantDetailsResponse cached = readFromCache(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
         // Base boundary + child list
         TenantDetailsResponse response = getTenantDetails(tenantId, parentLgdId);
 
         // Scheme regularity and reading submission are scope/period based
         AverageSchemeRegularityResponse averageRegularity =
-                schemeRegularityService.getAverageSchemeRegularity(parentLgdId, startDate, endDate);
+                schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, startDate, endDate);
         ReadingSubmissionRateResponse submissionRate =
-                schemeRegularityService.getReadingSubmissionRateByLgd(parentLgdId, startDate, endDate);
+                schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, startDate, endDate);
 
         // Performance is per child region; merge into response child rows.
         List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
@@ -188,6 +206,8 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                 schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate));
         response.setAverageSchemeRegularity(averageRegularity.getAverageRegularity());
         response.setReadingSubmissionRate(submissionRate.getReadingSubmissionRate());
+
+        writeToCache(cacheKey, response);
         return response;
     }
 
@@ -199,7 +219,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                 + ":parent_department:" + parentDepartmentId
                 + ":from:" + startDate
                 + ":to:" + endDate
-                + ":v3";
+                + ":v4";
 
         TenantDetailsResponse cached = readFromCache(cacheKey);
         if (cached != null) {
@@ -210,10 +230,10 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
 
         AverageSchemeRegularityResponse averageRegularity =
                 schemeRegularityService.getAverageSchemeRegularityByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
         ReadingSubmissionRateResponse submissionRate =
                 schemeRegularityService.getReadingSubmissionRateByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                        tenantId, parentDepartmentId, startDate, endDate);
 
         List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
                 schemeRegularityService.getChildAveragePerformanceScoreByDepartment(
@@ -271,13 +291,19 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         Map<String, Object> mergedBoundaryResult =
                 tenantBoundaryRepository.getMergedBoundaryByParent(tenant.getTenantId(), parentLgdId, parentLevel);
 
+        String parentBoundaryGeoJson =
+                tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(tenant.getTenantId(), parentLgdId);
+        String boundaryGeoJson = (parentBoundaryGeoJson != null && !parentBoundaryGeoJson.isBlank())
+                ? parentBoundaryGeoJson
+                : (String) mergedBoundaryResult.get("boundary_geojson");
+
         return TenantDetailsResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
                 .parentLgdLevel(parentLevel)
                 .parentDepartmentLevel(null)
                 .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
-                .boundaryGeoJson((String) mergedBoundaryResult.get("boundary_geojson"))
+                .boundaryGeoJson(boundaryGeoJson)
                 .childRegions(childRegions)
                 .build();
     }

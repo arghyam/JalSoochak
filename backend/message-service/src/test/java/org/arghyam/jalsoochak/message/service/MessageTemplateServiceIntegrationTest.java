@@ -204,6 +204,33 @@ class MessageTemplateServiceIntegrationTest {
         assertThat(msg).isEqualTo("Telugu escalation message.");
     }
 
+    // ──────────────────────────── state name ───────────────────────────────────
+
+    @Test
+    void findStateName_returnsConfiguredValue_whenStateNameKeyExists() {
+        insertConfig("state_name", "Madhya Pradesh");
+
+        String name = messageTemplateService.findStateName(TENANT_ID);
+
+        assertThat(name).isEqualTo("Madhya Pradesh");
+    }
+
+    @Test
+    void findStateName_returnsEmptyString_whenKeyAbsent() {
+        String name = messageTemplateService.findStateName(TENANT_ID);
+
+        assertThat(name).isEqualTo("");
+    }
+
+    @Test
+    void findStateName_returnsEmptyString_whenValueIsBlank() {
+        insertConfig("state_name", "   ");
+
+        String name = messageTemplateService.findStateName(TENANT_ID);
+
+        assertThat(name).isEqualTo("");
+    }
+
     // ────────────────────────────── helpers ────────────────────────────────────
 
     private void insertConfig(String key, String value) {

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
@@ -10,6 +11,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.MeterChangeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -39,6 +41,10 @@ public class GlificWebhookService {
         return imageWorkflowService.processImage(glificWebhookRequest);
     }
 
+    public CreateReadingResponse processAssamReading(AssamReadingRequest request) {
+        return imageWorkflowService.processAssamReading(request);
+    }
+
     public IntroResponse introMessage(IntroRequest introRequest) {
         return messageService.introMessage(introRequest);
     }
@@ -61,6 +67,14 @@ public class GlificWebhookService {
 
     public IntroResponse selectedChannelMessage(SelectedChannelRequest request) {
         return selectionService.selectedChannelMessage(request);
+    }
+
+    public IntroResponse schemeSelectionMessage(IntroRequest request) {
+        return selectionService.schemeSelectionMessage(request);
+    }
+
+    public IntroResponse selectedSchemeMessage(SelectedSchemeRequest request) {
+        return selectionService.selectedSchemeMessage(request);
     }
 
     public IntroResponse itemSelectionMessage(IntroRequest request) {

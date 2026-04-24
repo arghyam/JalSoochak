@@ -2,10 +2,12 @@ package org.arghyam.jalsoochak.telemetry.repository;
 
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -16,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Repository
 @RequiredArgsConstructor
@@ -23,6 +26,7 @@ public class TelemetryTenantRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
+    private static final String SCHEME_SELECTION_CORRELATION_PREFIX = "scheme-selection-";
     private static final int OPERATOR_LOOKUP_CACHE_SIZE = 10_000;
     private final Map<String, String> phoneToSchemaCache = Collections.synchronizedMap(
             new LinkedHashMap<>(256, 0.75f, true) {
@@ -32,6 +36,16 @@ public class TelemetryTenantRepository {
                 }
             }
     );
+    @Value("${telemetry.cache.metadata.enabled:true}")
+    private boolean metadataCacheEnabled = true;
+    @Value("${telemetry.cache.tenant-schemas-ttl-ms:300000}")
+    private long tenantSchemaListCacheTtlMs = 300_000L;
+    @Value("${telemetry.cache.column-exists-ttl-ms:600000}")
+    private long columnExistsCacheTtlMs = 600_000L;
+    private final Object metadataCacheLock = new Object();
+    private final Map<String, TimedCacheValue<Boolean>> columnExistsCache = new ConcurrentHashMap<>();
+    private volatile List<String> tenantSchemasCache = List.of();
+    private volatile long tenantSchemasCacheExpiresAtMs = 0L;
 
     public boolean existsSchemeById(String schemaName, Long schemeId) {
         validateSchemaName(schemaName);
@@ -88,13 +102,7 @@ public class TelemetryTenantRepository {
             phoneToSchemaCache.remove(normalizedPhone);
         }
 
-        String schemaSql = """
-                SELECT nspname
-                FROM pg_namespace
-                WHERE nspname LIKE 'tenant_%'
-                ORDER BY nspname
-                """;
-        List<String> schemas = jdbcTemplate.query(schemaSql, (rs, n) -> rs.getString("nspname"));
+        List<String> schemas = getTenantSchemasCached();
         TelemetryOperatorWithSchema firstMatch = null;
         for (String schemaName : schemas) {
             Optional<TelemetryOperator> operator = findOperatorByPhone(schemaName, phoneNumber, normalizedPhone);
@@ -142,13 +150,7 @@ public class TelemetryTenantRepository {
             }
         }
 
-        String schemaSql = """
-                SELECT nspname
-                FROM pg_namespace
-                WHERE nspname LIKE 'tenant_%'
-                ORDER BY nspname
-                """;
-        List<String> schemas = jdbcTemplate.query(schemaSql, (rs, n) -> rs.getString("nspname"));
+        List<String> schemas = getTenantSchemasCached();
         TelemetryOperatorWithSchema firstMatch = null;
         for (String schemaName : schemas) {
             Optional<TelemetryOperator> operator = findOperatorByPhoneHashValue(schemaName, normalizedHash);
@@ -170,15 +172,118 @@ public class TelemetryTenantRepository {
     public Optional<Long> findFirstSchemeForUser(String schemaName, Long userId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
-                SELECT scheme_id
-                FROM %s.user_scheme_mapping_table
-                WHERE user_id = ?
-                  AND status = 1
-                ORDER BY id
+                SELECT usm.scheme_id
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
+                ORDER BY usm.id
                 LIMIT 1
-                """, schemaName);
+                """, schemaName, schemaName);
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("scheme_id")), userId);
         return rows.stream().findFirst();
+    }
+
+    public List<TelemetrySchemeOption> findSchemesForUser(String schemaName, Long userId) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT usm.scheme_id AS id,
+                       sm.scheme_name AS name,
+                       MIN(usm.id) AS mapping_order
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
+                GROUP BY usm.scheme_id, sm.scheme_name
+                ORDER BY mapping_order
+                """, schemaName, schemaName);
+        return jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetrySchemeOption(
+                        toLong(rs.getObject("id")),
+                        rs.getString("name")
+                ),
+                userId
+        );
+    }
+
+    public Optional<TelemetrySchemeSelectionRecord> findLatestPendingSchemeSelectionForDate(String schemaName,
+                                                                                            Long operatorId,
+                                                                                            LocalDate readingDate) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, scheme_id, correlation_id
+                FROM %s.flow_reading_table
+                WHERE created_by = ?
+                  AND reading_date = ?
+                  AND deleted_at IS NULL
+                  AND COALESCE(extracted_reading, 0) = 0
+                  AND COALESCE(confirmed_reading, 0) = 0
+                  AND meter_change_reason IS NULL
+                  AND issue_report_reason IS NULL
+                  AND COALESCE(image_url, '') = ''
+                  AND correlation_id LIKE ?
+                ORDER BY %s DESC, id DESC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetrySchemeSelectionRecord> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetrySchemeSelectionRecord(
+                        toLong(rs.getObject("id")),
+                        toLong(rs.getObject("scheme_id")),
+                        rs.getString("correlation_id")
+                ),
+                operatorId,
+                readingDate,
+                SCHEME_SELECTION_CORRELATION_PREFIX + "%"
+        );
+        return rows.stream().findFirst();
+    }
+
+    public String upsertPendingSchemeSelectionRecord(String schemaName,
+                                                     Long schemeId,
+                                                     Long operatorId,
+                                                     LocalDateTime readingAt) {
+        validateSchemaName(schemaName);
+        LocalDate readingDate = LocalDate.from(readingAt);
+        Optional<TelemetrySchemeSelectionRecord> existing = findLatestPendingSchemeSelectionForDate(
+                schemaName,
+                operatorId,
+                readingDate
+        );
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        if (existing.isPresent()) {
+            String sql = String.format("""
+                    UPDATE %s.flow_reading_table
+                    SET scheme_id = ?,
+                        %s = ?,
+                        reading_date = ?,
+                        updated_by = ?,
+                        updated_at = NOW()
+                    WHERE id = ?
+                    """, schemaName, timeColumn);
+            jdbcTemplate.update(sql, schemeId, readingAt, readingDate, operatorId, existing.get().id());
+            return existing.get().correlationId();
+        }
+
+        String correlationId = SCHEME_SELECTION_CORRELATION_PREFIX + UUID.randomUUID();
+        createFlowReading(
+                schemaName,
+                schemeId,
+                operatorId,
+                readingAt,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                correlationId,
+                "",
+                null
+        );
+        return correlationId;
     }
 
     public Optional<Integer> findUserLanguageId(String schemaName, Long userId) {
@@ -279,10 +384,47 @@ public class TelemetryTenantRepository {
                     WHERE user_id = ?
                       AND scheme_id = ?
                       AND status = 1
+                      AND deleted_at IS NULL
                 )
                 """, schemaName);
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, operatorId, schemeId);
         return Boolean.TRUE.equals(exists);
+    }
+
+    public Optional<Long> findSectionOfficerUserIdForScheme(String schemaName, Long schemeId) {
+        List<Long> userIds = findSectionOfficerUserIdsForScheme(schemaName, schemeId);
+        return userIds.stream().findFirst();
+    }
+
+    public List<Long> findSubDivisionalOfficerUserIdsForScheme(String schemaName, Long schemeId) {
+        return findUserIdsForSchemeByUserType(schemaName, schemeId, "SUB_DIVISIONAL_OFFICER");
+    }
+
+    public List<Long> findSectionOfficerUserIdsForScheme(String schemaName, Long schemeId) {
+        return findUserIdsForSchemeByUserType(schemaName, schemeId, "SECTION_OFFICER");
+    }
+
+    private List<Long> findUserIdsForSchemeByUserType(String schemaName, Long schemeId, String userType) {
+        validateSchemaName(schemaName);
+        if (schemeId == null) {
+            return List.of();
+        }
+        String sql = String.format("""
+                SELECT usm.user_id
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.user_table u
+                  ON u.id = usm.user_id
+                JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type
+                WHERE usm.scheme_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND u.status = 1
+                  AND u.deleted_at IS NULL
+                  AND UPPER(COALESCE(ut.c_name, '')) = ?
+                ORDER BY usm.id DESC
+                """, schemaName, schemaName);
+        return jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("user_id")), schemeId, userType);
     }
 
     public Long createFlowReading(String schemaName,
@@ -600,13 +742,11 @@ public class TelemetryTenantRepository {
                     WHERE id = ?
                     """, schemaName, timeColumn);
             jdbcTemplate.update(sql, readingAt, LocalDate.from(readingAt), reason, operatorId, pending.get().id());
-            cleanupOtherPendingIssueReportRecords(schemaName, schemeId, operatorId, pending.get().id(), operatorId);
             return pending.get().correlationId();
         }
 
         String correlationId = "issue-report-" + UUID.randomUUID();
-        Long createdId = createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
-        cleanupOtherPendingIssueReportRecords(schemaName, schemeId, operatorId, createdId, operatorId);
+        createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
         return correlationId;
     }
 
@@ -627,29 +767,6 @@ public class TelemetryTenantRepository {
                   AND extracted_reading = 0
                   AND confirmed_reading = 0
                   AND meter_change_reason IS NOT NULL
-                  AND deleted_at IS NULL
-                  AND id <> ?
-                """, schemaName);
-        jdbcTemplate.update(sql, updatedBy, updatedBy, schemeId, operatorId, keepId);
-    }
-
-    private void cleanupOtherPendingIssueReportRecords(String schemaName,
-                                                       Long schemeId,
-                                                       Long operatorId,
-                                                       Long keepId,
-                                                       Long updatedBy) {
-        validateSchemaName(schemaName);
-        String sql = String.format("""
-                UPDATE %s.flow_reading_table
-                SET deleted_at = NOW(),
-                    deleted_by = ?,
-                    updated_by = ?,
-                    updated_at = NOW()
-                WHERE scheme_id = ?
-                  AND created_by = ?
-                  AND extracted_reading = 0
-                  AND confirmed_reading = 0
-                  AND issue_report_reason IS NOT NULL
                   AND deleted_at IS NULL
                   AND id <> ?
                 """, schemaName);
@@ -838,6 +955,26 @@ public class TelemetryTenantRepository {
         return count != null ? count : 0;
     }
 
+    public int touchLatestAnomalyByTypeForToday(String schemaName, Long userId, Long schemeId, int anomalyType) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                UPDATE %1$s.anomaly_table
+                SET created_at = NOW()
+                WHERE id = (
+                    SELECT id
+                    FROM %1$s.anomaly_table
+                    WHERE user_id = ?
+                      AND scheme_id = ?
+                      AND type = ?
+                      AND DATE(created_at) = CURRENT_DATE
+                      AND deleted_at IS NULL
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                )
+                """, schemaName);
+        return jdbcTemplate.update(sql, userId, schemeId, anomalyType);
+    }
+
     public List<LocalDate> findAnomalyDatesByType(String schemaName, Long userId, Long schemeId, int anomalyType, int limitDays) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -992,6 +1129,74 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingBeforeDate(String schemaName,
+                                                                                             Long schemeId,
+                                                                                             Long operatorId,
+                                                                                             LocalDate beforeDate) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND reading_date < ?
+                  AND extracted_reading > 0
+                  AND confirmed_reading > 0
+                  AND deleted_at IS NULL
+                ORDER BY reading_date DESC, %s DESC, id DESC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryCompletedFlowReading(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                schemeId,
+                operatorId,
+                beforeDate
+        );
+        return rows.stream().findFirst();
+    }
+
+    public Optional<TelemetryCompletedFlowReading> findEarliestCompletedFlowReadingAfterDate(String schemaName,
+                                                                                              Long schemeId,
+                                                                                              Long operatorId,
+                                                                                              LocalDate afterDate) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND reading_date > ?
+                  AND extracted_reading > 0
+                  AND confirmed_reading > 0
+                  AND deleted_at IS NULL
+                ORDER BY reading_date ASC, %s ASC, id ASC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryCompletedFlowReading(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                schemeId,
+                operatorId,
+                afterDate
+        );
+        return rows.stream().findFirst();
+    }
+
     public void updateReadingValues(String schemaName, Long readingId, BigDecimal readingValue, Long updatedBy) {
         validateSchemaName(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
@@ -1066,6 +1271,94 @@ public class TelemetryTenantRepository {
                 WHERE id = ?
                 """, schemaName);
         jdbcTemplate.update(sql, latitude, longitude, updatedBy, readingId);
+    }
+
+    public void upsertAnalyticsWaterQuantity(Integer tenantId,
+                                             Long schemeId,
+                                             Long userId,
+                                             LocalDate date,
+                                             BigDecimal waterQuantity,
+                                             Integer submissionStatus) {
+        if (tenantId == null || schemeId == null || userId == null || date == null || waterQuantity == null) {
+            throw new IllegalArgumentException("tenantId, schemeId, userId, date, and waterQuantity are required");
+        }
+
+        int schemeIdInt = Math.toIntExact(schemeId);
+        int userIdInt = Math.toIntExact(userId);
+        int waterQuantityInt = Math.max(0, waterQuantity.setScale(0, RoundingMode.HALF_UP).intValue());
+
+        boolean hasSubmissionStatus = columnExists("analytics_schema", "fact_water_quantity_table", "submission_status");
+        boolean hasOutageReason = columnExists("analytics_schema", "fact_water_quantity_table", "outage_reason");
+        boolean hasNonSubmissionReason = columnExists("analytics_schema", "fact_water_quantity_table", "non_submission_reason");
+
+        List<Object> updateArgs = new ArrayList<>();
+        updateArgs.add(tenantId);
+        updateArgs.add(schemeIdInt);
+        updateArgs.add(date);
+        StringBuilder updateSql = new StringBuilder("""
+                UPDATE analytics_schema.fact_water_quantity_table
+                SET user_id = ?,
+                    water_quantity = ?,
+                    updated_at = NOW()
+                """);
+        updateArgs.add(userIdInt);
+        updateArgs.add(waterQuantityInt);
+        if (hasSubmissionStatus) {
+            updateSql.append(", submission_status = ?");
+            updateArgs.add(submissionStatus);
+        }
+        if (hasOutageReason) {
+            updateSql.append(", outage_reason = NULL");
+        }
+        if (hasNonSubmissionReason) {
+            updateSql.append(", non_submission_reason = NULL");
+        }
+        updateSql.insert(0, """
+                WITH latest AS (
+                    SELECT id
+                    FROM analytics_schema.fact_water_quantity_table
+                    WHERE tenant_id = ?
+                      AND scheme_id = ?
+                      AND "date" = ?
+                    ORDER BY updated_at DESC NULLS LAST, id DESC
+                    LIMIT 1
+                )
+                """);
+        updateSql.append("""
+
+                FROM latest
+                WHERE analytics_schema.fact_water_quantity_table.id = latest.id
+                """);
+
+        int updated = jdbcTemplate.update(updateSql.toString(), updateArgs.toArray());
+        if (updated > 0) {
+            return;
+        }
+
+        List<Object> insertArgs = new ArrayList<>();
+        StringBuilder columns = new StringBuilder("tenant_id, scheme_id, user_id, water_quantity, \"date\", created_at, updated_at");
+        StringBuilder values = new StringBuilder("?, ?, ?, ?, ?, NOW(), NOW()");
+        insertArgs.add(tenantId);
+        insertArgs.add(schemeIdInt);
+        insertArgs.add(userIdInt);
+        insertArgs.add(waterQuantityInt);
+        insertArgs.add(date);
+        if (hasSubmissionStatus) {
+            columns.append(", submission_status");
+            values.append(", ?");
+            insertArgs.add(submissionStatus);
+        }
+        if (hasOutageReason) {
+            columns.append(", outage_reason");
+            values.append(", NULL");
+        }
+        if (hasNonSubmissionReason) {
+            columns.append(", non_submission_reason");
+            values.append(", NULL");
+        }
+
+        String insertSql = "INSERT INTO analytics_schema.fact_water_quantity_table (" + columns + ") VALUES (" + values + ")";
+        jdbcTemplate.update(insertSql, insertArgs.toArray());
     }
 
     public Optional<Long> findLatestPlaceholderFlowReadingIdForDate(String schemaName,
@@ -1357,7 +1650,30 @@ public class TelemetryTenantRepository {
         }
     }
 
+    public void invalidateMetadataCaches() {
+        synchronized (metadataCacheLock) {
+            tenantSchemasCache = List.of();
+            tenantSchemasCacheExpiresAtMs = 0L;
+            columnExistsCache.clear();
+        }
+    }
+
     private boolean columnExists(String schemaName, String tableName, String columnName) {
+        if (!metadataCacheEnabled || columnExistsCacheTtlMs <= 0L) {
+            return queryColumnExists(schemaName, tableName, columnName);
+        }
+        String cacheKey = schemaName + "." + tableName + "." + columnName;
+        long now = System.currentTimeMillis();
+        TimedCacheValue<Boolean> cached = columnExistsCache.get(cacheKey);
+        if (cached != null && !cached.isExpired(now)) {
+            return cached.value();
+        }
+        boolean exists = queryColumnExists(schemaName, tableName, columnName);
+        columnExistsCache.put(cacheKey, new TimedCacheValue<>(exists, now + columnExistsCacheTtlMs));
+        return exists;
+    }
+
+    private boolean queryColumnExists(String schemaName, String tableName, String columnName) {
         String sql = """
                 SELECT EXISTS (
                     SELECT 1
@@ -1369,6 +1685,36 @@ public class TelemetryTenantRepository {
                 """;
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, schemaName, tableName, columnName);
         return Boolean.TRUE.equals(exists);
+    }
+
+    private List<String> getTenantSchemasCached() {
+        if (!metadataCacheEnabled || tenantSchemaListCacheTtlMs <= 0L) {
+            return queryTenantSchemas();
+        }
+        long now = System.currentTimeMillis();
+        if (now < tenantSchemasCacheExpiresAtMs) {
+            return tenantSchemasCache;
+        }
+        synchronized (metadataCacheLock) {
+            long refreshedNow = System.currentTimeMillis();
+            if (refreshedNow < tenantSchemasCacheExpiresAtMs) {
+                return tenantSchemasCache;
+            }
+            List<String> refreshed = queryTenantSchemas();
+            tenantSchemasCache = refreshed;
+            tenantSchemasCacheExpiresAtMs = refreshedNow + tenantSchemaListCacheTtlMs;
+            return refreshed;
+        }
+    }
+
+    private List<String> queryTenantSchemas() {
+        String schemaSql = """
+                SELECT nspname
+                FROM pg_namespace
+                WHERE nspname LIKE 'tenant_%'
+                ORDER BY nspname
+                """;
+        return jdbcTemplate.query(schemaSql, (rs, n) -> rs.getString("nspname"));
     }
 
     private String resolveSelectColumn(String schemaName, String tableName, String columnName, String fallbackExpression) {
@@ -1418,5 +1764,11 @@ public class TelemetryTenantRepository {
             return number.intValue();
         }
         throw new IllegalArgumentException("Expected numeric DB value, got: " + value.getClass().getName());
+    }
+
+    private record TimedCacheValue<T>(T value, long expiresAtMs) {
+        private boolean isExpired(long nowMs) {
+            return nowMs >= expiresAtMs;
+        }
     }
 }

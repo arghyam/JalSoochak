@@ -27,6 +27,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -104,7 +105,7 @@ class TenantDetailsServiceImplTest {
     @Test
     void getTenantDetails_cacheHit_returnsCachedResponse() throws Exception {
         mockRedisValueOps();
-        String key = "analytics-service:api-cache:get_tenant_details:tenant:1:parent:all:v3";
+        String key = "analytics-service:api-cache:get_tenant_details:tenant:1:parent:all:v4";
         TenantDetailsResponse cached = TenantDetailsResponse.builder().tenantId(1).stateCode("mp").build();
         when(valueOperations.get(key)).thenReturn("cached");
         when(objectMapper.readValue("cached", TenantDetailsResponse.class)).thenReturn(cached);
@@ -149,15 +150,19 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantBoundaryRepository.getMergedBoundaryByParent(1, 100, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(1, 100))
+                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
 
         TenantDetailsResponse response = service.getTenantDetails(1, 100);
 
         assertThat(response.getChildBoundaryCount()).isEqualTo(1);
+        assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
         assertThat(response.getChildRegions()).hasSize(1);
         assertThat(response.getChildRegions().getFirst().getLgdId()).isEqualTo(101);
         verify(tenantBoundaryRepository).getLocationLevel(100);
         verify(tenantBoundaryRepository).getChildLevelByParent(1, 100, 1);
         verify(tenantBoundaryRepository).getMergedBoundaryByParent(1, 100, 1);
+        verify(tenantBoundaryRepository).getBoundaryGeoJsonByLgdId(1, 100);
     }
 
     @Test
@@ -234,12 +239,14 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(tenantId, parentLgdId))
+                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
 
-        when(schemeRegularityService.getAverageSchemeRegularity(parentLgdId, start, end))
+        when(schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, start, end))
                 .thenReturn(AverageSchemeRegularityResponse.builder()
                         .averageRegularity(new BigDecimal("0.75"))
                         .build());
-        when(schemeRegularityService.getReadingSubmissionRateByLgd(parentLgdId, start, end))
+        when(schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, start, end))
                 .thenReturn(ReadingSubmissionRateResponse.builder()
                         .readingSubmissionRate(new BigDecimal("0.84"))
                         .build());
@@ -256,9 +263,67 @@ class TenantDetailsServiceImplTest {
         assertThat(response.getAverageSchemeRegularity()).isEqualByComparingTo("0.75");
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.84");
         assertThat(response.getAveragePerformanceScore()).isEqualByComparingTo("0.5");
+        assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
         assertThat(response.getChildRegions()).hasSize(1);
         assertThat(response.getChildRegions().getFirst().getAveragePerformanceScore())
                 .isEqualByComparingTo("0.9");
+    }
+
+    @Test
+    void getTenantDetailsWithAggregatedMetrics_cacheMiss_writesFinalResponseToCache() throws Exception {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+
+        Integer tenantId = 1;
+        Integer parentLgdId = 100;
+        LocalDate start = LocalDate.of(2026, 1, 1);
+        LocalDate end = LocalDate.of(2026, 1, 3);
+
+        String cacheKey = "analytics-service:api-cache:get_tenant_details"
+                + ":tenant:" + tenantId
+                + ":parent:" + parentLgdId
+                + ":from:" + start
+                + ":to:" + end
+                + ":v4";
+
+        when(dimTenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant(tenantId, "mp")));
+        when(tenantBoundaryRepository.getLocationLevel(parentLgdId)).thenReturn(1);
+        when(tenantBoundaryRepository.getChildLevelByParent(tenantId, parentLgdId, 1))
+                .thenReturn(List.of(Map.of(
+                        "lgd_id", 101,
+                        "parent_lgd_id", 100,
+                        "child_level", 2,
+                        "scheme_count", 2,
+                        "title", "Child A",
+                        "lgd_code", "C101",
+                        "boundary_geojson", "{\"type\":\"Polygon\"}"
+                )));
+        when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
+                .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(tenantId, parentLgdId))
+                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
+
+        when(schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, start, end))
+                .thenReturn(AverageSchemeRegularityResponse.builder()
+                        .averageRegularity(new BigDecimal("0.75"))
+                        .build());
+        when(schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, start, end))
+                .thenReturn(ReadingSubmissionRateResponse.builder()
+                        .readingSubmissionRate(new BigDecimal("0.84"))
+                        .build());
+        when(schemeRegularityService.getChildAveragePerformanceScoreByLgd(parentLgdId, start, end))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionPerformanceScore(
+                                101, null, new BigDecimal("0.9"))));
+        when(schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, start, end))
+                .thenReturn(new BigDecimal("0.5"));
+
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        service.getTenantDetailsWithAggregatedMetrics(tenantId, parentLgdId, start, end);
+
+        verify(valueOperations).get(cacheKey);
+        verify(valueOperations).set(eq(cacheKey), eq("{json}"), eq(java.time.Duration.ofHours(24)));
     }
 
     @Test
@@ -268,7 +333,7 @@ class TenantDetailsServiceImplTest {
         when(dimTenantRepository.findById(1)).thenReturn(Optional.of(tenant(1, "mp")));
         when(tenantBoundaryRepository.getMergedBoundaryForTenant(1))
                 .thenReturn(Map.of("boundary_count", 2, "boundary_geojson", "{}"));
-        when(schemeRegularityService.getAverageSchemeRegularity(isNull(), any(), any()))
+        when(schemeRegularityService.getAverageSchemeRegularity(any(), isNull(), any(), any()))
                 .thenThrow(new IllegalArgumentException("lgd_id must be a positive integer"));
 
         LocalDate start = LocalDate.of(2026, 1, 1);
@@ -303,12 +368,14 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantDepartmentBoundaryRepository.getMergedBoundaryByParentDepartment(tenantId, parentDepartmentId, 2))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(tenantDepartmentBoundaryRepository.getBoundaryGeoJsonByDepartmentId(tenantId, parentDepartmentId))
+                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
 
-        when(schemeRegularityService.getAverageSchemeRegularityByDepartment(parentDepartmentId, start, end))
+        when(schemeRegularityService.getAverageSchemeRegularityByDepartment(tenantId, parentDepartmentId, start, end))
                 .thenReturn(AverageSchemeRegularityResponse.builder()
                         .averageRegularity(new BigDecimal("0.66"))
                         .build());
-        when(schemeRegularityService.getReadingSubmissionRateByDepartment(parentDepartmentId, start, end))
+        when(schemeRegularityService.getReadingSubmissionRateByDepartment(tenantId, parentDepartmentId, start, end))
                 .thenReturn(ReadingSubmissionRateResponse.builder()
                         .readingSubmissionRate(new BigDecimal("0.77"))
                         .build());
@@ -325,6 +392,7 @@ class TenantDetailsServiceImplTest {
         assertThat(response.getAverageSchemeRegularity()).isEqualByComparingTo("0.66");
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.77");
         assertThat(response.getAveragePerformanceScore()).isEqualByComparingTo("0.55");
+        assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
         assertThat(response.getChildRegions()).hasSize(1);
         assertThat(response.getChildRegions().getFirst().getAveragePerformanceScore())
                 .isEqualByComparingTo("0.88");
@@ -344,7 +412,7 @@ class TenantDetailsServiceImplTest {
                 + ":parent_department:" + parentDepartmentId
                 + ":from:" + start
                 + ":to:" + end
-                + ":v3";
+                + ":v4";
 
         TenantDetailsResponse cached = TenantDetailsResponse.builder()
                 .tenantId(tenantId)
@@ -367,8 +435,8 @@ class TenantDetailsServiceImplTest {
         verify(tenantDepartmentBoundaryRepository, never()).getDepartmentLevel(any(), any());
         verify(tenantDepartmentBoundaryRepository, never()).getChildDepartmentsByParent(any(), any(), any());
         verify(tenantDepartmentBoundaryRepository, never()).getMergedBoundaryByParentDepartment(any(), any(), any());
-        verify(schemeRegularityService, never()).getAverageSchemeRegularityByDepartment(any(), any(), any());
-        verify(schemeRegularityService, never()).getReadingSubmissionRateByDepartment(any(), any(), any());
+        verify(schemeRegularityService, never()).getAverageSchemeRegularityByDepartment(any(), any(), any(), any());
+        verify(schemeRegularityService, never()).getReadingSubmissionRateByDepartment(any(), any(), any(), any());
         verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByDepartment(any(), any(), any());
         verify(schemeRegularityService, never()).getAveragePerformanceScoreByDepartment(any(), any(), any());
 
@@ -393,10 +461,13 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantDepartmentBoundaryRepository.getMergedBoundaryByParentDepartment(1, 200, 2))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(tenantDepartmentBoundaryRepository.getBoundaryGeoJsonByDepartmentId(1, 200))
+                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
 
         TenantDetailsResponse response = service.getTenantDetailsByParentDepartment(1, 200);
 
         assertThat(response.getChildBoundaryCount()).isEqualTo(1);
+        assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
         assertThat(response.getChildRegions()).hasSize(1);
         assertThat(response.getChildRegions().getFirst().getDepartmentId()).isEqualTo(201);
     }

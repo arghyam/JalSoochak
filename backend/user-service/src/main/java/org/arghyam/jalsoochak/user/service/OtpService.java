@@ -129,6 +129,10 @@ public class OtpService {
     }
 
     private String generateOtp() {
+        if (otpProperties.cheat().enabled()) {
+            log.debug("Cheat OTP active — returning configured value");
+            return otpProperties.cheat().value();
+        }
         StringBuilder sb = new StringBuilder(otpProperties.otpLength());
         for (int i = 0; i < otpProperties.otpLength(); i++) {
             sb.append(secureRandom.nextInt(10));

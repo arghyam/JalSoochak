@@ -10,7 +10,9 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Publishes user lifecycle events to {@code user-service-topic} after the current
@@ -63,6 +65,43 @@ public class UserAnalyticsEventPublisher {
         payload.put("userType", userType);
         payload.put("uuid", uuid);
         payload.put("status", status);
+        publishAfterCommit(payload);
+    }
+
+    public void publishUserUpdatedAfterCommit(
+            Long userId,
+            Integer tenantId,
+            Integer userType,
+            UUID uuid,
+            String email,
+            String title,
+            Integer status
+    ) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("eventType", "USER_UPDATED");
+        payload.put("userId", userId);
+        payload.put("tenantId", tenantId);
+        payload.put("email", email);
+        payload.put("userType", userType);
+        payload.put("uuid", uuid);
+        payload.put("title", title);
+        payload.put("status", status);
+        publishAfterCommit(payload);
+    }
+
+    public void publishUserSchemeMappingsReplacedAfterCommit(
+            Long userId,
+            Integer tenantId,
+            UUID userUuid,
+            List<Integer> schemeIds
+    ) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("eventType", "USER_SCHEME_MAPPINGS_REPLACED");
+        payload.put("userId", userId);
+        payload.put("tenantId", tenantId);
+        payload.put("userUuid", userUuid);
+        payload.put("schemeIds", schemeIds);
+        payload.put("status", 1);
         publishAfterCommit(payload);
     }
 

@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
+import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
 import org.arghyam.jalsoochak.analytics.service.UserAlertTotalsService;
@@ -28,6 +29,7 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -36,6 +38,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -55,6 +59,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/analytics")
 @RequiredArgsConstructor
 @Tag(name = "Analytics - Scheme Reporting", description = "Scheme dashboards, region reports (CSV/JSON), escalations, and scheme performance queries")
+@Slf4j
 public class AnalyticsSchemeReportingController {
 
     private static final String CSV_OUTPUT_FORMAT = "csv";
@@ -65,6 +70,7 @@ public class AnalyticsSchemeReportingController {
     private final AnomalyQueryService anomalyQueryService;
     private final OperatorAttendanceQueryService operatorAttendanceQueryService;
     private final UserAlertTotalsService userAlertTotalsService;
+    private final AuthenticatedRequestContextService authenticatedRequestContextService;
     private final DimUserRepository dimUserRepository;
     private final FactEscalationRepository factEscalationRepository;
 
@@ -72,7 +78,7 @@ public class AnalyticsSchemeReportingController {
     }
 
     private Integer resolveUserIdByUuid(Integer tenantId, UUID userUuid) {
-        return dimUserRepository.findByTenantIdAndUuid(tenantId, userUuid)
+        return dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(tenantId, userUuid)
                 .map(u -> u.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("No user found for uuid: " + userUuid));
     }
@@ -128,7 +134,6 @@ public class AnalyticsSchemeReportingController {
                     .build());
         }
     }
-
     @GetMapping("/schemes/status-count")
     @Operation(
             summary = "Get active and inactive scheme count for an LGD or department area",
@@ -163,6 +168,7 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<Map<String, Integer>>> getSchemeStatusCount(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "lgd_id", required = false) Integer lgdId,
             @RequestParam(name = "department_id", required = false) Integer departmentId) {
         try {
@@ -174,8 +180,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             Map<String, Integer> data = (lgdId != null)
-                    ? schemeRegularityService.getSchemeStatusCountByLgd(lgdId)
-                    : schemeRegularityService.getSchemeStatusCountByDepartment(departmentId);
+                    ? schemeRegularityService.getSchemeStatusCountByLgd(tenantId, lgdId)
+                    : schemeRegularityService.getSchemeStatusCountByDepartment(tenantId, departmentId);
 
             return ResponseEntity.ok(ApiResponse.<Map<String, Integer>>builder()
                     .success(true)
@@ -228,11 +234,13 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<SchemeStatusAndTopReportingResponse>> getSchemeStatusAndTopReportingRate(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
             @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
-            @RequestParam(name = "scheme_count", required = false, defaultValue = "10") Integer schemeCount) {
+            @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
+            @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit) {
         try {
             if (parentLgdId != null && parentDepartmentId != null) {
                 throw new IllegalArgumentException("Provide either parent_lgd_id or parent_department_id, not both");
@@ -242,8 +250,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             SchemeStatusAndTopReportingResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(parentLgdId, startDate, endDate, schemeCount)
-                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(parentDepartmentId, startDate, endDate, schemeCount);
+                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(tenantId, parentLgdId, startDate, endDate, pageNumber, limit)
+                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(tenantId, parentDepartmentId, startDate, endDate, pageNumber, limit);
 
             return ResponseEntity.ok(ApiResponse.<SchemeStatusAndTopReportingResponse>builder()
                     .success(true)
@@ -296,6 +304,7 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<?> getSchemeRegionReport(
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
@@ -316,8 +325,8 @@ public class AnalyticsSchemeReportingController {
             }
 
             SchemeRegularityListResponse reportResponse = (parentLgdId != null)
-                    ? schemeRegularityService.getSchemeRegionReportByLgd(parentLgdId, startDate, endDate, pageNumber, count)
-                    : schemeRegularityService.getSchemeRegionReportByDepartment(parentDepartmentId, startDate, endDate, pageNumber, count);
+                    ? schemeRegularityService.getSchemeRegionReportByLgd(tenantId, parentLgdId, startDate, endDate, pageNumber, count)
+                    : schemeRegularityService.getSchemeRegionReportByDepartment(tenantId, parentDepartmentId, startDate, endDate, pageNumber, count);
 
             if (!CSV_OUTPUT_FORMAT.equalsIgnoreCase(Objects.toString(outputFormat, ""))) {
                 return ResponseEntity.ok(ApiResponse.<SchemeRegularityListResponse>builder()
@@ -376,9 +385,9 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<EscalationPaginatedResponse> getEscalationsPaginated(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "uuid") UUID userUuid,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "escalation_type", required = false) String escalationType,
@@ -396,7 +405,30 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("limit must be >= 1");
             }
 
-            Integer userId = resolveUserIdByUuid(tenantId, userUuid);
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            log.info(
+                    "Escalations request: extracted tenantId={}, userId={}, userUuid={}, page_number={}, limit={}, escalation_type={}, scheme_id={}, scheme_name_present={}, resolution_status={}, start_date={}, end_date={}",
+                    userRef != null ? userRef.tenantId() : null,
+                    userRef != null ? userRef.userId() : null,
+                    userRef != null ? userRef.userUuid() : null,
+                    pageNumber,
+                    limit,
+                    escalationType,
+                    schemeId,
+                    schemeName != null && !schemeName.isBlank(),
+                    resolutionStatus,
+                    startDate,
+                    endDate
+            );
+            Integer tenantId = userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer userId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<EscalationListItemDto> page = escalationQueryService.getEscalations(
                     tenantId,
@@ -524,9 +556,9 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<AnomalyPaginatedResponse> getAnomalies(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "uuid") UUID userUuid,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
             @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -543,7 +575,16 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("limit must be >= 1");
             }
 
-            Integer mappedUserId = resolveUserIdByUuid(tenantId, userUuid);
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer mappedUserId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             PageRequest pageable = PageRequest.of(pageNumber - 1, limit, Sort.by("createdAt").descending());
             Page<AnomalyListItemDto> page = anomalyQueryService.getAnomaliesForUserSchemes(
                     tenantId,
@@ -592,7 +633,8 @@ public class AnalyticsSchemeReportingController {
                             description = "Totals fetched successfully",
                             content = @Content(
                                     mediaType = "application/json",
-                                    schema = @Schema(implementation = ApiResponse.class)
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.OFFICER_DASHBOARD_TOTALS_SUCCESS)
                             )
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -600,7 +642,8 @@ public class AnalyticsSchemeReportingController {
                             description = "Bad request",
                             content = @Content(
                                     mediaType = "application/json",
-                                    schema = @Schema(implementation = ApiResponse.class)
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
                             )
                     ),
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -608,7 +651,8 @@ public class AnalyticsSchemeReportingController {
                             description = "Unexpected error",
                             content = @Content(
                                     mediaType = "application/json",
-                                    schema = @Schema(implementation = ApiResponse.class)
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
                             )
                     )
             }
@@ -663,16 +707,14 @@ public class AnalyticsSchemeReportingController {
             }
     )
     public ResponseEntity<ApiResponse<List<FactSchemePerformance>>> getSchemePerformance(
-            @RequestParam(required = false) Integer tenantId,
+            @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(required = false) Integer schemeId) {
         try {
             List<FactSchemePerformance> data;
             if (schemeId != null) {
-                data = schemePerformanceRepository.findBySchemeId(schemeId);
-            } else if (tenantId != null) {
-                data = schemePerformanceRepository.findByTenantId(tenantId);
+                data = schemePerformanceRepository.findByTenantIdAndSchemeId(tenantId, schemeId);
             } else {
-                data = schemePerformanceRepository.findAll();
+                data = schemePerformanceRepository.findByTenantId(tenantId);
             }
 
             return ResponseEntity.ok(ApiResponse.<List<FactSchemePerformance>>builder()

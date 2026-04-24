@@ -22,7 +22,6 @@ import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
 import org.arghyam.jalsoochak.user.service.GlificPreferredLanguageService;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadService;
 import org.arghyam.jalsoochak.user.service.PumpOperatorUploadChunkProcessor;
-import org.arghyam.jalsoochak.user.util.LongHashSet;
 import org.arghyam.jalsoochak.user.util.PhoneNumberUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -39,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -84,6 +84,19 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
 
     @Override
     public PumpOperatorUploadResponseDTO uploadPumpOperatorMappings(MultipartFile file, String authorizationHeader) {
+        return uploadMappingsInternal(file, authorizationHeader, false);
+    }
+
+    @Override
+    public PumpOperatorUploadResponseDTO uploadUserSchemeMappings(MultipartFile file, String authorizationHeader) {
+        return uploadMappingsInternal(file, authorizationHeader, false);
+    }
+
+    private PumpOperatorUploadResponseDTO uploadMappingsInternal(
+            MultipartFile file,
+            String authorizationHeader,
+            boolean allowDuplicatePhonesInFile
+    ) {
         String schemaName = requireTenantSchema();
         String tenantCode = toTenantCode(schemaName);
         int actorUserId = uploadAuthService.requireStateAdminUserId(schemaName, authorizationHeader);
@@ -98,7 +111,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
         String extension = extractExtension(file.getOriginalFilename());
         Map<String, Integer> schemeIdCache = new HashMap<>();
 
-        int totalRows = validateUpload(schemaName, file, extension, schemeIdCache);
+        int totalRows = validateUpload(schemaName, file, extension, schemeIdCache, allowDuplicatePhonesInFile);
         ProcessResult processed = processUpload(schemaName, tenantCode, actor, actorUserId, userTypeIds, preferredLanguageId, file, extension, schemeIdCache);
         if (processed.uploadedRows() == 0 && processed.unchangedRows() == totalRows) {
             throw new BadRequestException("Duplicate upload", List.of(
@@ -137,13 +150,19 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
         }
     }
 
-    private int validateUpload(String schemaName, MultipartFile file, String extension, Map<String, Integer> schemeIdCache) {
+    private int validateUpload(
+            String schemaName,
+            MultipartFile file,
+            String extension,
+            Map<String, Integer> schemeIdCache,
+            boolean allowDuplicatePhonesInFile
+    ) {
         List<UploadErrorDTO> errors = new ArrayList<>();
-        LongHashSet seenPhones = new LongHashSet(2048);
+        Set<String> seenPhoneSchemePairs = new java.util.HashSet<>();
 
         int totalRows = "csv".equals(extension)
-                ? validateCsv(schemaName, file, schemeIdCache, seenPhones, errors)
-                : validateXlsx(schemaName, file, schemeIdCache, seenPhones, errors);
+                ? validateCsv(schemaName, file, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhoneSchemePairs)
+                : validateXlsx(schemaName, file, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhoneSchemePairs);
 
         if (!errors.isEmpty()) {
             throw new BadRequestException("Validation failed for uploaded file", errors);
@@ -176,8 +195,9 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             String schemaName,
             MultipartFile file,
             Map<String, Integer> schemeIdCache,
-            LongHashSet seenPhones,
-            List<UploadErrorDTO> errors
+            List<UploadErrorDTO> errors,
+            boolean allowDuplicatePhonesInFile,
+            Set<String> seenPhoneSchemePairs
     ) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
              CSVParser parser = CSVFormat.DEFAULT.builder().setTrim(true).setIgnoreSurroundingSpaces(true).build().parse(reader)) {
@@ -202,7 +222,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 PumpOperatorUploadChunkProcessor.UploadRow row = toUploadRow((int) record.getRecordNumber(), map);
                 total++;
-                validateRow(schemaName, row, schemeIdCache, seenPhones, errors);
+                validateRow(schemaName, row, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhoneSchemePairs);
                 if (errors.size() >= MAX_VALIDATION_ERRORS) {
                     errors.add(err(row.rowNumber(), "file", "Too many validation errors; showing first " + MAX_VALIDATION_ERRORS));
                     break;
@@ -222,8 +242,9 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             String schemaName,
             MultipartFile file,
             Map<String, Integer> schemeIdCache,
-            LongHashSet seenPhones,
-            List<UploadErrorDTO> errors
+            List<UploadErrorDTO> errors,
+            boolean allowDuplicatePhonesInFile,
+            Set<String> seenPhoneSchemePairs
     ) {
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getNumberOfSheets() > 0 ? workbook.getSheetAt(0) : null;
@@ -255,7 +276,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 PumpOperatorUploadChunkProcessor.UploadRow uploadRow = toUploadRow(i + 1, map);
                 total++;
-                validateRow(schemaName, uploadRow, schemeIdCache, seenPhones, errors);
+                validateRow(schemaName, uploadRow, schemeIdCache, errors, allowDuplicatePhonesInFile, seenPhoneSchemePairs);
                 if (errors.size() >= MAX_VALIDATION_ERRORS) {
                     errors.add(err(uploadRow.rowNumber(), "file", "Too many validation errors; showing first " + MAX_VALIDATION_ERRORS));
                     break;
@@ -297,6 +318,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             int uploaded = 0;
             int skipped = 0;
             int unchanged = 0;
+            Set<Long> mappingsClearedInUpload = new java.util.HashSet<>();
             List<PumpOperatorUploadChunkProcessor.UploadRow> chunk = new ArrayList<>(CHUNK_SIZE);
             while (it.hasNext()) {
                 CSVRecord record = it.next();
@@ -306,7 +328,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 chunk.add(toUploadRow((int) record.getRecordNumber(), map));
                 if (chunk.size() >= CHUNK_SIZE) {
-                    var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache);
+                    var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
                     uploaded += res.uploadedRows();
                     skipped += res.skippedRows();
                     unchanged += res.unchangedRows();
@@ -315,7 +337,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             }
 
             if (!chunk.isEmpty()) {
-                var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache);
+                var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
                 uploaded += res.uploadedRows();
                 skipped += res.skippedRows();
                 unchanged += res.unchangedRows();
@@ -363,6 +385,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             int uploaded = 0;
             int skipped = 0;
             int unchanged = 0;
+            Set<Long> mappingsClearedInUpload = new java.util.HashSet<>();
             List<PumpOperatorUploadChunkProcessor.UploadRow> chunk = new ArrayList<>(CHUNK_SIZE);
             for (int i = firstRowIndex + 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
@@ -372,7 +395,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
                 chunk.add(toUploadRow(i + 1, map));
                 if (chunk.size() >= CHUNK_SIZE) {
-                    var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache);
+                    var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
                     uploaded += res.uploadedRows();
                     skipped += res.skippedRows();
                     unchanged += res.unchangedRows();
@@ -380,7 +403,7 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
                 }
             }
             if (!chunk.isEmpty()) {
-                var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache);
+                var res = chunkProcessor.processChunk(schemaName, tenantCode, actor, userTypeIds, preferredLanguageId, actorUserId, chunk, schemeIdCache, mappingsClearedInUpload);
                 uploaded += res.uploadedRows();
                 skipped += res.skippedRows();
                 unchanged += res.unchangedRows();
@@ -400,8 +423,9 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             String schemaName,
             PumpOperatorUploadChunkProcessor.UploadRow row,
             Map<String, Integer> schemeIdCache,
-            LongHashSet seenPhones,
-            List<UploadErrorDTO> errors
+            List<UploadErrorDTO> errors,
+            boolean allowDuplicatePhonesInFile,
+            Set<String> seenPhoneSchemePairs
     ) {
         if (row.fullName().isBlank()) {
             errors.add(err(row.rowNumber(), "full_name", "Full name is required"));
@@ -420,17 +444,6 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
             errors.add(err(row.rowNumber(), "phone_number", "Phone number must be a valid 10-digit Indian number (no country code)"));
             return;
         }
-        try {
-            long phoneNum = Long.parseLong(row.phone());
-            if (!seenPhones.add(phoneNum)) {
-                errors.add(err(row.rowNumber(), "phone_number", "Duplicate phone_number in uploaded file"));
-                return;
-            }
-        } catch (NumberFormatException nfe) {
-            errors.add(err(row.rowNumber(), "phone_number", "Phone number must be numeric"));
-            return;
-        }
-
         if (row.personType().isBlank()) {
             errors.add(err(row.rowNumber(), "person_type", "person_type is required"));
             return;
@@ -443,6 +456,14 @@ public class PumpOperatorUploadServiceImpl implements PumpOperatorUploadService 
         if (row.stateSchemeId().isBlank()) {
             errors.add(err(row.rowNumber(), "state_scheme_id", "state_scheme_id is required"));
             return;
+        }
+
+        if (!allowDuplicatePhonesInFile) {
+            String phoneSchemeKey = row.phone() + "|" + row.stateSchemeId().trim().toLowerCase(Locale.ROOT);
+            if (!seenPhoneSchemePairs.add(phoneSchemeKey)) {
+                errors.add(err(row.rowNumber(), "phone_number", "Duplicate phone_number for the same state_scheme_id in uploaded file"));
+                return;
+            }
         }
 
         String schemeKey = row.stateSchemeId();

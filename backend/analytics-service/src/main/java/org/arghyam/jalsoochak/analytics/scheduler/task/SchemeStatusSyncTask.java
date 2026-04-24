@@ -28,6 +28,7 @@ public class SchemeStatusSyncTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.common.cron:0 0 19 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
+        log.info("Scheduler START '{}'", taskName());
         int sanitizedInactiveAfterDays = Math.max(0, inactiveAfterDays);
         log.info("Running scheduled task '{}' with inactive-after-days={}", taskName(), sanitizedInactiveAfterDays);
 
@@ -40,5 +41,6 @@ public class SchemeStatusSyncTask implements AnalyticsScheduledTask {
                 result.totalSchemes(),
                 result.activeMarkedCount(),
                 result.inactiveMarkedCount());
+        log.info("Scheduler END '{}'", taskName());
     }
 }

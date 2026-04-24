@@ -15,6 +15,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -24,6 +25,20 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * All SQL in this repository uses {@code String.format} to inject only pre-validated,
+ * internal-only values:
+ * <ul>
+ *   <li>{@code schemaName} — validated by {@link #validateSchemaName} against
+ *       {@code ^[a-z_][a-z0-9_]*$}.</li>
+ *   <li>Column name fragments ({@code timeColumn}, {@code confirmedExpr}) — returned from
+ *       internal helpers that produce only hardcoded SQL literals.</li>
+ *   <li>WHERE/ORDER-BY fragments — assembled from hardcoded string constants with
+ *       {@code ?} placeholders; user input is always bound as a parameter.</li>
+ *   <li>IN-clause placeholders — built as {@code "?, ?, ..."} strings from collection size.</li>
+ * </ul>
+ * No user-supplied data is ever concatenated into the query string.
+ */
 @Repository
 @RequiredArgsConstructor
 public class PersonSchemeRepository {
@@ -35,6 +50,18 @@ public class PersonSchemeRepository {
         if (schemaName == null || !schemaName.matches("^[a-z_][a-z0-9_]*$")) {
             throw new IllegalArgumentException("Invalid schema name: " + schemaName);
         }
+    }
+
+    private Integer findTenantIdBySchemaName(String schemaName) {
+        String tenantCode = schemaName.startsWith("tenant_") ? schemaName.substring("tenant_".length()) : schemaName;
+        String sql = """
+                SELECT id
+                FROM common_schema.tenant_master_table
+                WHERE LOWER(state_code) = LOWER(?)
+                LIMIT 1
+                """;
+        List<Integer> rows = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getInt("id"), tenantCode);
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     private boolean tableExists(String schemaName, String tableName) {
@@ -68,6 +95,7 @@ public class PersonSchemeRepository {
         return columnExists(schemaName, "flow_reading_table", "observation_time") ? "observation_time" : "reading_at";
     }
 
+    @SuppressWarnings("java:S2077")
     private String resolveConfirmedReadingExpression(String schemaName, String tableAlias) {
         if (columnExists(schemaName, "flow_reading_table", "payload_json")) {
             return String.format(
@@ -92,6 +120,7 @@ public class PersonSchemeRepository {
         return "ORDER BY " + col + " " + dir;
     }
 
+    @SuppressWarnings("java:S2077")
     public long countSchemesByPerson(String schemaName, long personId, String schemeName) {
         validateSchemaName(schemaName);
         if (!tableExists(schemaName, "user_scheme_mapping_table")) {
@@ -120,6 +149,7 @@ public class PersonSchemeRepository {
         return total == null ? 0 : total;
     }
 
+    @SuppressWarnings("java:S2077")
     public List<PersonSchemeDetailsDTO> listSchemesByPerson(
             String schemaName,
             long personId,
@@ -251,6 +281,7 @@ public class PersonSchemeRepository {
         return results;
     }
 
+    @SuppressWarnings("java:S2077")
     private Map<Long, List<String>> fetchPumpOperatorsBySchemes(String schemaName, List<Long> schemeIds) {
         if (schemeIds == null || schemeIds.isEmpty()) {
             return Map.of();
@@ -284,6 +315,7 @@ public class PersonSchemeRepository {
         return grouped;
     }
 
+    @SuppressWarnings("java:S2077")
     public SchemeDetailsWithReportingDTO getSchemeDetails(String schemaName, long schemeId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
@@ -337,6 +369,7 @@ public class PersonSchemeRepository {
         }
     }
 
+    @SuppressWarnings("java:S2077")
     public long countSchemeReadings(String schemaName, long schemeId) {
         validateSchemaName(schemaName);
         String sql = String.format("""
@@ -355,6 +388,7 @@ public class PersonSchemeRepository {
         return total == null ? 0 : total;
     }
 
+    @SuppressWarnings("java:S2077")
     public List<SchemeReadingSubmissionDTO> listSchemeReadings(
             String schemaName,
             long schemeId,
@@ -414,18 +448,21 @@ public class PersonSchemeRepository {
         String col = switch (key) {
             case "name", "title" -> "o.id";
             case "status" -> "o.status";
-            case "lastsubmissionat" -> "last.last_submission_at";
+            case "lastsubmissionat" -> "COALESCE(aw.last_submission_at, fl.last_submission_at)";
             default -> "o.id";
         };
         return "ORDER BY " + col + " " + dir;
     }
 
+    @SuppressWarnings("java:S2077")
     public long countPumpOperatorsByPerson(
             String schemaName,
             long personId,
             String name,
             Integer status,
-            Integer durationDays
+            Integer durationDays,
+            LocalDate startDate,
+            LocalDate endDate
     ) {
         validateSchemaName(schemaName);
         if (!tableExists(schemaName, "user_scheme_mapping_table")) {
@@ -439,6 +476,17 @@ public class PersonSchemeRepository {
         }
         if (status != null) {
             args.add(status);
+        }
+        if (startDate != null) {
+            args.add(startDate);
+        }
+        if (endDate != null) {
+            args.add(endDate);
+        }
+        boolean analyticsFactAvailable = tableExists("analytics_schema", "fact_water_quantity_table");
+        if (analyticsFactAvailable) {
+            Integer tenantId = findTenantIdBySchemaName(schemaName);
+            args.add(tenantId == null ? -1 : tenantId);
         }
         if (durationDays != null) {
             args.add(durationDays);
@@ -469,32 +517,54 @@ public class PersonSchemeRepository {
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                       %s
                       %s
+                      %s
+                      %s
                 )
                 SELECT COUNT(1)
                 FROM ops o
+                LEFT JOIN LATERAL (
+                    %s
+                ) aw ON true
                 LEFT JOIN LATERAL (
                     SELECT MAX(fr.%s) AS last_submission_at
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = o.id
-                ) last ON true
+                ) fl ON true
                 %s
                 """, schemaName, schemaName, schemaName,
                 nameFilter == null ? "" : "AND u.title_hash = ?",
                 status == null ? "" : "AND u.status = ?",
+                startDate == null ? "" : "AND u.created_at::date >= ?",
+                endDate == null ? "" : "AND u.created_at::date <= ?",
+                analyticsFactAvailable
+                        ? """
+                        SELECT COALESCE(fwq.updated_at, fwq.created_at, fwq.date::timestamp) AS last_submission_at
+                        FROM analytics_schema.fact_water_quantity_table fwq
+                        WHERE fwq.user_id = o.id
+                          AND fwq.tenant_id = ?
+                          AND COALESCE(fwq.submission_status, 1) = 1
+                          AND fwq.scheme_id IN (SELECT scheme_id FROM person_schemes)
+                        ORDER BY fwq.date DESC, fwq.created_at DESC, fwq.id DESC
+                        LIMIT 1
+                        """
+                        : "SELECT NULL::timestamp AS last_submission_at",
                 resolveFlowReadingTimeColumn(schemaName), schemaName,
-                durationDays == null ? "" : "WHERE last.last_submission_at::date >= CURRENT_DATE - ?");
+                durationDays == null ? "" : "WHERE COALESCE(aw.last_submission_at, fl.last_submission_at)::date >= CURRENT_DATE - ?");
 
         Long total = jdbcTemplate.queryForObject(sql, Long.class, args.toArray());
         return total == null ? 0 : total;
     }
 
+    @SuppressWarnings("java:S2077")
     public List<PumpOperatorSummaryWithMetricsDTO> listPumpOperatorsByPerson(
             String schemaName,
             long personId,
             String name,
             Integer status,
             Integer durationDays,
+            LocalDate startDate,
+            LocalDate endDate,
             String sortBy,
             String sortDir,
             int offset,
@@ -506,6 +576,7 @@ public class PersonSchemeRepository {
         }
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String confirmedExpr = resolveConfirmedReadingExpression(schemaName, "fr");
+        boolean analyticsFactAvailable = tableExists("analytics_schema", "fact_water_quantity_table");
 
         String nameFilter = buildNameFilter(schemaName, name);
         List<Object> args = new ArrayList<>();
@@ -515,6 +586,16 @@ public class PersonSchemeRepository {
         }
         if (status != null) {
             args.add(status);
+        }
+        if (startDate != null) {
+            args.add(startDate);
+        }
+        if (endDate != null) {
+            args.add(endDate);
+        }
+        if (analyticsFactAvailable) {
+            Integer tenantId = findTenantIdBySchemaName(schemaName);
+            args.add(tenantId == null ? -1 : tenantId);
         }
         if (durationDays != null) {
             args.add(durationDays);
@@ -549,15 +630,20 @@ public class PersonSchemeRepository {
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                       %s
                       %s
+                      %s
+                      %s
                 )
                 SELECT o.id,
                        o.uuid,
                        o.title,
                        o.status,
-                       last.last_submission_at,
-                       last.last_water_supplied,
+                       COALESCE(aw.last_submission_at, fl.last_submission_at) AS last_submission_at,
+                       COALESCE(aw.last_water_supplied, fl.last_water_supplied) AS last_water_supplied,
                        comp.reporting_rate_percent
                 FROM ops o
+                LEFT JOIN LATERAL (
+                    %s
+                ) aw ON true
                 LEFT JOIN LATERAL (
                     WITH ordered AS (
                         SELECT fr.%s AS reading_at,
@@ -575,7 +661,7 @@ public class PersonSchemeRepository {
                     FROM ordered
                     ORDER BY reading_at DESC
                     LIMIT 1
-                ) last ON true
+                ) fl ON true
                 LEFT JOIN LATERAL (
                     SELECT MIN(fr.reading_date) AS first_submission_date,
                            COUNT(DISTINCT fr.reading_date) AS submitted_days
@@ -601,9 +687,24 @@ public class PersonSchemeRepository {
                 """, schemaName, schemaName, schemaName,
                 nameFilter == null ? "" : "AND u.title_hash = ?",
                 status == null ? "" : "AND u.status = ?",
+                startDate == null ? "" : "AND u.created_at::date >= ?",
+                endDate == null ? "" : "AND u.created_at::date <= ?",
+                analyticsFactAvailable
+                        ? """
+                        SELECT COALESCE(fwq.updated_at, fwq.created_at, fwq.date::timestamp) AS last_submission_at,
+                               fwq.water_quantity::numeric AS last_water_supplied
+                        FROM analytics_schema.fact_water_quantity_table fwq
+                        WHERE fwq.user_id = o.id
+                          AND fwq.tenant_id = ?
+                          AND COALESCE(fwq.submission_status, 1) = 1
+                          AND fwq.scheme_id IN (SELECT scheme_id FROM person_schemes)
+                        ORDER BY fwq.date DESC, fwq.created_at DESC, fwq.id DESC
+                        LIMIT 1
+                        """
+                        : "SELECT NULL::timestamp AS last_submission_at, NULL::numeric AS last_water_supplied",
                 timeColumn, confirmedExpr, confirmedExpr, timeColumn, schemaName,
                 schemaName,
-                durationDays == null ? "" : "WHERE last.last_submission_at::date >= CURRENT_DATE - ?",
+                durationDays == null ? "" : "WHERE COALESCE(aw.last_submission_at, fl.last_submission_at)::date >= CURRENT_DATE - ?",
                 pumpOperatorOrderBy(sortBy, sortDir));
 
         record Row(
@@ -664,6 +765,7 @@ public class PersonSchemeRepository {
         return "title_hash";
     }
 
+    @SuppressWarnings("java:S2077")
     private Map<Long, List<PumpOperatorSchemeSummaryDTO>> fetchSchemesForPumpOperators(
             String schemaName,
             long personId,
@@ -719,6 +821,7 @@ public class PersonSchemeRepository {
         return grouped;
     }
 
+    @SuppressWarnings("java:S2077")
     public long countPumpOperatorReadings(
             String schemaName,
             long pumpOperatorId,
@@ -757,6 +860,7 @@ public class PersonSchemeRepository {
         return "ORDER BY " + col + " " + dir + ", o.id DESC";
     }
 
+    @SuppressWarnings("java:S2077")
     public List<PumpOperatorReadingDetailDTO> listPumpOperatorReadings(
             String schemaName,
             long pumpOperatorId,

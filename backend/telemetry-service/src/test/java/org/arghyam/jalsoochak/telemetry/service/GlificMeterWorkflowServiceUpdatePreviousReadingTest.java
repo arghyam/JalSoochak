@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetryFlowReadingDetails;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -70,12 +70,15 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
         LocalDate today = LocalDate.now();
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(2)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(22L, "corr-2", 1L, new BigDecimal("1100"), new BigDecimal("1100"))));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(3)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(11L, "corr-3", 1L, new BigDecimal("1000"), new BigDecimal("1000"))));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(1)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(33L, "corr-1", 1L, new BigDecimal("1200"), new BigDecimal("1200"))));
+        LocalDate targetDate = today.minusDays(2);
+        LocalDate previousDate = today.minusDays(3);
+        LocalDate nextDate = today.minusDays(1);
+        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, today))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(22L, "corr-2", 1L, targetDate, new BigDecimal("1100"))));
+        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, targetDate))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(11L, "corr-3", 1L, previousDate, new BigDecimal("1000"))));
+        when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDate("tenant_test", 10L, 1L, targetDate))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(33L, "corr-1", 1L, nextDate, new BigDecimal("1200"))));
 
         CreateReadingResponse resp = service.updatePreviousReadingMessage(UpdatedPreviousReadingRequest.builder()
                 .contactId("919999999999")
@@ -86,6 +89,22 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertEquals(true, resp.isSuccess());
         assertEquals("CONFIRMED", resp.getQualityStatus());
         verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("900"), 1L);
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
+                1,
+                10L,
+                1L,
+                targetDate,
+                new BigDecimal("-100"),
+                1
+        );
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
+                1,
+                10L,
+                1L,
+                nextDate,
+                new BigDecimal("300"),
+                1
+        );
     }
 
     @Test
@@ -102,12 +121,15 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
         LocalDate today = LocalDate.now();
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(2)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(22L, "corr-2", 1L, new BigDecimal("1100"), new BigDecimal("1100"))));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(3)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(11L, "corr-3", 1L, new BigDecimal("1000"), new BigDecimal("1000"))));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(1)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(33L, "corr-1", 1L, new BigDecimal("1200"), new BigDecimal("1200"))));
+        LocalDate targetDate = today.minusDays(2);
+        LocalDate previousDate = today.minusDays(3);
+        LocalDate nextDate = today.minusDays(1);
+        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, today))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(22L, "corr-2", 1L, targetDate, new BigDecimal("1100"))));
+        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, targetDate))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(11L, "corr-3", 1L, previousDate, new BigDecimal("1000"))));
+        when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDate("tenant_test", 10L, 1L, targetDate))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(33L, "corr-1", 1L, nextDate, new BigDecimal("1200"))));
 
         // Config: norm=100; under=20% => min=80; over=30% => max=130
         when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
@@ -129,6 +151,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
+        verify(telemetryEventPublisher, never()).publishWaterQuantityRecorded(any(), anyLong(), anyLong(), any(), any(), any());
     }
 
     @Test
@@ -145,12 +168,15 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
         LocalDate today = LocalDate.now();
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(2)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(22L, "corr-2", 1L, new BigDecimal("1100"), new BigDecimal("1100"))));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(3)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(11L, "corr-3", 1L, new BigDecimal("1000"), new BigDecimal("1000"))));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, today.minusDays(1)))
-                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(33L, "corr-1", 1L, new BigDecimal("1200"), new BigDecimal("1200"))));
+        LocalDate targetDate = today.minusDays(2);
+        LocalDate previousDate = today.minusDays(3);
+        LocalDate nextDate = today.minusDays(1);
+        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, today))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(22L, "corr-2", 1L, targetDate, new BigDecimal("1100"))));
+        when(telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDate("tenant_test", 10L, 1L, targetDate))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(11L, "corr-3", 1L, previousDate, new BigDecimal("1000"))));
+        when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDate("tenant_test", 10L, 1L, targetDate))
+                .thenReturn(Optional.of(new TelemetryCompletedFlowReading(33L, "corr-1", 1L, nextDate, new BigDecimal("1200"))));
 
         when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
                 .thenReturn(Optional.of("{\"value\":\"100\"}"));
@@ -173,5 +199,21 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertEquals(new BigDecimal("1110"), resp.getMeterReading());
         assertEquals("corr-2", resp.getCorrelationId());
         verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("1110"), 1L);
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
+                1,
+                10L,
+                1L,
+                targetDate,
+                new BigDecimal("110"),
+                1
+        );
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
+                1,
+                10L,
+                1L,
+                nextDate,
+                new BigDecimal("90"),
+                1
+        );
     }
 }

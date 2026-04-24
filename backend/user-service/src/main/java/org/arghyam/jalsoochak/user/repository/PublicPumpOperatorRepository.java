@@ -25,6 +25,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * All SQL in this repository uses {@code String.format} to inject only pre-validated,
+ * internal-only values:
+ * <ul>
+ *   <li>{@code schemaName} — validated by {@link #validateSchemaName} against
+ *       {@code ^[a-z_][a-z0-9_]*$}.</li>
+ *   <li>Column name fragments ({@code timeColumn}, {@code confirmedExpr}, {@code schemeJoin}) —
+ *       returned from internal helpers that produce only hardcoded SQL literals.</li>
+ *   <li>Conditional SQL fragments (filter, ORDER-BY) — assembled from hardcoded string
+ *       constants; user input is always bound as a {@code ?} parameter.</li>
+ *   <li>IN-clause placeholders — built as {@code "?, ?, ..."} strings from collection size.</li>
+ * </ul>
+ * No user-supplied data is ever concatenated into any query string.
+ */
+@SuppressWarnings("java:S2077")
 @Repository
 @RequiredArgsConstructor
 public class PublicPumpOperatorRepository {
@@ -551,10 +566,10 @@ public class PublicPumpOperatorRepository {
                 LEFT JOIN LATERAL (
                     SELECT %s AS last_submission_at,
                            %s AS confirmed_reading
-                    FROM %s.flow_reading_table
-                    WHERE deleted_at IS NULL
-                      AND created_by = u.id
-                    ORDER BY %s DESC, id DESC
+                    FROM %s.flow_reading_table fr
+                    WHERE fr.deleted_at IS NULL
+                      AND fr.created_by = u.id
+                    ORDER BY fr.%s DESC, fr.id DESC
                     LIMIT 1
                 ) fr ON true
                 WHERE u.deleted_at IS NULL
@@ -596,10 +611,10 @@ public class PublicPumpOperatorRepository {
                 LEFT JOIN LATERAL (
                     SELECT %s AS last_submission_at,
                            %s AS confirmed_reading
-                    FROM %s.flow_reading_table
-                    WHERE deleted_at IS NULL
-                      AND created_by = u.id
-                    ORDER BY %s DESC, id DESC
+                    FROM %s.flow_reading_table fr
+                    WHERE fr.deleted_at IS NULL
+                      AND fr.created_by = u.id
+                    ORDER BY fr.%s DESC, fr.id DESC
                     LIMIT 1
                 ) fr ON true
                 WHERE u.deleted_at IS NULL
@@ -872,10 +887,10 @@ public class PublicPumpOperatorRepository {
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 )
-                SELECT COUNT(*)
-                FROM %s.flow_reading_table fr
-                JOIN latest_mapping l
-                  ON l.id = fr.created_by
+                SELECT COUNT(DISTINCT l.id)
+                FROM latest_mapping l
+                JOIN %s.flow_reading_table fr
+                  ON fr.created_by = l.id
                 WHERE fr.deleted_at IS NULL
                   AND l.onboarding_date IS NOT NULL
                   AND fr.reading_date BETWEEN l.onboarding_date AND CURRENT_DATE

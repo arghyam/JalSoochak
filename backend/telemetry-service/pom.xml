@@ -24,6 +24,34 @@
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.32</lombok.version>
         <springdoc.version>2.5.0</springdoc.version>
+        <sonar.coverage.exclusions>
+            **/org/arghyam/jalsoochak/telemetry/dto/**,
+            **/org/arghyam/jalsoochak/telemetry/entity/**,
+            **/org/arghyam/jalsoochak/telemetry/event/**,
+            **/org/arghyam/jalsoochak/telemetry/repository/**,
+            **/org/arghyam/jalsoochak/telemetry/kafka/**,
+            **/org/arghyam/jalsoochak/telemetry/controller/**,
+            **/org/arghyam/jalsoochak/telemetry/config/AsyncConfig.java,
+            **/org/arghyam/jalsoochak/telemetry/config/DataSourceConfig.java,
+            **/org/arghyam/jalsoochak/telemetry/config/RequestCorrelationFilter.java,
+            **/org/arghyam/jalsoochak/telemetry/config/RestTemplateConfig.java,
+            **/org/arghyam/jalsoochak/telemetry/config/WebConfig.java,
+            **/org/arghyam/jalsoochak/telemetry/service/AnomalyConstants.java,
+            **/org/arghyam/jalsoochak/telemetry/service/BfmReadingService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/BusinessService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificContactSyncService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificImageWorkflowService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificLocalizationService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificMediaService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificMessageService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificMessageTemplatesService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificMeterWorkflowService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificOperatorContextService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificSelectionService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/GlificWebhookService.java,
+            **/org/arghyam/jalsoochak/telemetry/service/MinioService.java,
+            **/org/arghyam/jalsoochak/telemetry/TelemetryServiceApplication.java
+        </sonar.coverage.exclusions>
     </properties>
 
     <dependencyManagement>
@@ -91,6 +119,10 @@
             <version>${springdoc.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
@@ -124,9 +156,48 @@
                     <execution>
                         <id>report</id>
                         <phase>verify</phase>
+                        <configuration>
+                            <includes>
+                                <include>org/arghyam/jalsoochak/telemetry/service/FlowVisionService*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/service/PiiEncryptionService*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/service/BusinessServiceImpl*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/OpenApiConfig*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/TenantContext*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/TenantInterceptor*</include>
+                            </includes>
+                        </configuration>
                         <goals>
                             <goal>report</goal>
                         </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>org/arghyam/jalsoochak/telemetry/service/FlowVisionService*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/service/PiiEncryptionService*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/service/BusinessServiceImpl*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/OpenApiConfig*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/TenantContext*</include>
+                                <include>org/arghyam/jalsoochak/telemetry/config/TenantInterceptor*</include>
+                            </includes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>INSTRUCTION</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

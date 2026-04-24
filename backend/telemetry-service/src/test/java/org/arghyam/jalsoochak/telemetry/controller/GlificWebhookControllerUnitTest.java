@@ -1,21 +1,48 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
+import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class GlificWebhookControllerUnitTest {
+
+    @Test
+    void readingsReturnsImmediateAckAndJobId() {
+        StubGlificReadingsAsyncService asyncService = new StubGlificReadingsAsyncService();
+        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookController controller = new GlificWebhookController(service, asyncService);
+
+        ResponseEntity<ReadingWebhookAckResponse> response = controller.receive(
+                GlificWebhookRequest.builder()
+                        .contactId("919999999999")
+                        .mediaId("media-123")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(true, response.getBody().isSuccess());
+        assertEquals("accepted", response.getBody().getStatus());
+        assertNotNull(response.getBody().getJobId());
+        assertEquals(true, asyncService.wasCalled);
+        assertEquals("919999999999", asyncService.lastContactId);
+    }
 
     @Test
     void languageSelectionReturnsOkWhenServiceSucceeds() {
@@ -79,6 +106,28 @@ class GlificWebhookControllerUnitTest {
         assertEquals("location-ok", response.getBody().getMessage());
     }
 
+    @Test
+    void assamReadingsReturnsOkWhenServiceSucceeds() {
+        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookController controller = new GlificWebhookController(service);
+
+        ResponseEntity<CreateReadingResponse> response = controller.receiveAssamReading(
+                AssamReadingRequest.builder()
+                        .readingUrl("https://example.com/meter.jpg")
+                        .confirmedReading(new BigDecimal("123.4"))
+                        .stateSchemeId(30178236L)
+                        .centreSchemeId(30244993L)
+                        .phoneNumber("919999999999")
+                        .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(true, response.getBody().isSuccess());
+        assertEquals("assam-reading-ok", response.getBody().getMessage());
+    }
+
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean throwLanguageSelection;
         private final boolean throwSelectedChannel;
@@ -111,6 +160,29 @@ class GlificWebhookControllerUnitTest {
                     .success(true)
                     .message("location-ok")
                     .build();
+        }
+
+        @Override
+        public CreateReadingResponse processAssamReading(AssamReadingRequest request) {
+            return CreateReadingResponse.builder()
+                    .success(true)
+                    .message("assam-reading-ok")
+                    .build();
+        }
+    }
+
+    private static final class StubGlificReadingsAsyncService extends GlificReadingsAsyncService {
+        private boolean wasCalled;
+        private String lastContactId;
+
+        private StubGlificReadingsAsyncService() {
+            super(null, null, Runnable::run);
+        }
+
+        @Override
+        public void enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
+            this.wasCalled = true;
+            this.lastContactId = request != null ? request.getContactId() : null;
         }
     }
 }

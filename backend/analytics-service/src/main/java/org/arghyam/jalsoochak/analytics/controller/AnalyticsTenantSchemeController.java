@@ -5,7 +5,6 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantDetailsResponse;
@@ -18,6 +17,7 @@ import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,7 +31,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/analytics")
-@RequiredArgsConstructor
 @Tag(name = "Analytics - Tenants & Schemes", description = "Tenant metadata, scheme dimensions, and raw meter reading queries")
 public class AnalyticsTenantSchemeController {
 
@@ -40,6 +39,23 @@ public class AnalyticsTenantSchemeController {
     private final DimSchemeRepository dimSchemeRepository;
     private final FactMeterReadingRepository meterReadingRepository;
     private final TenantDetailsService tenantDetailsService;
+    private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
+
+    public AnalyticsTenantSchemeController(
+            DimTenantRepository dimTenantRepository,
+            DimLgdLocationRepository dimLgdLocationRepository,
+            DimSchemeRepository dimSchemeRepository,
+            FactMeterReadingRepository meterReadingRepository,
+            TenantDetailsService tenantDetailsService,
+            DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider
+    ) {
+        this.dimTenantRepository = dimTenantRepository;
+        this.dimLgdLocationRepository = dimLgdLocationRepository;
+        this.dimSchemeRepository = dimSchemeRepository;
+        this.meterReadingRepository = meterReadingRepository;
+        this.tenantDetailsService = tenantDetailsService;
+        this.defaultAnalyticsDateWindowProvider = defaultAnalyticsDateWindowProvider;
+    }
 
     @GetMapping("/tenants")
     @Operation(
@@ -75,7 +91,7 @@ public class AnalyticsTenantSchemeController {
         try {
             return ResponseEntity.ok(ApiResponse.<List<DimTenant>>builder()
                     .success(true)
-                    .data(dimTenantRepository.findAll())
+                    .data(dimTenantRepository.findByTenantIdGreaterThan(0))
                     .build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<DimTenant>>builder()
@@ -128,8 +144,10 @@ public class AnalyticsTenantSchemeController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         try {
             if (startDate == null && endDate == null) {
-                endDate = LocalDate.now();
-                startDate = endDate.minusDays(30);
+                DefaultAnalyticsDateWindowProvider.DateWindow window =
+                        defaultAnalyticsDateWindowProvider.defaultWindow();
+                startDate = window.startDate();
+                endDate = window.endDate();
             } else if (startDate == null || endDate == null) {
                 throw new IllegalArgumentException("Provide both start_date and end_date together");
             }
@@ -245,8 +263,12 @@ public class AnalyticsTenantSchemeController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         try {
             if (startDate == null && endDate == null) {
-                startDate = LocalDate.now();
-                endDate = startDate.minusDays(30);
+                // Preserve existing (start_date > end_date) semantics, but anchor defaults to "yesterday" (IST)
+                // so they complement the warm-cache window across 7PM→7PM.
+                DefaultAnalyticsDateWindowProvider.DateWindow window =
+                        defaultAnalyticsDateWindowProvider.defaultWindow();
+                startDate = window.endDate();
+                endDate = window.startDate();
             } else if (startDate == null || endDate == null) {
                 throw new IllegalArgumentException("Provide both start_date and end_date together");
             }
