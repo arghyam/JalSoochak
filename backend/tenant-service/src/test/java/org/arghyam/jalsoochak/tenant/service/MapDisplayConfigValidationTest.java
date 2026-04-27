@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
 import org.arghyam.jalsoochak.tenant.service.serviceImpl.TenantManagementServiceImpl;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -92,7 +93,7 @@ class MapDisplayConfigValidationTest {
                 .thenReturn(Optional.empty());
     }
 
-    @BeforeEach
+    @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
     }

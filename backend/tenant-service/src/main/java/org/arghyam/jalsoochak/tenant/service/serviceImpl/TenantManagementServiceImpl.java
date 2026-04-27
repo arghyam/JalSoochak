@@ -292,10 +292,12 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         // When DISPLAY_DEPARTMENT_MAPS is being set to FALSE, auto-cascade all dept level keys to FALSE
         JsonNode deptMapsNode = request.getConfigs().get(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS);
+        boolean cascadedDeptToFalse = false;
         if (deptMapsNode != null) {
             String deptMapsVal = deptMapsNode.isTextual() ? deptMapsNode.asText() : deptMapsNode.path("value").asText();
             if ("FALSE".equalsIgnoreCase(deptMapsVal)) {
                 cascadeDeptMapsToFalse(tenantId, tenant.getStateCode(), currentUserId);
+                cascadedDeptToFalse = true;
             }
         }
 
@@ -303,6 +305,9 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         for (Map.Entry<TenantConfigKeyEnum, JsonNode> entry : request.getConfigs().entrySet()) {
             TenantConfigKeyEnum key = entry.getKey();
+            if (cascadedDeptToFalse && DEPT_MAP_LEVELS.contains(key)) {
+                continue;
+            }
             if (key.isManagedValue()) {
                 throw new InvalidConfigKeyException(
                         key + " is managed by a dedicated endpoint and cannot be set via the generic config API.");
@@ -914,7 +919,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         // Determine how many LGD levels this tenant actually has
         String schemaName = "tenant_" + stateCode.toLowerCase();
         LocationConfigDTO lgdHierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, RegionTypeEnum.LGD);
-        int tenantLgdLevelCount = lgdHierarchy.getLocationHierarchy() == null
+        int tenantLgdLevelCount = (lgdHierarchy == null || lgdHierarchy.getLocationHierarchy() == null)
                 ? MAP_LGD_LEVELS.size()
                 : Math.min(lgdHierarchy.getLocationHierarchy().size(), MAP_LGD_LEVELS.size());
         List<TenantConfigKeyEnum> activeLevels = MAP_LGD_LEVELS.subList(0, tenantLgdLevelCount);
@@ -971,7 +976,12 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 .findConfigByTenantAndKey(tenantId, TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS.name())
                 .map(cfg -> {
                     try {
-                        return objectMapper.readValue(cfg.getConfigValue(), SimpleConfigValueDTO.class).getValue();
+                        String raw = objectMapper.readValue(cfg.getConfigValue(), SimpleConfigValueDTO.class).getValue();
+                        if (!"TRUE".equalsIgnoreCase(raw) && !"FALSE".equalsIgnoreCase(raw)) {
+                            log.warn("Invalid persisted value for DISPLAY_DEPARTMENT_MAPS: '{}', defaulting to TRUE", raw);
+                            return "TRUE";
+                        }
+                        return raw.toUpperCase();
                     } catch (JsonProcessingException e) {
                         log.warn("Could not parse persisted DISPLAY_DEPARTMENT_MAPS: {}", e.getMessage());
                         return "TRUE";
@@ -982,9 +992,13 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         JsonNode override = configs.get(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS);
         if (override != null) {
             String val = override.isTextual() ? override.asText() : override.path("value").asText();
+            if (!"TRUE".equalsIgnoreCase(val) && !"FALSE".equalsIgnoreCase(val)) {
+                log.warn("Invalid override value for DISPLAY_DEPARTMENT_MAPS: '{}', ignoring override", val);
+                return persisted;
+            }
             return val.toUpperCase();
         }
-        return persisted.toUpperCase();
+        return persisted;
     }
 
     /**
@@ -994,7 +1008,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private void cascadeDeptMapsToFalse(Integer tenantId, String stateCode, Integer currentUserId) {
         String schemaName = "tenant_" + stateCode.toLowerCase();
         LocationConfigDTO deptHierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, RegionTypeEnum.DEPARTMENT);
-        int levelCount = deptHierarchy.getLocationHierarchy() == null
+        int levelCount = (deptHierarchy == null || deptHierarchy.getLocationHierarchy() == null)
                 ? DEPT_MAP_LEVELS.size()
                 : Math.min(deptHierarchy.getLocationHierarchy().size(), DEPT_MAP_LEVELS.size());
         try {
@@ -1023,7 +1037,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         String schemaName = "tenant_" + stateCode.toLowerCase();
         LocationConfigDTO deptHierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, RegionTypeEnum.DEPARTMENT);
-        int levelCount = deptHierarchy.getLocationHierarchy() == null
+        int levelCount = (deptHierarchy == null || deptHierarchy.getLocationHierarchy() == null)
                 ? DEPT_MAP_LEVELS.size()
                 : Math.min(deptHierarchy.getLocationHierarchy().size(), DEPT_MAP_LEVELS.size());
         List<TenantConfigKeyEnum> activeLevels = DEPT_MAP_LEVELS.subList(0, levelCount);
