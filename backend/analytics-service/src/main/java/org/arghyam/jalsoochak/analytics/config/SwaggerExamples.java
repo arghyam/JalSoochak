@@ -582,6 +582,32 @@ public final class SwaggerExamples {
             }
             """;
 
+    public static final String NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "nationalBoundary": {
+                  "type": "Polygon",
+                  "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                },
+                "lgdLevel2Boundaries": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001429,
+                    "tenantStatus": 1,
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "title": "District-1",
+                    "boundary": {
+                      "type": "Polygon",
+                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                    }
+                  }
+                ]
+              }
+            }
+            """;
+
     public static final String SCHEME_REGULARITY_PERIODIC_NATIONAL_SUCCESS = """
             {
               "success": true,

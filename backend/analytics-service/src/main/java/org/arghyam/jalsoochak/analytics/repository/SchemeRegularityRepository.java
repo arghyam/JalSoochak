@@ -3817,6 +3817,40 @@ public class SchemeRegularityRepository {
         });
     }
 
+    public List<NationalDashboardLevel2LgdBoundary> getNationalDashboardLevel2LgdBoundaries() {
+        String sql = """
+                SELECT
+                    l.tenant_id,
+                    l.lgd_id,
+                    t.status AS tenant_status,
+                    t.state_code,
+                    t.title AS state_title,
+                    l.title AS lgd_title,
+                    CASE
+                        WHEN l.geom IS NOT NULL THEN ST_AsGeoJSON(l.geom, 9, 8)
+                        ELSE NULL
+                    END AS boundary_geojson
+                FROM analytics_schema.dim_lgd_location_table l
+                JOIN analytics_schema.dim_tenant_table t
+                    ON t.tenant_id = l.tenant_id
+                WHERE l.tenant_id > 0
+                  AND l.lgd_level = 2
+                ORDER BY l.tenant_id, l.lgd_id
+                """;
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            Integer lgdId = rs.getObject("lgd_id") == null ? null : rs.getInt("lgd_id");
+            return new NationalDashboardLevel2LgdBoundary(
+                    rs.getInt("tenant_id"),
+                    lgdId,
+                    rs.getInt("tenant_status"),
+                    rs.getString("state_code"),
+                    rs.getString("state_title"),
+                    rs.getString("lgd_title"),
+                    rs.getString("boundary_geojson"));
+        });
+    }
+
     public String getNationalBoundaryGeoJson() {
         String sql = """
                 SELECT
@@ -5574,6 +5608,16 @@ public class SchemeRegularityRepository {
             Integer tenantStatus,
             String stateCode,
             String stateTitle,
+            String boundaryGeoJson) {
+    }
+
+    public record NationalDashboardLevel2LgdBoundary(
+            Integer tenantId,
+            Integer lgdId,
+            Integer tenantStatus,
+            String stateCode,
+            String stateTitle,
+            String title,
             String boundaryGeoJson) {
     }
 

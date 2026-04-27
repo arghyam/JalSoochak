@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResp
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
@@ -62,6 +63,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private static final String READING_SUBMISSION_RATE_CACHE_PREFIX = ":reading_submission_rate";
     private static final String NATIONAL_DASHBOARD_CACHE_PREFIX = ":national:dashboard";
     private static final String NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY = ":national:dashboard:boundaries:v1";
+    private static final String NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_CACHE_KEY = ":national:dashboard:boundaries:level2:v1";
     private static final String REGION_WISE_WATER_QUANTITY_CACHE_PREFIX = ":water_quantity:region_wise";
     private static final String PERIODIC_WATER_QUANTITY_CACHE_PREFIX = ":water_quantity:periodic";
     private static final String PERIODIC_SCHEME_REGULARITY_CACHE_PREFIX = ":scheme_regularity:periodic";
@@ -861,6 +863,16 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         return buildAndCacheNationalDashboardBoundaries();
     }
 
+    @Override
+    public NationalDashboardLevel2BoundaryResponse getNationalDashboardLevel2BoundariesForApi() {
+        NationalDashboardLevel2BoundaryResponse cached =
+                readFromCache(NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_CACHE_KEY, NationalDashboardLevel2BoundaryResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+        return buildAndCacheNationalDashboardLevel2Boundaries();
+    }
+
     private String buildNationalDashboardCacheKey(LocalDate startDate, LocalDate endDate) {
         return NATIONAL_DASHBOARD_CACHE_PREFIX
                 + ":start:" + startDate
@@ -993,6 +1005,30 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .stateWiseBoundaries(stateWiseBoundaries)
                 .build();
         writeToCache(NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY, response);
+        return response;
+    }
+
+    private NationalDashboardLevel2BoundaryResponse buildAndCacheNationalDashboardLevel2Boundaries() {
+        JsonNode nationalBoundary = parseBoundaryGeoJson(schemeRegularityRepository.getNationalBoundaryGeoJson());
+
+        List<NationalDashboardLevel2BoundaryResponse.LgdLevel2Boundary> lgdLevel2Boundaries =
+                schemeRegularityRepository.getNationalDashboardLevel2LgdBoundaries().stream()
+                        .map(row -> NationalDashboardLevel2BoundaryResponse.LgdLevel2Boundary.builder()
+                                .tenantId(row.tenantId())
+                                .lgdId(row.lgdId())
+                                .tenantStatus(row.tenantStatus())
+                                .stateCode(row.stateCode())
+                                .stateTitle(row.stateTitle())
+                                .title(row.title())
+                                .boundary(parseBoundaryGeoJson(row.boundaryGeoJson()))
+                                .build())
+                        .toList();
+
+        NationalDashboardLevel2BoundaryResponse response = NationalDashboardLevel2BoundaryResponse.builder()
+                .nationalBoundary(nationalBoundary)
+                .lgdLevel2Boundaries(lgdLevel2Boundaries)
+                .build();
+        writeToCache(NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_CACHE_KEY, response);
         return response;
     }
 

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
@@ -141,6 +142,36 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 .thenThrow(new RuntimeException("boom"));
 
         mockMvc.perform(get(BASE + "/national/dashboard/boundary"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getNationalDashboardLevel2Boundaries_returnsOk() throws Exception {
+        when(schemeRegularityService.getNationalDashboardLevel2BoundariesForApi())
+                .thenReturn(NationalDashboardLevel2BoundaryResponse.builder()
+                        .nationalBoundary(OBJECT_MAPPER.readTree("""
+                                {"type":"Polygon","coordinates":[[[78.1,22.9],[78.2,22.9],[78.2,23.0],[78.1,22.9]]]}
+                                """))
+                        .lgdLevel2Boundaries(List.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary/level2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.nationalBoundary").exists())
+                .andExpect(jsonPath("$.data.lgdLevel2Boundaries").isArray());
+
+        verify(schemeRegularityService, times(1)).getNationalDashboardLevel2BoundariesForApi();
+    }
+
+    @Test
+    void getNationalDashboardLevel2Boundaries_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getNationalDashboardLevel2BoundariesForApi())
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary/level2"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));

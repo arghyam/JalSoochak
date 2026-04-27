@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
@@ -77,6 +78,39 @@ public class AnalyticsWaterSupplyNationalController {
                     .build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardBoundaryResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
+    @GetMapping("/national/dashboard/boundary/level2")
+    @Operation(
+            summary = "Get national outer boundary + LGD level-2 boundaries for the national dashboard map",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "National + level-2 boundaries fetched successfully",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_SUCCESS))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<NationalDashboardLevel2BoundaryResponse>> getNationalDashboardLevel2Boundaries() {
+        rejectIfSingleTenantMode("national/dashboard/boundary/level2");
+        try {
+            return ResponseEntity.ok(ApiResponse.<NationalDashboardLevel2BoundaryResponse>builder()
+                    .success(true)
+                    .data(schemeRegularityService.getNationalDashboardLevel2BoundariesForApi())
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardLevel2BoundaryResponse>builder()
                     .success(false)
                     .data(null)
                     .build());

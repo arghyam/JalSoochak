@@ -1309,6 +1309,30 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
+    void getNationalDashboardLevel2BoundariesForApi_computesAndWritesCacheWhenMiss() throws Exception {
+        mockRedisValueOps();
+        String polygonGeoJson =
+                "{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}";
+        com.fasterxml.jackson.databind.JsonNode boundaryNode = new ObjectMapper().readTree(polygonGeoJson);
+
+        when(valueOperations.get(":national:dashboard:boundaries:level2:v1")).thenReturn(null);
+        when(schemeRegularityRepository.getNationalDashboardLevel2LgdBoundaries())
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.NationalDashboardLevel2LgdBoundary(
+                                1, 101, 1, "mp", "Madhya Pradesh", "District-1", polygonGeoJson)
+                ));
+        when(objectMapper.readTree(eq(polygonGeoJson))).thenReturn(boundaryNode);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{boundary-json}");
+
+        var response = service.getNationalDashboardLevel2BoundariesForApi();
+
+        assertThat(response.getLgdLevel2Boundaries()).hasSize(1);
+        assertThat(response.getLgdLevel2Boundaries().getFirst().getBoundary().get("type").asText()).isEqualTo("Polygon");
+        verify(valueOperations, times(1)).set(
+                eq(":national:dashboard:boundaries:level2:v1"), eq("{boundary-json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
     void getAveragePerformanceScoreByLgd_valid_returnsScore() {
         BigDecimal expected = new BigDecimal("0.8500");
         when(schemeRegularityRepository.getAveragePerformanceScoreByLgd(101, START, END)).thenReturn(expected);

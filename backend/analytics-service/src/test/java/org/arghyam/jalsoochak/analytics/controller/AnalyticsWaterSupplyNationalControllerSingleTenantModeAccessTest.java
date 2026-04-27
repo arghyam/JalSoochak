@@ -41,6 +41,13 @@ class AnalyticsWaterSupplyNationalControllerSingleTenantModeAccessTest {
     }
 
     @Test
+    void nationalDashboardLevel2Boundary_forbiddenInSingleTenantMode() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary/level2"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("API 'national/dashboard/boundary/level2' cannot be accessed when single-tenant mode is enabled"));
+    }
+
+    @Test
     void nationalDashboard_forbiddenInSingleTenantMode() throws Exception {
         mockMvc.perform(get(BASE + "/national/dashboard")
                         .param("start_date", "2026-01-01")
