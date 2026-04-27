@@ -102,11 +102,11 @@ public class GlificImageWorkflowService {
         }
     }
 
-    public CreateReadingResponse processAssamReading(AssamReadingRequest request) {
+    public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
         String safeContactId = request != null ? request.getPhoneNumber() : null;
         try {
             String contactId = safeContactId;
-            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
+            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId, preferredTenantId);
             Long operatorId = operatorWithSchema.operator().id();
             String schemaName = operatorWithSchema.schemaName();
             String languageKey = localizationService.normalizeLanguageKey(

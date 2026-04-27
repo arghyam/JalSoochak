@@ -29,6 +29,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -96,14 +97,18 @@ public class GlificWebhookController {
             consumes = "application/json",
             produces = "application/json"
     )
-    public ResponseEntity<CreateReadingResponse> receiveAssamReading(@RequestBody @Valid AssamReadingRequest request) {
+    public ResponseEntity<CreateReadingResponse> receiveAssamReading(
+            @RequestHeader("X-Tenant-Id") Integer tenantId,
+            @RequestBody @Valid AssamReadingRequest request
+    ) {
         try {
-            CreateReadingResponse response = glificWebhookService.processAssamReading(request);
+            CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             String safeContactId = request != null ? request.getPhoneNumber() : null;
             log.error("Error processing Assam reading: {}", e.getMessage(), e);
-            log.debug("Error processing Assam reading for phoneNumber {}: {}", safeContactId, e.getMessage());
+            log.debug("Error processing Assam reading for phoneNumber {} and tenantId {}: {}",
+                    safeContactId, tenantId, e.getMessage());
 
             CreateReadingResponse errorResponse = CreateReadingResponse.builder()
                     .correlationId(safeContactId)

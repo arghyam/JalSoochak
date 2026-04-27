@@ -112,6 +112,7 @@ class GlificWebhookControllerUnitTest {
         GlificWebhookController controller = new GlificWebhookController(service);
 
         ResponseEntity<CreateReadingResponse> response = controller.receiveAssamReading(
+                22,
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .confirmedReading(new BigDecimal("123.4"))
@@ -163,7 +164,7 @@ class GlificWebhookControllerUnitTest {
         }
 
         @Override
-        public CreateReadingResponse processAssamReading(AssamReadingRequest request) {
+        public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
             return CreateReadingResponse.builder()
                     .success(true)
                     .message("assam-reading-ok")

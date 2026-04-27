@@ -65,7 +65,7 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
@@ -81,7 +81,7 @@ class GlificImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request);
+        CreateReadingResponse response = service.processAssamReading(request, 22);
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
@@ -108,7 +108,7 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
@@ -125,7 +125,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findReadingByCorrelationId("tenant_assam", "corr-1"))
                 .thenReturn(Optional.of(new TelemetryReadingRecord(100L, "corr-1", 11L)));
 
-        CreateReadingResponse response = service.processAssamReading(request);
+        CreateReadingResponse response = service.processAssamReading(request, 22);
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
