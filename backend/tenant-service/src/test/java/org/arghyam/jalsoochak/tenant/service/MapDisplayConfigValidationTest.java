@@ -187,20 +187,23 @@ class MapDisplayConfigValidationTest {
 
         @Test
         void levelsAboveHierarchyDepth_areIgnored() throws Exception {
-            // Tenant has only 3 LGD levels — levels 4-6 are not validated
+            // Tenant has only 3 LGD levels — levels 4-6 are outside the active window and not validated
             stubLgdHierarchy(3);
             stubDeptHierarchy(0);
             stubUpsert(TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_1, "FALSE");
             stubUpsert(TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_2, "FALSE");
             stubUpsert(TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_3, "FALSE");
+            // Level 4 is above the hierarchy depth so it bypasses cascade validation and is upserted as-is
+            stubUpsert(TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_4, "TRUE");
 
-            // Setting level 4 TRUE would be invalid if level 3 is false and level 4 existed —
-            // but since the hierarchy only has 3 levels, level 4 is not validated and this passes
+            // LEVEL_4=TRUE with LEVEL_3=FALSE would fail cascade validation if level 4 were active —
+            // but since the hierarchy only has 3 levels, LEVEL_4 is ignored in validation and this passes.
             assertThatNoException().isThrownBy(() ->
                     service.setTenantConfigs(TENANT_ID, requestWith(Map.of(
                             TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_1, "FALSE",
                             TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_2, "FALSE",
-                            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_3, "FALSE"))));
+                            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_3, "FALSE",
+                            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_4, "TRUE"))));
         }
     }
 
@@ -257,7 +260,7 @@ class MapDisplayConfigValidationTest {
         void deptLevelValidation_skipped_whenDisplayDeptMapsMasterIsFalseInRequest() throws Exception {
             // DISPLAY_DEPARTMENT_MAPS=FALSE in request → dept level cascade skipped entirely
             stubLgdHierarchy(0);
-            // DEPARTMENT hierarchy stub only needed for cascadeDeptMapsToFalse, not validation
+            // DEPARTMENT hierarchy stub needed for cascadeDeptMapsToFalse
             stubDeptHierarchy(4);
             String falseJson = objectMapper.writeValueAsString(Map.of("value", "FALSE"));
             for (TenantConfigKeyEnum k : List.of(
@@ -270,12 +273,14 @@ class MapDisplayConfigValidationTest {
             }
             stubUpsert(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE");
 
-            // Level 2 TRUE would normally violate the cascade if level 1 is FALSE,
-            // but since the master toggle is FALSE the level-wise check is skipped
-            // and all levels are auto-cascaded to FALSE instead.
+            // LEVEL_1=FALSE + LEVEL_2=TRUE is a cascade violation — but since the master toggle is
+            // FALSE the level-wise check is skipped entirely and both keys are ignored in the upsert
+            // loop (all levels are auto-cascaded to FALSE by cascadeDeptMapsToFalse instead).
             assertThatNoException().isThrownBy(() ->
                     service.setTenantConfigs(TENANT_ID, requestWith(Map.of(
-                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE"))));
+                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE",
+                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1, "FALSE",
+                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2, "TRUE"))));
         }
 
         @Test
@@ -283,12 +288,14 @@ class MapDisplayConfigValidationTest {
             stubLgdHierarchy(0);
             when(tenantCommonRepository.findConfigByTenantAndKey(TENANT_ID, "DISPLAY_DEPARTMENT_MAPS"))
                     .thenReturn(Optional.of(persistedConfig(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE")));
-            stubUpsert(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2, "FALSE");
+            // No dept hierarchy → cascadeDeptMapsToFalse is a no-op (0 active levels); no upsert stubs needed.
 
-            // With master=FALSE persisted, setting a level key (even to FALSE) shouldn't trigger cascade error
+            // LEVEL_1=FALSE + LEVEL_2=TRUE is a cascade violation — but since the master is persistently
+            // FALSE the level-wise check is skipped and both keys are dropped in the upsert loop.
             assertThatNoException().isThrownBy(() ->
                     service.setTenantConfigs(TENANT_ID, requestWith(Map.of(
-                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2, "FALSE"))));
+                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1, "FALSE",
+                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2, "TRUE"))));
         }
     }
 

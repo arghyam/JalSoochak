@@ -290,22 +290,19 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         validateMapLgdLevelCascade(tenantId, tenant.getStateCode(), request.getConfigs());
         validateDeptMapLevelCascade(tenantId, tenant.getStateCode(), request.getConfigs());
 
-        // When DISPLAY_DEPARTMENT_MAPS is being set to FALSE, auto-cascade all dept level keys to FALSE
-        JsonNode deptMapsNode = request.getConfigs().get(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS);
-        boolean cascadedDeptToFalse = false;
-        if (deptMapsNode != null) {
-            String deptMapsVal = deptMapsNode.isTextual() ? deptMapsNode.asText() : deptMapsNode.path("value").asText();
-            if ("FALSE".equalsIgnoreCase(deptMapsVal)) {
-                cascadeDeptMapsToFalse(tenantId, tenant.getStateCode(), currentUserId);
-                cascadedDeptToFalse = true;
-            }
+        // When DISPLAY_DEPARTMENT_MAPS is effectively FALSE (request or persisted), cascade all dept
+        // level keys to FALSE so the DB stays consistent and incoming level TRUEs are skipped below.
+        boolean deptMapsEffectivelyFalse = "FALSE".equalsIgnoreCase(
+                effectiveDeptMapsToggle(tenantId, request.getConfigs()));
+        if (deptMapsEffectivelyFalse) {
+            cascadeDeptMapsToFalse(tenantId, tenant.getStateCode(), currentUserId);
         }
 
         Map<TenantConfigKeyEnum, ConfigValueDTO> results = new HashMap<>();
 
         for (Map.Entry<TenantConfigKeyEnum, JsonNode> entry : request.getConfigs().entrySet()) {
             TenantConfigKeyEnum key = entry.getKey();
-            if (cascadedDeptToFalse && DEPT_MAP_LEVELS.contains(key)) {
+            if (deptMapsEffectivelyFalse && DEPT_MAP_LEVELS.contains(key)) {
                 continue;
             }
             if (key.isManagedValue()) {
@@ -910,23 +907,29 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_5,
             TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_6);
 
-    /**
-     * Enforces the cascade rule against both the incoming request and persisted state:
-     * if level N resolves to FALSE (from DB or request), all lower levels must also resolve to FALSE.
-     * Absent keys default to TRUE (the system default).
-     */
-    private void validateMapLgdLevelCascade(Integer tenantId, String stateCode, Map<TenantConfigKeyEnum, JsonNode> configs) {
-        // Determine how many LGD levels this tenant actually has
-        String schemaName = "tenant_" + stateCode.toLowerCase();
-        LocationConfigDTO lgdHierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, RegionTypeEnum.LGD);
-        int tenantLgdLevelCount = (lgdHierarchy == null || lgdHierarchy.getLocationHierarchy() == null)
-                ? MAP_LGD_LEVELS.size()
-                : Math.min(lgdHierarchy.getLocationHierarchy().size(), MAP_LGD_LEVELS.size());
-        List<TenantConfigKeyEnum> activeLevels = MAP_LGD_LEVELS.subList(0, tenantLgdLevelCount);
+    /** Returns the active level sublist for a hierarchy; absent hierarchy means 0 active levels. */
+    private List<TenantConfigKeyEnum> computeActiveLevels(LocationConfigDTO hierarchy,
+                                                           List<TenantConfigKeyEnum> allLevels) {
+        int count = (hierarchy == null || hierarchy.getLocationHierarchy() == null)
+                ? 0
+                : Math.min(hierarchy.getLocationHierarchy().size(), allLevels.size());
+        return allLevels.subList(0, count);
+    }
 
-        // Build effective value map: DB values overlaid with incoming request values
+    /**
+     * Enforces the cascade rule for a set of boolean level config keys: if level N resolves to
+     * FALSE (from DB or request), all subsequent levels must also resolve to FALSE.
+     * Absent keys default to TRUE (the system default).
+     * Used by validateMapLgdLevelCascade and validateDeptMapLevelCascade.
+     */
+    private void validateLevelCascade(Integer tenantId, String schemaName, RegionTypeEnum regionType,
+                                      List<TenantConfigKeyEnum> levelKeys,
+                                      Map<TenantConfigKeyEnum, JsonNode> configs) {
+        LocationConfigDTO hierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, regionType);
+        List<TenantConfigKeyEnum> active = computeActiveLevels(hierarchy, levelKeys);
+
         Map<TenantConfigKeyEnum, String> effective = new HashMap<>();
-        for (TenantConfigKeyEnum level : activeLevels) {
+        for (TenantConfigKeyEnum level : active) {
             tenantCommonRepository.findConfigByTenantAndKey(tenantId, level.name())
                     .ifPresent(cfg -> {
                         try {
@@ -937,7 +940,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                         }
                     });
         }
-        for (TenantConfigKeyEnum level : activeLevels) {
+        for (TenantConfigKeyEnum level : active) {
             JsonNode node = configs.get(level);
             if (node != null) {
                 String val = node.isTextual() ? node.asText() : node.path("value").asText();
@@ -950,8 +953,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
         boolean parentFalse = false;
         TenantConfigKeyEnum falseParent = null;
-        for (TenantConfigKeyEnum level : activeLevels) {
-            // absent key defaults to TRUE
+        for (TenantConfigKeyEnum level : active) {
             String val = effective.getOrDefault(level, "TRUE");
             boolean isTrue = "TRUE".equalsIgnoreCase(val);
             if (parentFalse && isTrue) {
@@ -964,6 +966,10 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 falseParent = level;
             }
         }
+    }
+
+    private void validateMapLgdLevelCascade(Integer tenantId, String stateCode, Map<TenantConfigKeyEnum, JsonNode> configs) {
+        validateLevelCascade(tenantId, "tenant_" + stateCode.toLowerCase(), RegionTypeEnum.LGD, MAP_LGD_LEVELS, configs);
     }
 
     /**
@@ -1002,19 +1008,18 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     }
 
     /**
-     * When DISPLAY_DEPARTMENT_MAPS is being set to FALSE, writes FALSE for all active
-     * department level map keys so that the persisted state stays consistent.
+     * Writes FALSE for all active department level map keys so the persisted state stays consistent
+     * whenever DISPLAY_DEPARTMENT_MAPS is effectively FALSE. Absent hierarchy means 0 active levels
+     * (no writes), consistent with setDefaultConfigs, validateMapLgdLevelCascade, and
+     * validateDeptMapLevelCascade.
      */
     private void cascadeDeptMapsToFalse(Integer tenantId, String stateCode, Integer currentUserId) {
         String schemaName = "tenant_" + stateCode.toLowerCase();
         LocationConfigDTO deptHierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, RegionTypeEnum.DEPARTMENT);
-        int levelCount = (deptHierarchy == null || deptHierarchy.getLocationHierarchy() == null)
-                ? DEPT_MAP_LEVELS.size()
-                : Math.min(deptHierarchy.getLocationHierarchy().size(), DEPT_MAP_LEVELS.size());
+        List<TenantConfigKeyEnum> active = computeActiveLevels(deptHierarchy, DEPT_MAP_LEVELS);
         try {
             String falseValue = objectMapper.writeValueAsString(new SimpleConfigValueDTO("FALSE"));
-            for (int i = 0; i < levelCount; i++) {
-                TenantConfigKeyEnum levelKey = DEPT_MAP_LEVELS.get(i);
+            for (TenantConfigKeyEnum levelKey : active) {
                 tenantCommonRepository.upsertConfig(tenantId, levelKey.name(), falseValue, currentUserId)
                         .orElseThrow(() -> new ConfigurationException(
                                 "Failed to cascade FALSE to " + levelKey.name() + " for tenant [id=" + tenantId + "]"));
@@ -1022,64 +1027,19 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         } catch (JsonProcessingException e) {
             throw new InvalidConfigValueException("Failed to serialize FALSE for department map level keys", e);
         }
-        log.info("Cascaded DISPLAY_DEPARTMENT_MAPS=FALSE to all dept level map keys [tenantId={}]", tenantId);
+        log.info("Cascaded DISPLAY_DEPARTMENT_MAPS=FALSE to all active dept level map keys [tenantId={}]", tenantId);
     }
 
     /**
      * Validates the department level map cascade rule against both incoming request and persisted state.
-     * Only runs when the effective value of DISPLAY_DEPARTMENT_MAPS is TRUE.
-     * If it is FALSE, level-wise keys are irrelevant (all forced FALSE by cascadeDeptMapsToFalse).
+     * Skipped when the effective value of DISPLAY_DEPARTMENT_MAPS is FALSE — all level keys are forced
+     * FALSE by cascadeDeptMapsToFalse in that case, so cascade validation is irrelevant.
      */
     private void validateDeptMapLevelCascade(Integer tenantId, String stateCode, Map<TenantConfigKeyEnum, JsonNode> configs) {
         if ("FALSE".equalsIgnoreCase(effectiveDeptMapsToggle(tenantId, configs))) {
             return;
         }
-
-        String schemaName = "tenant_" + stateCode.toLowerCase();
-        LocationConfigDTO deptHierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, RegionTypeEnum.DEPARTMENT);
-        int levelCount = (deptHierarchy == null || deptHierarchy.getLocationHierarchy() == null)
-                ? DEPT_MAP_LEVELS.size()
-                : Math.min(deptHierarchy.getLocationHierarchy().size(), DEPT_MAP_LEVELS.size());
-        List<TenantConfigKeyEnum> activeLevels = DEPT_MAP_LEVELS.subList(0, levelCount);
-
-        Map<TenantConfigKeyEnum, String> effective = new HashMap<>();
-        for (TenantConfigKeyEnum level : activeLevels) {
-            tenantCommonRepository.findConfigByTenantAndKey(tenantId, level.name())
-                    .ifPresent(cfg -> {
-                        try {
-                            SimpleConfigValueDTO dto = objectMapper.readValue(cfg.getConfigValue(), SimpleConfigValueDTO.class);
-                            effective.put(level, dto.getValue());
-                        } catch (JsonProcessingException e) {
-                            log.warn("Could not parse persisted value for {}: {}", level, e.getMessage());
-                        }
-                    });
-        }
-        for (TenantConfigKeyEnum level : activeLevels) {
-            JsonNode node = configs.get(level);
-            if (node != null) {
-                String val = node.isTextual() ? node.asText() : node.path("value").asText();
-                if (!"TRUE".equalsIgnoreCase(val) && !"FALSE".equalsIgnoreCase(val)) {
-                    throw new InvalidConfigValueException(level + " must be TRUE or FALSE, got: " + val);
-                }
-                effective.put(level, val.toUpperCase());
-            }
-        }
-
-        boolean parentFalse = false;
-        TenantConfigKeyEnum falseParent = null;
-        for (TenantConfigKeyEnum level : activeLevels) {
-            String val = effective.getOrDefault(level, "TRUE");
-            boolean isTrue = "TRUE".equalsIgnoreCase(val);
-            if (parentFalse && isTrue) {
-                throw new InvalidConfigValueException(
-                        level + " cannot be TRUE because " + falseParent + " is FALSE. " +
-                        "All levels below a FALSE level must also be FALSE.");
-            }
-            if (!isTrue && !parentFalse) {
-                parentFalse = true;
-                falseParent = level;
-            }
-        }
+        validateLevelCascade(tenantId, "tenant_" + stateCode.toLowerCase(), RegionTypeEnum.DEPARTMENT, DEPT_MAP_LEVELS, configs);
     }
 
     private Integer resolveCurrentUserId() {
