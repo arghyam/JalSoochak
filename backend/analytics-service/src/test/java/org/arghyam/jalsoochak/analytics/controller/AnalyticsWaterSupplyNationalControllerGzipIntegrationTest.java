@@ -85,7 +85,7 @@ class AnalyticsWaterSupplyNationalControllerGzipIntegrationTest {
 
         HttpClient client = HttpClient.newBuilder().build();
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:" + port + "/api/v1/analytics/national/dashboard/boundary/level2"))
+                .uri(URI.create("http://localhost:" + port + "/api/v1/analytics/national/dashboard/boundary/district"))
                 .header("Accept-Encoding", "gzip")
                 .GET()
                 .build();

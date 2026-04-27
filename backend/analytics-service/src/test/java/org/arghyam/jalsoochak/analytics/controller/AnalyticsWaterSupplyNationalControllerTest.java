@@ -157,7 +157,7 @@ class AnalyticsWaterSupplyNationalControllerTest {
                         .lgdLevel2Boundaries(List.of())
                         .build());
 
-        mockMvc.perform(get(BASE + "/national/dashboard/boundary/level2"))
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary/district"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.nationalBoundary").exists())
@@ -171,7 +171,7 @@ class AnalyticsWaterSupplyNationalControllerTest {
         when(schemeRegularityService.getNationalDashboardLevel2BoundariesForApi())
                 .thenThrow(new RuntimeException("boom"));
 
-        mockMvc.perform(get(BASE + "/national/dashboard/boundary/level2"))
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary/district"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));

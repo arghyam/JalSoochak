@@ -84,7 +84,7 @@ public class AnalyticsWaterSupplyNationalController {
         }
     }
 
-    @GetMapping("/national/dashboard/boundary/level2")
+    @GetMapping("/national/dashboard/boundary/district")
     @Operation(
             summary = "Get national outer boundary + LGD level-2 boundaries for the national dashboard map",
             responses = {
@@ -103,7 +103,7 @@ public class AnalyticsWaterSupplyNationalController {
             }
     )
     public ResponseEntity<ApiResponse<NationalDashboardLevel2BoundaryResponse>> getNationalDashboardLevel2Boundaries() {
-        rejectIfSingleTenantMode("national/dashboard/boundary/level2");
+        rejectIfSingleTenantMode("national/dashboard/boundary/district");
         try {
             return ResponseEntity.ok(ApiResponse.<NationalDashboardLevel2BoundaryResponse>builder()
                     .success(true)
