@@ -31,13 +31,13 @@ public class AssamReadingRequest {
     @JsonProperty("confirmed_reading")
     private BigDecimal confirmedReading;
 
-    @NotNull
+    @NotBlank
     @JsonProperty("state_scheme_id")
-    private Long stateSchemeId;
+    private String stateSchemeId;
 
-    @NotNull
+    @NotBlank
     @JsonProperty("centre_scheme_id")
-    private Long centreSchemeId;
+    private String centreSchemeId;
 
     @NotBlank
     @JsonProperty("phone_number")

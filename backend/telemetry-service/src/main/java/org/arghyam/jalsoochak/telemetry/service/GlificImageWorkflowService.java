@@ -148,7 +148,7 @@ public class GlificImageWorkflowService {
         }
     }
 
-    private Long resolveAssamSchemeId(String schemaName, Long operatorId, Long stateSchemeId, Long centreSchemeId) {
+    private Long resolveAssamSchemeId(String schemaName, Long operatorId, String stateSchemeId, String centreSchemeId) {
         Optional<Long> stateResolvedSchemeId = telemetryTenantRepository.findSchemeIdByStateSchemeId(schemaName, stateSchemeId);
         if (stateResolvedSchemeId.isPresent()
                 && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, stateResolvedSchemeId.get())) {
