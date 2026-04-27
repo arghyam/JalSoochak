@@ -33,16 +33,41 @@ public final class SwaggerExamples {
                 "boundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}",
                 "averageSchemeRegularity": 0.75,
                 "readingSubmissionRate": 0.84,
-                "averagePerformanceScore": 0.62,
                 "childRegions": [
                   {
-                    "childLgdId": 110,
-                    "childLgdCName": "Child Region",
-                    "childLgdTitle": "Child Region Title",
-                    "childBoundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[0.5,0],[0.5,0.5],[0,0.5],[0,0]]]}",
-                    "averageSchemeRegularity": 0.78,
-                    "readingSubmissionRate": 0.86,
-                    "averagePerformanceScore": 0.64
+                    "lgdId": 110,
+                    "departmentId": null,
+                    "parentLgdId": 101,
+                    "parentDepartmentId": null,
+                    "lgdLevel": 2,
+                    "schemeCount": 2,
+                    "title": "Child Region Title",
+                    "lgdCode": "C110",
+                    "boundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[0.5,0],[0.5,0.5],[0,0.5],[0,0]]]}"
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String TENANT_PERFORMANCE_SCORE_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "tenantId": 10,
+                "stateCode": "MP",
+                "parentLgdLevel": 1,
+                "parentDepartmentLevel": null,
+                "averagePerformanceScore": 0.623,
+                "childRegions": [
+                  {
+                    "lgdId": 110,
+                    "departmentId": null,
+                    "parentLgdId": 101,
+                    "parentDepartmentId": null,
+                    "lgdLevel": 2,
+                    "lgdCode": "C110",
+                    "averagePerformanceScore": 0.641
                   }
                 ]
               }

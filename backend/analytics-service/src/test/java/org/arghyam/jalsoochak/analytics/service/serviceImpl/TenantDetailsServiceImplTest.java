@@ -2,8 +2,11 @@ package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.ChildRegionDetails;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantDetailsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceChildRegionDetails;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceScoreResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
@@ -27,6 +30,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -166,6 +170,55 @@ class TenantDetailsServiceImplTest {
     }
 
     @Test
+    void getTenantPerformanceScoreByParentLgd_roundsTo3Decimals_andShapesChildFields() throws Exception {
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+
+        Integer tenantId = 1;
+        Integer parentLgdId = 100;
+        LocalDate start = LocalDate.of(2026, 1, 1);
+        LocalDate end = LocalDate.of(2026, 1, 3);
+
+        when(dimTenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant(tenantId, "mp")));
+        when(tenantBoundaryRepository.getLocationLevel(parentLgdId)).thenReturn(1);
+        when(tenantBoundaryRepository.getChildLevelByParent(tenantId, parentLgdId, 1))
+                .thenReturn(List.of(Map.of(
+                        "lgd_id", 101,
+                        "parent_lgd_id", 100,
+                        "child_level", 2,
+                        "scheme_count", 2,
+                        "title", "Child A",
+                        "lgd_code", "C101",
+                        "boundary_geojson", "{\"type\":\"Polygon\"}"
+                )));
+        when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
+                .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(tenantId, parentLgdId))
+                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
+
+        when(schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, start, end))
+                .thenReturn(new BigDecimal("0.55555"));
+        when(schemeRegularityService.getChildAveragePerformanceScoreByLgd(parentLgdId, start, end))
+                .thenReturn(List.of(new SchemeRegularityRepository.ChildRegionPerformanceScore(
+                        101, null, new BigDecimal("0.99994"))));
+
+        TenantPerformanceScoreResponse response =
+                service.getTenantPerformanceScoreByParentLgd(tenantId, parentLgdId, start, end);
+
+        assertThat(response.getAveragePerformanceScore()).isEqualByComparingTo("0.556");
+        assertThat(response.getChildRegions()).hasSize(1);
+
+        TenantPerformanceChildRegionDetails child = response.getChildRegions().getFirst();
+        assertThat(child.getLgdId()).isEqualTo(101);
+        assertThat(child.getDepartmentId()).isNull();
+        assertThat(child.getParentLgdId()).isEqualTo(100);
+        assertThat(child.getParentDepartmentId()).isNull();
+        assertThat(child.getLgdLevel()).isEqualTo(2);
+        assertThat(child.getLgdCode()).isEqualTo("C101");
+        assertThat(child.getAveragePerformanceScore()).isEqualByComparingTo("1.000");
+    }
+
+    @Test
     void getTenantDetailsByParentDepartment_invalidParent_throws() {
         assertThatThrownBy(() -> service.getTenantDetailsByParentDepartment(1, 0))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -250,23 +303,16 @@ class TenantDetailsServiceImplTest {
                 .thenReturn(ReadingSubmissionRateResponse.builder()
                         .readingSubmissionRate(new BigDecimal("0.84"))
                         .build());
-        when(schemeRegularityService.getChildAveragePerformanceScoreByLgd(parentLgdId, start, end))
-                .thenReturn(List.of(
-                        new SchemeRegularityRepository.ChildRegionPerformanceScore(
-                                101, null, new BigDecimal("0.9"))));
-        when(schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, start, end))
-                .thenReturn(new BigDecimal("0.5"));
 
         TenantDetailsResponse response =
                 service.getTenantDetailsWithAggregatedMetrics(tenantId, parentLgdId, start, end);
 
         assertThat(response.getAverageSchemeRegularity()).isEqualByComparingTo("0.75");
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.84");
-        assertThat(response.getAveragePerformanceScore()).isEqualByComparingTo("0.5");
         assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
         assertThat(response.getChildRegions()).hasSize(1);
-        assertThat(response.getChildRegions().getFirst().getAveragePerformanceScore())
-                .isEqualByComparingTo("0.9");
+        verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByLgd(any(), any(), any());
+        verify(schemeRegularityService, never()).getAveragePerformanceScoreByLgd(any(), any(), any());
     }
 
     @Test
@@ -311,12 +357,6 @@ class TenantDetailsServiceImplTest {
                 .thenReturn(ReadingSubmissionRateResponse.builder()
                         .readingSubmissionRate(new BigDecimal("0.84"))
                         .build());
-        when(schemeRegularityService.getChildAveragePerformanceScoreByLgd(parentLgdId, start, end))
-                .thenReturn(List.of(
-                        new SchemeRegularityRepository.ChildRegionPerformanceScore(
-                                101, null, new BigDecimal("0.9"))));
-        when(schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, start, end))
-                .thenReturn(new BigDecimal("0.5"));
 
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -324,6 +364,8 @@ class TenantDetailsServiceImplTest {
 
         verify(valueOperations).get(cacheKey);
         verify(valueOperations).set(eq(cacheKey), eq("{json}"), eq(java.time.Duration.ofHours(24)));
+        verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByLgd(any(), any(), any());
+        verify(schemeRegularityService, never()).getAveragePerformanceScoreByLgd(any(), any(), any());
     }
 
     @Test
@@ -379,23 +421,16 @@ class TenantDetailsServiceImplTest {
                 .thenReturn(ReadingSubmissionRateResponse.builder()
                         .readingSubmissionRate(new BigDecimal("0.77"))
                         .build());
-        when(schemeRegularityService.getChildAveragePerformanceScoreByDepartment(parentDepartmentId, start, end))
-                .thenReturn(List.of(
-                        new SchemeRegularityRepository.ChildRegionPerformanceScore(
-                                null, 201, new BigDecimal("0.88"))));
-        when(schemeRegularityService.getAveragePerformanceScoreByDepartment(parentDepartmentId, start, end))
-                .thenReturn(new BigDecimal("0.55"));
 
         TenantDetailsResponse response = service.getTenantDetailsByParentDepartmentWithAggregatedMetrics(
                 tenantId, parentDepartmentId, start, end);
 
         assertThat(response.getAverageSchemeRegularity()).isEqualByComparingTo("0.66");
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.77");
-        assertThat(response.getAveragePerformanceScore()).isEqualByComparingTo("0.55");
         assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
         assertThat(response.getChildRegions()).hasSize(1);
-        assertThat(response.getChildRegions().getFirst().getAveragePerformanceScore())
-                .isEqualByComparingTo("0.88");
+        verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByDepartment(any(), any(), any());
+        verify(schemeRegularityService, never()).getAveragePerformanceScoreByDepartment(any(), any(), any());
     }
 
     @Test

@@ -4,6 +4,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.ChildRegionDetails;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantDetailsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceChildRegionDetails;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceScoreResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.TenantBoundaryRepository;
@@ -23,6 +25,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.math.RoundingMode;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +38,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
 
     private static final Duration TENANT_DETAILS_CACHE_TTL = Duration.ofHours(24);
     private static final String TENANT_DETAILS_CACHE_PREFIX = "analytics-service:api-cache:get_tenant_details";
+    private static final String TENANT_PERFORMANCE_CACHE_PREFIX = "analytics-service:api-cache:get_tenant_performance_score";
     private static final String DEBUG_LOG_PATH = "/home/beehyv/Desktop/Codes/jalSoochak/JalSoochak_New/.cursor/debug.log";
 
     private final DimTenantRepository dimTenantRepository;
@@ -188,22 +192,6 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         ReadingSubmissionRateResponse submissionRate =
                 schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, startDate, endDate);
 
-        // Performance is per child region; merge into response child rows.
-        List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
-                schemeRegularityService.getChildAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate);
-        Map<Integer, BigDecimal> childPerformanceByLgdId = childPerformance.stream()
-                .collect(Collectors.toMap(
-                        SchemeRegularityRepository.ChildRegionPerformanceScore::lgdId,
-                        SchemeRegularityRepository.ChildRegionPerformanceScore::averagePerformanceScore,
-                        (a, b) -> b));
-
-        if (response.getChildRegions() != null) {
-            response.getChildRegions().forEach(childRegion -> childRegion.setAveragePerformanceScore(
-                    childPerformanceByLgdId.getOrDefault(childRegion.getLgdId(), BigDecimal.ZERO)));
-        }
-
-        response.setAveragePerformanceScore(
-                schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate));
         response.setAverageSchemeRegularity(averageRegularity.getAverageRegularity());
         response.setReadingSubmissionRate(submissionRate.getReadingSubmissionRate());
 
@@ -235,26 +223,119 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                 schemeRegularityService.getReadingSubmissionRateByDepartment(
                         tenantId, parentDepartmentId, startDate, endDate);
 
+        response.setAverageSchemeRegularity(averageRegularity.getAverageRegularity());
+        response.setReadingSubmissionRate(submissionRate.getReadingSubmissionRate());
+
+        writeToCache(cacheKey, response);
+        return response;
+    }
+
+    @Override
+    public TenantPerformanceScoreResponse getTenantPerformanceScoreByParentLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
+        String cacheKey = TENANT_PERFORMANCE_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":parent:" + (parentLgdId == null ? "all" : parentLgdId)
+                + ":from:" + startDate
+                + ":to:" + endDate
+                + ":v1";
+
+        TenantPerformanceScoreResponse cached = readFromCache(cacheKey, TenantPerformanceScoreResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
+        // Reuse validated tenant resolution + child region selection logic from the boundary API.
+        TenantDetailsResponse base = getTenantDetails(tenantId, parentLgdId);
+
         List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
-                schemeRegularityService.getChildAveragePerformanceScoreByDepartment(
-                        parentDepartmentId, startDate, endDate);
+                schemeRegularityService.getChildAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate);
+        Map<Integer, BigDecimal> childPerformanceByLgdId = childPerformance.stream()
+                .filter(row -> row.lgdId() != null)
+                .collect(Collectors.toMap(
+                        SchemeRegularityRepository.ChildRegionPerformanceScore::lgdId,
+                        SchemeRegularityRepository.ChildRegionPerformanceScore::averagePerformanceScore,
+                        (a, b) -> b));
+
+        List<TenantPerformanceChildRegionDetails> shapedChildren = base.getChildRegions() == null
+                ? List.of()
+                : base.getChildRegions().stream()
+                .map(child -> TenantPerformanceChildRegionDetails.builder()
+                        .lgdId(child.getLgdId())
+                        .departmentId(null)
+                        .parentLgdId(child.getParentLgdId())
+                        .parentDepartmentId(null)
+                        .lgdLevel(child.getLgdLevel())
+                        .lgdCode(child.getLgdCode())
+                        .averagePerformanceScore(scale3(
+                                childPerformanceByLgdId.getOrDefault(child.getLgdId(), BigDecimal.ZERO)))
+                        .build())
+                .toList();
+
+        TenantPerformanceScoreResponse response = TenantPerformanceScoreResponse.builder()
+                .tenantId(base.getTenantId())
+                .stateCode(base.getStateCode())
+                .parentLgdLevel(base.getParentLgdLevel())
+                .parentDepartmentLevel(null)
+                .averagePerformanceScore(scale3(
+                        schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate)))
+                .childRegions(shapedChildren)
+                .build();
+
+        writeToCache(cacheKey, response);
+        return response;
+    }
+
+    @Override
+    public TenantPerformanceScoreResponse getTenantPerformanceScoreByParentDepartment(
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
+        String cacheKey = TENANT_PERFORMANCE_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":parent_department:" + parentDepartmentId
+                + ":from:" + startDate
+                + ":to:" + endDate
+                + ":v1";
+
+        TenantPerformanceScoreResponse cached = readFromCache(cacheKey, TenantPerformanceScoreResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
+        TenantDetailsResponse base = getTenantDetailsByParentDepartment(tenantId, parentDepartmentId);
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> childPerformance =
+                schemeRegularityService.getChildAveragePerformanceScoreByDepartment(parentDepartmentId, startDate, endDate);
         Map<Integer, BigDecimal> childPerformanceByDepartmentId = childPerformance.stream()
+                .filter(row -> row.departmentId() != null)
                 .collect(Collectors.toMap(
                         SchemeRegularityRepository.ChildRegionPerformanceScore::departmentId,
                         SchemeRegularityRepository.ChildRegionPerformanceScore::averagePerformanceScore,
                         (a, b) -> b));
 
-        if (response.getChildRegions() != null) {
-            response.getChildRegions().forEach(childRegion -> childRegion.setAveragePerformanceScore(
-                    childPerformanceByDepartmentId.getOrDefault(
-                            childRegion.getDepartmentId(), BigDecimal.ZERO)));
-        }
+        List<TenantPerformanceChildRegionDetails> shapedChildren = base.getChildRegions() == null
+                ? List.of()
+                : base.getChildRegions().stream()
+                .map(child -> TenantPerformanceChildRegionDetails.builder()
+                        .lgdId(null)
+                        .departmentId(child.getDepartmentId())
+                        .parentLgdId(null)
+                        .parentDepartmentId(child.getParentDepartmentId())
+                        .lgdLevel(child.getLgdLevel())
+                        .lgdCode(child.getLgdCode())
+                        .averagePerformanceScore(scale3(
+                                childPerformanceByDepartmentId.getOrDefault(child.getDepartmentId(), BigDecimal.ZERO)))
+                        .build())
+                .toList();
 
-        response.setAveragePerformanceScore(
-                schemeRegularityService.getAveragePerformanceScoreByDepartment(
-                        parentDepartmentId, startDate, endDate));
-        response.setAverageSchemeRegularity(averageRegularity.getAverageRegularity());
-        response.setReadingSubmissionRate(submissionRate.getReadingSubmissionRate());
+        TenantPerformanceScoreResponse response = TenantPerformanceScoreResponse.builder()
+                .tenantId(base.getTenantId())
+                .stateCode(base.getStateCode())
+                .parentLgdLevel(null)
+                .parentDepartmentLevel(base.getParentDepartmentLevel())
+                .averagePerformanceScore(scale3(
+                        schemeRegularityService.getAveragePerformanceScoreByDepartment(parentDepartmentId, startDate, endDate)))
+                .childRegions(shapedChildren)
+                .build();
 
         writeToCache(cacheKey, response);
         return response;
@@ -332,6 +413,19 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         }
     }
 
+    private <T> T readFromCache(String cacheKey, Class<T> type) {
+        try {
+            String payload = redisTemplate.opsForValue().get(cacheKey);
+            if (payload == null || payload.isBlank()) {
+                return null;
+            }
+            return objectMapper.readValue(payload, type);
+        } catch (Exception e) {
+            log.warn("Failed to read cache [{}]: {}", cacheKey, e.getMessage());
+            return null;
+        }
+    }
+
     private void writeToCache(String cacheKey, TenantDetailsResponse response) {
         try {
             String payload = objectMapper.writeValueAsString(response);
@@ -339,6 +433,22 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         } catch (Exception e) {
             log.warn("Failed to write tenant details cache [{}]: {}", cacheKey, e.getMessage());
         }
+    }
+
+    private void writeToCache(String cacheKey, TenantPerformanceScoreResponse response) {
+        try {
+            String payload = objectMapper.writeValueAsString(response);
+            redisTemplate.opsForValue().set(cacheKey, payload, TENANT_DETAILS_CACHE_TTL);
+        } catch (Exception e) {
+            log.warn("Failed to write tenant performance cache [{}]: {}", cacheKey, e.getMessage());
+        }
+    }
+
+    private static BigDecimal scale3(BigDecimal value) {
+        if (value == null) {
+            return BigDecimal.ZERO.setScale(3, RoundingMode.HALF_UP);
+        }
+        return value.setScale(3, RoundingMode.HALF_UP);
     }
 
     private void appendDebugLog(String hypothesisId, String location, String message, Map<String, Object> data) {
