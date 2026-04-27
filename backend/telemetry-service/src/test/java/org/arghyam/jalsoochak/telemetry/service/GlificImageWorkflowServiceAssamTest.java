@@ -70,8 +70,8 @@ class GlificImageWorkflowServiceAssamTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(telemetryTenantRepository.existsSchemeById("tenant_assam", 30244993L)).thenReturn(false);
-        when(telemetryTenantRepository.existsSchemeById("tenant_assam", 30178236L)).thenReturn(true);
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", 30178236L))
+                .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
                 .thenReturn(CreateReadingResponse.builder()
@@ -113,7 +113,10 @@ class GlificImageWorkflowServiceAssamTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(telemetryTenantRepository.existsSchemeById("tenant_assam", 30244993L)).thenReturn(true);
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", 30178236L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", 30244993L))
+                .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
                 .thenReturn(CreateReadingResponse.builder()
