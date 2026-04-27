@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
@@ -97,6 +98,9 @@ public interface SchemeRegularityService {
     NationalDashboardBoundaryResponse getNationalDashboardBoundariesForApi();
 
     NationalDashboardLevel2BoundaryResponse getNationalDashboardLevel2BoundariesForApi();
+
+    NationalDashboardLevel2MetricsResponse getNationalDashboardLevel2MetricsForApi(
+            LocalDate startDate, LocalDate endDate);
 
     AverageWaterSupplyResponse getAverageWaterSupplyPerCurrentRegionByLgd(
             Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate);

@@ -3953,6 +3953,249 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    public List<Level2WaterSupplyMetrics> getLgdLevel2WiseWaterSupplyMetricsForNation(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH water_by_scheme AS (
+                    SELECT
+                        f.tenant_id,
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied_liters
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.tenant_id, f.scheme_id
+                )
+                SELECT
+                    t.tenant_id,
+                    t.status AS tenant_status,
+                    t.state_code,
+                    t.title AS state_title,
+                    s.level_2_lgd_id AS lgd_id,
+                    l.title AS district_title,
+                    COALESCE(SUM(COALESCE(s.house_hold_count, 0)), 0)::bigint AS total_household_count,
+                    COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_fhtc_count,
+                    COALESCE(SUM(COALESCE(s.planned_fhtc, 0)), 0)::bigint AS total_planned_fhtc,
+                    COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    CASE
+                        WHEN COUNT(s.scheme_id) > 0
+                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(s.scheme_id), 4)
+                        ELSE 0::numeric
+                    END AS avg_water_supply_per_scheme
+                FROM analytics_schema.dim_scheme_table s
+                JOIN analytics_schema.dim_tenant_table t
+                    ON t.tenant_id = s.tenant_id
+                LEFT JOIN analytics_schema.dim_lgd_location_table l
+                    ON l.tenant_id = s.tenant_id
+                   AND l.lgd_id = s.level_2_lgd_id
+                   AND l.lgd_level = 2
+                LEFT JOIN water_by_scheme w
+                    ON w.tenant_id = s.tenant_id
+                   AND w.scheme_id = s.scheme_id
+                WHERE s.tenant_id > 0
+                  AND s.level_2_lgd_id IS NOT NULL
+                GROUP BY
+                    t.tenant_id,
+                    t.status,
+                    t.state_code,
+                    t.title,
+                    s.level_2_lgd_id,
+                    l.title
+                ORDER BY t.tenant_id, s.level_2_lgd_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new Level2WaterSupplyMetrics(
+                        rs.getInt("tenant_id"),
+                        rs.getInt("tenant_status"),
+                        rs.getString("state_code"),
+                        rs.getString("state_title"),
+                        (Integer) rs.getObject("lgd_id"),
+                        rs.getString("district_title"),
+                        rs.getLong("total_household_count"),
+                        rs.getLong("total_fhtc_count"),
+                        rs.getLong("total_planned_fhtc"),
+                        rs.getLong("total_water_supplied_liters"),
+                        rs.getInt("scheme_count"),
+                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                startDate,
+                endDate);
+    }
+
+    public List<Level2SupplyDaysInEfficientRange> getLgdLevel2WiseSupplyDaysInEfficientRangeForNation(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH tenant_cfg AS (
+                    SELECT
+                        t.tenant_id,
+                        COALESCE(t.required_lpcd, 0) AS required_lpcd,
+                        COALESCE(t.person_count_per_household, 5) AS person_count_per_household,
+                        COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
+                        COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
+                    FROM analytics_schema.dim_tenant_table t
+                    WHERE t.tenant_id > 0
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.tenant_id,
+                        s.scheme_id,
+                        s.level_2_lgd_id,
+                        COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.tenant_id > 0
+                      AND s.level_2_lgd_id IS NOT NULL
+                ),
+                dates_in_range AS (
+                    SELECT d.full_date AS date
+                    FROM analytics_schema.dim_date_table d
+                    WHERE d.full_date BETWEEN ? AND ?
+                ),
+                ewater_by_scheme_day AS (
+                    SELECT
+                        f.tenant_id,
+                        f.scheme_id,
+                        f.date,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.tenant_id, f.scheme_id, f.date
+                ),
+                level2_supply_days AS (
+                    SELECT
+                        s.tenant_id,
+                        s.level_2_lgd_id AS lgd_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                     (
+                                         (tc.required_lpcd::numeric * (s.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 - (tc.under_supply_range_percentage::numeric / 100))
+                                     )
+                                     AND
+                                     (
+                                         (tc.required_lpcd::numeric * (s.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 + (tc.over_supply_range_percentage::numeric / 100))
+                                     )
+                                    THEN 1
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS supply_days_in_efficient_range
+                    FROM schemes_in_scope s
+                    CROSS JOIN dates_in_range dr
+                    LEFT JOIN ewater_by_scheme_day wd
+                        ON wd.tenant_id = s.tenant_id
+                       AND wd.scheme_id = s.scheme_id
+                       AND wd.date = dr.date
+                    JOIN tenant_cfg tc
+                        ON tc.tenant_id = s.tenant_id
+                    GROUP BY s.tenant_id, s.level_2_lgd_id
+                )
+                SELECT
+                    tenant_id,
+                    lgd_id,
+                    supply_days_in_efficient_range
+                FROM level2_supply_days
+                ORDER BY tenant_id, lgd_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new Level2SupplyDaysInEfficientRange(
+                        rs.getInt("tenant_id"),
+                        (Integer) rs.getObject("lgd_id"),
+                        rs.getLong("supply_days_in_efficient_range")),
+                startDate,
+                endDate,
+                startDate,
+                endDate);
+    }
+
+    public List<Level2RegularityMetrics> getLgdLevel2WiseRegularityMetricsForNation(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH supply_days_by_scheme AS (
+                    SELECT
+                        m.tenant_id,
+                        m.scheme_id,
+                        COUNT(DISTINCT m.reading_date)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.tenant_id, m.scheme_id
+                )
+                SELECT
+                    s.tenant_id,
+                    s.level_2_lgd_id AS lgd_id,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                FROM analytics_schema.dim_scheme_table s
+                LEFT JOIN supply_days_by_scheme sd
+                    ON sd.tenant_id = s.tenant_id
+                   AND sd.scheme_id = s.scheme_id
+                WHERE s.tenant_id > 0
+                  AND s.level_2_lgd_id IS NOT NULL
+                GROUP BY s.tenant_id, s.level_2_lgd_id
+                ORDER BY s.tenant_id, s.level_2_lgd_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new Level2RegularityMetrics(
+                        rs.getInt("tenant_id"),
+                        (Integer) rs.getObject("lgd_id"),
+                        rs.getInt("scheme_count"),
+                        rs.getInt("total_supply_days")),
+                startDate,
+                endDate);
+    }
+
+    public List<Level2ReadingSubmissionMetrics> getLgdLevel2WiseReadingSubmissionMetricsForNation(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH submission_days_by_scheme AS (
+                    SELECT
+                        m.tenant_id,
+                        m.scheme_id,
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading >= 0
+                    GROUP BY m.tenant_id, m.scheme_id
+                )
+                SELECT
+                    s.tenant_id,
+                    s.level_2_lgd_id AS lgd_id,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
+                FROM analytics_schema.dim_scheme_table s
+                LEFT JOIN submission_days_by_scheme sd
+                    ON sd.tenant_id = s.tenant_id
+                   AND sd.scheme_id = s.scheme_id
+                WHERE s.tenant_id > 0
+                  AND s.level_2_lgd_id IS NOT NULL
+                GROUP BY s.tenant_id, s.level_2_lgd_id
+                ORDER BY s.tenant_id, s.level_2_lgd_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new Level2ReadingSubmissionMetrics(
+                        rs.getInt("tenant_id"),
+                        (Integer) rs.getObject("lgd_id"),
+                        rs.getInt("scheme_count"),
+                        rs.getInt("total_submission_days")),
+                startDate,
+                endDate);
+    }
+
     public List<OutageReasonSchemeCount> getOverallOutageReasonSchemeCount(
             LocalDate startDate, LocalDate endDate) {
         String sql = """
@@ -5633,6 +5876,41 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             String stateCode,
             String title,
+            Integer schemeCount,
+            Integer totalSubmissionDays) {
+    }
+
+    public record Level2WaterSupplyMetrics(
+            Integer tenantId,
+            Integer tenantStatus,
+            String stateCode,
+            String stateTitle,
+            Integer lgdId,
+            String districtTitle,
+            Long totalHouseholdCount,
+            Long totalAchievedFhtcCount,
+            Long totalPlannedFhtcCount,
+            Long totalWaterSuppliedLiters,
+            Integer schemeCount,
+            BigDecimal avgWaterSupplyPerScheme) {
+    }
+
+    public record Level2SupplyDaysInEfficientRange(
+            Integer tenantId,
+            Integer lgdId,
+            Long supplyDaysInEfficientRange) {
+    }
+
+    public record Level2RegularityMetrics(
+            Integer tenantId,
+            Integer lgdId,
+            Integer schemeCount,
+            Integer totalSupplyDays) {
+    }
+
+    public record Level2ReadingSubmissionMetrics(
+            Integer tenantId,
+            Integer lgdId,
             Integer schemeCount,
             Integer totalSubmissionDays) {
     }

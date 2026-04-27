@@ -44,6 +44,8 @@ public class NationalDashboardRefreshTask implements AnalyticsScheduledTask {
 
         log.info("Running scheduled task '{}' for range {} to {}", taskName(), startDate, endDate);
         schemeRegularityService.refreshNationalDashboard(startDate, endDate);
+        // Warm cache for national district-level dashboard (LGD level-2).
+        schemeRegularityService.getNationalDashboardLevel2MetricsForApi(startDate, endDate);
         log.info("Completed scheduled task '{}' for range {} to {}", taskName(), startDate, endDate);
         log.info("Scheduler END '{}'", taskName());
     }

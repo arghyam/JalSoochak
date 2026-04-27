@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
@@ -64,6 +65,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private static final String NATIONAL_DASHBOARD_CACHE_PREFIX = ":national:dashboard";
     private static final String NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY = ":national:dashboard:boundaries:v1";
     private static final String NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_CACHE_KEY = ":national:dashboard:boundaries:level2:v1";
+    private static final String NATIONAL_DASHBOARD_LEVEL2_METRICS_CACHE_PREFIX = ":national:dashboard:metrics:level2";
     private static final String REGION_WISE_WATER_QUANTITY_CACHE_PREFIX = ":water_quantity:region_wise";
     private static final String PERIODIC_WATER_QUANTITY_CACHE_PREFIX = ":water_quantity:periodic";
     private static final String PERIODIC_SCHEME_REGULARITY_CACHE_PREFIX = ":scheme_regularity:periodic";
@@ -871,6 +873,120 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
         return buildAndCacheNationalDashboardLevel2Boundaries();
+    }
+
+    @Override
+    public NationalDashboardLevel2MetricsResponse getNationalDashboardLevel2MetricsForApi(
+            LocalDate startDate, LocalDate endDate) {
+        validateDateRange(startDate, endDate);
+
+        String cacheKey = NATIONAL_DASHBOARD_LEVEL2_METRICS_CACHE_PREFIX
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v1";
+        NationalDashboardLevel2MetricsResponse cached =
+                readFromCache(cacheKey, NationalDashboardLevel2MetricsResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
+        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+
+        List<SchemeRegularityRepository.Level2WaterSupplyMetrics> quantityRows =
+                schemeRegularityRepository.getLgdLevel2WiseWaterSupplyMetricsForNation(startDate, endDate);
+        List<SchemeRegularityRepository.Level2SupplyDaysInEfficientRange> efficientRangeRows =
+                schemeRegularityRepository.getLgdLevel2WiseSupplyDaysInEfficientRangeForNation(startDate, endDate);
+        List<SchemeRegularityRepository.Level2RegularityMetrics> regularityRows =
+                schemeRegularityRepository.getLgdLevel2WiseRegularityMetricsForNation(startDate, endDate);
+        List<SchemeRegularityRepository.Level2ReadingSubmissionMetrics> submissionRows =
+                schemeRegularityRepository.getLgdLevel2WiseReadingSubmissionMetricsForNation(startDate, endDate);
+
+        List<SchemeRegularityRepository.OutageReasonSchemeCount> outageRows =
+                schemeRegularityRepository.getOverallOutageReasonSchemeCount(startDate, endDate);
+        Map<String, Integer> overallOutageReasonDistribution = buildReasonCountMap(outageRows);
+
+        record Key(Integer tenantId, Integer lgdId) {}
+
+        Map<Key, Long> supplyDaysInEfficientRangeByKey = efficientRangeRows.stream()
+                .filter(r -> r.tenantId() != null && r.lgdId() != null)
+                .collect(Collectors.toMap(
+                        r -> new Key(r.tenantId(), r.lgdId()),
+                        r -> r.supplyDaysInEfficientRange() != null ? r.supplyDaysInEfficientRange() : 0L,
+                        (a, b) -> a,
+                        LinkedHashMap::new));
+
+        Map<Key, SchemeRegularityRepository.Level2RegularityMetrics> regularityByKey = regularityRows.stream()
+                .filter(r -> r.tenantId() != null && r.lgdId() != null)
+                .collect(Collectors.toMap(
+                        r -> new Key(r.tenantId(), r.lgdId()),
+                        Function.identity(),
+                        (a, b) -> a,
+                        LinkedHashMap::new));
+
+        Map<Key, SchemeRegularityRepository.Level2ReadingSubmissionMetrics> submissionByKey = submissionRows.stream()
+                .filter(r -> r.tenantId() != null && r.lgdId() != null)
+                .collect(Collectors.toMap(
+                        r -> new Key(r.tenantId(), r.lgdId()),
+                        Function.identity(),
+                        (a, b) -> a,
+                        LinkedHashMap::new));
+
+        List<NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow> districts = quantityRows.stream()
+                .filter(r -> r.tenantId() != null && r.lgdId() != null)
+                .map(row -> {
+                    Key key = new Key(row.tenantId(), row.lgdId());
+                    SchemeRegularityRepository.Level2RegularityMetrics reg = regularityByKey.get(key);
+                    SchemeRegularityRepository.Level2ReadingSubmissionMetrics sub = submissionByKey.get(key);
+
+                    Integer schemeCount = row.schemeCount();
+                    Integer totalSupplyDays = reg != null ? reg.totalSupplyDays() : 0;
+                    Integer totalSubmissionDays = sub != null ? sub.totalSubmissionDays() : 0;
+
+                    BigDecimal averageRegularity = BigDecimal.ZERO;
+                    if (schemeCount != null && schemeCount > 0 && daysInRange > 0) {
+                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
+                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
+                    }
+
+                    BigDecimal readingSubmissionRate = BigDecimal.ZERO;
+                    if (schemeCount != null && schemeCount > 0 && daysInRange > 0) {
+                        readingSubmissionRate = BigDecimal.valueOf(totalSubmissionDays)
+                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
+                    }
+
+                    return NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow.builder()
+                            .tenantId(row.tenantId())
+                            .lgdId(row.lgdId())
+                            .tenantStatus(row.tenantStatus())
+                            .stateCode(row.stateCode())
+                            .stateTitle(row.stateTitle())
+                            .districtTitle(row.districtTitle())
+                            .schemeCount(schemeCount)
+                            .totalHouseholdCount(row.totalHouseholdCount())
+                            .totalAchievedFhtcCount(row.totalAchievedFhtcCount())
+                            .totalPlannedFhtcCount(row.totalPlannedFhtcCount())
+                            .totalWaterSuppliedLiters(row.totalWaterSuppliedLiters())
+                            .avgWaterSupplyPerScheme(row.avgWaterSupplyPerScheme())
+                            .supplyDaysInEfficientRange(
+                                    supplyDaysInEfficientRangeByKey.getOrDefault(key, 0L))
+                            .totalSupplyDays(totalSupplyDays)
+                            .averageRegularity(averageRegularity)
+                            .totalSubmissionDays(totalSubmissionDays)
+                            .readingSubmissionRate(readingSubmissionRate)
+                            .build();
+                })
+                .toList();
+
+        NationalDashboardLevel2MetricsResponse response = NationalDashboardLevel2MetricsResponse.builder()
+                .startDate(startDate)
+                .endDate(endDate)
+                .daysInRange(daysInRange)
+                .overallOutageReasonDistribution(overallOutageReasonDistribution)
+                .districts(districts)
+                .build();
+
+        writeToCache(cacheKey, response);
+        return response;
     }
 
     private String buildNationalDashboardCacheKey(LocalDate startDate, LocalDate endDate) {

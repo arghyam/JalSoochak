@@ -2,10 +2,12 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,6 +30,7 @@ import java.util.stream.Stream;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,6 +55,9 @@ class AnalyticsWaterSupplyNationalControllerTest {
     private SchemeRegularityService schemeRegularityService;
     @MockBean
     private DateDimensionService dateDimensionService;
+
+    @MockBean
+    private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
 //     @Test
 //     void populateDateDimension_validDateRange_returnsOkAndCallsService() throws Exception {
@@ -115,6 +121,68 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getNationalDashboardDistrict_withoutDates_usesDefaultWindowAndReturnsOk() throws Exception {
+        LocalDate defaultStart = LocalDate.of(2026, 2, 1);
+        LocalDate defaultEnd = LocalDate.of(2026, 3, 1);
+        when(defaultAnalyticsDateWindowProvider.defaultWindow())
+                .thenReturn(new DefaultAnalyticsDateWindowProvider.DateWindow(defaultStart, defaultEnd));
+
+        when(schemeRegularityService.getNationalDashboardLevel2MetricsForApi(defaultStart, defaultEnd))
+                .thenReturn(NationalDashboardLevel2MetricsResponse.builder()
+                        .startDate(defaultStart)
+                        .endDate(defaultEnd)
+                        .daysInRange(30)
+                        .overallOutageReasonDistribution(Map.of())
+                        .districts(List.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/national/dashboard/district"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.startDate").value("2026-02-01"))
+                .andExpect(jsonPath("$.data.endDate").value("2026-03-01"))
+                .andExpect(jsonPath("$.data.districts").isArray());
+
+        verify(defaultAnalyticsDateWindowProvider, times(1)).defaultWindow();
+        verify(schemeRegularityService, times(1))
+                .getNationalDashboardLevel2MetricsForApi(defaultStart, defaultEnd);
+    }
+
+    @Test
+    void getNationalDashboardDistrict_withOnlyStartDate_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/district")
+                        .param("start_date", START.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(schemeRegularityService, never()).getNationalDashboardLevel2MetricsForApi(any(), any());
+    }
+
+    @Test
+    void getNationalDashboardDistrict_withOnlyEndDate_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/district")
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(schemeRegularityService, never()).getNationalDashboardLevel2MetricsForApi(any(), any());
+    }
+
+    @Test
+    void getNationalDashboardDistrict_withEndBeforeStart_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/district")
+                        .param("start_date", "2026-02-01")
+                        .param("end_date", "2026-01-31"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(schemeRegularityService, never()).getNationalDashboardLevel2MetricsForApi(any(), any());
     }
 
     @Test
