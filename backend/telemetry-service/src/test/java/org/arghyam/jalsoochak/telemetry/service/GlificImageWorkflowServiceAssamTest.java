@@ -54,8 +54,8 @@ class GlificImageWorkflowServiceAssamTest {
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
-                .stateSchemeId(30178236L)
-                .centreSchemeId(30244993L)
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
                 .phoneNumber("919876543210")
                 .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
                 .build();
@@ -70,7 +70,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", 30178236L))
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
@@ -93,8 +93,8 @@ class GlificImageWorkflowServiceAssamTest {
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
-                .stateSchemeId(30178236L)
-                .centreSchemeId(30244993L)
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
                 .phoneNumber("919876543210")
                 .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
                 .geolocation(AssamReadingRequest.Geolocation.builder()
@@ -113,9 +113,9 @@ class GlificImageWorkflowServiceAssamTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", 30178236L))
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", 30244993L))
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
                 .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))

@@ -54,9 +54,9 @@ public class TelemetryTenantRepository {
         return Boolean.TRUE.equals(exists);
     }
 
-    public Optional<Long> findSchemeIdByStateSchemeId(String schemaName, Long stateSchemeId) {
+    public Optional<Long> findSchemeIdByStateSchemeId(String schemaName, String stateSchemeId) {
         validateSchemaName(schemaName);
-        if (stateSchemeId == null) {
+        if (stateSchemeId == null || stateSchemeId.isBlank()) {
             return Optional.empty();
         }
         String sql = String.format("""
@@ -67,13 +67,13 @@ public class TelemetryTenantRepository {
                 ORDER BY id
                 LIMIT 1
                 """, schemaName);
-        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), stateSchemeId);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), stateSchemeId.trim());
         return rows.stream().findFirst();
     }
 
-    public Optional<Long> findSchemeIdByCentreSchemeId(String schemaName, Long centreSchemeId) {
+    public Optional<Long> findSchemeIdByCentreSchemeId(String schemaName, String centreSchemeId) {
         validateSchemaName(schemaName);
-        if (centreSchemeId == null) {
+        if (centreSchemeId == null || centreSchemeId.isBlank()) {
             return Optional.empty();
         }
         String sql = String.format("""
@@ -84,7 +84,7 @@ public class TelemetryTenantRepository {
                 ORDER BY id
                 LIMIT 1
                 """, schemaName);
-        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), centreSchemeId);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), centreSchemeId.trim());
         return rows.stream().findFirst();
     }
 
