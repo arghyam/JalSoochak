@@ -30,7 +30,6 @@ public final class SwaggerExamples {
                 "parentLgdLevel": 1,
                 "parentDepartmentLevel": null,
                 "childBoundaryCount": 2,
-                "boundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}",
                 "averageSchemeRegularity": 0.75,
                 "readingSubmissionRate": 0.84,
                 "childRegions": [
@@ -41,6 +40,32 @@ public final class SwaggerExamples {
                     "parentDepartmentId": null,
                     "lgdLevel": 2,
                     "schemeCount": 2,
+                    "title": "Child Region Title",
+                    "lgdCode": "C110"
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String TENANT_BOUNDARIES_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "tenantId": 10,
+                "stateCode": "MP",
+                "parentLgdLevel": 1,
+                "parentDepartmentLevel": null,
+                "childBoundaryCount": 2,
+                "childRegionCount": 1,
+                "parentBoundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}",
+                "childRegions": [
+                  {
+                    "lgdId": 110,
+                    "departmentId": null,
+                    "parentLgdId": 101,
+                    "parentDepartmentId": null,
+                    "lgdLevel": 2,
                     "title": "Child Region Title",
                     "lgdCode": "C110",
                     "boundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[0.5,0],[0.5,0.5],[0,0.5],[0,0]]]}"

@@ -154,19 +154,16 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantBoundaryRepository.getMergedBoundaryByParent(1, 100, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
-        when(tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(1, 100))
-                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
 
         TenantDetailsResponse response = service.getTenantDetails(1, 100);
 
         assertThat(response.getChildBoundaryCount()).isEqualTo(1);
-        assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
         assertThat(response.getChildRegions()).hasSize(1);
         assertThat(response.getChildRegions().getFirst().getLgdId()).isEqualTo(101);
         verify(tenantBoundaryRepository).getLocationLevel(100);
         verify(tenantBoundaryRepository).getChildLevelByParent(1, 100, 1);
         verify(tenantBoundaryRepository).getMergedBoundaryByParent(1, 100, 1);
-        verify(tenantBoundaryRepository).getBoundaryGeoJsonByLgdId(1, 100);
+        verify(tenantBoundaryRepository, never()).getBoundaryGeoJsonByLgdId(any(), any());
     }
 
     @Test
@@ -193,8 +190,6 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
-        when(tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(tenantId, parentLgdId))
-                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
 
         when(schemeRegularityService.getAveragePerformanceScoreByLgd(parentLgdId, start, end))
                 .thenReturn(new BigDecimal("0.55555"));
@@ -292,8 +287,6 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
-        when(tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(tenantId, parentLgdId))
-                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
 
         when(schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, start, end))
                 .thenReturn(AverageSchemeRegularityResponse.builder()
@@ -309,7 +302,6 @@ class TenantDetailsServiceImplTest {
 
         assertThat(response.getAverageSchemeRegularity()).isEqualByComparingTo("0.75");
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.84");
-        assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
         assertThat(response.getChildRegions()).hasSize(1);
         verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByLgd(any(), any(), any());
         verify(schemeRegularityService, never()).getAveragePerformanceScoreByLgd(any(), any(), any());
@@ -346,8 +338,6 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
-        when(tenantBoundaryRepository.getBoundaryGeoJsonByLgdId(tenantId, parentLgdId))
-                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent\"}");
 
         when(schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, start, end))
                 .thenReturn(AverageSchemeRegularityResponse.builder()
@@ -410,8 +400,6 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantDepartmentBoundaryRepository.getMergedBoundaryByParentDepartment(tenantId, parentDepartmentId, 2))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
-        when(tenantDepartmentBoundaryRepository.getBoundaryGeoJsonByDepartmentId(tenantId, parentDepartmentId))
-                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
 
         when(schemeRegularityService.getAverageSchemeRegularityByDepartment(tenantId, parentDepartmentId, start, end))
                 .thenReturn(AverageSchemeRegularityResponse.builder()
@@ -427,7 +415,6 @@ class TenantDetailsServiceImplTest {
 
         assertThat(response.getAverageSchemeRegularity()).isEqualByComparingTo("0.66");
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.77");
-        assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
         assertThat(response.getChildRegions()).hasSize(1);
         verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByDepartment(any(), any(), any());
         verify(schemeRegularityService, never()).getAveragePerformanceScoreByDepartment(any(), any(), any());
@@ -454,7 +441,6 @@ class TenantDetailsServiceImplTest {
                 .stateCode("mp")
                 .averageSchemeRegularity(new BigDecimal("0.11"))
                 .readingSubmissionRate(new BigDecimal("0.22"))
-                .averagePerformanceScore(new BigDecimal("0.33"))
                 .build();
 
         when(valueOperations.get(cacheKey)).thenReturn("cached");
@@ -496,13 +482,10 @@ class TenantDetailsServiceImplTest {
                 )));
         when(tenantDepartmentBoundaryRepository.getMergedBoundaryByParentDepartment(1, 200, 2))
                 .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
-        when(tenantDepartmentBoundaryRepository.getBoundaryGeoJsonByDepartmentId(1, 200))
-                .thenReturn("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
 
         TenantDetailsResponse response = service.getTenantDetailsByParentDepartment(1, 200);
 
         assertThat(response.getChildBoundaryCount()).isEqualTo(1);
-        assertThat(response.getBoundaryGeoJson()).isEqualTo("{\"type\":\"MultiPolygon\",\"source\":\"parent_dept\"}");
         assertThat(response.getChildRegions()).hasSize(1);
         assertThat(response.getChildRegions().getFirst().getDepartmentId()).isEqualTo(201);
     }
