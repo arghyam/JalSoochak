@@ -53,7 +53,7 @@ public class GlificWebhookController {
     }
 
     @PostMapping(
-            value = "/readings",
+            value = "/readings/glific",
             consumes = "application/json",
             produces = "application/json"
     )
@@ -92,7 +92,7 @@ public class GlificWebhookController {
     }
 
     @PostMapping(
-            value = "/readings/assam",
+            value = "/readings",
             consumes = "application/json",
             produces = "application/json"
     )
