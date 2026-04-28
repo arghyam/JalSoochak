@@ -63,6 +63,15 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    @ExceptionHandler(SingleTenantModeAccessException.class)
+    public ResponseEntity<Map<String, Object>> handleSingleTenantModeAccess(
+            SingleTenantModeAccessException ex,
+            HttpServletRequest request
+    ) {
+        log.warn("{} Forbidden: {}", formatRequest(request), ex.getMessage());
+        return buildResponse(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneral(
             Exception ex,

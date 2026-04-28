@@ -54,6 +54,40 @@ public class TelemetryTenantRepository {
         return Boolean.TRUE.equals(exists);
     }
 
+    public Optional<Long> findSchemeIdByStateSchemeId(String schemaName, String stateSchemeId) {
+        validateSchemaName(schemaName);
+        if (stateSchemeId == null || stateSchemeId.isBlank()) {
+            return Optional.empty();
+        }
+        String sql = String.format("""
+                SELECT id
+                FROM %s.scheme_master_table
+                WHERE state_scheme_id = ?
+                  AND deleted_at IS NULL
+                ORDER BY id
+                LIMIT 1
+                """, schemaName);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), stateSchemeId.trim());
+        return rows.stream().findFirst();
+    }
+
+    public Optional<Long> findSchemeIdByCentreSchemeId(String schemaName, String centreSchemeId) {
+        validateSchemaName(schemaName);
+        if (centreSchemeId == null || centreSchemeId.isBlank()) {
+            return Optional.empty();
+        }
+        String sql = String.format("""
+                SELECT id
+                FROM %s.scheme_master_table
+                WHERE centre_scheme_id = ?
+                  AND deleted_at IS NULL
+                ORDER BY id
+                LIMIT 1
+                """, schemaName);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), centreSchemeId.trim());
+        return rows.stream().findFirst();
+    }
+
     public Optional<TelemetryOperator> findOperatorById(String schemaName, Long operatorId) {
         validateSchemaName(schemaName);
         String languageColumn = resolveSelectColumn(schemaName, "user_table", "language_id", "NULL::integer AS language_id");
@@ -742,13 +776,11 @@ public class TelemetryTenantRepository {
                     WHERE id = ?
                     """, schemaName, timeColumn);
             jdbcTemplate.update(sql, readingAt, LocalDate.from(readingAt), reason, operatorId, pending.get().id());
-            cleanupOtherPendingIssueReportRecords(schemaName, schemeId, operatorId, pending.get().id(), operatorId);
             return pending.get().correlationId();
         }
 
         String correlationId = "issue-report-" + UUID.randomUUID();
-        Long createdId = createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
-        cleanupOtherPendingIssueReportRecords(schemaName, schemeId, operatorId, createdId, operatorId);
+        createIssueReportRecord(schemaName, schemeId, operatorId, readingAt, correlationId, reason);
         return correlationId;
     }
 
@@ -769,29 +801,6 @@ public class TelemetryTenantRepository {
                   AND extracted_reading = 0
                   AND confirmed_reading = 0
                   AND meter_change_reason IS NOT NULL
-                  AND deleted_at IS NULL
-                  AND id <> ?
-                """, schemaName);
-        jdbcTemplate.update(sql, updatedBy, updatedBy, schemeId, operatorId, keepId);
-    }
-
-    private void cleanupOtherPendingIssueReportRecords(String schemaName,
-                                                       Long schemeId,
-                                                       Long operatorId,
-                                                       Long keepId,
-                                                       Long updatedBy) {
-        validateSchemaName(schemaName);
-        String sql = String.format("""
-                UPDATE %s.flow_reading_table
-                SET deleted_at = NOW(),
-                    deleted_by = ?,
-                    updated_by = ?,
-                    updated_at = NOW()
-                WHERE scheme_id = ?
-                  AND created_by = ?
-                  AND extracted_reading = 0
-                  AND confirmed_reading = 0
-                  AND issue_report_reason IS NOT NULL
                   AND deleted_at IS NULL
                   AND id <> ?
                 """, schemaName);

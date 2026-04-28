@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.user.controller;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.user.dto.request.UpdateStaffRoleRequestDTO;
@@ -25,8 +26,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.validation.constraints.NotBlank;
+
 import java.util.List;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/tenant/user")
 @RequiredArgsConstructor
@@ -69,6 +73,18 @@ public class TenantStaffController {
     ) {
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Staff counts retrieved",
                 tenantStaffService.countStaffByRole(tenantCode, status, name)));
+    }
+
+    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @PostMapping("/staff/{id}/deactivate")
+    public ResponseEntity<ApiResponseDTO<Void>> deactivateStaff(
+            @PathVariable @Positive Long id,
+            @RequestParam @NotBlank String tenantCode,
+            Authentication authentication) {
+        log.info("POST /api/v1/tenant/user/staff/{}/deactivate tenantCode={} caller={}",
+                id, tenantCode, authentication != null ? authentication.getName() : "anonymous");
+        tenantStaffService.deactivateStaff(id, tenantCode, authentication);
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Staff user deactivated successfully"));
     }
 
     @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")

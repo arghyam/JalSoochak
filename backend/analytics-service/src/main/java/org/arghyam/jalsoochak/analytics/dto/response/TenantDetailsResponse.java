@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -12,6 +13,7 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class TenantDetailsResponse {
 
     private Integer tenantId;
@@ -19,9 +21,7 @@ public class TenantDetailsResponse {
     private Integer parentLgdLevel;
     private Integer parentDepartmentLevel;
     private Integer childBoundaryCount;
-    private String boundaryGeoJson;
     private BigDecimal averageSchemeRegularity;
     private BigDecimal readingSubmissionRate;
-    private BigDecimal averagePerformanceScore;
     private List<ChildRegionDetails> childRegions;
 }

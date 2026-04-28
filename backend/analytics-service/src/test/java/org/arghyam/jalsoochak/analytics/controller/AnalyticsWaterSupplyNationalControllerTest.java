@@ -1,11 +1,13 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
-import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,7 +21,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -29,11 +30,11 @@ import java.util.stream.Stream;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -55,81 +56,8 @@ class AnalyticsWaterSupplyNationalControllerTest {
     @MockBean
     private DateDimensionService dateDimensionService;
 
-    @ParameterizedTest
-    @MethodSource("waterSupplyCombinationMatrix")
-    void getAverageWaterSupplyPerRegion_combinationMatrix(
-            String scope,
-            String tenantId,
-            String parentLgdId,
-            String parentDepartmentId,
-            int expectedStatus) throws Exception {
-        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionForCurrentScope(any(), any(), any()))
-                .thenReturn(averageWaterSupplyResponse());
-        when(schemeRegularityService.getAverageWaterSupplyPerNationForChildScope(any(), any()))
-                .thenReturn(averageWaterSupplyResponse());
-        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionByLgdForChildScope(any(), any(), any(), any()))
-                .thenReturn(averageWaterSupplyResponse());
-        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(any(), any(), any(), any()))
-                .thenReturn(averageWaterSupplyResponse());
-
-        MockHttpServletRequestBuilder request = get(BASE + "/water-supply/average-per-region")
-                .param("scope", scope)
-                .param("start_date", START.toString())
-                .param("end_date", END.toString());
-        if (tenantId != null) {
-            request.param("tenant_id", tenantId);
-        }
-        if (parentLgdId != null) {
-            request.param("parent_lgd_id", parentLgdId);
-        }
-        if (parentDepartmentId != null) {
-            request.param("parent_department_id", parentDepartmentId);
-        }
-
-        if (expectedStatus >= 200 && expectedStatus < 300) {
-            mockMvc.perform(request)
-                    .andExpect(status().is(expectedStatus))
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.data").exists());
-        } else if (tenantId == null) {
-            // Missing required request param is rejected by Spring before controller,
-            // so response body is not our ApiResponse wrapper.
-            mockMvc.perform(request)
-                    .andExpect(status().is(expectedStatus));
-        } else {
-            mockMvc.perform(request)
-                    .andExpect(status().is(expectedStatus))
-                    .andExpect(jsonPath("$.success").value(false))
-                    .andExpect(jsonPath("$.data").value(nullValue()));
-        }
-    }
-
-    @Test
-    void getAverageWaterSupplyPerRegion_invalidScope_returnsBadRequest() throws Exception {
-        mockMvc.perform(get(BASE + "/water-supply/average-per-region")
-                        .param("scope", "invalid")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString())
-                        .param("tenant_id", "10"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-    }
-
-    @Test
-    void getAverageWaterSupplyPerRegion_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
-        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionForCurrentScope(any(), any(), any()))
-                .thenThrow(new RuntimeException("boom"));
-
-        mockMvc.perform(get(BASE + "/water-supply/average-per-region")
-                        .param("scope", "current")
-                        .param("tenant_id", "10")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString()))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-    }
+    @MockBean
+    private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
 //     @Test
 //     void populateDateDimension_validDateRange_returnsOkAndCallsService() throws Exception {
@@ -196,6 +124,68 @@ class AnalyticsWaterSupplyNationalControllerTest {
     }
 
     @Test
+    void getNationalDashboardDistrict_withoutDates_usesDefaultWindowAndReturnsOk() throws Exception {
+        LocalDate defaultStart = LocalDate.of(2026, 2, 1);
+        LocalDate defaultEnd = LocalDate.of(2026, 3, 1);
+        when(defaultAnalyticsDateWindowProvider.defaultWindow())
+                .thenReturn(new DefaultAnalyticsDateWindowProvider.DateWindow(defaultStart, defaultEnd));
+
+        when(schemeRegularityService.getNationalDashboardLevel2MetricsForApi(defaultStart, defaultEnd))
+                .thenReturn(NationalDashboardLevel2MetricsResponse.builder()
+                        .startDate(defaultStart)
+                        .endDate(defaultEnd)
+                        .daysInRange(30)
+                        .overallOutageReasonDistribution(Map.of())
+                        .districts(List.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/national/dashboard/district"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.startDate").value("2026-02-01"))
+                .andExpect(jsonPath("$.data.endDate").value("2026-03-01"))
+                .andExpect(jsonPath("$.data.districts").isArray());
+
+        verify(defaultAnalyticsDateWindowProvider, times(1)).defaultWindow();
+        verify(schemeRegularityService, times(1))
+                .getNationalDashboardLevel2MetricsForApi(defaultStart, defaultEnd);
+    }
+
+    @Test
+    void getNationalDashboardDistrict_withOnlyStartDate_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/district")
+                        .param("start_date", START.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(schemeRegularityService, never()).getNationalDashboardLevel2MetricsForApi(any(), any());
+    }
+
+    @Test
+    void getNationalDashboardDistrict_withOnlyEndDate_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/district")
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(schemeRegularityService, never()).getNationalDashboardLevel2MetricsForApi(any(), any());
+    }
+
+    @Test
+    void getNationalDashboardDistrict_withEndBeforeStart_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/district")
+                        .param("start_date", "2026-02-01")
+                        .param("end_date", "2026-01-31"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
+        verify(schemeRegularityService, never()).getNationalDashboardLevel2MetricsForApi(any(), any());
+    }
+
+    @Test
     void getNationalDashboardBoundaries_returnsOk() throws Exception {
         when(schemeRegularityService.getNationalDashboardBoundariesForApi())
                 .thenReturn(NationalDashboardBoundaryResponse.builder()
@@ -220,6 +210,36 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 .thenThrow(new RuntimeException("boom"));
 
         mockMvc.perform(get(BASE + "/national/dashboard/boundary"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getNationalDashboardLevel2Boundaries_returnsOk() throws Exception {
+        when(schemeRegularityService.getNationalDashboardLevel2BoundariesForApi())
+                .thenReturn(NationalDashboardLevel2BoundaryResponse.builder()
+                        .nationalBoundary(OBJECT_MAPPER.readTree("""
+                                {"type":"Polygon","coordinates":[[[78.1,22.9],[78.2,22.9],[78.2,23.0],[78.1,22.9]]]}
+                                """))
+                        .lgdLevel2Boundaries(List.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary/district"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.nationalBoundary").exists())
+                .andExpect(jsonPath("$.data.lgdLevel2Boundaries").isArray());
+
+        verify(schemeRegularityService, times(1)).getNationalDashboardLevel2BoundariesForApi();
+    }
+
+    @Test
+    void getNationalDashboardLevel2Boundaries_whenServiceThrows_returnsInternalServerErrorWrapper() throws Exception {
+        when(schemeRegularityService.getNationalDashboardLevel2BoundariesForApi())
+                .thenThrow(new RuntimeException("boom"));
+
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary/district"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
@@ -255,46 +275,6 @@ class AnalyticsWaterSupplyNationalControllerTest {
                 Arguments.of("day"),
                 Arguments.of("week"),
                 Arguments.of("month"));
-    }
-
-    @Test
-    void getAverageWaterSupplyPerRegion_scopeChildWithDepartmentId_routesToDepartmentService() throws Exception {
-        when(schemeRegularityService.getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(any(), any(), any(), any()))
-                .thenReturn(averageWaterSupplyResponse());
-
-        mockMvc.perform(get(BASE + "/water-supply/average-per-region")
-                        .param("scope", "child")
-                        .param("tenant_id", "10")
-                        .param("parent_department_id", "201")
-                        .param("start_date", START.toString())
-                        .param("end_date", END.toString()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data").exists());
-
-        verify(schemeRegularityService, times(1))
-                .getAverageWaterSupplyPerCurrentRegionByDepartmentForChildScope(10, 201, START, END);
-    }
-
-    private static Stream<Arguments> waterSupplyCombinationMatrix() {
-        return Stream.of(
-                Arguments.of("current", "10", null, null, 200),
-                Arguments.of("current", null, null, null, 400),
-                Arguments.of("current", "10", "101", "201", 400),
-                Arguments.of("child", null, null, null, 400),
-                Arguments.of("child", "10", "101", null, 200),
-                Arguments.of("child", "10", null, null, 400),
-                Arguments.of("child", "10", "101", "201", 400)
-        );
-    }
-
-    private static AverageWaterSupplyResponse averageWaterSupplyResponse() {
-        return AverageWaterSupplyResponse.builder()
-                .schemeCount(0)
-                .childRegionCount(0)
-                .schemes(List.of())
-                .childRegions(List.of())
-                .build();
     }
 
     private static PeriodicNationalSchemeRegularityResponse periodicNationalSchemeRegularityResponse() {

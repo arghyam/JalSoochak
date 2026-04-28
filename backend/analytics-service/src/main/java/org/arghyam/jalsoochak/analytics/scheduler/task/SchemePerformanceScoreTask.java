@@ -28,9 +28,11 @@ public class SchemePerformanceScoreTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.common.cron:0 0 19 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
+        log.info("Scheduler START '{}'", taskName());
         LocalDate targetDate = LocalDate.now(IST_ZONE);
         log.info("Running scheduled task '{}' for date {}", taskName(), targetDate);
         int insertedRows = schemePerformanceSchedulerService.insertDailySchemePerformanceScores(targetDate);
         log.info("Completed scheduled task '{}' for date {} with insertedRows={}", taskName(), targetDate, insertedRows);
+        log.info("Scheduler END '{}'", taskName());
     }
 }

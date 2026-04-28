@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.user.dto.request.WelcomeMessageRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.WelcomeMessageResponseDTO;
+import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.service.TenantStaffService;
@@ -31,6 +32,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -176,6 +178,84 @@ class TenantStaffControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data[0].role").value("SECTION_OFFICER"))
                     .andExpect(jsonPath("$.data[0].count").value(3));
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/tenant/user/staff/{id}/deactivate")
+    class DeactivateStaff {
+
+        @Test
+        @DisplayName("returns 200 on successful deactivation")
+        void returns200() throws Exception {
+            // tenantStaffService.deactivateStaff is void — Mockito does nothing by default
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message").value("Staff user deactivated successfully"));
+        }
+
+        @Test
+        @DisplayName("returns 400 for non-positive id")
+        void returns400ForNonPositiveId() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/0/deactivate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 400 when tenantCode is blank")
+        void returns400ForBlankTenantCode() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "   "))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 400 when tenantCode is missing")
+        void returns400ForMissingTenantCode() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN")))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 403 on ForbiddenAccessException")
+        void returns403OnForbidden() throws Exception {
+            doThrow(new ForbiddenAccessException("forbidden"))
+                    .when(tenantStaffService).deactivateStaff(any(), any(), any());
+
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("returns 400 on BadRequestException (already deactivated)")
+        void returns400OnAlreadyDeactivated() throws Exception {
+            doThrow(new BadRequestException("already deactivated"))
+                    .when(tenantStaffService).deactivateStaff(any(), any(), any());
+
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 404 on ResourceNotFoundException")
+        void returns404OnNotFound() throws Exception {
+            doThrow(new ResourceNotFoundException("not found"))
+                    .when(tenantStaffService).deactivateStaff(any(), any(), any());
+
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/deactivate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isNotFound());
         }
     }
 

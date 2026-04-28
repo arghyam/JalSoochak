@@ -24,4 +24,15 @@ public interface TenantStaffService {
     List<RoleCountDTO> countStaffByRole(String tenantCode, String status, String name);
 
     TenantStaffResponseDTO updateStaffRole(Long id, UpdateStaffRoleRequestDTO request, Authentication caller);
+
+    /**
+     * Deactivates a staff user: revokes the Keycloak account, sets DB status to INACTIVE,
+     * and publishes an analytics event. Only a STATE_ADMIN for the user's own tenant may
+     * deactivate; a SUPER_USER may deactivate across tenants.
+     *
+     * @param id         the DB id of the staff user to deactivate
+     * @param tenantCode the tenant state code (e.g. "MP")
+     * @param caller     the authenticated caller
+     */
+    void deactivateStaff(Long id, String tenantCode, Authentication caller);
 }

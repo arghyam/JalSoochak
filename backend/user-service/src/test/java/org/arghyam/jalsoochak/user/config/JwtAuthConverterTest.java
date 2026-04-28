@@ -23,7 +23,7 @@ class JwtAuthConverterTest {
 
     private JwtAuthConverter converterFor(boolean singleTenantMode) {
         AppProperties props = new AppProperties();
-        props.setDeploymentMode(singleTenantMode ? "SINGLE_TENANT" : "MULTI_TENANT");
+        props.setSingleTenantMode(singleTenantMode);
         return new JwtAuthConverter(CLIENT_ID, props);
     }
 
@@ -94,7 +94,7 @@ class JwtAuthConverterTest {
         @DisplayName("ignores client roles when clientId is blank")
         void ignoresClientRolesWhenBlankClientId() {
             AppProperties props = new AppProperties();
-            props.setDeploymentMode("MULTI_TENANT");
+            props.setSingleTenantMode(false);
             JwtAuthConverter converter = new JwtAuthConverter("", props);
 
             Jwt jwt = buildJwt(Map.of(

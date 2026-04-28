@@ -139,6 +139,10 @@ class TenantManagementServiceImplTest {
         lenient().when(tenantDefaults.getDeptLocationHierarchy()).thenReturn(Collections.emptyList());
         lenient().when(tenantDefaults.getMeterChangeReasons()).thenReturn(Collections.emptyList());
         lenient().when(tenantDefaults.getSupplyOutageReasons()).thenReturn(Collections.emptyList());
+        // Default empty hierarchies so validateMapLgdLevelCascade / validateDeptMapLevelCascade
+        // don't NPE in tests that don't exercise map-display config validation.
+        lenient().when(tenantSchemaRepository.getLocationHierarchy(anyString(), any(RegionTypeEnum.class)))
+                .thenReturn(LocationConfigDTO.builder().locationHierarchy(Collections.emptyList()).build());
         
         // Manually create service with real ObjectMapper and mocked dependencies
         tenantManagementService = new TenantManagementServiceImpl(
@@ -299,6 +303,14 @@ class TenantManagementServiceImplTest {
                     .thenReturn(Optional.of(ConfigDTO.builder().build()));
             when(tenantCommonRepository.upsertConfig(eq(1), eq("LOCATION_CHECK_REQUIRED"), anyString(), eq(100)))
                     .thenReturn(Optional.of(ConfigDTO.builder().build()));
+            // 2 LGD levels → DISPLAY_MAP_LGD_LEVEL_1 and _2 seeded
+            when(tenantCommonRepository.upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_1"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
+            when(tenantCommonRepository.upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_2"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
+            // 1 dept level → DISPLAY_DEPARTMENT_MAP_LEVEL_1 seeded
+            when(tenantCommonRepository.upsertConfig(eq(1), eq("DISPLAY_DEPARTMENT_MAP_LEVEL_1"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
 
             // Act
             tenantManagementService.createTenant(request);
@@ -306,10 +318,17 @@ class TenantManagementServiceImplTest {
             // Assert — both hierarchy types seeded
             verify(tenantSchemaRepository).setLocationHierarchy("tenant_tt", RegionTypeEnum.LGD, lgdLevels, 100);
             verify(tenantSchemaRepository).setLocationHierarchy("tenant_tt", RegionTypeEnum.DEPARTMENT, deptLevels, 100);
-            // All three reason/flag configs written via upsertConfig
+            // Reason/flag configs seeded
             verify(tenantCommonRepository).upsertConfig(eq(1), eq("METER_CHANGE_REASONS"), anyString(), eq(100));
             verify(tenantCommonRepository).upsertConfig(eq(1), eq("SUPPLY_OUTAGE_REASONS"), anyString(), eq(100));
             verify(tenantCommonRepository).upsertConfig(eq(1), eq("LOCATION_CHECK_REQUIRED"), anyString(), eq(100));
+            // Map display keys seeded for each active level
+            verify(tenantCommonRepository).upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_1"), anyString(), eq(100));
+            verify(tenantCommonRepository).upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_2"), anyString(), eq(100));
+            verify(tenantCommonRepository).upsertConfig(eq(1), eq("DISPLAY_DEPARTMENT_MAP_LEVEL_1"), anyString(), eq(100));
+            // Level 3+ must NOT be seeded (hierarchy only has 2 LGD and 1 dept level)
+            verify(tenantCommonRepository, never()).upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_3"), anyString(), any());
+            verify(tenantCommonRepository, never()).upsertConfig(eq(1), eq("DISPLAY_DEPARTMENT_MAP_LEVEL_2"), anyString(), any());
         }
     }
 
@@ -767,7 +786,7 @@ class TenantManagementServiceImplTest {
         void testSetTenantConfigs_UpsertFailed() throws Exception {
             // Arrange
             Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).build();
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
             Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
             // Use valid JSON format that matches SimpleConfigValueDTO structure
             configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON, objectMapper.readTree("{\"value\": \"test value\"}"));

@@ -391,6 +391,77 @@ class UserTenantRepositoryIntegrationTest {
         }
     }
 
+    // ── resetKeycloakCredentials ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("resetKeycloakCredentials")
+    class ResetKeycloakCredentials {
+
+        @Test
+        @DisplayName("resets password to CSV_ONBOARDED while leaving uuid unchanged")
+        void resetCredentialsClearsManagedPassword() {
+            Long id = insertUser("uuid-reset-kc", "reset@mp.gov", "91XXXXXXXXXR", "Reset User", 3, "encrypted-managed-pw");
+            // Confirm uuid is set before reset
+            TenantUserRecord before = repo.findUserById(SCHEMA, id).orElseThrow();
+            assertThat(before.keycloakUuid()).isEqualTo("uuid-reset-kc");
+
+            int affected = repo.resetKeycloakCredentials(SCHEMA, id, 1L);
+            assertThat(affected).isEqualTo(1);
+
+            Optional<String> pw = repo.findPasswordByUserId(SCHEMA, id);
+            assertThat(pw).hasValue("CSV_ONBOARDED");
+            // uuid must be unchanged — it becomes a dangling reference but must not be cleared
+            // (uuid column is NOT NULL and changing it requires an analytics sync event)
+            TenantUserRecord after = repo.findUserById(SCHEMA, id).orElseThrow();
+            assertThat(after.keycloakUuid()).isEqualTo("uuid-reset-kc");
+        }
+
+        @Test
+        @DisplayName("returns 0 when user does not exist")
+        void resetCredentials_notFound() {
+            int affected = repo.resetKeycloakCredentials(SCHEMA, 99999L, 1L);
+            assertThat(affected).isZero();
+        }
+    }
+
+    // ── deactivateStaffUser ───────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("deactivateStaffUser")
+    class DeactivateStaffUser {
+
+        @Test
+        @DisplayName("sets status to INACTIVE for an active user")
+        void deactivatesActiveUser() {
+            Long id = insertUser("uuid-deact", "deact@mp.gov", "91XXXXXXXXXS", "Deact User", 3, "KEYCLOAK_MANAGED");
+            TenantUserRecord before = repo.findUserById(SCHEMA, id).orElseThrow();
+            assertThat(before.status()).isEqualTo(TenantUserStatus.ACTIVE.code);
+
+            int affected = repo.deactivateStaffUser(SCHEMA, id, null);
+            assertThat(affected).isEqualTo(1);
+
+            TenantUserRecord after = repo.findUserById(SCHEMA, id).orElseThrow();
+            assertThat(after.status()).isEqualTo(TenantUserStatus.INACTIVE.code);
+        }
+
+        @Test
+        @DisplayName("returns 0 (idempotent) for an already inactive user")
+        void isIdempotentForAlreadyInactiveUser() {
+            Long id = insertUser("uuid-deact2", "deact2@mp.gov", "91XXXXXXXXXU", "Deact2 User", 3, "KEYCLOAK_MANAGED");
+            repo.deactivateStaffUser(SCHEMA, id, null); // first deactivation
+
+            int affected = repo.deactivateStaffUser(SCHEMA, id, null); // second call
+            assertThat(affected).isZero();
+        }
+
+        @Test
+        @DisplayName("returns 0 when user does not exist")
+        void returnsZeroForNonexistentUser() {
+            int affected = repo.deactivateStaffUser(SCHEMA, 99999L, null);
+            assertThat(affected).isZero();
+        }
+    }
+
     // ── schema validation ─────────────────────────────────────────────────────
 
     @Nested

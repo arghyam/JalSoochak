@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.TenantDetailsResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceChildRegionDetails;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceScoreResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
@@ -8,9 +10,11 @@ import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.TenantDetailsService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -32,6 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -58,9 +63,21 @@ class AnalyticsTenantSchemeControllerTest {
     @MockBean
     private TenantDetailsService tenantDetailsService;
 
+    @MockBean
+    private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
+
     // not used by this controller, but present in older combined test; keep explicit no-interaction checks
     @MockBean
     private SchemeRegularityService schemeRegularityService;
+
+    @BeforeEach
+    void stubDefaultWindow() {
+        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Kolkata");
+        LocalDate end = LocalDate.now(zone).minusDays(1);
+        LocalDate start = end.minusDays(29);
+        when(defaultAnalyticsDateWindowProvider.defaultWindow())
+                .thenReturn(new DefaultAnalyticsDateWindowProvider.DateWindow(start, end));
+    }
 
     @Test
     void getTenants_wrapsSuccessAndData() throws Exception {
@@ -185,6 +202,92 @@ class AnalyticsTenantSchemeControllerTest {
 
         verify(dimLgdLocationRepository, times(1))
                 .findFirstByTenantIdAndLgdLevelOrderByLgdIdAsc(10, 1);
+        verifyNoInteractions(tenantDetailsService, schemeRegularityService);
+    }
+
+    @Test
+    void getTenantPerformanceScore_withParentLgdId_routesToLgdPerformanceService() throws Exception {
+        when(tenantDetailsService.getTenantPerformanceScoreByParentLgd(
+                eq(10),
+                eq(101),
+                any(LocalDate.class),
+                any(LocalDate.class)
+        )).thenReturn(TenantPerformanceScoreResponse.builder()
+                .tenantId(10)
+                .childRegions(List.of(TenantPerformanceChildRegionDetails.builder()
+                        .lgdId(110)
+                        .departmentId(null)
+                        .parentLgdId(101)
+                        .parentDepartmentId(null)
+                        .lgdLevel(2)
+                        .lgdCode("C110")
+                        .averagePerformanceScore(new java.math.BigDecimal("0.641"))
+                        .build()))
+                .build());
+
+        mockMvc.perform(get(BASE + "/tenant_performance_score")
+                        .param("tenant_id", "10")
+                        .param("parent_lgd_id", "101"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.tenantId").value(10))
+                .andExpect(jsonPath("$.data.childRegions[0].lgdId").value(110))
+                .andExpect(jsonPath("$.data.childRegions[0].lgdCode").value("C110"))
+                .andExpect(jsonPath("$.data.childRegions[0].averagePerformanceScore").value(0.641))
+                .andExpect(jsonPath("$.data.childRegions[0].title").doesNotExist())
+                .andExpect(jsonPath("$.data.childRegions[0].boundaryGeoJson").doesNotExist());
+
+        verify(tenantDetailsService, times(1))
+                .getTenantPerformanceScoreByParentLgd(eq(10), eq(101), any(LocalDate.class), any(LocalDate.class));
+        verifyNoInteractions(schemeRegularityService);
+    }
+
+    @Test
+    void getTenantPerformanceScore_withParentDepartmentId_routesToDepartmentPerformanceService() throws Exception {
+        when(tenantDetailsService.getTenantPerformanceScoreByParentDepartment(
+                eq(10),
+                eq(201),
+                any(LocalDate.class),
+                any(LocalDate.class)
+        )).thenReturn(TenantPerformanceScoreResponse.builder()
+                .tenantId(10)
+                .childRegions(List.of(TenantPerformanceChildRegionDetails.builder()
+                        .lgdId(null)
+                        .departmentId(210)
+                        .parentLgdId(null)
+                        .parentDepartmentId(201)
+                        .lgdLevel(3)
+                        .lgdCode(null)
+                        .averagePerformanceScore(new java.math.BigDecimal("0.888"))
+                        .build()))
+                .build());
+
+        mockMvc.perform(get(BASE + "/tenant_performance_score")
+                        .param("tenant_id", "10")
+                        .param("parent_department_id", "201"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.tenantId").value(10))
+                .andExpect(jsonPath("$.data.childRegions[0].departmentId").value(210))
+                .andExpect(jsonPath("$.data.childRegions[0].averagePerformanceScore").value(0.888))
+                .andExpect(jsonPath("$.data.childRegions[0].title").doesNotExist())
+                .andExpect(jsonPath("$.data.childRegions[0].boundaryGeoJson").doesNotExist());
+
+        verify(tenantDetailsService, times(1))
+                .getTenantPerformanceScoreByParentDepartment(eq(10), eq(201), any(LocalDate.class), any(LocalDate.class));
+        verifyNoInteractions(schemeRegularityService);
+    }
+
+    @Test
+    void getTenantPerformanceScore_withBothParentIds_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/tenant_performance_score")
+                        .param("tenant_id", "10")
+                        .param("parent_lgd_id", "101")
+                        .param("parent_department_id", "201"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+
         verifyNoInteractions(tenantDetailsService, schemeRegularityService);
     }
 

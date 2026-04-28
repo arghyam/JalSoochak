@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -11,6 +12,7 @@ import java.math.BigDecimal;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ChildRegionDetails {
 
     private Integer lgdId;
@@ -21,6 +23,4 @@ public class ChildRegionDetails {
     private Integer schemeCount;
     private String title;
     private String lgdCode;
-    private String boundaryGeoJson;
-    private BigDecimal averagePerformanceScore;
 }

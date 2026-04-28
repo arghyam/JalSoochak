@@ -39,6 +39,7 @@ class PumpOperatorUploadChunkProcessorTest {
     @Mock private UserUploadRepository userUploadRepository;
     @Mock private UserEventPublisher userEventPublisher;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
+    @Mock private StaffKeycloakService staffKeycloakService;
 
     private PumpOperatorUploadChunkProcessor processor;
 
@@ -52,7 +53,7 @@ class PumpOperatorUploadChunkProcessorTest {
     void setUp() {
         processor = new PumpOperatorUploadChunkProcessor(
                 userTenantRepository, userUploadRepository,
-                userEventPublisher, userAnalyticsEventPublisher);
+                userEventPublisher, userAnalyticsEventPublisher, staffKeycloakService);
     }
 
     private Map<String, Integer> userTypeIds() {
@@ -234,6 +235,56 @@ class PumpOperatorUploadChunkProcessorTest {
             assertThat(result.uploadedRows()).isEqualTo(1);
             verify(userTenantRepository).updateUserProfile(SCHEMA, 55L, "New Name", "919876543214");
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 55L, 1);
+        }
+
+        @Test
+        @DisplayName("calls revokeKeycloakAccount before updateUserProfile when stored phone differs from upload phone")
+        void callsRevokeKeycloakAccountWhenPhoneChanges() {
+            // Simulate a user whose stored phone (91DIFFERENT) differs from the upload row's phone.
+            // This can happen if a future phone-change API is added; the guard must revoke the old
+            // Keycloak account so the next OTP login re-provisions with the new phone as username.
+            TenantUserRecord existingUserDiffPhone = new TenantUserRecord(
+                    55L, 10, "91DIFFERENT000", "po@test.com", 4L, "PUMP_OPERATOR",
+                    "Old Name", "kc-uuid-old", 1, null);
+            var uploadRow = row(1, "New", "Name", "New Name", "9876543214", "pump_operator", "SS-1");
+            Map<String, Integer> schemeCache = schemeCache("SS-1", 100);
+
+            // findUserByPhone is called with the upload phone (919876543214); we return a user
+            // whose stored phoneNumber is different to trigger the guard.
+            when(userTenantRepository.findUserByPhone(SCHEMA, "919876543214"))
+                    .thenReturn(Optional.of(existingUserDiffPhone));
+            when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt()))
+                    .thenReturn(new int[]{1});
+            when(userUploadRepository.markUserSchemeMappingsDeleted(eq(SCHEMA), anyList(), anyInt()))
+                    .thenReturn(0);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), 1, 1,
+                    List.of(uploadRow), schemeCache, new HashSet<>());
+
+            verify(staffKeycloakService).revokeKeycloakAccount(existingUserDiffPhone, SCHEMA, ACTOR.id());
+            verify(userTenantRepository).updateUserProfile(SCHEMA, 55L, "New Name", "919876543214");
+        }
+
+        @Test
+        @DisplayName("does NOT call revokeKeycloakAccount when phone is unchanged")
+        void doesNotCallRevokeWhenPhoneUnchanged() {
+            TenantUserRecord existingUser = new TenantUserRecord(
+                    55L, 10, "919876543214", "po@test.com", 4L, "PUMP_OPERATOR",
+                    "Old Name", "kc-uuid-123", 1, null);
+            var uploadRow = row(1, "New", "Name", "New Name", "9876543214", "pump_operator", "SS-1");
+            Map<String, Integer> schemeCache = schemeCache("SS-1", 100);
+
+            when(userTenantRepository.findUserByPhone(SCHEMA, "919876543214"))
+                    .thenReturn(Optional.of(existingUser));
+            when(userUploadRepository.insertUserSchemeMappings(eq(SCHEMA), anyList(), anyInt()))
+                    .thenReturn(new int[]{1});
+            when(userUploadRepository.markUserSchemeMappingsDeleted(eq(SCHEMA), anyList(), anyInt()))
+                    .thenReturn(0);
+
+            processor.processChunk(SCHEMA, TENANT_CODE, ACTOR, userTypeIds(), 1, 1,
+                    List.of(uploadRow), schemeCache, new HashSet<>());
+
+            verify(staffKeycloakService, never()).revokeKeycloakAccount(any(), anyString(), anyLong());
         }
 
         @Test
