@@ -7,5 +7,5 @@ import lombok.Data;
 @Builder
 public class ReadingsApiResponse {
     private boolean success;
-    private CreateReadingResponse data;
+    private ReadingsDataResponse data;
 }
