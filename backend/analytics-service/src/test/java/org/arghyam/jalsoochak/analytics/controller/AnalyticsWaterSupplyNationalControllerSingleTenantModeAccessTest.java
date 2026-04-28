@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
@@ -33,11 +34,21 @@ class AnalyticsWaterSupplyNationalControllerSingleTenantModeAccessTest {
     @MockBean
     private DateDimensionService dateDimensionService;
 
+    @MockBean
+    private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
+
     @Test
     void nationalDashboardBoundary_forbiddenInSingleTenantMode() throws Exception {
         mockMvc.perform(get(BASE + "/national/dashboard/boundary"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("API 'national/dashboard/boundary' cannot be accessed when single-tenant mode is enabled"));
+    }
+
+    @Test
+    void nationalDashboardLevel2Boundary_forbiddenInSingleTenantMode() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/boundary/district"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("API 'national/dashboard/boundary/district' cannot be accessed when single-tenant mode is enabled"));
     }
 
     @Test
@@ -47,6 +58,13 @@ class AnalyticsWaterSupplyNationalControllerSingleTenantModeAccessTest {
                         .param("end_date", "2026-01-31"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("API 'national/dashboard' cannot be accessed when single-tenant mode is enabled"));
+    }
+
+    @Test
+    void nationalDashboardDistrict_forbiddenInSingleTenantMode() throws Exception {
+        mockMvc.perform(get(BASE + "/national/dashboard/district"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("API 'national/dashboard/district' cannot be accessed when single-tenant mode is enabled"));
     }
 
     @Test

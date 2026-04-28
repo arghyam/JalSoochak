@@ -1,5 +1,9 @@
 server:
   port: 8087
+  compression:
+    enabled: true
+    mime-types: application/json,application/*+json,text/plain,text/html,text/xml,application/xml
+    min-response-size: 1024
 
 spring:
   application:

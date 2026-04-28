@@ -26,7 +26,6 @@ public class AssamReadingRequest {
     @JsonProperty("reading_url")
     private String readingUrl;
 
-    @NotNull
     @DecimalMin(value = "0.0", inclusive = false)
     @JsonProperty("confirmed_reading")
     private BigDecimal confirmedReading;

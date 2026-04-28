@@ -2,11 +2,14 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicNationalSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.SingleTenantModeAccessException;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.service.DateDimensionService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -37,6 +40,7 @@ public class AnalyticsWaterSupplyNationalController {
 
     private final SchemeRegularityService schemeRegularityService;
     private final DateDimensionService dateDimensionService;
+    private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
     @Value("${analytics.single-tenant-mode:false}")
     private boolean singleTenantMode;
@@ -83,6 +87,39 @@ public class AnalyticsWaterSupplyNationalController {
         }
     }
 
+    @GetMapping("/national/dashboard/boundary/district")
+    @Operation(
+            summary = "Get national outer boundary + LGD level-2 boundaries for the national dashboard map",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "National + level-2 boundaries fetched successfully",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_SUCCESS))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<NationalDashboardLevel2BoundaryResponse>> getNationalDashboardLevel2Boundaries() {
+        rejectIfSingleTenantMode("national/dashboard/boundary/district");
+        try {
+            return ResponseEntity.ok(ApiResponse.<NationalDashboardLevel2BoundaryResponse>builder()
+                    .success(true)
+                    .data(schemeRegularityService.getNationalDashboardLevel2BoundariesForApi())
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardLevel2BoundaryResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
     @GetMapping("/national/dashboard")
     @Operation(
             summary = "Get national dashboard aggregates with state-wise metrics and overall outage distribution",
@@ -112,6 +149,60 @@ public class AnalyticsWaterSupplyNationalController {
                     .build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
+    @GetMapping("/national/dashboard/district")
+    @Operation(
+            summary = "Get national dashboard aggregates at LGD level-2 (district) without repeating identity fields across arrays",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "National district dashboard fetched successfully",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.NATIONAL_DASHBOARD_LEVEL2_METRICS_SUCCESS))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE))
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<NationalDashboardLevel2MetricsResponse>> getNationalDashboardDistrict(
+            @RequestParam(name = "start_date", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        rejectIfSingleTenantMode("national/dashboard/district");
+        try {
+            if (startDate == null && endDate == null) {
+                DefaultAnalyticsDateWindowProvider.DateWindow window =
+                        defaultAnalyticsDateWindowProvider.defaultWindow();
+                startDate = window.startDate();
+                endDate = window.endDate();
+            } else if (startDate == null || endDate == null) {
+                throw new IllegalArgumentException("Provide both start_date and end_date together");
+            }
+            if (endDate.isBefore(startDate)) {
+                throw new IllegalArgumentException("end_date must be on or after start_date");
+            }
+
+            return ResponseEntity.ok(ApiResponse.<NationalDashboardLevel2MetricsResponse>builder()
+                    .success(true)
+                    .data(schemeRegularityService.getNationalDashboardLevel2MetricsForApi(startDate, endDate))
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<NationalDashboardLevel2MetricsResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardLevel2MetricsResponse>builder()
                     .success(false)
                     .data(null)
                     .build());

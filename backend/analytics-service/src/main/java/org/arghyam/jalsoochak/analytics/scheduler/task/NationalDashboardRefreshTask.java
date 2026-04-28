@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.scheduler.task;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 
 @Component
+@ConditionalOnProperty(prefix = "analytics", name = "single-tenant-mode", havingValue = "false", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
 public class NationalDashboardRefreshTask implements AnalyticsScheduledTask {
@@ -42,6 +44,8 @@ public class NationalDashboardRefreshTask implements AnalyticsScheduledTask {
 
         log.info("Running scheduled task '{}' for range {} to {}", taskName(), startDate, endDate);
         schemeRegularityService.refreshNationalDashboard(startDate, endDate);
+        // Warm cache for national district-level dashboard (LGD level-2).
+        schemeRegularityService.getNationalDashboardLevel2MetricsForApi(startDate, endDate);
         log.info("Completed scheduled task '{}' for range {} to {}", taskName(), startDate, endDate);
         log.info("Scheduler END '{}'", taskName());
     }

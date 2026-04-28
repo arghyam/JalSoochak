@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 
 import org.arghyam.jalsoochak.analytics.dto.response.ChildRegionDetails;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantBoundaryGeoJsonChildRegion;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantBoundaryGeoJsonResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantDetailsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
@@ -39,6 +41,7 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
     private static final Duration TENANT_DETAILS_CACHE_TTL = Duration.ofHours(24);
     private static final String TENANT_DETAILS_CACHE_PREFIX = "analytics-service:api-cache:get_tenant_details";
     private static final String TENANT_PERFORMANCE_CACHE_PREFIX = "analytics-service:api-cache:get_tenant_performance_score";
+    private static final String TENANT_BOUNDARY_GEOJSON_CACHE_PREFIX = "analytics-service:api-cache:get_tenant_boundary_geojson";
     private static final String DEBUG_LOG_PATH = "/home/beehyv/Desktop/Codes/jalSoochak/JalSoochak_New/.cursor/debug.log";
 
     private final DimTenantRepository dimTenantRepository;
@@ -84,7 +87,6 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
         } else {
             Map<String, Object> boundaryResult = tenantBoundaryRepository.getMergedBoundaryForTenant(tenantId);
             Integer boundaryCount = intFromQueryMap(boundaryResult, "boundary_count");
-            String boundaryGeoJson = (String) boundaryResult.get("boundary_geojson");
 
             response = TenantDetailsResponse.builder()
                     .tenantId(tenant.getTenantId())
@@ -92,7 +94,6 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                     .parentLgdLevel(null)
                     .parentDepartmentLevel(null)
                     .childBoundaryCount(boundaryCount)
-                    .boundaryGeoJson(boundaryGeoJson)
                     .childRegions(List.of())
                     .build();
         }
@@ -141,6 +142,110 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                         .schemeCount(row.get("scheme_count") instanceof Number number ? number.intValue() : 0)
                         .title((String) row.get("title"))
                         .lgdCode((String) row.get("lgd_code"))
+                        .build())
+                .toList();
+
+        Map<String, Object> mergedBoundaryResult = tenantDepartmentBoundaryRepository
+                .getMergedBoundaryByParentDepartment(tenantId, parentDepartmentId, parentLevel);
+
+        TenantDetailsResponse response = TenantDetailsResponse.builder()
+                .tenantId(tenant.getTenantId())
+                .stateCode(tenant.getStateCode())
+                .parentLgdLevel(null)
+                .parentDepartmentLevel(parentLevel)
+                .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
+                .childRegions(childRegions)
+                .build();
+
+        writeToCache(cacheKey, response);
+        return response;
+    }
+
+    @Override
+    public TenantBoundaryGeoJsonResponse getTenantBoundaryGeoJson(Integer tenantId, Integer parentLgdId) {
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalArgumentException("tenant_id must be a positive integer");
+        }
+
+        String parentSegment = parentLgdId == null ? "all" : String.valueOf(parentLgdId);
+        String cacheKey = TENANT_BOUNDARY_GEOJSON_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":parent:" + parentSegment
+                + ":v1";
+
+        TenantBoundaryGeoJsonResponse cached = readFromCache(cacheKey, TenantBoundaryGeoJsonResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
+        DimTenant tenant = dimTenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Tenant not found for tenant_id: " + tenantId));
+
+        TenantBoundaryGeoJsonResponse response;
+        if (parentLgdId != null) {
+            response = getTenantBoundaryGeoJsonByParentLgdInternal(tenant, parentLgdId);
+        } else {
+            Map<String, Object> boundaryResult = tenantBoundaryRepository.getMergedBoundaryForTenant(tenantId);
+            Integer boundaryCount = intFromQueryMap(boundaryResult, "boundary_count");
+            String boundaryGeoJson = (String) boundaryResult.get("boundary_geojson");
+
+            response = TenantBoundaryGeoJsonResponse.builder()
+                    .tenantId(tenant.getTenantId())
+                    .stateCode(tenant.getStateCode())
+                    .parentLgdLevel(null)
+                    .parentDepartmentLevel(null)
+                    .childBoundaryCount(boundaryCount)
+                    .childRegionCount(0)
+                    .parentBoundaryGeoJson(boundaryGeoJson)
+                    .childRegions(List.of())
+                    .build();
+        }
+
+        writeToCache(cacheKey, response);
+        return response;
+    }
+
+    @Override
+    public TenantBoundaryGeoJsonResponse getTenantBoundaryGeoJsonByParentDepartment(Integer tenantId, Integer parentDepartmentId) {
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalArgumentException("tenant_id must be a positive integer");
+        }
+        if (parentDepartmentId == null || parentDepartmentId <= 0) {
+            throw new IllegalArgumentException("parent_department_id must be a positive integer");
+        }
+
+        String cacheKey = TENANT_BOUNDARY_GEOJSON_CACHE_PREFIX
+                + ":tenant:" + tenantId
+                + ":parent_department:" + parentDepartmentId
+                + ":v1";
+
+        TenantBoundaryGeoJsonResponse cached = readFromCache(cacheKey, TenantBoundaryGeoJsonResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
+        DimTenant tenant = dimTenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Tenant not found for tenant_id: " + tenantId));
+
+        Integer parentLevel = tenantDepartmentBoundaryRepository.getDepartmentLevel(tenantId, parentDepartmentId);
+        if (parentLevel == null) {
+            throw new IllegalArgumentException("parent_department_id not found for tenant: " + parentDepartmentId);
+        }
+        if (parentLevel >= 6) {
+            throw new IllegalArgumentException("No child department level available for parent_department_id: " + parentDepartmentId);
+        }
+
+        List<Map<String, Object>> childRows = tenantDepartmentBoundaryRepository
+                .getChildDepartmentsByParent(tenantId, parentDepartmentId, parentLevel);
+        List<TenantBoundaryGeoJsonChildRegion> childRegions = childRows.stream()
+                .map(row -> TenantBoundaryGeoJsonChildRegion.builder()
+                        .lgdId(null)
+                        .departmentId((Integer) row.get("department_id"))
+                        .parentLgdId(null)
+                        .parentDepartmentId((Integer) row.get("parent_department_id"))
+                        .lgdLevel((Integer) row.get("child_level"))
+                        .title((String) row.get("title"))
+                        .lgdCode((String) row.get("lgd_code"))
                         .boundaryGeoJson((String) row.get("boundary_geojson"))
                         .build())
                 .toList();
@@ -154,13 +259,14 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                 ? parentBoundaryGeoJson
                 : (String) mergedBoundaryResult.get("boundary_geojson");
 
-        TenantDetailsResponse response = TenantDetailsResponse.builder()
+        TenantBoundaryGeoJsonResponse response = TenantBoundaryGeoJsonResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
                 .parentLgdLevel(null)
                 .parentDepartmentLevel(parentLevel)
                 .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
-                .boundaryGeoJson(boundaryGeoJson)
+                .childRegionCount(childRegions == null ? 0 : childRegions.size())
+                .parentBoundaryGeoJson(boundaryGeoJson)
                 .childRegions(childRegions)
                 .build();
 
@@ -365,6 +471,46 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                         .schemeCount(row.get("scheme_count") instanceof Number number ? number.intValue() : 0)
                         .title((String) row.get("title"))
                         .lgdCode((String) row.get("lgd_code"))
+                        .build())
+                .toList();
+
+        Map<String, Object> mergedBoundaryResult =
+                tenantBoundaryRepository.getMergedBoundaryByParent(tenant.getTenantId(), parentLgdId, parentLevel);
+
+        return TenantDetailsResponse.builder()
+                .tenantId(tenant.getTenantId())
+                .stateCode(tenant.getStateCode())
+                .parentLgdLevel(parentLevel)
+                .parentDepartmentLevel(null)
+                .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
+                .childRegions(childRegions)
+                .build();
+    }
+
+    private TenantBoundaryGeoJsonResponse getTenantBoundaryGeoJsonByParentLgdInternal(
+            DimTenant tenant,
+            Integer parentLgdId
+    ) {
+        if (parentLgdId == null || parentLgdId <= 0) {
+            throw new IllegalArgumentException("parent_lgd_id must be a positive integer");
+        }
+
+        Integer parentLevel = tenantBoundaryRepository.getLocationLevel(parentLgdId);
+        if (parentLevel == null) {
+            throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
+        }
+
+        List<Map<String, Object>> childRows =
+                tenantBoundaryRepository.getChildLevelByParent(tenant.getTenantId(), parentLgdId, parentLevel);
+        List<TenantBoundaryGeoJsonChildRegion> childRegions = childRows.stream()
+                .map(row -> TenantBoundaryGeoJsonChildRegion.builder()
+                        .lgdId((Integer) row.get("lgd_id"))
+                        .departmentId(null)
+                        .parentLgdId((Integer) row.get("parent_lgd_id"))
+                        .parentDepartmentId(null)
+                        .lgdLevel((Integer) row.get("child_level"))
+                        .title((String) row.get("title"))
+                        .lgdCode((String) row.get("lgd_code"))
                         .boundaryGeoJson((String) row.get("boundary_geojson"))
                         .build())
                 .toList();
@@ -378,13 +524,14 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
                 ? parentBoundaryGeoJson
                 : (String) mergedBoundaryResult.get("boundary_geojson");
 
-        return TenantDetailsResponse.builder()
+        return TenantBoundaryGeoJsonResponse.builder()
                 .tenantId(tenant.getTenantId())
                 .stateCode(tenant.getStateCode())
                 .parentLgdLevel(parentLevel)
                 .parentDepartmentLevel(null)
                 .childBoundaryCount(intFromQueryMap(mergedBoundaryResult, "child_count"))
-                .boundaryGeoJson(boundaryGeoJson)
+                .childRegionCount(childRegions == null ? 0 : childRegions.size())
+                .parentBoundaryGeoJson(boundaryGeoJson)
                 .childRegions(childRegions)
                 .build();
     }
@@ -432,6 +579,15 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
             redisTemplate.opsForValue().set(cacheKey, payload, TENANT_DETAILS_CACHE_TTL);
         } catch (Exception e) {
             log.warn("Failed to write tenant details cache [{}]: {}", cacheKey, e.getMessage());
+        }
+    }
+
+    private void writeToCache(String cacheKey, TenantBoundaryGeoJsonResponse response) {
+        try {
+            String payload = objectMapper.writeValueAsString(response);
+            redisTemplate.opsForValue().set(cacheKey, payload, TENANT_DETAILS_CACHE_TTL);
+        } catch (Exception e) {
+            log.warn("Failed to write tenant boundary cache [{}]: {}", cacheKey, e.getMessage());
         }
     }
 
