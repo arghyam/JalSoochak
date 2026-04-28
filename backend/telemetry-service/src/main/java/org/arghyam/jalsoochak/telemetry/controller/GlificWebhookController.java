@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
@@ -107,7 +108,7 @@ public class GlificWebhookController {
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
-                            .data(response)
+                            .data(toReadingsDataResponse(response))
                             .build()
             );
         } catch (Exception e) {
@@ -127,10 +128,21 @@ public class GlificWebhookController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                     ReadingsApiResponse.builder()
                             .success(false)
-                            .data(errorResponse)
+                            .data(toReadingsDataResponse(errorResponse))
                             .build()
             );
         }
+    }
+
+    private ReadingsDataResponse toReadingsDataResponse(CreateReadingResponse response) {
+        return ReadingsDataResponse.builder()
+                .correlationId(response.getCorrelationId())
+                .meterReading(response.getMeterReading())
+                .qualityStatus(response.getQualityStatus())
+                .qualityConfidence(response.getQualityConfidence())
+                .lastConfirmedReading(response.getLastConfirmedReading())
+                .message(response.getMessage())
+                .build();
     }
 
     @PostMapping("/intro")
