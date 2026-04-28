@@ -58,6 +58,7 @@ class MapDisplayConfigValidationTest {
     @Mock private TenantSchedulerManager schedulerManager;
     @Mock private ObjectStorageService objectStorageService;
     @Mock private SystemManagementService systemManagementService;
+    @Mock private ApiKeyService apiKeyService;
 
     private TenantManagementServiceImpl service;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -71,7 +72,7 @@ class MapDisplayConfigValidationTest {
         service = new TenantManagementServiceImpl(
                 tenantCommonRepository, tenantSchemaRepository, objectMapper,
                 appProperties, tenantDefaults, eventPublisher, schedulerManager,
-                objectStorageService, systemManagementService);
+                objectStorageService, systemManagementService, apiKeyService);
 
         // Provide a valid authenticated context so resolveCurrentUserId() doesn't throw
         Jwt jwt = Jwt.withTokenValue("token")
