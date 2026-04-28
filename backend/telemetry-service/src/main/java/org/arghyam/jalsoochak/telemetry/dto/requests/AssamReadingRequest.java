@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.dto.requests;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -26,8 +27,8 @@ public class AssamReadingRequest {
     @JsonProperty("reading_url")
     private String readingUrl;
 
-    @NotNull
     @DecimalMin(value = "0.0", inclusive = false)
+    @JsonAlias("confirmed_readings")
     @JsonProperty("confirmed_reading")
     private BigDecimal confirmedReading;
 
