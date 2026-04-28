@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedChannelRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.junit.jupiter.api.Test;
@@ -111,7 +112,7 @@ class GlificWebhookControllerUnitTest {
         GlificWebhookService service = new StubGlificWebhookService(false, false);
         GlificWebhookController controller = new GlificWebhookController(service);
 
-        ResponseEntity<CreateReadingResponse> response = controller.receiveAssamReading(
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
                 22,
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
@@ -126,7 +127,8 @@ class GlificWebhookControllerUnitTest {
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
         assertEquals(true, response.getBody().isSuccess());
-        assertEquals("assam-reading-ok", response.getBody().getMessage());
+        assertNotNull(response.getBody().getData());
+        assertEquals("assam-reading-ok", response.getBody().getData().getMessage());
     }
 
     private static final class StubGlificWebhookService extends GlificWebhookService {

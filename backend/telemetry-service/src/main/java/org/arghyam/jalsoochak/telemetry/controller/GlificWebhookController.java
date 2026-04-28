@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.ClosingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.SelectionResponse;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
@@ -97,13 +98,18 @@ public class GlificWebhookController {
             consumes = "application/json",
             produces = "application/json"
     )
-    public ResponseEntity<CreateReadingResponse> receiveAssamReading(
+    public ResponseEntity<ReadingsApiResponse> receiveAssamReading(
             @RequestHeader("X-Tenant-Id") Integer tenantId,
             @RequestBody @Valid AssamReadingRequest request
     ) {
         try {
             CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(
+                    ReadingsApiResponse.builder()
+                            .success(true)
+                            .data(response)
+                            .build()
+            );
         } catch (Exception e) {
             String safeContactId = request != null ? request.getPhoneNumber() : null;
             log.error("Error processing Assam reading: {}", e.getMessage(), e);
@@ -118,7 +124,12 @@ public class GlificWebhookController {
                     .lastConfirmedReading(null)
                     .build();
 
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    ReadingsApiResponse.builder()
+                            .success(false)
+                            .data(errorResponse)
+                            .build()
+            );
         }
     }
 
