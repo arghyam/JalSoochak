@@ -4920,7 +4920,10 @@ public class SchemeRegularityRepository {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForMeterReadings(scale);
 
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT
                         s.tenant_id,
                         s.scheme_id
@@ -4931,7 +4934,8 @@ public class SchemeRegularityRepository {
                         %1$s AS period_start_date,
                         %2$s AS period_end_date,
                         %3$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 scheme_supply_days AS (
                     SELECT
@@ -4940,7 +4944,8 @@ public class SchemeRegularityRepository {
                         %4$s AS period_start_date,
                         COUNT(DISTINCT m.reading_date)::int AS supply_days,
                         COALESCE(SUM(m.confirmed_reading), 0)::bigint AS total_water_quantity
-                    FROM analytics_schema.fact_meter_reading_table m
+                    FROM params,
+                         analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope s
                         ON s.scheme_id = m.scheme_id
                         AND s.tenant_id = m.tenant_id
@@ -4981,6 +4986,7 @@ public class SchemeRegularityRepository {
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
                 startDate,
+                startDate,
                 endDate,
                 startDate,
                 endDate);
@@ -4994,7 +5000,10 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT
                         s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
@@ -5005,7 +5014,8 @@ public class SchemeRegularityRepository {
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 scheme_day AS (
                     SELECT
@@ -5024,7 +5034,8 @@ public class SchemeRegularityRepository {
                         %5$s AS period_start_date,
                         COUNT(*) FILTER (WHERE sd.day_water_quantity > 0)::int AS supply_days,
                         COALESCE(SUM(sd.day_water_quantity), 0)::bigint AS total_water_quantity
-                    FROM scheme_day sd
+                    FROM params,
+                         scheme_day sd
                     GROUP BY sd.scheme_id, %5$s
                 ),
                 period_supply AS (
@@ -5060,6 +5071,7 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_count"),
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
+                startDate,
                 locationId,
                 startDate,
                 endDate,
@@ -5076,7 +5088,10 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT
                         s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
@@ -5088,7 +5103,8 @@ public class SchemeRegularityRepository {
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 scheme_day AS (
                     SELECT
@@ -5108,7 +5124,8 @@ public class SchemeRegularityRepository {
                         %5$s AS period_start_date,
                         COUNT(*) FILTER (WHERE sd.day_water_quantity > 0)::int AS supply_days,
                         COALESCE(SUM(sd.day_water_quantity), 0)::bigint AS total_water_quantity
-                    FROM scheme_day sd
+                    FROM params,
+                         scheme_day sd
                     GROUP BY sd.scheme_id, %5$s
                 ),
                 period_supply AS (
@@ -5144,6 +5161,7 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_count"),
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
+                startDate,
                 locationId,
                 tenantId,
                 startDate,
@@ -5390,7 +5408,10 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
@@ -5400,14 +5421,16 @@ public class SchemeRegularityRepository {
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 outage_by_period AS (
                     SELECT
                         %5$s AS period_start_date,
                         f.outage_reason,
                         COUNT(DISTINCT f.scheme_id)::int AS scheme_count
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM params,
+                         analytics_schema.fact_water_quantity_table f
                     JOIN schemes_in_scope s
                         ON s.scheme_id = f.scheme_id
                     WHERE f.outage_reason IS NOT NULL
@@ -5444,6 +5467,7 @@ public class SchemeRegularityRepository {
                             reason,
                             count);
                 },
+                startDate,
                 locationId,
                 startDate,
                 endDate,
@@ -5460,7 +5484,10 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
@@ -5471,14 +5498,16 @@ public class SchemeRegularityRepository {
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 outage_by_period AS (
                     SELECT
                         %5$s AS period_start_date,
                         f.outage_reason,
                         COUNT(DISTINCT f.scheme_id)::int AS scheme_count
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM params,
+                         analytics_schema.fact_water_quantity_table f
                     JOIN schemes_in_scope s
                         ON s.scheme_id = f.scheme_id
                     WHERE f.outage_reason IS NOT NULL
@@ -5515,6 +5544,7 @@ public class SchemeRegularityRepository {
                             reason,
                             count);
                 },
+                startDate,
                 locationId,
                 tenantId,
                 startDate,
@@ -5531,7 +5561,10 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT
                         s.scheme_id,
                         COALESCE(s.house_hold_count, 0)::bigint AS house_hold_count,
@@ -5545,13 +5578,15 @@ public class SchemeRegularityRepository {
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 water_by_period AS (
                     SELECT
                         %5$s AS period_start_date,
                         AVG(f.water_quantity::numeric) AS avg_water_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM params,
+                         analytics_schema.fact_water_quantity_table f
                     JOIN schemes_in_scope s
                         ON s.scheme_id = f.scheme_id
                     WHERE f.date BETWEEN ? AND ?
@@ -5594,6 +5629,7 @@ public class SchemeRegularityRepository {
                         rs.getLong("household_count"),
                         rs.getLong("fhtc_count"),
                         rs.getLong("planned_fhtc")),
+                startDate,
                 locationId,
                 startDate,
                 endDate,
@@ -5629,6 +5665,10 @@ public class SchemeRegularityRepository {
     }
 
     private PeriodSqlParts buildPeriodSqlParts(PeriodScale scale) {
+        // Period alignment rules:
+        // - WEEK: rolling 7-day buckets anchored to the request start_date (params.anchor_start), not ISO-week aligned.
+        // - MONTH/QUARTER/YEAR: calendar-aligned buckets via DATE_TRUNC (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31).
+        // These fragments assume the calling query defines `params(anchor_start)` CTE when WEEK scale is used.
         return switch (scale) {
             case DAY -> new PeriodSqlParts(
                     "g.day_date::date",
@@ -5636,19 +5676,30 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "f.date::date");
             case WEEK -> new PeriodSqlParts(
-                    "DATE_TRUNC('week', g.day_date)::date",
-                    "(DATE_TRUNC('week', g.day_date)::date + 6)",
-                    "TO_CHAR(DATE_TRUNC('week', g.day_date)::date, 'IYYY-\"W\"IW')",
-                    "DATE_TRUNC('week', f.date)::date");
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
+                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
+                    "(params.anchor_start + (((f.date::date - params.anchor_start) / 7) * 7))::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
                     "TO_CHAR(DATE_TRUNC('month', g.day_date)::date, 'YYYY-MM')",
                     "DATE_TRUNC('month', f.date)::date");
+            case QUARTER -> new PeriodSqlParts(
+                    "DATE_TRUNC('quarter', g.day_date)::date",
+                    "(DATE_TRUNC('quarter', g.day_date)::date + INTERVAL '3 month - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('quarter', g.day_date)::date, 'YYYY-\"Q\"Q')",
+                    "DATE_TRUNC('quarter', f.date)::date");
+            case YEAR -> new PeriodSqlParts(
+                    "DATE_TRUNC('year', g.day_date)::date",
+                    "(DATE_TRUNC('year', g.day_date)::date + INTERVAL '1 year - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('year', g.day_date)::date, 'YYYY')",
+                    "DATE_TRUNC('year', f.date)::date");
         };
     }
 
     private PeriodSqlParts buildPeriodSqlPartsForMeterReadings(PeriodScale scale) {
+        // Same alignment rules as buildPeriodSqlParts(), but fact date column is m.reading_date.
         return switch (scale) {
             case DAY -> new PeriodSqlParts(
                     "g.day_date::date",
@@ -5656,19 +5707,30 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "m.reading_date::date");
             case WEEK -> new PeriodSqlParts(
-                    "DATE_TRUNC('week', g.day_date)::date",
-                    "(DATE_TRUNC('week', g.day_date)::date + 6)",
-                    "TO_CHAR(DATE_TRUNC('week', g.day_date)::date, 'IYYY-\"W\"IW')",
-                    "DATE_TRUNC('week', m.reading_date)::date");
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
+                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
+                    "(params.anchor_start + (((m.reading_date::date - params.anchor_start) / 7) * 7))::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
                     "TO_CHAR(DATE_TRUNC('month', g.day_date)::date, 'YYYY-MM')",
                     "DATE_TRUNC('month', m.reading_date)::date");
+            case QUARTER -> new PeriodSqlParts(
+                    "DATE_TRUNC('quarter', g.day_date)::date",
+                    "(DATE_TRUNC('quarter', g.day_date)::date + INTERVAL '3 month - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('quarter', g.day_date)::date, 'YYYY-\"Q\"Q')",
+                    "DATE_TRUNC('quarter', m.reading_date)::date");
+            case YEAR -> new PeriodSqlParts(
+                    "DATE_TRUNC('year', g.day_date)::date",
+                    "(DATE_TRUNC('year', g.day_date)::date + INTERVAL '1 year - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('year', g.day_date)::date, 'YYYY')",
+                    "DATE_TRUNC('year', m.reading_date)::date");
         };
     }
 
     private PeriodSqlParts buildPeriodSqlPartsForSchemeDay(PeriodScale scale) {
+        // Same alignment rules as buildPeriodSqlParts(), but fact date column is sd.reading_date.
         return switch (scale) {
             case DAY -> new PeriodSqlParts(
                     "g.day_date::date",
@@ -5676,15 +5738,25 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "sd.reading_date::date");
             case WEEK -> new PeriodSqlParts(
-                    "DATE_TRUNC('week', g.day_date)::date",
-                    "(DATE_TRUNC('week', g.day_date)::date + 6)",
-                    "TO_CHAR(DATE_TRUNC('week', g.day_date)::date, 'IYYY-\"W\"IW')",
-                    "DATE_TRUNC('week', sd.reading_date)::date");
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
+                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
+                    "(params.anchor_start + (((sd.reading_date::date - params.anchor_start) / 7) * 7))::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
                     "TO_CHAR(DATE_TRUNC('month', g.day_date)::date, 'YYYY-MM')",
                     "DATE_TRUNC('month', sd.reading_date)::date");
+            case QUARTER -> new PeriodSqlParts(
+                    "DATE_TRUNC('quarter', g.day_date)::date",
+                    "(DATE_TRUNC('quarter', g.day_date)::date + INTERVAL '3 month - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('quarter', g.day_date)::date, 'YYYY-\"Q\"Q')",
+                    "DATE_TRUNC('quarter', sd.reading_date)::date");
+            case YEAR -> new PeriodSqlParts(
+                    "DATE_TRUNC('year', g.day_date)::date",
+                    "(DATE_TRUNC('year', g.day_date)::date + INTERVAL '1 year - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('year', g.day_date)::date, 'YYYY')",
+                    "DATE_TRUNC('year', sd.reading_date)::date");
         };
     }
 

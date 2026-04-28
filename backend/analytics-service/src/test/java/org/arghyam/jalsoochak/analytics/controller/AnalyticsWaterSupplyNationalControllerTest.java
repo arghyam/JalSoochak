@@ -250,7 +250,7 @@ class AnalyticsWaterSupplyNationalControllerTest {
         mockMvc.perform(get(BASE + "/scheme-regularity/periodic/national")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
-                        .param("scale", "year"))
+                        .param("scale", "decade"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
@@ -274,7 +274,9 @@ class AnalyticsWaterSupplyNationalControllerTest {
         return Stream.of(
                 Arguments.of("day"),
                 Arguments.of("week"),
-                Arguments.of("month"));
+                Arguments.of("month"),
+                Arguments.of("quarter"),
+                Arguments.of("year"));
     }
 
     private static PeriodicNationalSchemeRegularityResponse periodicNationalSchemeRegularityResponse() {

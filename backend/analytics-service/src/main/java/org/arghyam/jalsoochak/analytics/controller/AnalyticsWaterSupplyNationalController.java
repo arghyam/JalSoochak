@@ -239,9 +239,14 @@ public class AnalyticsWaterSupplyNationalController {
             @RequestParam(name = "end_date")
                     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @Parameter(
-                    description = "Time aggregation scale",
+                    description = """
+                            Time aggregation scale.
+                            - day: per-day buckets
+                            - week: rolling 7-day buckets anchored to start_date (not ISO-week aligned)
+                            - month/quarter/year: calendar-aligned buckets (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31)
+                            """,
                     required = true,
-                    schema = @Schema(type = "string", allowableValues = {"day", "week", "month"}))
+                    schema = @Schema(type = "string", allowableValues = {"day", "week", "month", "quarter", "year"}))
                     @RequestParam(name = "scale") String scale) {
         rejectIfSingleTenantMode("scheme-regularity/periodic/national");
         try {
