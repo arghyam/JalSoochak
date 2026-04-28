@@ -2492,7 +2492,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     private void validateScaleInput(PeriodScale scale) {
         if (scale == null) {
-            throw new IllegalArgumentException("scale is required and must be one of: day, week, month");
+            throw new IllegalArgumentException("scale is required and must be one of: day, week, month, quarter, year");
         }
     }
 
