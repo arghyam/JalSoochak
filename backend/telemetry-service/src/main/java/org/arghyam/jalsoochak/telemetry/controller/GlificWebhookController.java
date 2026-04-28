@@ -100,7 +100,7 @@ public class GlificWebhookController {
             produces = "application/json"
     )
     public ResponseEntity<ReadingsApiResponse> receiveAssamReading(
-            @RequestHeader("X-Tenant-Id") Integer tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) Integer tenantId,
             @RequestBody @Valid AssamReadingRequest request
     ) {
         try {
