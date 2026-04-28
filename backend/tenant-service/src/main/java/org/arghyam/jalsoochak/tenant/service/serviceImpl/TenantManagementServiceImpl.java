@@ -36,6 +36,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
+import org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationHierarchyEditConstraintsResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationHierarchyResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationResponseDTO;
@@ -43,6 +44,7 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantConfigResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantConfigStatusResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
+import org.arghyam.jalsoochak.tenant.service.ApiKeyService;
 import org.arghyam.jalsoochak.tenant.enums.ConfigStatusEnum;
 import org.arghyam.jalsoochak.tenant.enums.RegionTypeEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
@@ -95,6 +97,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final TenantSchedulerManager schedulerManager;
     private final ObjectStorageService objectStorageService;
     private final SystemManagementService systemManagementService;
+    private final ApiKeyService apiKeyService;
 
     // TODO: Re-enable "image/svg+xml" only after implementing SVG sanitization and
     // serving from an isolated origin.
@@ -1105,5 +1108,18 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         }
 
         log.info("Default configs seeded for tenant [id={}]", tenant.getId());
+    }
+
+    @Override
+    @Transactional
+    public GenerateApiTokenResponseDTO generateApiToken(Integer tenantId) {
+        tenantCommonRepository.findById(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        ApiKeyService.GeneratedApiToken generated = apiKeyService.generate();
+        tenantCommonRepository.upsertApiKeyHash(tenantId, generated.hash());
+
+        log.info("API token (re)generated for tenant [id={}]", tenantId);
+        return GenerateApiTokenResponseDTO.builder().token(generated.rawToken()).build();
     }
 }
