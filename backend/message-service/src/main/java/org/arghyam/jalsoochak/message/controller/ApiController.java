@@ -69,7 +69,11 @@ public class ApiController {
     public ResponseEntity<TriggerWelcomeMessageResponse> triggerWelcomeMessage(
             @Valid @RequestBody TriggerWelcomeMessageRequest request) {
         log.info("POST /api/v1/message/trigger-welcome-message called");
-        TriggerWelcomeMessageResponse response = welcomeMessageTriggerService.triggerByPhone(request.getPhoneNumber());
+        String phone = request.resolvePhoneNumber();
+        if (phone.isBlank()) {
+            throw new IllegalArgumentException("phoneNumber/contactId is required");
+        }
+        TriggerWelcomeMessageResponse response = welcomeMessageTriggerService.triggerByPhone(phone);
         return ResponseEntity.ok(response);
     }
 
