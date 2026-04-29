@@ -215,6 +215,10 @@ management:
       exposure:
         include: "*"
 
+pii:
+  encryption-key: ${PII_ENCRYPTION_KEY}
+  hmac-key: ${PII_HMAC_KEY}
+
 # ──────────────────────────────────────────────────────────────
 # Escalation Report Configuration
 # ──────────────────────────────────────────────────────────────
