@@ -37,6 +37,23 @@ public class TenantConfigRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<String> findTenantTitleById(Integer tenantId) {
+        if (tenantId == null) {
+            return Optional.empty();
+        }
+        String sql = """
+                SELECT title
+                FROM common_schema.tenant_master_table
+                WHERE id = ?
+                LIMIT 1
+                """;
+        List<String> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getString("title"), tenantId);
+        return rows.stream()
+                .filter(v -> v != null && !v.isBlank())
+                .map(String::trim)
+                .findFirst();
+    }
+
     public Optional<String> findLanguageSelectionPrompt(Integer tenantId) {
         return findConfigValue(tenantId, "language_selection_prompt");
     }
