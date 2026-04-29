@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import lombok.RequiredArgsConstructor;
+import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.dto.TriggerWelcomeMessageResponse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ public class WelcomeMessageTriggerService {
 
     private final JdbcTemplate jdbcTemplate;
     private final MessageTemplateService messageTemplateService;
+    private final GlificWhatsAppService glificWhatsAppService;
     private final PiiEncryptionService piiEncryptionService;
 
     public TriggerWelcomeMessageResponse triggerByPhone(String phoneInput) {
@@ -41,6 +43,7 @@ public class WelcomeMessageTriggerService {
         int tenantId = resolveTenantId(tenantCode);
         String tenantSchema = "tenant_" + tenantCode;
         String stateName = messageTemplateService.findStateName(tenantId);
+        String welcomeFlowId = messageTemplateService.findWelcomeFlowId(tenantId).orElse("");
 
         UserContactInfo info = fetchUserContactInfo(tenantSchema, phone);
         String normalizedPhone = normalizeIndianPhone(phone);
@@ -48,14 +51,36 @@ public class WelcomeMessageTriggerService {
             info = fetchUserContactInfo(tenantSchema, normalizedPhone);
         }
 
+        Long contactId = info.contactId;
+        if (contactId == null || contactId <= 0) {
+            contactId = glificWhatsAppService.optIn(normalizedPhone);
+            if (contactId == null || contactId <= 0) {
+                return TriggerWelcomeMessageResponse.builder()
+                        .success(false)
+                        .tenantCode(tenantCode)
+                        .phoneNumber(normalizedPhone)
+                        .contactId(null)
+                        .name(info.name)
+                        .state(stateName)
+                        .message("Failed to create Glific contact via opt-in")
+                        .build();
+            }
+        }
+
+        if (welcomeFlowId.isBlank()) {
+            glificWhatsAppService.startWelcomeFlow(contactId, info.name, stateName);
+        } else {
+            glificWhatsAppService.startWelcomeFlow(contactId, welcomeFlowId, info.name, stateName);
+        }
+
         return TriggerWelcomeMessageResponse.builder()
                 .success(true)
                 .tenantCode(tenantCode)
                 .phoneNumber(normalizedPhone)
-                .contactId(info.contactId)
+                .contactId(contactId)
                 .name(info.name)
                 .state(stateName)
-                .message("Welcome context resolved")
+                .message("Welcome flow triggered")
                 .build();
     }
 
