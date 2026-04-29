@@ -1,10 +1,18 @@
 package org.arghyam.jalsoochak.message.dto;
 
-import jakarta.validation.constraints.NotBlank;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Data;
 
 @Data
 public class TriggerWelcomeMessageRequest {
-    @NotBlank(message = "phoneNumber is required")
+    /**
+     * Glific commonly posts sender phone as "contactId" (e.g. @contact.phone).
+     * We also accept "phoneNumber" for direct API callers.
+     */
+    @JsonAlias({"contactId", "phone", "contact"})
     private String phoneNumber;
+
+    public String resolvePhoneNumber() {
+        return phoneNumber == null ? "" : phoneNumber.trim();
+    }
 }
