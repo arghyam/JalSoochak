@@ -19,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -865,6 +866,51 @@ class TenantCommonRepositoryIntegrationTest {
                     t.getId());
 
             assertThat(repository.countNonDeletedTenants()).isZero();
+        }
+    }
+
+    @Nested
+    @DisplayName("upsertApiKeyHash / findByApiKeyHash")
+    class ApiKeyHashTests {
+
+        @Test
+        @DisplayName("stores hash and retrieves tenant by hash")
+        void upsertAndFind_roundTrip() {
+            TenantResponseDTO tenant = insertTenant("AK", "API Key Tenant", TenantStatusEnum.ACTIVE);
+            String hash = "a".repeat(64);
+
+            repository.upsertApiKeyHash(tenant.getId(), hash);
+
+            java.util.Optional<TenantResponseDTO> found = repository.findByApiKeyHash(hash);
+            assertThat(found).isPresent();
+            assertThat(found.get().getId()).isEqualTo(tenant.getId());
+        }
+
+        @Test
+        @DisplayName("overwriting hash invalidates old token lookup")
+        void upsertApiKeyHash_overwritesPreviousHash() {
+            TenantResponseDTO tenant = insertTenant("AK2", "API Key Tenant 2", TenantStatusEnum.ACTIVE);
+            String oldHash = "b".repeat(64);
+            String newHash = "c".repeat(64);
+
+            repository.upsertApiKeyHash(tenant.getId(), oldHash);
+            repository.upsertApiKeyHash(tenant.getId(), newHash);
+
+            assertThat(repository.findByApiKeyHash(oldHash)).isEmpty();
+            assertThat(repository.findByApiKeyHash(newHash)).isPresent();
+        }
+
+        @Test
+        @DisplayName("returns empty for unknown hash")
+        void findByApiKeyHash_unknownHash_returnsEmpty() {
+            assertThat(repository.findByApiKeyHash("d".repeat(64))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("throws when tenant does not exist")
+        void upsertApiKeyHash_nonExistentTenant_throws() {
+            assertThatThrownBy(() -> repository.upsertApiKeyHash(99999, "e".repeat(64)))
+                    .isInstanceOf(EmptyResultDataAccessException.class);
         }
     }
 }
