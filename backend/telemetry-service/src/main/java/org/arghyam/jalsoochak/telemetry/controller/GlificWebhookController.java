@@ -20,8 +20,10 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedItemRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedLanguageRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.SelectedSchemeRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.TriggerWelcomeMessageRequest;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
+import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,16 +45,19 @@ public class GlificWebhookController {
     private static final Logger log = LoggerFactory.getLogger(GlificWebhookController.class);
     private final GlificWebhookService glificWebhookService;
     private final GlificReadingsAsyncService glificReadingsAsyncService;
+    private final WelcomeMessageService welcomeMessageService;
 
     public GlificWebhookController(GlificWebhookService glificWebhookService) {
-        this(glificWebhookService, null);
+        this(glificWebhookService, null, null);
     }
 
     @Autowired
     public GlificWebhookController(GlificWebhookService glificWebhookService,
-                                   GlificReadingsAsyncService glificReadingsAsyncService) {
+                                   GlificReadingsAsyncService glificReadingsAsyncService,
+                                   WelcomeMessageService welcomeMessageService) {
         this.glificWebhookService = glificWebhookService;
         this.glificReadingsAsyncService = glificReadingsAsyncService;
+        this.welcomeMessageService = welcomeMessageService;
     }
 
     @PostMapping(
@@ -261,6 +266,27 @@ public class GlificWebhookController {
                     IntroResponse.builder()
                             .success(false)
                             .message("Scheme selection could not be prepared.")
+                            .build()
+            );
+        }
+    }
+
+    @PostMapping("/trigger-welcome-message")
+    public ResponseEntity<IntroResponse> triggerWelcomeMessage(
+            @RequestBody TriggerWelcomeMessageRequest request) {
+        try {
+            String phone = request != null ? request.resolvePhoneNumber() : "";
+            IntroResponse response = welcomeMessageService.triggerWelcomeMessage(phone);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            String safeContactId = request != null ? request.resolvePhoneNumber() : null;
+            log.error("Error preparing welcome message: {}", e.getMessage(), e);
+            log.debug("Error preparing welcome message for contactId {}: {}", safeContactId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                    IntroResponse.builder()
+                            .success(false)
+                            .correlationId(safeContactId)
+                            .message("Welcome message could not be prepared.")
                             .build()
             );
         }
