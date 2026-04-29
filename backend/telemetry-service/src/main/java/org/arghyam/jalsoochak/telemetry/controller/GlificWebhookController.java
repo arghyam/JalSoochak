@@ -51,6 +51,11 @@ public class GlificWebhookController {
         this(glificWebhookService, null, null);
     }
 
+    public GlificWebhookController(GlificWebhookService glificWebhookService,
+                                   GlificReadingsAsyncService glificReadingsAsyncService) {
+        this(glificWebhookService, glificReadingsAsyncService, null);
+    }
+
     @Autowired
     public GlificWebhookController(GlificWebhookService glificWebhookService,
                                    GlificReadingsAsyncService glificReadingsAsyncService,
