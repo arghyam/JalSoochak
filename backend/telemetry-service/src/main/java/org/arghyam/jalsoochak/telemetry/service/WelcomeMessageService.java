@@ -34,7 +34,10 @@ public class WelcomeMessageService {
         }
 
         String name = safeName(operatorWithSchema.operator().title());
-        String state = tenantConfigRepository.findConfigValue(tenantId, "state_name").orElse("");
+        String state = tenantConfigRepository.findConfigValue(tenantId, "state_name")
+                .filter(v -> !v.isBlank())
+                .or(() -> tenantConfigRepository.findTenantTitleById(tenantId))
+                .orElse("");
         String language = operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId);
         String languageKey = localizationService.normalizeLanguageKey(language);
 
