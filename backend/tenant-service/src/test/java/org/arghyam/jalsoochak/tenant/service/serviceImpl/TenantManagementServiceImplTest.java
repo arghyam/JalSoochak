@@ -2361,6 +2361,8 @@ class TenantManagementServiceImplTest {
 
             when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(TENANT));
             when(apiKeyService.generate()).thenReturn(generated);
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
 
             org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO result =
                     tenantManagementService.generateApiToken(TENANT_ID);
@@ -2369,7 +2371,7 @@ class TenantManagementServiceImplTest {
             assertEquals("js_rawtoken", result.getToken());
 
             ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
-            verify(tenantCommonRepository).upsertApiKeyHash(eq(TENANT_ID), hashCaptor.capture());
+            verify(tenantCommonRepository).upsertApiKeyHash(eq(TENANT_ID), hashCaptor.capture(), eq(100));
             assertEquals("abc123hash", hashCaptor.getValue());
         }
 
@@ -2382,7 +2384,18 @@ class TenantManagementServiceImplTest {
                     () -> tenantManagementService.generateApiToken(TENANT_ID));
 
             verify(apiKeyService, never()).generate();
-            verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString());
+            verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Should throw IllegalArgumentException when tenant ID is system tenant")
+        void generateApiToken_SystemTenant_ThrowsIllegalArgumentException() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> tenantManagementService.generateApiToken(TenantConstants.SYSTEM_TENANT_ID));
+
+            verify(tenantCommonRepository, never()).findById(any());
+            verify(apiKeyService, never()).generate();
+            verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
         }
     }
 }

@@ -879,7 +879,7 @@ class TenantCommonRepositoryIntegrationTest {
             TenantResponseDTO tenant = insertTenant("AK", "API Key Tenant", TenantStatusEnum.ACTIVE);
             String hash = "a".repeat(64);
 
-            repository.upsertApiKeyHash(tenant.getId(), hash);
+            repository.upsertApiKeyHash(tenant.getId(), hash, null);
 
             java.util.Optional<TenantResponseDTO> found = repository.findByApiKeyHash(hash);
             assertThat(found).isPresent();
@@ -893,8 +893,8 @@ class TenantCommonRepositoryIntegrationTest {
             String oldHash = "b".repeat(64);
             String newHash = "c".repeat(64);
 
-            repository.upsertApiKeyHash(tenant.getId(), oldHash);
-            repository.upsertApiKeyHash(tenant.getId(), newHash);
+            repository.upsertApiKeyHash(tenant.getId(), oldHash, null);
+            repository.upsertApiKeyHash(tenant.getId(), newHash, null);
 
             assertThat(repository.findByApiKeyHash(oldHash)).isEmpty();
             assertThat(repository.findByApiKeyHash(newHash)).isPresent();
@@ -909,7 +909,7 @@ class TenantCommonRepositoryIntegrationTest {
         @Test
         @DisplayName("throws when tenant does not exist")
         void upsertApiKeyHash_nonExistentTenant_throws() {
-            assertThatThrownBy(() -> repository.upsertApiKeyHash(99999, "e".repeat(64)))
+            assertThatThrownBy(() -> repository.upsertApiKeyHash(99999, "e".repeat(64), null))
                     .isInstanceOf(EmptyResultDataAccessException.class);
         }
     }

@@ -410,13 +410,13 @@ public class TenantCommonRepository {
      * Upserts the API key hash for a tenant.
      * Overwrites any previously stored hash, immediately invalidating the old token.
      */
-    public void upsertApiKeyHash(Integer tenantId, String apiKeyHash) {
+    public void upsertApiKeyHash(Integer tenantId, String apiKeyHash, Integer updatedBy) {
         String sql = """
                 UPDATE common_schema.tenant_master_table
-                SET api_key_hash = ?, updated_at = NOW()
+                SET api_key_hash = ?, updated_at = NOW(), updated_by = ?
                 WHERE id = ?
                 """;
-        int rows = jdbcTemplate.update(sql, apiKeyHash, tenantId);
+        int rows = jdbcTemplate.update(sql, apiKeyHash, updatedBy, tenantId);
         if (rows == 0) {
             throw new EmptyResultDataAccessException("Tenant with tenantId " + tenantId + " does not exist", 1);
         }

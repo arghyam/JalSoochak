@@ -1113,11 +1113,13 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     @Override
     @Transactional
     public GenerateApiTokenResponseDTO generateApiToken(Integer tenantId) {
+        validateNotSystemTenant(tenantId);
         tenantCommonRepository.findById(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
+        Integer currentUserId = resolveCurrentUserId();
         ApiKeyService.GeneratedApiToken generated = apiKeyService.generate();
-        tenantCommonRepository.upsertApiKeyHash(tenantId, generated.hash());
+        tenantCommonRepository.upsertApiKeyHash(tenantId, generated.hash(), currentUserId);
 
         log.info("API token (re)generated for tenant [id={}]", tenantId);
         return GenerateApiTokenResponseDTO.builder().token(generated.rawToken()).build();
