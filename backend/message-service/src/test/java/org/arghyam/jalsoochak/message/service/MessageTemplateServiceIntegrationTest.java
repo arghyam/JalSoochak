@@ -216,19 +216,19 @@ class MessageTemplateServiceIntegrationTest {
     }
 
     @Test
-    void findStateName_returnsEmptyString_whenKeyAbsent() {
+    void findStateName_fallsBackToTenantTitle_whenKeyAbsent() {
         String name = messageTemplateService.findStateName(TENANT_ID);
 
-        assertThat(name).isEqualTo("");
+        assertThat(name).isEqualTo("Test State");
     }
 
     @Test
-    void findStateName_returnsEmptyString_whenValueIsBlank() {
+    void findStateName_fallsBackToTenantTitle_whenValueIsBlank() {
         insertConfig("state_name", "   ");
 
         String name = messageTemplateService.findStateName(TENANT_ID);
 
-        assertThat(name).isEqualTo("");
+        assertThat(name).isEqualTo("Test State");
     }
 
     // ────────────────────────────── helpers ────────────────────────────────────

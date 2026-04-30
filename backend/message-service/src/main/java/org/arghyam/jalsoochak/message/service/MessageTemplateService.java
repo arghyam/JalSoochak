@@ -87,7 +87,20 @@ public class MessageTemplateService {
     public String findStateName(int tenantId) {
         return findConfigValue(tenantId, "state_name")
                 .filter(s -> !s.isBlank())
+                .or(() -> findTenantTitleById(tenantId))
                 .orElse("");
+    }
+
+    public Optional<String> findTenantTitleById(int tenantId) {
+        List<String> rows = jdbcTemplate.query(
+                "SELECT title FROM common_schema.tenant_master_table WHERE id = ? LIMIT 1",
+                (rs, n) -> rs.getString("title"),
+                tenantId
+        );
+        return rows.stream()
+                .filter(v -> v != null && !v.isBlank())
+                .map(String::trim)
+                .findFirst();
     }
 
     private Optional<String> findConfigValue(int tenantId, String key) {

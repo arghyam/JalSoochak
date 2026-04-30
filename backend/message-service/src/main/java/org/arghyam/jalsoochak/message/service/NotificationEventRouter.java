@@ -688,7 +688,7 @@ public class NotificationEventRouter {
         List<UserContactInfo> rows = jdbcTemplate.query(sql,
                 (rs, n) -> new UserContactInfo(
                         rs.getObject("whatsapp_connection_id", Long.class),
-                        rs.getString("title")),
+                        piiEncryptionService.safeDecrypt(rs.getString("title"))),
                 phone);
         return rows.isEmpty() ? new UserContactInfo(null, null) : rows.get(0);
     }
@@ -719,7 +719,7 @@ public class NotificationEventRouter {
                 List<UserContactInfo> rows = jdbcTemplate.query(sql,
                         (rs, n) -> new UserContactInfo(
                                 rs.getObject("whatsapp_connection_id", Long.class),
-                                rs.getString("title")),
+                                piiEncryptionService.safeDecrypt(rs.getString("title"))),
                         lookupHash);
                 if (rows != null && !rows.isEmpty()) {
                     return rows.get(0);
