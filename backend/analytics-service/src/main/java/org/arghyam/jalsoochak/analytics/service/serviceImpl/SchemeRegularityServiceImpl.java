@@ -2167,8 +2167,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .map(metric -> SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(metric.schemeId())
                                 .schemeName(metric.schemeName())
-                                .statusCode(metric.status())
-                                .status(resolveSchemeStatus(metric.status()))
+                                .statusCode(metric.operatingStatus())
+                                .status(resolveSchemeStatus(metric.operatingStatus()))
                                 .submissionDays(metric.submissionDays())
                                 .reportingRate(calculateReportingRate(metric.submissionDays(), daysInRange))
                                 .totalWaterSupplied(metric.totalWaterSupplied())
@@ -2238,8 +2238,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .map(metric -> SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(metric.schemeId())
                                 .schemeName(metric.schemeName())
-                                .statusCode(metric.status())
-                                .status(resolveSchemeStatus(metric.status()))
+                                .statusCode(metric.operatingStatus())
+                                .status(resolveSchemeStatus(metric.operatingStatus()))
                                 .submissionDays(metric.submissionDays())
                                 .reportingRate(calculateReportingRate(metric.submissionDays(), daysInRange))
                                 .totalWaterSupplied(metric.totalWaterSupplied())
@@ -2301,18 +2301,18 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         String parentLgdTitle = schemeRegularityRepository.getParentLgdTitleByLgd(tenantId, parentLgdId);
 
         int activeCount = (int) schemes.stream()
-                .filter(s -> s.status() != null && s.status() == SchemeStatus.ACTIVE.getCode())
+                .filter(s -> s.operatingStatus() != null && s.operatingStatus() > 0)
                 .count();
         int inactiveCount = (int) schemes.stream()
-                .filter(s -> s.status() != null && s.status() == SchemeStatus.INACTIVE.getCode())
+                .filter(s -> s.operatingStatus() != null && s.operatingStatus() == 0)
                 .count();
 
         List<SchemeRegularityListResponse.SchemeMetrics> allSchemeMetrics = schemes.stream()
                 .map(metric -> SchemeRegularityListResponse.SchemeMetrics.builder()
                         .schemeId(metric.schemeId())
                         .schemeName(metric.schemeName())
-                        .statusCode(metric.status())
-                        .status(resolveSchemeStatus(metric.status()))
+                        .statusCode(metric.operatingStatus())
+                        .status(resolveSchemeStatus(metric.operatingStatus()))
                         .supplyDays(metric.supplyDays())
                         .averageRegularity(calculateReportingRate(metric.supplyDays(), daysInRange))
                         .submissionDays(metric.submissionDays())
@@ -2359,18 +2359,18 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 schemeRegularityRepository.getParentDepartmentTitleByDepartment(tenantId, parentDepartmentId);
 
         int activeCount = (int) schemes.stream()
-                .filter(s -> s.status() != null && s.status() == SchemeStatus.ACTIVE.getCode())
+                .filter(s -> s.operatingStatus() != null && s.operatingStatus() > 0)
                 .count();
         int inactiveCount = (int) schemes.stream()
-                .filter(s -> s.status() != null && s.status() == SchemeStatus.INACTIVE.getCode())
+                .filter(s -> s.operatingStatus() != null && s.operatingStatus() == 0)
                 .count();
 
         List<SchemeRegularityListResponse.SchemeMetrics> allSchemeMetrics = schemes.stream()
                 .map(metric -> SchemeRegularityListResponse.SchemeMetrics.builder()
                         .schemeId(metric.schemeId())
                         .schemeName(metric.schemeName())
-                        .statusCode(metric.status())
-                        .status(resolveSchemeStatus(metric.status()))
+                        .statusCode(metric.operatingStatus())
+                        .status(resolveSchemeStatus(metric.operatingStatus()))
                         .supplyDays(metric.supplyDays())
                         .averageRegularity(calculateReportingRate(metric.supplyDays(), daysInRange))
                         .submissionDays(metric.submissionDays())
@@ -2482,12 +2482,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         if (statusCode == null) {
             return "unknown";
         }
-        for (SchemeStatus value : SchemeStatus.values()) {
-            if (value.getCode() == statusCode) {
-                return value.name().toLowerCase();
-            }
-        }
-        return "unknown";
+        return statusCode > 0 ? "active" : "inactive";
     }
 
     private void validateScaleInput(PeriodScale scale) {

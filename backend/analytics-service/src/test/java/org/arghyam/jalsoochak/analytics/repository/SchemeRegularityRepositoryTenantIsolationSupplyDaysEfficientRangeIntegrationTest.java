@@ -130,7 +130,7 @@ class SchemeRegularityRepositoryTenantIsolationSupplyDaysEfficientRangeIntegrati
                 (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
                  parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
                  parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
-                 status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
                 VALUES
                 (1, 1, 'S1-T1', 1001, 2001, 0.0, 0.0, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW()),
                 (2, 1, 'S2-T1', 1002, 2002, 0.0, 0.0, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW()),
