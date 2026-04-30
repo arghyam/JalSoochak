@@ -649,6 +649,7 @@ public final class SwaggerExamples {
               "success": true,
               "data": {
                 "schemeCount": 0,
+                "totalAchievedFhtcCount": 900,
                 "scale": "day",
                 "startDate": "2026-01-01",
                 "endDate": "2026-01-31",
@@ -658,6 +659,8 @@ public final class SwaggerExamples {
                     "periodStartDate": "2026-01-01",
                     "periodEndDate": "2026-01-01",
                     "schemeCount": 10,
+                    "totalSupplyDays": 275,
+                    "totalWaterQuantity": 500000,
                     "averageRegularity": 0.74
                   }
                 ]

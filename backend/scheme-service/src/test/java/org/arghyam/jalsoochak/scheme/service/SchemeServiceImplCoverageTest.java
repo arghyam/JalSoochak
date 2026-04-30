@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.scheme.service;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
@@ -448,6 +449,18 @@ class SchemeServiceImplCoverageTest {
         assertThat(page.getTotalElements()).isEqualTo(1);
         assertThat(page.getNumber()).isEqualTo(2);
         assertThat(page.getSize()).isEqualTo(1);
+    }
+
+    @Test
+    void getSchemeStatuses_returnsStatusesOnHappyPath() {
+        when(schemeDbRepository.findSchemaNameByTenantId(22)).thenReturn("tenant_ka");
+        when(schemeDbRepository.findSchemeStatusesById("tenant_ka", 11))
+                .thenReturn(SchemeStatusesResponseDTO.builder().workStatus(2).operatingStatus(1).build());
+
+        SchemeStatusesResponseDTO response = schemeService.getSchemeStatuses(22, 11);
+
+        assertThat(response.getWorkStatus()).isEqualTo(2);
+        assertThat(response.getOperatingStatus()).isEqualTo(1);
     }
 
     private MockMultipartFile csv(String fileName, String content) {

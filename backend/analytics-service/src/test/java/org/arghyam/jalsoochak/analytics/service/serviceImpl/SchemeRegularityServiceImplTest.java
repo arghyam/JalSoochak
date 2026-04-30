@@ -248,6 +248,7 @@ class SchemeRegularityServiceImplTest {
                                         LocalDate.of(2025, 12, 29),
                                         LocalDate.of(2026, 1, 12),
                                         2,
+                                        0L,
                                         2,
                                         15L)));
 
@@ -282,6 +283,7 @@ class SchemeRegularityServiceImplTest {
                                         LocalDate.of(2025, 12, 29),
                                         LocalDate.of(2026, 1, 12),
                                         2,
+                                        0L,
                                         2,
                                         115L)));
 
@@ -310,7 +312,7 @@ class SchemeRegularityServiceImplTest {
 
         mockRedisValueOps();
         String cacheKey = ":scheme_regularity:nation:periodic-scheme-regularity:api"
-                + ":scale:week:start:2026-01-01:end:2026-01-10:v1";
+                + ":scale:week:start:2026-01-01:end:2026-01-10:v2";
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         when(schemeRegularityRepository.getPeriodicSchemeRegularityForNation(
@@ -321,6 +323,7 @@ class SchemeRegularityServiceImplTest {
                                         LocalDate.of(2025, 12, 29),
                                         LocalDate.of(2026, 1, 12),
                                         2,
+                                        123L,
                                         2,
                                         115L)));
 
@@ -329,6 +332,7 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getScale()).isEqualTo("week");
         assertThat(response.getSchemeCount()).isEqualTo(2);
+        assertThat(response.getTotalAchievedFhtcCount()).isEqualTo(123L);
         assertThat(response.getMetrics().getFirst().getTotalWaterQuantity()).isEqualTo(115L);
         verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
     }
@@ -1475,6 +1479,7 @@ class SchemeRegularityServiceImplTest {
                                 LocalDate.of(2025, 12, 29),
                                 LocalDate.of(2026, 1, 12),
                                 2,
+                                0L,
                                 3,
                                 20L)));
 

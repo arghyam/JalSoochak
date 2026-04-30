@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.service.SchemeService;
@@ -115,6 +116,15 @@ public class SchemeController {
     ) {
         log.info("GET /api/schemes/counts/by-status called");
         return ResponseEntity.ok(schemeService.getSchemeStatusCounts(tenantCode));
+    }
+
+    @GetMapping("/schemes/{schemeId}/statuses")
+    public ResponseEntity<SchemeStatusesResponseDTO> getSchemeStatuses(
+            @PathVariable int schemeId,
+            @RequestParam Integer tenantId
+    ) {
+        log.info("GET /api/schemes/{}/statuses called for tenantId {}", schemeId, tenantId);
+        return ResponseEntity.ok(schemeService.getSchemeStatuses(tenantId, schemeId));
     }
 
     @PreAuthorize("hasRole('STATE_ADMIN')")

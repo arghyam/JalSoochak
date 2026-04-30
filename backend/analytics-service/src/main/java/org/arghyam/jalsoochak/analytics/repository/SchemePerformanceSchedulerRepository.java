@@ -57,7 +57,7 @@ public interface SchemePerformanceSchedulerRepository extends JpaRepository<Fact
             ) supply
               ON supply.tenant_id = ds.tenant_id
              AND supply.scheme_id = ds.scheme_id
-            WHERE ds.status = 1
+            WHERE ds.operating_status > 0
               AND NOT EXISTS (
                   SELECT 1
                   FROM analytics_schema.fact_scheme_performance_table fp
