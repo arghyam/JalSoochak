@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.service.SchemeService;
@@ -74,5 +75,15 @@ class SchemeControllerTest {
         assertThat(controller.uploadSchemeMappings(file).getBody()).isEqualTo(response);
         verify(schemeService).uploadSchemes(file);
         verify(schemeService).uploadSchemeMappings(file);
+    }
+
+    @Test
+    void updateSchemeStatuses_delegatesToService() {
+        SchemeStatusUpdateRequestDTO request = new SchemeStatusUpdateRequestDTO();
+        request.setWorkStatus("Completed");
+        request.setOperatingStatus("Operative");
+
+        assertThat(controller.updateSchemeStatuses("ka", 11, request).getStatusCode().value()).isEqualTo(204);
+        verify(schemeService).updateSchemeStatuses("ka", 11, request);
     }
 }

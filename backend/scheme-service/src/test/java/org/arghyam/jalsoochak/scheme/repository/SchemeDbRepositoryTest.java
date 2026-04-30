@@ -179,6 +179,15 @@ class SchemeDbRepositoryTest {
     }
 
     @Test
+    void updateSchemeStatusesById_updatesProvidedStatuses() {
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        boolean updated = repository.updateSchemeStatusesById("tenant_ka", 11, 2, null, 9);
+
+        assertThat(updated).isTrue();
+    }
+
+    @Test
     void guardsRejectInvalidSchema() {
         assertThatThrownBy(() -> repository.findAllSchemes("tenant-ka"))
                 .isInstanceOf(IllegalArgumentException.class);
