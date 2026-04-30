@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
@@ -241,6 +242,42 @@ public class SchemeServiceImpl implements SchemeService {
                 .workStatusCounts(schemeDbRepository.countSchemesByWorkStatus(schemaName))
                 .operatingStatusCounts(schemeDbRepository.countSchemesByOperatingStatus(schemaName))
                 .build();
+    }
+
+    @Override
+    public void updateSchemeStatuses(String tenantCode, int schemeId, SchemeStatusUpdateRequestDTO request) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        if (schemeId < 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "schemeId must be a positive integer");
+        }
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
+        }
+
+        Integer workStatusCode = parseWorkStatus(request.getWorkStatus());
+        Integer operatingStatusCode = parseOperatingStatus(request.getOperatingStatus());
+        if (workStatusCode == null && operatingStatusCode == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "At least one of workStatus or operatingStatus must be provided"
+            );
+        }
+
+        int updatedBy = resolveCurrentUserId(schemaName);
+        Integer tenantId = schemeDbRepository.findTenantIdByUserId(schemaName, updatedBy);
+        boolean updated = schemeDbRepository.updateSchemeStatusesById(
+                schemaName,
+                schemeId,
+                workStatusCode,
+                operatingStatusCode,
+                updatedBy
+        );
+        if (!updated) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
+        }
+        List<SchemeDbRepository.SchemeAnalyticsRow> rows =
+                schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, List.of(schemeId));
+        publishSchemeDimensionEventsFromRows(tenantId, rows);
     }
 
     @Override
@@ -958,6 +995,8 @@ public class SchemeServiceImpl implements SchemeService {
             payload.put("level5DeptId", deptLevelFallback);
             payload.put("level6DeptId", deptLevelFallback);
             payload.put("status", row.operatingStatus());
+            payload.put("operating_status", row.operatingStatus());
+            payload.put("work_status", row.workStatus());
             kafkaProducer.publishJson(SCHEME_TOPIC, payload);
         }
     }

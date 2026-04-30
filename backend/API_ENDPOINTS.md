@@ -118,8 +118,22 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings |
 | GET | `/api/v1/scheme/schemes/counts` | Scheme counts |
 | GET | `/api/v1/scheme/schemes/counts/by-status` | Scheme counts by status |
+| PATCH | `/api/v1/scheme/schemes/{schemeId}/status?tenantCode={tenantCode}` | Update scheme work/operating status (one or both) |
 | POST | `/api/v1/scheme/schemes/upload` | Bulk upload schemes (CSV) |
 | POST | `/api/v1/scheme/schemes/mappings/upload` | Bulk upload scheme mappings (CSV) |
+
+### Scheme Status Integer Mapping
+
+`work_status`
+- `1` = `Ongoing`
+- `2` = `Completed`
+- `3` = `Not Started`
+- `4` = `Handed Over`
+
+`operating_status`
+- `1` = `Operative`
+- `2` = `Non-Operative`
+- `3` = `Partially Operative`
 
 ---
 
