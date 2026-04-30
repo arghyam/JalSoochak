@@ -1602,7 +1602,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":scale:" + scale.name().toLowerCase()
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v2";
     }
 
     @Override
@@ -2575,6 +2575,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             PeriodScale scale,
             List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> metrics) {
         int schemeCount = metrics.isEmpty() ? 0 : metrics.getFirst().schemeCount();
+        long totalAchievedFhtcCount = metrics.isEmpty() || metrics.getFirst().totalAchievedFhtcCount() == null
+                ? 0L
+                : metrics.getFirst().totalAchievedFhtcCount();
         List<PeriodicNationalSchemeRegularityResponse.PeriodicNationalSchemeRegularityPeriodMetric> periodicMetrics =
                 metrics.stream()
                         .map(metric -> {
@@ -2598,6 +2601,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                     .builder()
                                     .periodStartDate(cappedPeriodStart)
                                     .periodEndDate(cappedPeriodEnd)
+                                    .schemeCount(metric.schemeCount())
                                     .totalSupplyDays(metric.totalSupplyDays())
                                     .totalWaterQuantity(metric.totalWaterQuantity())
                                     .averageRegularity(averageRegularity)
@@ -2607,6 +2611,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         return PeriodicNationalSchemeRegularityResponse.builder()
                 .schemeCount(schemeCount)
+                .totalAchievedFhtcCount(totalAchievedFhtcCount)
                 .scale(scale.name().toLowerCase())
                 .startDate(startDate)
                 .endDate(endDate)

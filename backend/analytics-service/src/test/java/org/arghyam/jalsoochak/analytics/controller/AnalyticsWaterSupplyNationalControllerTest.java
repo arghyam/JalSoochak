@@ -282,6 +282,7 @@ class AnalyticsWaterSupplyNationalControllerTest {
     private static PeriodicNationalSchemeRegularityResponse periodicNationalSchemeRegularityResponse() {
         return PeriodicNationalSchemeRegularityResponse.builder()
                 .schemeCount(0)
+                .totalAchievedFhtcCount(0L)
                 .periodCount(0)
                 .metrics(List.of())
                 .build();

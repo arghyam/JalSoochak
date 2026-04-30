@@ -4929,6 +4929,11 @@ public class SchemeRegularityRepository {
                         s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                 ),
+                scheme_fhtc_totals AS (
+                    SELECT
+                        COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_achieved_fhtc_count
+                    FROM analytics_schema.dim_scheme_table s
+                ),
                 periods AS (
                     SELECT DISTINCT
                         %1$s AS period_start_date,
@@ -4965,6 +4970,7 @@ public class SchemeRegularityRepository {
                     p.period_start_date,
                     p.period_end_date,
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
+                    COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
                     COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
@@ -4983,6 +4989,7 @@ public class SchemeRegularityRepository {
                         rs.getObject("period_start_date", LocalDate.class),
                         rs.getObject("period_end_date", LocalDate.class),
                         rs.getInt("scheme_count"),
+                        rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
                 startDate,
@@ -5005,9 +5012,15 @@ public class SchemeRegularityRepository {
                 ),
                 schemes_in_scope AS (
                     SELECT
-                        s.scheme_id
+                        s.scheme_id,
+                        COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
+                ),
+                scheme_fhtc_totals AS (
+                    SELECT
+                        COALESCE(SUM(s.achieved_fhtc_count), 0)::bigint AS total_achieved_fhtc_count
+                    FROM schemes_in_scope s
                 ),
                 periods AS (
                     SELECT DISTINCT
@@ -5050,6 +5063,7 @@ public class SchemeRegularityRepository {
                     p.period_start_date,
                     p.period_end_date,
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
+                    COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
                     COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
@@ -5069,6 +5083,7 @@ public class SchemeRegularityRepository {
                         rs.getObject("period_start_date", LocalDate.class),
                         rs.getObject("period_end_date", LocalDate.class),
                         rs.getInt("scheme_count"),
+                        rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
                 startDate,
@@ -5093,10 +5108,16 @@ public class SchemeRegularityRepository {
                 ),
                 schemes_in_scope AS (
                     SELECT
-                        s.scheme_id
+                        s.scheme_id,
+                        COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
+                ),
+                scheme_fhtc_totals AS (
+                    SELECT
+                        COALESCE(SUM(s.achieved_fhtc_count), 0)::bigint AS total_achieved_fhtc_count
+                    FROM schemes_in_scope s
                 ),
                 periods AS (
                     SELECT DISTINCT
@@ -5140,6 +5161,7 @@ public class SchemeRegularityRepository {
                     p.period_start_date,
                     p.period_end_date,
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
+                    COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
                     COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
@@ -5159,6 +5181,7 @@ public class SchemeRegularityRepository {
                         rs.getObject("period_start_date", LocalDate.class),
                         rs.getObject("period_end_date", LocalDate.class),
                         rs.getInt("scheme_count"),
+                        rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
                 startDate,
@@ -5879,6 +5902,7 @@ public class SchemeRegularityRepository {
             LocalDate periodStartDate,
             LocalDate periodEndDate,
             Integer schemeCount,
+            Long totalAchievedFhtcCount,
             Integer totalSupplyDays,
             Long totalWaterQuantity) {}
 
