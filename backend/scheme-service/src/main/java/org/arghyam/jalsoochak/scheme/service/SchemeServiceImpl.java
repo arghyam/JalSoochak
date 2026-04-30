@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
@@ -242,6 +243,25 @@ public class SchemeServiceImpl implements SchemeService {
                 .workStatusCounts(schemeDbRepository.countSchemesByWorkStatus(schemaName))
                 .operatingStatusCounts(schemeDbRepository.countSchemesByOperatingStatus(schemaName))
                 .build();
+    }
+
+    @Override
+    public SchemeStatusesResponseDTO getSchemeStatuses(Integer tenantId, int schemeId) {
+        if (tenantId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenantId is required");
+        }
+        if (schemeId < 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "schemeId must be a positive integer");
+        }
+        String schemaName = schemeDbRepository.findSchemaNameByTenantId(tenantId);
+        if (schemaName == null || schemaName.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+        SchemeStatusesResponseDTO statuses = schemeDbRepository.findSchemeStatusesById(schemaName, schemeId);
+        if (statuses == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
+        }
+        return statuses;
     }
 
     @Override

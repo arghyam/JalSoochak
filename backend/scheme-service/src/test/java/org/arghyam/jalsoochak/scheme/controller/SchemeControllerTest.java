@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.service.SchemeService;
@@ -85,5 +86,19 @@ class SchemeControllerTest {
 
         assertThat(controller.updateSchemeStatuses("ka", 11, request).getStatusCode().value()).isEqualTo(204);
         verify(schemeService).updateSchemeStatuses("ka", 11, request);
+    }
+
+    @Test
+    void getSchemeStatuses_delegatesToService() {
+        SchemeStatusesResponseDTO response = SchemeStatusesResponseDTO.builder()
+                .workStatus(2)
+                .operatingStatus(1)
+                .build();
+        when(schemeService.getSchemeStatuses(22, 11)).thenReturn(response);
+
+        SchemeStatusesResponseDTO body = controller.getSchemeStatuses(11, 22).getBody();
+
+        assertThat(body).isEqualTo(response);
+        verify(schemeService).getSchemeStatuses(22, 11);
     }
 }
