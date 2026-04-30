@@ -290,7 +290,7 @@ class SchemeServiceImplCoverageTest {
         setJwtAuth("admin@example.com", "ka", false);
         when(schemeDbRepository.findUserIdByEmail("tenant_ka", "admin@example.com")).thenReturn(10);
         when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(200);
-        when(schemeDbRepository.updateSchemeStatusesById("tenant_ka", 999, null, 2, 10)).thenReturn(false);
+        when(schemeDbRepository.updateSchemeStatusesById("tenant_ka", 999, null, 0, 10)).thenReturn(false);
 
         SchemeStatusUpdateRequestDTO request = new SchemeStatusUpdateRequestDTO();
         request.setOperatingStatus("Non-Operative");
@@ -321,7 +321,7 @@ class SchemeServiceImplCoverageTest {
         when(schemeDbRepository.findSchemeAnalyticsRowsByStateSchemeIds(eq("tenant_ka"), anyList()))
                 .thenReturn(List.of(
                         new SchemeDbRepository.SchemeAnalyticsRow(99, "101", "201", "Scheme New", 11.11, 22.22, 2, 1, 501, 601),
-                        new SchemeDbRepository.SchemeAnalyticsRow(77, "102", "ABC", "Scheme Existing Updated", 33.33, 44.44, 1, 2, 502, null)
+                        new SchemeDbRepository.SchemeAnalyticsRow(77, "102", "ABC", "Scheme Existing Updated", 33.33, 44.44, 1, 0, 502, null)
                 ));
 
         String csv = """
@@ -350,7 +350,7 @@ class SchemeServiceImplCoverageTest {
                 .anySatisfy(payload -> {
                     assertThat(payload.get("stateSchemeId")).isEqualTo(102);
                     assertThat(payload.get("centreSchemeId")).isEqualTo(0);
-                    assertThat(payload.get("operating_status")).isEqualTo(2);
+                    assertThat(payload.get("operating_status")).isEqualTo(0);
                     assertThat(payload.get("work_status")).isEqualTo(1);
                 });
     }
@@ -368,14 +368,14 @@ class SchemeServiceImplCoverageTest {
                 "Scheme",
                 "query",
                 2,
-                3,
+                2,
                 "ACTIVE",
                 "scheme_name",
                 "asc",
                 0,
                 100
         )).thenReturn(List.of(dto));
-        when(schemeDbRepository.countSchemes("tenant_ka", "SS", "Scheme", "query", 2, 3, "ACTIVE")).thenReturn(1L);
+        when(schemeDbRepository.countSchemes("tenant_ka", "SS", "Scheme", "query", 2, 2, "ACTIVE")).thenReturn(1L);
 
         PageResponseDTO<SchemeDTO> page = schemeService.listSchemes(
                 "ka",
@@ -387,7 +387,7 @@ class SchemeServiceImplCoverageTest {
                 "Scheme",
                 "query",
                 "completed",
-                "3",
+                "2",
                 "ACTIVE"
         );
 
@@ -411,7 +411,7 @@ class SchemeServiceImplCoverageTest {
                 "tenant_ka",
                 "Scheme",
                 1,
-                2,
+                0,
                 "INACTIVE",
                 "VLG",
                 "North",
@@ -424,7 +424,7 @@ class SchemeServiceImplCoverageTest {
                 "tenant_ka",
                 "Scheme",
                 1,
-                2,
+                0,
                 "INACTIVE",
                 "VLG",
                 "North"
