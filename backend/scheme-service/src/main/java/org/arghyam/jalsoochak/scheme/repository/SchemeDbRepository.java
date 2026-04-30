@@ -37,8 +37,8 @@ public class SchemeDbRepository {
     );
     private static final Map<Integer, String> OPERATING_STATUS_LABELS = Map.of(
             1, "Operative",
-            2, "Non-Operative",
-            3, "Partially Operative"
+            0, "Non-Operative",
+            2, "Partially Operative"
     );
 
     public record SchemeSnapshot(
