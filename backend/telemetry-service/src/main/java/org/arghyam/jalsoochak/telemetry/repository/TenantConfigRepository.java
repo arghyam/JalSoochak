@@ -37,6 +37,21 @@ public class TenantConfigRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<Integer> findTenantIdByApiKeyHash(String apiKeyHash) {
+        if (apiKeyHash == null || apiKeyHash.isBlank()) {
+            return Optional.empty();
+        }
+        String sql = """
+                SELECT id
+                FROM common_schema.tenant_master_table
+                WHERE api_key_hash = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """;
+        List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getInt("id"), apiKeyHash);
+        return rows.stream().findFirst();
+    }
+
     public Optional<String> findTenantTitleById(Integer tenantId) {
         if (tenantId == null) {
             return Optional.empty();

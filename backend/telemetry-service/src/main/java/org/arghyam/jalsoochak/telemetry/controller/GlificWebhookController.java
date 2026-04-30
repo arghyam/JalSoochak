@@ -23,6 +23,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingReque
 import org.arghyam.jalsoochak.telemetry.dto.requests.TriggerWelcomeMessageRequest;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
+import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -31,6 +32,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -46,23 +48,26 @@ public class GlificWebhookController {
     private final GlificWebhookService glificWebhookService;
     private final GlificReadingsAsyncService glificReadingsAsyncService;
     private final WelcomeMessageService welcomeMessageService;
+    private final TelemetryApiKeyService telemetryApiKeyService;
 
     public GlificWebhookController(GlificWebhookService glificWebhookService) {
-        this(glificWebhookService, null, null);
+        this(glificWebhookService, null, null, null);
     }
 
     public GlificWebhookController(GlificWebhookService glificWebhookService,
                                    GlificReadingsAsyncService glificReadingsAsyncService) {
-        this(glificWebhookService, glificReadingsAsyncService, null);
+        this(glificWebhookService, glificReadingsAsyncService, null, null);
     }
 
     @Autowired
     public GlificWebhookController(GlificWebhookService glificWebhookService,
                                    GlificReadingsAsyncService glificReadingsAsyncService,
-                                   WelcomeMessageService welcomeMessageService) {
+                                   WelcomeMessageService welcomeMessageService,
+                                   TelemetryApiKeyService telemetryApiKeyService) {
         this.glificWebhookService = glificWebhookService;
         this.glificReadingsAsyncService = glificReadingsAsyncService;
         this.welcomeMessageService = welcomeMessageService;
+        this.telemetryApiKeyService = telemetryApiKeyService;
     }
 
     @PostMapping(
@@ -110,10 +115,16 @@ public class GlificWebhookController {
             produces = "application/json"
     )
     public ResponseEntity<ReadingsApiResponse> receiveAssamReading(
-            @RequestHeader(value = "X-Tenant-Id", required = false) Integer tenantId,
+            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
             @RequestBody @Valid AssamReadingRequest request
     ) {
         try {
+            if (telemetryApiKeyService == null) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "API key service not configured");
+            }
+            Integer tenantId = telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
+
             CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
@@ -121,11 +132,22 @@ public class GlificWebhookController {
                             .data(toReadingsDataResponse(response))
                             .build()
             );
+        } catch (ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(
+                    ReadingsApiResponse.builder()
+                            .success(false)
+                            .data(ReadingsDataResponse.builder()
+                                    .correlationId(request != null ? request.getPhoneNumber() : null)
+                                    .message(e.getReason())
+                                    .qualityStatus("REJECTED")
+                                    .build())
+                            .build()
+            );
         } catch (Exception e) {
             String safeContactId = request != null ? request.getPhoneNumber() : null;
             log.error("Error processing Assam reading: {}", e.getMessage(), e);
-            log.debug("Error processing Assam reading for phoneNumber {} and tenantId {}: {}",
-                    safeContactId, tenantId, e.getMessage());
+            log.debug("Error processing Assam reading for phoneNumber {}: {}",
+                    safeContactId, e.getMessage());
 
             CreateReadingResponse errorResponse = CreateReadingResponse.builder()
                     .correlationId(safeContactId)
