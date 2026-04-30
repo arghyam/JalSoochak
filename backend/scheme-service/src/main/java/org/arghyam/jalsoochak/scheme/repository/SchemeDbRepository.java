@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -452,6 +453,44 @@ public class SchemeDbRepository {
                     .channel((Integer) rs.getObject("channel"))
                     .workStatus(workStatusLabel((Integer) rs.getObject("work_status")))
                     .operatingStatus(operatingStatusLabel((Integer) rs.getObject("operating_status")))
+                    .build(), schemeId);
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
+    public String findSchemaNameByTenantId(Integer tenantId) {
+        if (tenantId == null) {
+            return null;
+        }
+        String sql = """
+                SELECT state_code
+                FROM common_schema.tenant_master_table
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """;
+        List<String> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getString("state_code"), tenantId);
+        return rows.stream()
+                .filter(code -> code != null && !code.isBlank())
+                .map(code -> "tenant_" + code.trim().toLowerCase(Locale.ROOT))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public SchemeStatusesResponseDTO findSchemeStatusesById(String schemaName, int schemeId) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT work_status, operating_status
+                FROM %s.scheme_master_table
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """, schemaName);
+        try {
+            return jdbcTemplate.queryForObject(sql, (rs, n) -> SchemeStatusesResponseDTO.builder()
+                    .workStatus((Integer) rs.getObject("work_status"))
+                    .operatingStatus((Integer) rs.getObject("operating_status"))
                     .build(), schemeId);
         } catch (EmptyResultDataAccessException ex) {
             return null;
