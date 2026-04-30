@@ -3,6 +3,8 @@ package org.arghyam.jalsoochak.analytics.repository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
+import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest;
 import org.springframework.context.annotation.Import;
@@ -22,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @JdbcTest
 @Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@ImportAutoConfiguration(FlywayAutoConfiguration.class)
 @Import(SchemeRegularityRepository.class)
 class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
 
