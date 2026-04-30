@@ -70,6 +70,7 @@ import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
 import org.arghyam.jalsoochak.tenant.exception.StorageException;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
+import org.arghyam.jalsoochak.tenant.service.ApiKeyService;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
@@ -125,6 +126,9 @@ class TenantManagementServiceImplTest {
     @Mock
     private SystemManagementService systemManagementService;
 
+    @Mock
+    private ApiKeyService apiKeyService;
+
     private ObjectMapper objectMapper;
 
     private TenantManagementServiceImpl tenantManagementService;
@@ -149,12 +153,13 @@ class TenantManagementServiceImplTest {
             tenantCommonRepository,
             tenantSchemaRepository,
             objectMapper,
-            appProperties, 
+            appProperties,
             tenantDefaults,
             eventPublisher,
             schedulerManager,
             objectStorageService,
-            systemManagementService
+            systemManagementService,
+            apiKeyService
         );
     }
 
@@ -2336,6 +2341,61 @@ class TenantManagementServiceImplTest {
 
             assertThrows(ResourceNotFoundException.class,
                     () -> tenantManagementService.resolveTenantLogo(TENANT_ID));
+        }
+    }
+
+    @Nested
+    @DisplayName("Generate API Token Tests")
+    class GenerateApiTokenTests {
+
+        private static final Integer TENANT_ID = 1;
+        private static final TenantResponseDTO TENANT =
+                TenantResponseDTO.builder().id(TENANT_ID).stateCode("KA").build();
+
+        @Test
+        @DisplayName("Should generate token, persist hash, and return raw token once")
+        void generateApiToken_Success() {
+            org.arghyam.jalsoochak.tenant.service.ApiKeyService.GeneratedApiToken generated =
+                    new org.arghyam.jalsoochak.tenant.service.ApiKeyService.GeneratedApiToken(
+                            "js_rawtoken", "abc123hash");
+
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(TENANT));
+            when(apiKeyService.generate()).thenReturn(generated);
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO result =
+                    tenantManagementService.generateApiToken(TENANT_ID);
+
+            assertNotNull(result);
+            assertEquals("js_rawtoken", result.getToken());
+
+            ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+            verify(tenantCommonRepository).upsertApiKeyHash(eq(TENANT_ID), hashCaptor.capture(), eq(100));
+            assertEquals("abc123hash", hashCaptor.getValue());
+        }
+
+        @Test
+        @DisplayName("Should throw ResourceNotFoundException when tenant does not exist")
+        void generateApiToken_TenantNotFound_ThrowsResourceNotFoundException() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.empty());
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> tenantManagementService.generateApiToken(TENANT_ID));
+
+            verify(apiKeyService, never()).generate();
+            verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Should throw IllegalArgumentException when tenant ID is system tenant")
+        void generateApiToken_SystemTenant_ThrowsIllegalArgumentException() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> tenantManagementService.generateApiToken(TenantConstants.SYSTEM_TENANT_ID));
+
+            verify(tenantCommonRepository, never()).findById(any());
+            verify(apiKeyService, never()).generate();
+            verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
         }
     }
 }

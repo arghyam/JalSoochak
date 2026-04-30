@@ -60,6 +60,21 @@ Infrastructure: PostgreSQL (shared_db) + Apache Kafka
 
 ---
 
+## Scheme Status Integer Mapping
+
+`work_status`
+- `1` = `Ongoing`
+- `2` = `Completed`
+- `3` = `Not Started`
+- `4` = `Handed Over`
+
+`operating_status`
+- `1` = `Operative`
+- `2` = `Non-Operative`
+- `3` = `Partially Operative`
+
+---
+
 ## Prerequisites
 
 - **Java 21** (Eclipse Temurin recommended)

@@ -11,12 +11,14 @@ import org.arghyam.jalsoochak.telemetry.dto.response.ReadingWebhookAckResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -110,10 +112,15 @@ class GlificWebhookControllerUnitTest {
     @Test
     void assamReadingsReturnsOkWhenServiceSucceeds() {
         GlificWebhookService service = new StubGlificWebhookService(false, false);
-        GlificWebhookController controller = new GlificWebhookController(service);
+        GlificWebhookController controller = new GlificWebhookController(
+                service,
+                null,
+                null,
+                new StubTelemetryApiKeyService(Optional.of(22))
+        );
 
         ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
-                22,
+                "js_valid_key",
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .confirmedReading(new BigDecimal("123.4"))
@@ -129,6 +136,35 @@ class GlificWebhookControllerUnitTest {
         assertEquals(true, response.getBody().isSuccess());
         assertNotNull(response.getBody().getData());
         assertEquals("assam-reading-ok", response.getBody().getData().getMessage());
+    }
+
+    @Test
+    void assamReadingsReturnsUnauthorizedWhenApiKeyInvalid() {
+        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookController controller = new GlificWebhookController(
+                service,
+                null,
+                null,
+                new StubTelemetryApiKeyService(Optional.empty())
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+                "js_invalid_key",
+                AssamReadingRequest.builder()
+                        .readingUrl("https://example.com/meter.jpg")
+                        .confirmedReading(new BigDecimal("123.4"))
+                        .stateSchemeId("30178236")
+                        .centreSchemeId("30244993")
+                        .phoneNumber("919999999999")
+                        .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(false, response.getBody().isSuccess());
+        assertNotNull(response.getBody().getData());
+        assertEquals("Invalid API key", response.getBody().getData().getMessage());
     }
 
     private static final class StubGlificWebhookService extends GlificWebhookService {
@@ -186,6 +222,20 @@ class GlificWebhookControllerUnitTest {
         public void enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
             this.wasCalled = true;
             this.lastContactId = request != null ? request.getContactId() : null;
+        }
+    }
+
+    private static final class StubTelemetryApiKeyService extends TelemetryApiKeyService {
+        private final Optional<Integer> tenantId;
+
+        private StubTelemetryApiKeyService(Optional<Integer> tenantId) {
+            super(null);
+            this.tenantId = tenantId;
+        }
+
+        @Override
+        public Optional<Integer> resolveTenantIdFromRawApiKey(String rawApiKey) {
+            return tenantId;
         }
     }
 }

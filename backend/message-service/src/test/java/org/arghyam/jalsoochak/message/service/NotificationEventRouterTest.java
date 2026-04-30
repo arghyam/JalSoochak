@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -72,6 +73,9 @@ class NotificationEventRouterTest {
     @Mock
     private SmsCountryService smsCountryService;
 
+    @Mock
+    private PiiEncryptionService piiEncryptionService;
+
     @InjectMocks
     private NotificationEventRouter router;
 
@@ -84,6 +88,8 @@ class NotificationEventRouterTest {
         ReflectionTestUtils.setField(router, "objectMapper", new ObjectMapper());
         ReflectionTestUtils.setField(router, "reportDir", tempDir.toString() + "/");
         ReflectionTestUtils.setField(router, "baseUrl", "https://example.com");
+        lenient().when(piiEncryptionService.hmac(anyString()))
+                .thenAnswer(inv -> "hash_" + inv.getArgument(0, String.class));
     }
 
     /**

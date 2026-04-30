@@ -19,8 +19,10 @@ CREATE TABLE common_schema.tenant_master_table (
     updated_at   TIMESTAMP,
     updated_by   INTEGER,
     deleted_at   TIMESTAMP,
+    api_key_hash VARCHAR(64),
     PRIMARY KEY (id),
-    UNIQUE (state_code)
+    UNIQUE (state_code),
+    UNIQUE (api_key_hash)
 );
 
 -- System tenant sentinel (id=0 is a special non-SERIAL value).
