@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.analytics.repository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest;
 import org.springframework.context.annotation.Import;
@@ -21,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @JdbcTest
 @Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@ImportAutoConfiguration(FlywayAutoConfiguration.class)
 @Import(SchemeRegularityRepository.class)
 class SchemeRegularityRepositoryTenantIsolationWaterQuantityIntegrationTest {
 
@@ -143,7 +146,7 @@ class SchemeRegularityRepositoryTenantIsolationWaterQuantityIntegrationTest {
                 (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
                  parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
                  parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
-                 status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
                 VALUES
                 (1, 1, 'Scheme 1 (T1)', 1001, 2001, 0.0, 0.0, 1, 1, 2, NULL, NULL, NULL, NULL, 200, 200, 201, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW()),
                 (2, 1, 'Scheme 2 (T1)', 1002, 2002, 0.0, 0.0, 1, 1, 2, NULL, NULL, NULL, NULL, 200, 200, 201, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW()),

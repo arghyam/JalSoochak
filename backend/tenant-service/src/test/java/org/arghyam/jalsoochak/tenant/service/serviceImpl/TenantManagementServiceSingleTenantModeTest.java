@@ -70,6 +70,9 @@ public class TenantManagementServiceSingleTenantModeTest {
     @Mock
     private SystemManagementService systemManagementService;
 
+    @Mock
+    private org.arghyam.jalsoochak.tenant.service.ApiKeyService apiKeyService;
+
     private TenantManagementServiceImpl tenantManagementService;
     private MockedStatic<SecurityUtils> mockedSecurityUtils;
 
@@ -85,7 +88,8 @@ public class TenantManagementServiceSingleTenantModeTest {
                 eventPublisher,
                 schedulerManager,
                 objectStorageService,
-                systemManagementService);
+                systemManagementService,
+                apiKeyService);
     }
 
     @AfterEach

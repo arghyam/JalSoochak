@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -37,8 +38,8 @@ public class SchemeDbRepository {
     );
     private static final Map<Integer, String> OPERATING_STATUS_LABELS = Map.of(
             1, "Operative",
-            2, "Non-Operative",
-            3, "Partially Operative"
+            0, "Non-Operative",
+            2, "Partially Operative"
     );
 
     public record SchemeSnapshot(
@@ -62,6 +63,7 @@ public class SchemeDbRepository {
             String schemeName,
             Double latitude,
             Double longitude,
+            Integer workStatus,
             Integer operatingStatus,
             Integer parentLgdId,
             Integer parentDepartmentId
@@ -457,6 +459,44 @@ public class SchemeDbRepository {
         }
     }
 
+    public String findSchemaNameByTenantId(Integer tenantId) {
+        if (tenantId == null) {
+            return null;
+        }
+        String sql = """
+                SELECT state_code
+                FROM common_schema.tenant_master_table
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """;
+        List<String> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getString("state_code"), tenantId);
+        return rows.stream()
+                .filter(code -> code != null && !code.isBlank())
+                .map(code -> "tenant_" + code.trim().toLowerCase(Locale.ROOT))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public SchemeStatusesResponseDTO findSchemeStatusesById(String schemaName, int schemeId) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT work_status, operating_status
+                FROM %s.scheme_master_table
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """, schemaName);
+        try {
+            return jdbcTemplate.queryForObject(sql, (rs, n) -> SchemeStatusesResponseDTO.builder()
+                    .workStatus((Integer) rs.getObject("work_status"))
+                    .operatingStatus((Integer) rs.getObject("operating_status"))
+                    .build(), schemeId);
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
     private String workStatusLabel(Integer code) {
         if (code == null) {
             return "Unknown";
@@ -598,6 +638,7 @@ public class SchemeDbRepository {
                        sm.scheme_name,
                        sm.latitude,
                        sm.longitude,
+                       sm.work_status,
                        sm.operating_status,
                        slm.parent_lgd_id,
                        sdm.parent_department_id
@@ -630,6 +671,7 @@ public class SchemeDbRepository {
                 rs.getString("scheme_name"),
                 (Double) rs.getObject("latitude"),
                 (Double) rs.getObject("longitude"),
+                (Integer) rs.getObject("work_status"),
                 (Integer) rs.getObject("operating_status"),
                 (Integer) rs.getObject("parent_lgd_id"),
                 (Integer) rs.getObject("parent_department_id")
@@ -654,6 +696,7 @@ public class SchemeDbRepository {
                        sm.scheme_name,
                        sm.latitude,
                        sm.longitude,
+                       sm.work_status,
                        sm.operating_status,
                        slm.parent_lgd_id,
                        sdm.parent_department_id
@@ -686,6 +729,7 @@ public class SchemeDbRepository {
                 rs.getString("scheme_name"),
                 (Double) rs.getObject("latitude"),
                 (Double) rs.getObject("longitude"),
+                (Integer) rs.getObject("work_status"),
                 (Integer) rs.getObject("operating_status"),
                 (Integer) rs.getObject("parent_lgd_id"),
                 (Integer) rs.getObject("parent_department_id")
@@ -862,6 +906,44 @@ public class SchemeDbRepository {
                 return rows.size();
             }
         });
+    }
+
+    public boolean updateSchemeStatusesById(
+            String schemaName,
+            int schemeId,
+            Integer workStatus,
+            Integer operatingStatus,
+            int updatedBy
+    ) {
+        validateSchemaName(schemaName);
+        List<String> updates = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+
+        if (workStatus != null) {
+            updates.add("work_status = ?");
+            args.add(workStatus);
+        }
+        if (operatingStatus != null) {
+            updates.add("operating_status = ?");
+            args.add(operatingStatus);
+        }
+        if (updates.isEmpty()) {
+            return false;
+        }
+
+        updates.add("updated_at = NOW()");
+        updates.add("updated_by = ?");
+        args.add(updatedBy);
+        args.add(schemeId);
+
+        String sql = String.format("""
+                UPDATE %s.scheme_master_table
+                SET %s
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                """, schemaName, String.join(", ", updates));
+
+        return jdbcTemplate.update(sql, args.toArray()) > 0;
     }
 
     public void insertLgdMappings(String schemaName, List<SchemeLgdMappingCreateRecord> rows) {

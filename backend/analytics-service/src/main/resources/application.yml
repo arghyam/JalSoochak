@@ -1,5 +1,9 @@
 server:
   port: 8087
+  compression:
+    enabled: true
+    mime-types: application/json,application/*+json,text/plain,text/html,text/xml,application/xml
+    min-response-size: 1024
 
 spring:
   application:
@@ -11,7 +15,7 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 10
+      maximum-pool-size: 30
       minimum-idle: 2
       connection-timeout: 30000
       initialization-fail-timeout: -1
@@ -48,7 +52,7 @@ spring:
       database: ${REDIS_DATABASE:0}
 
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: analytics-service-group
       auto-offset-reset: earliest

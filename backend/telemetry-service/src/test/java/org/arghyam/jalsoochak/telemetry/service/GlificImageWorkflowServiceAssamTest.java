@@ -54,8 +54,8 @@ class GlificImageWorkflowServiceAssamTest {
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
-                .stateSchemeId(30178236L)
-                .centreSchemeId(30244993L)
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
                 .phoneNumber("919876543210")
                 .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
                 .build();
@@ -65,13 +65,13 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(telemetryTenantRepository.existsSchemeById("tenant_assam", 30244993L)).thenReturn(false);
-        when(telemetryTenantRepository.existsSchemeById("tenant_assam", 30178236L)).thenReturn(true);
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
                 .thenReturn(CreateReadingResponse.builder()
@@ -81,7 +81,7 @@ class GlificImageWorkflowServiceAssamTest {
                         .qualityStatus("CONFIRMED")
                         .build());
 
-        CreateReadingResponse response = service.processAssamReading(request);
+        CreateReadingResponse response = service.processAssamReading(request, 22);
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
@@ -93,8 +93,8 @@ class GlificImageWorkflowServiceAssamTest {
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
-                .stateSchemeId(30178236L)
-                .centreSchemeId(30244993L)
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
                 .phoneNumber("919876543210")
                 .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
                 .geolocation(AssamReadingRequest.Geolocation.builder()
@@ -108,12 +108,15 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
                 .thenReturn("Reading created successfully");
-        when(telemetryTenantRepository.existsSchemeById("tenant_assam", 30244993L)).thenReturn(true);
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
+                .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
         when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
                 .thenReturn(CreateReadingResponse.builder()
@@ -125,7 +128,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findReadingByCorrelationId("tenant_assam", "corr-1"))
                 .thenReturn(Optional.of(new TelemetryReadingRecord(100L, "corr-1", 11L)));
 
-        CreateReadingResponse response = service.processAssamReading(request);
+        CreateReadingResponse response = service.processAssamReading(request, 22);
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());

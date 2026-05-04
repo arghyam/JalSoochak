@@ -25,10 +25,12 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -104,6 +106,7 @@ public class NotificationEventRouter {
     private final MessageTemplateService messageTemplateService;
     private final AccountEmailService accountEmailService;
     private final JdbcTemplate jdbcTemplate;
+    private final PiiEncryptionService piiEncryptionService;
 
     @Value("${escalation.report.dir:/tmp/escalation-reports/}")
     private String reportDir;
@@ -659,6 +662,10 @@ public class NotificationEventRouter {
      * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
      */
     private Long fetchWhatsappConnectionId(String tenantSchema, String phone) {
+        Long byHash = fetchWhatsappConnectionIdByHash(tenantSchema, phone);
+        if (byHash != null) {
+            return byHash;
+        }
         String sql = "SELECT whatsapp_connection_id FROM " + tenantSchema
                 + ".user_table WHERE phone_number = ? LIMIT 1";
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getObject("whatsapp_connection_id", Long.class), phone);
@@ -672,14 +679,75 @@ public class NotificationEventRouter {
      * tenantSchema is pre-validated to match {@code [a-z0-9_]+} before this call.
      */
     private UserContactInfo fetchUserContactInfo(String tenantSchema, String phone) {
+        UserContactInfo byHash = fetchUserContactInfoByHash(tenantSchema, phone);
+        if (byHash.contactId() != null || byHash.name() != null) {
+            return byHash;
+        }
         String sql = "SELECT whatsapp_connection_id, title FROM " + tenantSchema
                 + ".user_table WHERE phone_number = ? LIMIT 1";
         List<UserContactInfo> rows = jdbcTemplate.query(sql,
                 (rs, n) -> new UserContactInfo(
                         rs.getObject("whatsapp_connection_id", Long.class),
-                        rs.getString("title")),
+                        piiEncryptionService.safeDecrypt(rs.getString("title"))),
                 phone);
         return rows.isEmpty() ? new UserContactInfo(null, null) : rows.get(0);
+    }
+
+    private Long fetchWhatsappConnectionIdByHash(String tenantSchema, String phone) {
+        String sql = "SELECT whatsapp_connection_id FROM " + tenantSchema
+                + ".user_table WHERE phone_number_hash = ? LIMIT 1";
+        try {
+            for (String candidate : buildPhoneCandidates(phone)) {
+                String lookupHash = piiEncryptionService.hmac(candidate);
+                List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getObject("whatsapp_connection_id", Long.class), lookupHash);
+                if (rows != null && !rows.isEmpty()) {
+                    return rows.get(0);
+                }
+            }
+        } catch (Exception ex) {
+            return null;
+        }
+        return null;
+    }
+
+    private UserContactInfo fetchUserContactInfoByHash(String tenantSchema, String phone) {
+        String sql = "SELECT whatsapp_connection_id, title FROM " + tenantSchema
+                + ".user_table WHERE phone_number_hash = ? LIMIT 1";
+        try {
+            for (String candidate : buildPhoneCandidates(phone)) {
+                String lookupHash = piiEncryptionService.hmac(candidate);
+                List<UserContactInfo> rows = jdbcTemplate.query(sql,
+                        (rs, n) -> new UserContactInfo(
+                                rs.getObject("whatsapp_connection_id", Long.class),
+                                piiEncryptionService.safeDecrypt(rs.getString("title"))),
+                        lookupHash);
+                if (rows != null && !rows.isEmpty()) {
+                    return rows.get(0);
+                }
+            }
+        } catch (Exception ex) {
+            return new UserContactInfo(null, null);
+        }
+        return new UserContactInfo(null, null);
+    }
+
+    private List<String> buildPhoneCandidates(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return List.of();
+        }
+        String raw = phone.trim();
+        String digits = raw.replaceAll("\\D", "");
+        Set<String> candidates = new LinkedHashSet<>();
+        candidates.add(raw);
+        if (!digits.isBlank()) {
+            candidates.add(digits);
+            if (digits.length() == 10) {
+                candidates.add("91" + digits);
+            } else if (digits.length() == 12 && digits.startsWith("91")) {
+                candidates.add(digits.substring(2));
+            }
+        }
+        return new ArrayList<>(candidates);
     }
 
     private void handleEscalation(JsonNode root) throws Exception {

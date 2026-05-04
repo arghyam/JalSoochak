@@ -2553,8 +2553,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.status = 1)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.status = 0)::int AS inactive_scheme_count
+                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                 """, schemeLgdColumn);
@@ -2575,8 +2575,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.status = 1)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.status = 0)::int AS inactive_scheme_count
+                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                   AND s.tenant_id = ?
@@ -2598,8 +2598,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.status = 1)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.status = 0)::int AS inactive_scheme_count
+                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                 """, schemeDepartmentColumn);
@@ -2620,8 +2620,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.status = 1)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.status = 0)::int AS inactive_scheme_count
+                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                   AND s.tenant_id = ?
@@ -2683,7 +2683,7 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
-                        s.status,
+                        s.operating_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -2724,7 +2724,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
-                    ss.status,
+                    ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
                     ss.immediate_parent_lgd_id,
@@ -2763,7 +2763,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeSubmissionMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("status"),
+                        (Integer) rs.getObject("operating_status"),
                         rs.getInt("submission_days"),
                         rs.getLong("total_water_supplied"),
                         (Integer) rs.getObject("immediate_parent_lgd_id"),
@@ -2811,7 +2811,7 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
-                        s.status,
+                        s.operating_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -2853,7 +2853,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
-                    ss.status,
+                    ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
                     ss.immediate_parent_lgd_id,
@@ -2894,7 +2894,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeSubmissionMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("status"),
+                        (Integer) rs.getObject("operating_status"),
                         rs.getInt("submission_days"),
                         rs.getLong("total_water_supplied"),
                         (Integer) rs.getObject("immediate_parent_lgd_id"),
@@ -2941,7 +2941,7 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
-                        s.status,
+                        s.operating_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -2982,7 +2982,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
-                    ss.status,
+                    ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
                     NULL::int AS immediate_parent_lgd_id,
@@ -3021,7 +3021,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeSubmissionMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("status"),
+                        (Integer) rs.getObject("operating_status"),
                         rs.getInt("submission_days"),
                         rs.getLong("total_water_supplied"),
                         (Integer) rs.getObject("immediate_parent_lgd_id"),
@@ -3070,7 +3070,7 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
-                        s.status,
+                        s.operating_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -3112,7 +3112,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
-                    ss.status,
+                    ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
                     NULL::int AS immediate_parent_lgd_id,
@@ -3153,7 +3153,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeSubmissionMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("status"),
+                        (Integer) rs.getObject("operating_status"),
                         rs.getInt("submission_days"),
                         rs.getLong("total_water_supplied"),
                         (Integer) rs.getObject("immediate_parent_lgd_id"),
@@ -3199,7 +3199,7 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
-                        s.status
+                        s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                 ),
@@ -3217,7 +3217,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
-                    ss.status,
+                    ss.operating_status,
                     COALESCE(sd.supply_days, 0)::int AS supply_days,
                     COALESCE(sd.submission_days, 0)::int AS submission_days
                 FROM schemes_in_scope ss
@@ -3231,7 +3231,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("status"),
+                        (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days")),
                 parentLgdId,
@@ -3252,7 +3252,7 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
-                        s.status
+                        s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -3271,7 +3271,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
-                    ss.status,
+                    ss.operating_status,
                     COALESCE(sd.supply_days, 0)::int AS supply_days,
                     COALESCE(sd.submission_days, 0)::int AS submission_days
                 FROM schemes_in_scope ss
@@ -3285,7 +3285,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("status"),
+                        (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days")),
                 parentLgdId,
@@ -3308,7 +3308,7 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
-                        s.status
+                        s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                 ),
@@ -3326,7 +3326,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
-                    ss.status,
+                    ss.operating_status,
                     COALESCE(sd.supply_days, 0)::int AS supply_days,
                     COALESCE(sd.submission_days, 0)::int AS submission_days
                 FROM schemes_in_scope ss
@@ -3340,7 +3340,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("status"),
+                        (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days")),
                 parentDepartmentId,
@@ -3362,7 +3362,7 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
-                        s.status
+                        s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -3381,7 +3381,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
-                    ss.status,
+                    ss.operating_status,
                     COALESCE(sd.supply_days, 0)::int AS supply_days,
                     COALESCE(sd.submission_days, 0)::int AS submission_days
                 FROM schemes_in_scope ss
@@ -3395,7 +3395,7 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
-                        (Integer) rs.getObject("status"),
+                        (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days")),
                 parentDepartmentId,
@@ -3817,6 +3817,40 @@ public class SchemeRegularityRepository {
         });
     }
 
+    public List<NationalDashboardLevel2LgdBoundary> getNationalDashboardLevel2LgdBoundaries() {
+        String sql = """
+                SELECT
+                    l.tenant_id,
+                    l.lgd_id,
+                    t.status AS tenant_status,
+                    t.state_code,
+                    t.title AS state_title,
+                    l.title AS lgd_title,
+                    CASE
+                        WHEN l.geom IS NOT NULL THEN ST_AsGeoJSON(l.geom, 9, 8)
+                        ELSE NULL
+                    END AS boundary_geojson
+                FROM analytics_schema.dim_lgd_location_table l
+                JOIN analytics_schema.dim_tenant_table t
+                    ON t.tenant_id = l.tenant_id
+                WHERE l.tenant_id > 0
+                  AND l.lgd_level = 2
+                ORDER BY l.tenant_id, l.lgd_id
+                """;
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            Integer lgdId = rs.getObject("lgd_id") == null ? null : rs.getInt("lgd_id");
+            return new NationalDashboardLevel2LgdBoundary(
+                    rs.getInt("tenant_id"),
+                    lgdId,
+                    rs.getInt("tenant_status"),
+                    rs.getString("state_code"),
+                    rs.getString("state_title"),
+                    rs.getString("lgd_title"),
+                    rs.getString("boundary_geojson"));
+        });
+    }
+
     public String getNationalBoundaryGeoJson() {
         String sql = """
                 SELECT
@@ -3913,6 +3947,249 @@ public class SchemeRegularityRepository {
                         rs.getInt("tenant_id"),
                         rs.getString("state_code"),
                         rs.getString("title"),
+                        rs.getInt("scheme_count"),
+                        rs.getInt("total_submission_days")),
+                startDate,
+                endDate);
+    }
+
+    public List<Level2WaterSupplyMetrics> getLgdLevel2WiseWaterSupplyMetricsForNation(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH water_by_scheme AS (
+                    SELECT
+                        f.tenant_id,
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied_liters
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.tenant_id, f.scheme_id
+                )
+                SELECT
+                    t.tenant_id,
+                    t.status AS tenant_status,
+                    t.state_code,
+                    t.title AS state_title,
+                    s.level_2_lgd_id AS lgd_id,
+                    l.title AS district_title,
+                    COALESCE(SUM(COALESCE(s.house_hold_count, 0)), 0)::bigint AS total_household_count,
+                    COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_fhtc_count,
+                    COALESCE(SUM(COALESCE(s.planned_fhtc, 0)), 0)::bigint AS total_planned_fhtc,
+                    COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    CASE
+                        WHEN COUNT(s.scheme_id) > 0
+                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(s.scheme_id), 4)
+                        ELSE 0::numeric
+                    END AS avg_water_supply_per_scheme
+                FROM analytics_schema.dim_scheme_table s
+                JOIN analytics_schema.dim_tenant_table t
+                    ON t.tenant_id = s.tenant_id
+                LEFT JOIN analytics_schema.dim_lgd_location_table l
+                    ON l.tenant_id = s.tenant_id
+                   AND l.lgd_id = s.level_2_lgd_id
+                   AND l.lgd_level = 2
+                LEFT JOIN water_by_scheme w
+                    ON w.tenant_id = s.tenant_id
+                   AND w.scheme_id = s.scheme_id
+                WHERE s.tenant_id > 0
+                  AND s.level_2_lgd_id IS NOT NULL
+                GROUP BY
+                    t.tenant_id,
+                    t.status,
+                    t.state_code,
+                    t.title,
+                    s.level_2_lgd_id,
+                    l.title
+                ORDER BY t.tenant_id, s.level_2_lgd_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new Level2WaterSupplyMetrics(
+                        rs.getInt("tenant_id"),
+                        rs.getInt("tenant_status"),
+                        rs.getString("state_code"),
+                        rs.getString("state_title"),
+                        (Integer) rs.getObject("lgd_id"),
+                        rs.getString("district_title"),
+                        rs.getLong("total_household_count"),
+                        rs.getLong("total_fhtc_count"),
+                        rs.getLong("total_planned_fhtc"),
+                        rs.getLong("total_water_supplied_liters"),
+                        rs.getInt("scheme_count"),
+                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                startDate,
+                endDate);
+    }
+
+    public List<Level2SupplyDaysInEfficientRange> getLgdLevel2WiseSupplyDaysInEfficientRangeForNation(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH tenant_cfg AS (
+                    SELECT
+                        t.tenant_id,
+                        COALESCE(t.required_lpcd, 0) AS required_lpcd,
+                        COALESCE(t.person_count_per_household, 5) AS person_count_per_household,
+                        COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
+                        COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
+                    FROM analytics_schema.dim_tenant_table t
+                    WHERE t.tenant_id > 0
+                ),
+                schemes_in_scope AS (
+                    SELECT
+                        s.tenant_id,
+                        s.scheme_id,
+                        s.level_2_lgd_id,
+                        COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.tenant_id > 0
+                      AND s.level_2_lgd_id IS NOT NULL
+                ),
+                dates_in_range AS (
+                    SELECT d.full_date AS date
+                    FROM analytics_schema.dim_date_table d
+                    WHERE d.full_date BETWEEN ? AND ?
+                ),
+                ewater_by_scheme_day AS (
+                    SELECT
+                        f.tenant_id,
+                        f.scheme_id,
+                        f.date,
+                        COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.tenant_id, f.scheme_id, f.date
+                ),
+                level2_supply_days AS (
+                    SELECT
+                        s.tenant_id,
+                        s.level_2_lgd_id AS lgd_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                     (
+                                         (tc.required_lpcd::numeric * (s.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 - (tc.under_supply_range_percentage::numeric / 100))
+                                     )
+                                     AND
+                                     (
+                                         (tc.required_lpcd::numeric * (s.fhtc_count::numeric * tc.person_count_per_household::numeric))
+                                         * (1 + (tc.over_supply_range_percentage::numeric / 100))
+                                     )
+                                    THEN 1
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS supply_days_in_efficient_range
+                    FROM schemes_in_scope s
+                    CROSS JOIN dates_in_range dr
+                    LEFT JOIN ewater_by_scheme_day wd
+                        ON wd.tenant_id = s.tenant_id
+                       AND wd.scheme_id = s.scheme_id
+                       AND wd.date = dr.date
+                    JOIN tenant_cfg tc
+                        ON tc.tenant_id = s.tenant_id
+                    GROUP BY s.tenant_id, s.level_2_lgd_id
+                )
+                SELECT
+                    tenant_id,
+                    lgd_id,
+                    supply_days_in_efficient_range
+                FROM level2_supply_days
+                ORDER BY tenant_id, lgd_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new Level2SupplyDaysInEfficientRange(
+                        rs.getInt("tenant_id"),
+                        (Integer) rs.getObject("lgd_id"),
+                        rs.getLong("supply_days_in_efficient_range")),
+                startDate,
+                endDate,
+                startDate,
+                endDate);
+    }
+
+    public List<Level2RegularityMetrics> getLgdLevel2WiseRegularityMetricsForNation(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH supply_days_by_scheme AS (
+                    SELECT
+                        m.tenant_id,
+                        m.scheme_id,
+                        COUNT(DISTINCT m.reading_date)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.tenant_id, m.scheme_id
+                )
+                SELECT
+                    s.tenant_id,
+                    s.level_2_lgd_id AS lgd_id,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                FROM analytics_schema.dim_scheme_table s
+                LEFT JOIN supply_days_by_scheme sd
+                    ON sd.tenant_id = s.tenant_id
+                   AND sd.scheme_id = s.scheme_id
+                WHERE s.tenant_id > 0
+                  AND s.level_2_lgd_id IS NOT NULL
+                GROUP BY s.tenant_id, s.level_2_lgd_id
+                ORDER BY s.tenant_id, s.level_2_lgd_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new Level2RegularityMetrics(
+                        rs.getInt("tenant_id"),
+                        (Integer) rs.getObject("lgd_id"),
+                        rs.getInt("scheme_count"),
+                        rs.getInt("total_supply_days")),
+                startDate,
+                endDate);
+    }
+
+    public List<Level2ReadingSubmissionMetrics> getLgdLevel2WiseReadingSubmissionMetricsForNation(
+            LocalDate startDate, LocalDate endDate) {
+        String sql = """
+                WITH submission_days_by_scheme AS (
+                    SELECT
+                        m.tenant_id,
+                        m.scheme_id,
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading >= 0
+                    GROUP BY m.tenant_id, m.scheme_id
+                )
+                SELECT
+                    s.tenant_id,
+                    s.level_2_lgd_id AS lgd_id,
+                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
+                FROM analytics_schema.dim_scheme_table s
+                LEFT JOIN submission_days_by_scheme sd
+                    ON sd.tenant_id = s.tenant_id
+                   AND sd.scheme_id = s.scheme_id
+                WHERE s.tenant_id > 0
+                  AND s.level_2_lgd_id IS NOT NULL
+                GROUP BY s.tenant_id, s.level_2_lgd_id
+                ORDER BY s.tenant_id, s.level_2_lgd_id
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new Level2ReadingSubmissionMetrics(
+                        rs.getInt("tenant_id"),
+                        (Integer) rs.getObject("lgd_id"),
                         rs.getInt("scheme_count"),
                         rs.getInt("total_submission_days")),
                 startDate,
@@ -4643,10 +4920,18 @@ public class SchemeRegularityRepository {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForMeterReadings(scale);
 
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT
                         s.tenant_id,
                         s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                ),
+                scheme_fhtc_totals AS (
+                    SELECT
+                        COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                 ),
                 periods AS (
@@ -4654,7 +4939,8 @@ public class SchemeRegularityRepository {
                         %1$s AS period_start_date,
                         %2$s AS period_end_date,
                         %3$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 scheme_supply_days AS (
                     SELECT
@@ -4663,7 +4949,8 @@ public class SchemeRegularityRepository {
                         %4$s AS period_start_date,
                         COUNT(DISTINCT m.reading_date)::int AS supply_days,
                         COALESCE(SUM(m.confirmed_reading), 0)::bigint AS total_water_quantity
-                    FROM analytics_schema.fact_meter_reading_table m
+                    FROM params,
+                         analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope s
                         ON s.scheme_id = m.scheme_id
                         AND s.tenant_id = m.tenant_id
@@ -4683,6 +4970,7 @@ public class SchemeRegularityRepository {
                     p.period_start_date,
                     p.period_end_date,
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
+                    COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
                     COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
@@ -4701,8 +4989,10 @@ public class SchemeRegularityRepository {
                         rs.getObject("period_start_date", LocalDate.class),
                         rs.getObject("period_end_date", LocalDate.class),
                         rs.getInt("scheme_count"),
+                        rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
+                startDate,
                 startDate,
                 endDate,
                 startDate,
@@ -4717,18 +5007,28 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT
-                        s.scheme_id
+                        s.scheme_id,
+                        COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
+                ),
+                scheme_fhtc_totals AS (
+                    SELECT
+                        COALESCE(SUM(s.achieved_fhtc_count), 0)::bigint AS total_achieved_fhtc_count
+                    FROM schemes_in_scope s
                 ),
                 periods AS (
                     SELECT DISTINCT
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 scheme_day AS (
                     SELECT
@@ -4747,7 +5047,8 @@ public class SchemeRegularityRepository {
                         %5$s AS period_start_date,
                         COUNT(*) FILTER (WHERE sd.day_water_quantity > 0)::int AS supply_days,
                         COALESCE(SUM(sd.day_water_quantity), 0)::bigint AS total_water_quantity
-                    FROM scheme_day sd
+                    FROM params,
+                         scheme_day sd
                     GROUP BY sd.scheme_id, %5$s
                 ),
                 period_supply AS (
@@ -4762,6 +5063,7 @@ public class SchemeRegularityRepository {
                     p.period_start_date,
                     p.period_end_date,
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
+                    COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
                     COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
@@ -4781,8 +5083,10 @@ public class SchemeRegularityRepository {
                         rs.getObject("period_start_date", LocalDate.class),
                         rs.getObject("period_end_date", LocalDate.class),
                         rs.getInt("scheme_count"),
+                        rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
+                startDate,
                 locationId,
                 startDate,
                 endDate,
@@ -4799,19 +5103,29 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT
-                        s.scheme_id
+                        s.scheme_id,
+                        COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
+                ),
+                scheme_fhtc_totals AS (
+                    SELECT
+                        COALESCE(SUM(s.achieved_fhtc_count), 0)::bigint AS total_achieved_fhtc_count
+                    FROM schemes_in_scope s
                 ),
                 periods AS (
                     SELECT DISTINCT
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 scheme_day AS (
                     SELECT
@@ -4831,7 +5145,8 @@ public class SchemeRegularityRepository {
                         %5$s AS period_start_date,
                         COUNT(*) FILTER (WHERE sd.day_water_quantity > 0)::int AS supply_days,
                         COALESCE(SUM(sd.day_water_quantity), 0)::bigint AS total_water_quantity
-                    FROM scheme_day sd
+                    FROM params,
+                         scheme_day sd
                     GROUP BY sd.scheme_id, %5$s
                 ),
                 period_supply AS (
@@ -4846,6 +5161,7 @@ public class SchemeRegularityRepository {
                     p.period_start_date,
                     p.period_end_date,
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
+                    COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
                     COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
@@ -4865,8 +5181,10 @@ public class SchemeRegularityRepository {
                         rs.getObject("period_start_date", LocalDate.class),
                         rs.getObject("period_end_date", LocalDate.class),
                         rs.getInt("scheme_count"),
+                        rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
                         rs.getLong("total_water_quantity")),
+                startDate,
                 locationId,
                 tenantId,
                 startDate,
@@ -5113,7 +5431,10 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
@@ -5123,14 +5444,16 @@ public class SchemeRegularityRepository {
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 outage_by_period AS (
                     SELECT
                         %5$s AS period_start_date,
                         f.outage_reason,
                         COUNT(DISTINCT f.scheme_id)::int AS scheme_count
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM params,
+                         analytics_schema.fact_water_quantity_table f
                     JOIN schemes_in_scope s
                         ON s.scheme_id = f.scheme_id
                     WHERE f.outage_reason IS NOT NULL
@@ -5167,6 +5490,7 @@ public class SchemeRegularityRepository {
                             reason,
                             count);
                 },
+                startDate,
                 locationId,
                 startDate,
                 endDate,
@@ -5183,7 +5507,10 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
@@ -5194,14 +5521,16 @@ public class SchemeRegularityRepository {
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 outage_by_period AS (
                     SELECT
                         %5$s AS period_start_date,
                         f.outage_reason,
                         COUNT(DISTINCT f.scheme_id)::int AS scheme_count
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM params,
+                         analytics_schema.fact_water_quantity_table f
                     JOIN schemes_in_scope s
                         ON s.scheme_id = f.scheme_id
                     WHERE f.outage_reason IS NOT NULL
@@ -5238,6 +5567,7 @@ public class SchemeRegularityRepository {
                             reason,
                             count);
                 },
+                startDate,
                 locationId,
                 tenantId,
                 startDate,
@@ -5254,7 +5584,10 @@ public class SchemeRegularityRepository {
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH params AS (
+                    SELECT ?::date AS anchor_start
+                ),
+                schemes_in_scope AS (
                     SELECT
                         s.scheme_id,
                         COALESCE(s.house_hold_count, 0)::bigint AS house_hold_count,
@@ -5268,13 +5601,15 @@ public class SchemeRegularityRepository {
                         %2$s AS period_start_date,
                         %3$s AS period_end_date,
                         %4$s AS scope
-                    FROM generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
+                    FROM params,
+                         generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 water_by_period AS (
                     SELECT
                         %5$s AS period_start_date,
                         AVG(f.water_quantity::numeric) AS avg_water_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM params,
+                         analytics_schema.fact_water_quantity_table f
                     JOIN schemes_in_scope s
                         ON s.scheme_id = f.scheme_id
                     WHERE f.date BETWEEN ? AND ?
@@ -5317,6 +5652,7 @@ public class SchemeRegularityRepository {
                         rs.getLong("household_count"),
                         rs.getLong("fhtc_count"),
                         rs.getLong("planned_fhtc")),
+                startDate,
                 locationId,
                 startDate,
                 endDate,
@@ -5352,6 +5688,10 @@ public class SchemeRegularityRepository {
     }
 
     private PeriodSqlParts buildPeriodSqlParts(PeriodScale scale) {
+        // Period alignment rules:
+        // - WEEK: rolling 7-day buckets anchored to the request start_date (params.anchor_start), not ISO-week aligned.
+        // - MONTH/QUARTER/YEAR: calendar-aligned buckets via DATE_TRUNC (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31).
+        // These fragments assume the calling query defines `params(anchor_start)` CTE when WEEK scale is used.
         return switch (scale) {
             case DAY -> new PeriodSqlParts(
                     "g.day_date::date",
@@ -5359,19 +5699,30 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "f.date::date");
             case WEEK -> new PeriodSqlParts(
-                    "DATE_TRUNC('week', g.day_date)::date",
-                    "(DATE_TRUNC('week', g.day_date)::date + 6)",
-                    "TO_CHAR(DATE_TRUNC('week', g.day_date)::date, 'IYYY-\"W\"IW')",
-                    "DATE_TRUNC('week', f.date)::date");
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
+                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
+                    "(params.anchor_start + (((f.date::date - params.anchor_start) / 7) * 7))::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
                     "TO_CHAR(DATE_TRUNC('month', g.day_date)::date, 'YYYY-MM')",
                     "DATE_TRUNC('month', f.date)::date");
+            case QUARTER -> new PeriodSqlParts(
+                    "DATE_TRUNC('quarter', g.day_date)::date",
+                    "(DATE_TRUNC('quarter', g.day_date)::date + INTERVAL '3 month - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('quarter', g.day_date)::date, 'YYYY-\"Q\"Q')",
+                    "DATE_TRUNC('quarter', f.date)::date");
+            case YEAR -> new PeriodSqlParts(
+                    "DATE_TRUNC('year', g.day_date)::date",
+                    "(DATE_TRUNC('year', g.day_date)::date + INTERVAL '1 year - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('year', g.day_date)::date, 'YYYY')",
+                    "DATE_TRUNC('year', f.date)::date");
         };
     }
 
     private PeriodSqlParts buildPeriodSqlPartsForMeterReadings(PeriodScale scale) {
+        // Same alignment rules as buildPeriodSqlParts(), but fact date column is m.reading_date.
         return switch (scale) {
             case DAY -> new PeriodSqlParts(
                     "g.day_date::date",
@@ -5379,19 +5730,30 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "m.reading_date::date");
             case WEEK -> new PeriodSqlParts(
-                    "DATE_TRUNC('week', g.day_date)::date",
-                    "(DATE_TRUNC('week', g.day_date)::date + 6)",
-                    "TO_CHAR(DATE_TRUNC('week', g.day_date)::date, 'IYYY-\"W\"IW')",
-                    "DATE_TRUNC('week', m.reading_date)::date");
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
+                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
+                    "(params.anchor_start + (((m.reading_date::date - params.anchor_start) / 7) * 7))::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
                     "TO_CHAR(DATE_TRUNC('month', g.day_date)::date, 'YYYY-MM')",
                     "DATE_TRUNC('month', m.reading_date)::date");
+            case QUARTER -> new PeriodSqlParts(
+                    "DATE_TRUNC('quarter', g.day_date)::date",
+                    "(DATE_TRUNC('quarter', g.day_date)::date + INTERVAL '3 month - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('quarter', g.day_date)::date, 'YYYY-\"Q\"Q')",
+                    "DATE_TRUNC('quarter', m.reading_date)::date");
+            case YEAR -> new PeriodSqlParts(
+                    "DATE_TRUNC('year', g.day_date)::date",
+                    "(DATE_TRUNC('year', g.day_date)::date + INTERVAL '1 year - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('year', g.day_date)::date, 'YYYY')",
+                    "DATE_TRUNC('year', m.reading_date)::date");
         };
     }
 
     private PeriodSqlParts buildPeriodSqlPartsForSchemeDay(PeriodScale scale) {
+        // Same alignment rules as buildPeriodSqlParts(), but fact date column is sd.reading_date.
         return switch (scale) {
             case DAY -> new PeriodSqlParts(
                     "g.day_date::date",
@@ -5399,15 +5761,25 @@ public class SchemeRegularityRepository {
                     "TO_CHAR(g.day_date::date, 'YYYY-MM-DD')",
                     "sd.reading_date::date");
             case WEEK -> new PeriodSqlParts(
-                    "DATE_TRUNC('week', g.day_date)::date",
-                    "(DATE_TRUNC('week', g.day_date)::date + 6)",
-                    "TO_CHAR(DATE_TRUNC('week', g.day_date)::date, 'IYYY-\"W\"IW')",
-                    "DATE_TRUNC('week', sd.reading_date)::date");
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date",
+                    "(params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7) + 6)::date",
+                    "TO_CHAR((params.anchor_start + (((g.day_date::date - params.anchor_start) / 7) * 7))::date, 'YYYY-MM-DD')",
+                    "(params.anchor_start + (((sd.reading_date::date - params.anchor_start) / 7) * 7))::date");
             case MONTH -> new PeriodSqlParts(
                     "DATE_TRUNC('month', g.day_date)::date",
                     "(DATE_TRUNC('month', g.day_date)::date + INTERVAL '1 month - 1 day')::date",
                     "TO_CHAR(DATE_TRUNC('month', g.day_date)::date, 'YYYY-MM')",
                     "DATE_TRUNC('month', sd.reading_date)::date");
+            case QUARTER -> new PeriodSqlParts(
+                    "DATE_TRUNC('quarter', g.day_date)::date",
+                    "(DATE_TRUNC('quarter', g.day_date)::date + INTERVAL '3 month - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('quarter', g.day_date)::date, 'YYYY-\"Q\"Q')",
+                    "DATE_TRUNC('quarter', sd.reading_date)::date");
+            case YEAR -> new PeriodSqlParts(
+                    "DATE_TRUNC('year', g.day_date)::date",
+                    "(DATE_TRUNC('year', g.day_date)::date + INTERVAL '1 year - 1 day')::date",
+                    "TO_CHAR(DATE_TRUNC('year', g.day_date)::date, 'YYYY')",
+                    "DATE_TRUNC('year', sd.reading_date)::date");
         };
     }
 
@@ -5530,6 +5902,7 @@ public class SchemeRegularityRepository {
             LocalDate periodStartDate,
             LocalDate periodEndDate,
             Integer schemeCount,
+            Long totalAchievedFhtcCount,
             Integer totalSupplyDays,
             Long totalWaterQuantity) {}
 
@@ -5577,6 +5950,16 @@ public class SchemeRegularityRepository {
             String boundaryGeoJson) {
     }
 
+    public record NationalDashboardLevel2LgdBoundary(
+            Integer tenantId,
+            Integer lgdId,
+            Integer tenantStatus,
+            String stateCode,
+            String stateTitle,
+            String title,
+            String boundaryGeoJson) {
+    }
+
     public record StateSchemeRegularityMetrics(
             Integer tenantId,
             String stateCode,
@@ -5589,6 +5972,41 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             String stateCode,
             String title,
+            Integer schemeCount,
+            Integer totalSubmissionDays) {
+    }
+
+    public record Level2WaterSupplyMetrics(
+            Integer tenantId,
+            Integer tenantStatus,
+            String stateCode,
+            String stateTitle,
+            Integer lgdId,
+            String districtTitle,
+            Long totalHouseholdCount,
+            Long totalAchievedFhtcCount,
+            Long totalPlannedFhtcCount,
+            Long totalWaterSuppliedLiters,
+            Integer schemeCount,
+            BigDecimal avgWaterSupplyPerScheme) {
+    }
+
+    public record Level2SupplyDaysInEfficientRange(
+            Integer tenantId,
+            Integer lgdId,
+            Long supplyDaysInEfficientRange) {
+    }
+
+    public record Level2RegularityMetrics(
+            Integer tenantId,
+            Integer lgdId,
+            Integer schemeCount,
+            Integer totalSupplyDays) {
+    }
+
+    public record Level2ReadingSubmissionMetrics(
+            Integer tenantId,
+            Integer lgdId,
             Integer schemeCount,
             Integer totalSubmissionDays) {
     }
@@ -5636,7 +6054,7 @@ public class SchemeRegularityRepository {
     public record SchemeSubmissionMetrics(
             Integer schemeId,
             String schemeName,
-            Integer status,
+            Integer operatingStatus,
             Integer submissionDays,
             Long totalWaterSupplied,
             Integer immediateParentLgdId,
@@ -5664,7 +6082,7 @@ public class SchemeRegularityRepository {
     public record SchemeRegularityListMetrics(
             Integer schemeId,
             String schemeName,
-            Integer status,
+            Integer operatingStatus,
             Integer supplyDays,
             Integer submissionDays) {
     }

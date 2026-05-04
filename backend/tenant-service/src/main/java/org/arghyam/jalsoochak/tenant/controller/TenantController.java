@@ -19,6 +19,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
+import org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationHierarchyEditConstraintsResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationHierarchyResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationResponseDTO;
@@ -333,6 +334,24 @@ public class TenantController {
                 LocationHierarchyResponseDTO updated = tenantManagementService.updateLocationHierarchy(tenantId,
                                 hierarchyType, levels);
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Location hierarchy updated successfully", updated));
+        }
+
+        @Operation(summary = "Generate API token for a tenant",
+                        description = "Generates a new API token (create-or-replace). "
+                                        + "The raw token is returned exactly once and is never stored — save it immediately. "
+                                        + "Calling this again invalidates the previous token.")
+        @ApiResponses({
+                        @ApiResponse(responseCode = "200", description = "API token generated successfully"),
+                        @ApiResponse(responseCode = "404", description = "Tenant not found",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
+        })
+        @RequiresTenantAccess
+        @PostMapping("/{tenantId}/api-token")
+        public ResponseEntity<ApiResponseDTO<GenerateApiTokenResponseDTO>> generateApiToken(
+                        @PathVariable Integer tenantId) {
+                log.info("POST /api/v1/tenants/{}/api-token", tenantId);
+                return ResponseEntity.ok(ApiResponseDTO.of(200, "API token generated successfully",
+                                tenantManagementService.generateApiToken(tenantId)));
         }
 
         @Operation(summary = "Get child locations by parent ID", description = "Fetches all child locations under the specified parent location in the given hierarchy type. "

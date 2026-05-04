@@ -264,7 +264,7 @@ class AnalyticsRegularityAndReadingControllerTest {
                         .param("tenant_id", "1")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
-                        .param("scale", "year")
+                        .param("scale", "decade")
                         .param("lgd_id", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))

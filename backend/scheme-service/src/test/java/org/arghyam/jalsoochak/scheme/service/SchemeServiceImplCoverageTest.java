@@ -3,6 +3,8 @@ package org.arghyam.jalsoochak.scheme.service;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
@@ -249,6 +251,57 @@ class SchemeServiceImplCoverageTest {
     }
 
     @Test
+    void updateSchemeStatuses_updatesBothStatuses() {
+        setJwtAuth("admin@example.com", "ka", false);
+        when(schemeDbRepository.findUserIdByEmail("tenant_ka", "admin@example.com")).thenReturn(10);
+        when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(200);
+        when(schemeDbRepository.updateSchemeStatusesById("tenant_ka", 77, 2, 1, 10)).thenReturn(true);
+        when(schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds("tenant_ka", List.of(77)))
+                .thenReturn(List.of(
+                        new SchemeDbRepository.SchemeAnalyticsRow(77, "101", "201", "Scheme Updated", 11.11, 22.22, 2, 1, 501, 601)
+                ));
+
+        SchemeStatusUpdateRequestDTO request = new SchemeStatusUpdateRequestDTO();
+        request.setWorkStatus("Completed");
+        request.setOperatingStatus("Operative");
+
+        schemeService.updateSchemeStatuses("ka", 77, request);
+
+        verify(schemeDbRepository).updateSchemeStatusesById("tenant_ka", 77, 2, 1, 10);
+        verify(kafkaProducer).publishJson(eq("scheme-service-topic"), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue())
+                .containsEntry("eventType", "SCHEME_UPDATED")
+                .containsEntry("schemeId", 77)
+                .containsEntry("tenantId", 200)
+                .containsEntry("status", 1)
+                .containsEntry("operating_status", 1)
+                .containsEntry("work_status", 2);
+    }
+
+    @Test
+    void updateSchemeStatuses_throwsWhenNoFieldsProvided() {
+        SchemeStatusUpdateRequestDTO request = new SchemeStatusUpdateRequestDTO();
+        assertThatThrownBy(() -> schemeService.updateSchemeStatuses("ka", 77, request))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
+    void updateSchemeStatuses_throwsNotFoundWhenSchemeMissing() {
+        setJwtAuth("admin@example.com", "ka", false);
+        when(schemeDbRepository.findUserIdByEmail("tenant_ka", "admin@example.com")).thenReturn(10);
+        when(schemeDbRepository.findTenantIdByUserId("tenant_ka", 10)).thenReturn(200);
+        when(schemeDbRepository.updateSchemeStatusesById("tenant_ka", 999, null, 0, 10)).thenReturn(false);
+
+        SchemeStatusUpdateRequestDTO request = new SchemeStatusUpdateRequestDTO();
+        request.setOperatingStatus("Non-Operative");
+
+        assertThatThrownBy(() -> schemeService.updateSchemeStatuses("ka", 999, request))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
     void uploadSchemes_successfullyInsertsAndUpdatesRows() {
         setJwtAuth("admin@example.com", "ka", false);
 
@@ -268,8 +321,8 @@ class SchemeServiceImplCoverageTest {
         when(chunkProcessor.updateSchemesChunk(eq("tenant_ka"), anyList())).thenReturn(1);
         when(schemeDbRepository.findSchemeAnalyticsRowsByStateSchemeIds(eq("tenant_ka"), anyList()))
                 .thenReturn(List.of(
-                        new SchemeDbRepository.SchemeAnalyticsRow(99, "101", "201", "Scheme New", 11.11, 22.22, 1, 501, 601),
-                        new SchemeDbRepository.SchemeAnalyticsRow(77, "102", "ABC", "Scheme Existing Updated", 33.33, 44.44, 2, 502, null)
+                        new SchemeDbRepository.SchemeAnalyticsRow(99, "101", "201", "Scheme New", 11.11, 22.22, 2, 1, 501, 601),
+                        new SchemeDbRepository.SchemeAnalyticsRow(77, "102", "ABC", "Scheme Existing Updated", 33.33, 44.44, 1, 0, 502, null)
                 ));
 
         String csv = """
@@ -292,10 +345,14 @@ class SchemeServiceImplCoverageTest {
                     assertThat(payload.get("eventType")).isEqualTo("SCHEME_UPDATED");
                     assertThat(payload.get("tenantId")).isEqualTo(200);
                     assertThat(payload.get("stateSchemeId")).isEqualTo(101);
+                    assertThat(payload.get("operating_status")).isEqualTo(1);
+                    assertThat(payload.get("work_status")).isEqualTo(2);
                 })
                 .anySatisfy(payload -> {
                     assertThat(payload.get("stateSchemeId")).isEqualTo(102);
                     assertThat(payload.get("centreSchemeId")).isEqualTo(0);
+                    assertThat(payload.get("operating_status")).isEqualTo(0);
+                    assertThat(payload.get("work_status")).isEqualTo(1);
                 });
     }
 
@@ -312,14 +369,14 @@ class SchemeServiceImplCoverageTest {
                 "Scheme",
                 "query",
                 2,
-                3,
+                2,
                 "ACTIVE",
                 "scheme_name",
                 "asc",
                 0,
                 100
         )).thenReturn(List.of(dto));
-        when(schemeDbRepository.countSchemes("tenant_ka", "SS", "Scheme", "query", 2, 3, "ACTIVE")).thenReturn(1L);
+        when(schemeDbRepository.countSchemes("tenant_ka", "SS", "Scheme", "query", 2, 2, "ACTIVE")).thenReturn(1L);
 
         PageResponseDTO<SchemeDTO> page = schemeService.listSchemes(
                 "ka",
@@ -331,7 +388,7 @@ class SchemeServiceImplCoverageTest {
                 "Scheme",
                 "query",
                 "completed",
-                "3",
+                "2",
                 "ACTIVE"
         );
 
@@ -355,7 +412,7 @@ class SchemeServiceImplCoverageTest {
                 "tenant_ka",
                 "Scheme",
                 1,
-                2,
+                0,
                 "INACTIVE",
                 "VLG",
                 "North",
@@ -368,7 +425,7 @@ class SchemeServiceImplCoverageTest {
                 "tenant_ka",
                 "Scheme",
                 1,
-                2,
+                0,
                 "INACTIVE",
                 "VLG",
                 "North"
@@ -392,6 +449,18 @@ class SchemeServiceImplCoverageTest {
         assertThat(page.getTotalElements()).isEqualTo(1);
         assertThat(page.getNumber()).isEqualTo(2);
         assertThat(page.getSize()).isEqualTo(1);
+    }
+
+    @Test
+    void getSchemeStatuses_returnsStatusesOnHappyPath() {
+        when(schemeDbRepository.findSchemaNameByTenantId(22)).thenReturn("tenant_ka");
+        when(schemeDbRepository.findSchemeStatusesById("tenant_ka", 11))
+                .thenReturn(SchemeStatusesResponseDTO.builder().workStatus(2).operatingStatus(1).build());
+
+        SchemeStatusesResponseDTO response = schemeService.getSchemeStatuses(22, 11);
+
+        assertThat(response.getWorkStatus()).isEqualTo(2);
+        assertThat(response.getOperatingStatus()).isEqualTo(1);
     }
 
     private MockMultipartFile csv(String fileName, String content) {

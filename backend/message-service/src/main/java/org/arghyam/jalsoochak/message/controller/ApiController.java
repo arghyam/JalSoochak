@@ -2,9 +2,13 @@ package org.arghyam.jalsoochak.message.controller;
 
 import org.arghyam.jalsoochak.message.dto.NotificationRequest;
 import org.arghyam.jalsoochak.message.dto.SampleDTO;
+import org.arghyam.jalsoochak.message.dto.TriggerWelcomeMessageRequest;
+import org.arghyam.jalsoochak.message.dto.TriggerWelcomeMessageResponse;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.message.service.BusinessService;
 import org.arghyam.jalsoochak.message.service.NotificationService;
+import org.arghyam.jalsoochak.message.service.WelcomeMessageTriggerService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +31,7 @@ public class ApiController {
     private final BusinessService businessService;
     private final NotificationService notificationService;
     private final KafkaProducer kafkaProducer;
+    private final WelcomeMessageTriggerService welcomeMessageTriggerService;
 
     // ── GET all notifications (hardcoded) ─────────────────────
 
@@ -58,6 +63,18 @@ public class ApiController {
         log.info("POST /api/v1/message/events called with message: {}", message);
         kafkaProducer.sendMessage(message);
         return ResponseEntity.ok("Message published to message-service-topic");
+    }
+
+    @PostMapping("/trigger-welcome-message")
+    public ResponseEntity<TriggerWelcomeMessageResponse> triggerWelcomeMessage(
+            @Valid @RequestBody TriggerWelcomeMessageRequest request) {
+        log.info("POST /api/v1/message/trigger-welcome-message called");
+        String phone = request.resolvePhoneNumber();
+        if (phone.isBlank()) {
+            throw new IllegalArgumentException("phoneNumber/contactId is required");
+        }
+        TriggerWelcomeMessageResponse response = welcomeMessageTriggerService.triggerByPhone(phone);
+        return ResponseEntity.ok(response);
     }
 
 }

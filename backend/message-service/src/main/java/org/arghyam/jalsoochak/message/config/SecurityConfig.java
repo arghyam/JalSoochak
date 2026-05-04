@@ -32,6 +32,7 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/error", "/actuator/health", "/actuator/info").permitAll();
+                    auth.requestMatchers("/api/v1/message/trigger-welcome-message").permitAll();
                     if (isProd) {
                         auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").authenticated();
                     } else {

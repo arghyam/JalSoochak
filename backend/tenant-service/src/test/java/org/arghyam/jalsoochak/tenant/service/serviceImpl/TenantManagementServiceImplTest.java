@@ -70,6 +70,7 @@ import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
 import org.arghyam.jalsoochak.tenant.exception.StorageException;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.repository.TenantSchemaRepository;
+import org.arghyam.jalsoochak.tenant.service.ApiKeyService;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
@@ -125,6 +126,9 @@ class TenantManagementServiceImplTest {
     @Mock
     private SystemManagementService systemManagementService;
 
+    @Mock
+    private ApiKeyService apiKeyService;
+
     private ObjectMapper objectMapper;
 
     private TenantManagementServiceImpl tenantManagementService;
@@ -139,18 +143,23 @@ class TenantManagementServiceImplTest {
         lenient().when(tenantDefaults.getDeptLocationHierarchy()).thenReturn(Collections.emptyList());
         lenient().when(tenantDefaults.getMeterChangeReasons()).thenReturn(Collections.emptyList());
         lenient().when(tenantDefaults.getSupplyOutageReasons()).thenReturn(Collections.emptyList());
+        // Default empty hierarchies so validateMapLgdLevelCascade / validateDeptMapLevelCascade
+        // don't NPE in tests that don't exercise map-display config validation.
+        lenient().when(tenantSchemaRepository.getLocationHierarchy(anyString(), any(RegionTypeEnum.class)))
+                .thenReturn(LocationConfigDTO.builder().locationHierarchy(Collections.emptyList()).build());
         
         // Manually create service with real ObjectMapper and mocked dependencies
         tenantManagementService = new TenantManagementServiceImpl(
             tenantCommonRepository,
             tenantSchemaRepository,
             objectMapper,
-            appProperties, 
+            appProperties,
             tenantDefaults,
             eventPublisher,
             schedulerManager,
             objectStorageService,
-            systemManagementService
+            systemManagementService,
+            apiKeyService
         );
     }
 
@@ -299,6 +308,14 @@ class TenantManagementServiceImplTest {
                     .thenReturn(Optional.of(ConfigDTO.builder().build()));
             when(tenantCommonRepository.upsertConfig(eq(1), eq("LOCATION_CHECK_REQUIRED"), anyString(), eq(100)))
                     .thenReturn(Optional.of(ConfigDTO.builder().build()));
+            // 2 LGD levels → DISPLAY_MAP_LGD_LEVEL_1 and _2 seeded
+            when(tenantCommonRepository.upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_1"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
+            when(tenantCommonRepository.upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_2"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
+            // 1 dept level → DISPLAY_DEPARTMENT_MAP_LEVEL_1 seeded
+            when(tenantCommonRepository.upsertConfig(eq(1), eq("DISPLAY_DEPARTMENT_MAP_LEVEL_1"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
 
             // Act
             tenantManagementService.createTenant(request);
@@ -306,10 +323,17 @@ class TenantManagementServiceImplTest {
             // Assert — both hierarchy types seeded
             verify(tenantSchemaRepository).setLocationHierarchy("tenant_tt", RegionTypeEnum.LGD, lgdLevels, 100);
             verify(tenantSchemaRepository).setLocationHierarchy("tenant_tt", RegionTypeEnum.DEPARTMENT, deptLevels, 100);
-            // All three reason/flag configs written via upsertConfig
+            // Reason/flag configs seeded
             verify(tenantCommonRepository).upsertConfig(eq(1), eq("METER_CHANGE_REASONS"), anyString(), eq(100));
             verify(tenantCommonRepository).upsertConfig(eq(1), eq("SUPPLY_OUTAGE_REASONS"), anyString(), eq(100));
             verify(tenantCommonRepository).upsertConfig(eq(1), eq("LOCATION_CHECK_REQUIRED"), anyString(), eq(100));
+            // Map display keys seeded for each active level
+            verify(tenantCommonRepository).upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_1"), anyString(), eq(100));
+            verify(tenantCommonRepository).upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_2"), anyString(), eq(100));
+            verify(tenantCommonRepository).upsertConfig(eq(1), eq("DISPLAY_DEPARTMENT_MAP_LEVEL_1"), anyString(), eq(100));
+            // Level 3+ must NOT be seeded (hierarchy only has 2 LGD and 1 dept level)
+            verify(tenantCommonRepository, never()).upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_3"), anyString(), any());
+            verify(tenantCommonRepository, never()).upsertConfig(eq(1), eq("DISPLAY_DEPARTMENT_MAP_LEVEL_2"), anyString(), any());
         }
     }
 
@@ -767,7 +791,7 @@ class TenantManagementServiceImplTest {
         void testSetTenantConfigs_UpsertFailed() throws Exception {
             // Arrange
             Integer tenantId = 1;
-            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).build();
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
             Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
             // Use valid JSON format that matches SimpleConfigValueDTO structure
             configs.put(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON, objectMapper.readTree("{\"value\": \"test value\"}"));
@@ -2317,6 +2341,61 @@ class TenantManagementServiceImplTest {
 
             assertThrows(ResourceNotFoundException.class,
                     () -> tenantManagementService.resolveTenantLogo(TENANT_ID));
+        }
+    }
+
+    @Nested
+    @DisplayName("Generate API Token Tests")
+    class GenerateApiTokenTests {
+
+        private static final Integer TENANT_ID = 1;
+        private static final TenantResponseDTO TENANT =
+                TenantResponseDTO.builder().id(TENANT_ID).stateCode("KA").build();
+
+        @Test
+        @DisplayName("Should generate token, persist hash, and return raw token once")
+        void generateApiToken_Success() {
+            org.arghyam.jalsoochak.tenant.service.ApiKeyService.GeneratedApiToken generated =
+                    new org.arghyam.jalsoochak.tenant.service.ApiKeyService.GeneratedApiToken(
+                            "js_rawtoken", "abc123hash");
+
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(TENANT));
+            when(apiKeyService.generate()).thenReturn(generated);
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO result =
+                    tenantManagementService.generateApiToken(TENANT_ID);
+
+            assertNotNull(result);
+            assertEquals("js_rawtoken", result.getToken());
+
+            ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+            verify(tenantCommonRepository).upsertApiKeyHash(eq(TENANT_ID), hashCaptor.capture(), eq(100));
+            assertEquals("abc123hash", hashCaptor.getValue());
+        }
+
+        @Test
+        @DisplayName("Should throw ResourceNotFoundException when tenant does not exist")
+        void generateApiToken_TenantNotFound_ThrowsResourceNotFoundException() {
+            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.empty());
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> tenantManagementService.generateApiToken(TENANT_ID));
+
+            verify(apiKeyService, never()).generate();
+            verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Should throw IllegalArgumentException when tenant ID is system tenant")
+        void generateApiToken_SystemTenant_ThrowsIllegalArgumentException() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> tenantManagementService.generateApiToken(TenantConstants.SYSTEM_TENANT_ID));
+
+            verify(tenantCommonRepository, never()).findById(any());
+            verify(apiKeyService, never()).generate();
+            verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
         }
     }
 }

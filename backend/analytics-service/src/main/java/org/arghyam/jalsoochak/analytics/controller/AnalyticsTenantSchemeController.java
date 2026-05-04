@@ -7,7 +7,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantBoundaryGeoJsonResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantDetailsResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.TenantPerformanceScoreResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
@@ -103,7 +105,7 @@ public class AnalyticsTenantSchemeController {
 
     @GetMapping("/tenant_data")
     @Operation(
-            summary = "Get tenant boundary, filtered by parent_lgd_id or parent_department_id",
+            summary = "Get tenant data, filtered by parent_lgd_id or parent_department_id",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",
@@ -182,6 +184,164 @@ public class AnalyticsTenantSchemeController {
                     .build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<TenantDetailsResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
+    @GetMapping("/tenant_boundaries")
+    @Operation(
+            summary = "Get tenant boundary GeoJSON (parent + children), filtered by parent_lgd_id or parent_department_id",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Tenant boundary GeoJSON fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.TENANT_BOUNDARIES_SUCCESS)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<TenantBoundaryGeoJsonResponse>> getTenantBoundaryGeoJson(
+            @RequestParam(name = "tenant_id", required = true) Integer tenantId,
+            @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
+            @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId
+    ) {
+        try {
+            if (parentLgdId != null && parentDepartmentId != null) {
+                throw new IllegalArgumentException("Provide either parent_lgd_id or parent_department_id, not both");
+            }
+            if (parentLgdId == null && parentDepartmentId == null) {
+                DimLgdLocation tenantLevelLgd = dimLgdLocationRepository
+                        .findFirstByTenantIdAndLgdLevelOrderByLgdIdAsc(tenantId, 1)
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "No level-1 lgd_id found for tenant_id: " + tenantId));
+                parentLgdId = tenantLevelLgd.getLgdId();
+            }
+
+            TenantBoundaryGeoJsonResponse data = (parentDepartmentId != null)
+                    ? tenantDetailsService.getTenantBoundaryGeoJsonByParentDepartment(tenantId, parentDepartmentId)
+                    : tenantDetailsService.getTenantBoundaryGeoJson(tenantId, parentLgdId);
+
+            return ResponseEntity.ok(ApiResponse.<TenantBoundaryGeoJsonResponse>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<TenantBoundaryGeoJsonResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<TenantBoundaryGeoJsonResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
+    @GetMapping("/tenant_performance_score")
+    @Operation(
+            summary = "Get average performance score for a tenant boundary (parent + children)",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Performance score fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "success", value = SwaggerExamples.TENANT_PERFORMANCE_SCORE_SUCCESS)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<TenantPerformanceScoreResponse>> getTenantPerformanceScore(
+            @RequestParam(name = "tenant_id", required = true) Integer tenantId,
+            @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
+            @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
+            @RequestParam(name = "start_date", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        try {
+            if (startDate == null && endDate == null) {
+                DefaultAnalyticsDateWindowProvider.DateWindow window =
+                        defaultAnalyticsDateWindowProvider.defaultWindow();
+                startDate = window.startDate();
+                endDate = window.endDate();
+            } else if (startDate == null || endDate == null) {
+                throw new IllegalArgumentException("Provide both start_date and end_date together");
+            }
+            if (endDate.isBefore(startDate)) {
+                throw new IllegalArgumentException("end_date must be on or after start_date");
+            }
+            if (parentLgdId != null && parentDepartmentId != null) {
+                throw new IllegalArgumentException("Provide either parent_lgd_id or parent_department_id, not both");
+            }
+            if (parentLgdId == null && parentDepartmentId == null) {
+                DimLgdLocation tenantLevelLgd = dimLgdLocationRepository
+                        .findFirstByTenantIdAndLgdLevelOrderByLgdIdAsc(tenantId, 1)
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "No level-1 lgd_id found for tenant_id: " + tenantId));
+                parentLgdId = tenantLevelLgd.getLgdId();
+            }
+
+            TenantPerformanceScoreResponse data = (parentDepartmentId != null)
+                    ? tenantDetailsService.getTenantPerformanceScoreByParentDepartment(
+                    tenantId, parentDepartmentId, startDate, endDate)
+                    : tenantDetailsService.getTenantPerformanceScoreByParentLgd(
+                    tenantId, parentLgdId, startDate, endDate);
+
+            return ResponseEntity.ok(ApiResponse.<TenantPerformanceScoreResponse>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<TenantPerformanceScoreResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<TenantPerformanceScoreResponse>builder()
                     .success(false)
                     .data(null)
                     .build());

@@ -54,6 +54,40 @@ public class TelemetryTenantRepository {
         return Boolean.TRUE.equals(exists);
     }
 
+    public Optional<Long> findSchemeIdByStateSchemeId(String schemaName, String stateSchemeId) {
+        validateSchemaName(schemaName);
+        if (stateSchemeId == null || stateSchemeId.isBlank()) {
+            return Optional.empty();
+        }
+        String sql = String.format("""
+                SELECT id
+                FROM %s.scheme_master_table
+                WHERE state_scheme_id = ?
+                  AND deleted_at IS NULL
+                ORDER BY id
+                LIMIT 1
+                """, schemaName);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), stateSchemeId.trim());
+        return rows.stream().findFirst();
+    }
+
+    public Optional<Long> findSchemeIdByCentreSchemeId(String schemaName, String centreSchemeId) {
+        validateSchemaName(schemaName);
+        if (centreSchemeId == null || centreSchemeId.isBlank()) {
+            return Optional.empty();
+        }
+        String sql = String.format("""
+                SELECT id
+                FROM %s.scheme_master_table
+                WHERE centre_scheme_id = ?
+                  AND deleted_at IS NULL
+                ORDER BY id
+                LIMIT 1
+                """, schemaName);
+        List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), centreSchemeId.trim());
+        return rows.stream().findFirst();
+    }
+
     public Optional<TelemetryOperator> findOperatorById(String schemaName, Long operatorId) {
         validateSchemaName(schemaName);
         String languageColumn = resolveSelectColumn(schemaName, "user_table", "language_id", "NULL::integer AS language_id");

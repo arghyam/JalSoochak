@@ -102,11 +102,11 @@ public class GlificImageWorkflowService {
         }
     }
 
-    public CreateReadingResponse processAssamReading(AssamReadingRequest request) {
+    public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
         String safeContactId = request != null ? request.getPhoneNumber() : null;
         try {
             String contactId = safeContactId;
-            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
+            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId, preferredTenantId);
             Long operatorId = operatorWithSchema.operator().id();
             String schemaName = operatorWithSchema.schemaName();
             String languageKey = localizationService.normalizeLanguageKey(
@@ -148,17 +148,17 @@ public class GlificImageWorkflowService {
         }
     }
 
-    private Long resolveAssamSchemeId(String schemaName, Long operatorId, Long stateSchemeId, Long centreSchemeId) {
-        if (centreSchemeId != null
-                && telemetryTenantRepository.existsSchemeById(schemaName, centreSchemeId)
-                && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, centreSchemeId)) {
-            return centreSchemeId;
+    private Long resolveAssamSchemeId(String schemaName, Long operatorId, String stateSchemeId, String centreSchemeId) {
+        Optional<Long> stateResolvedSchemeId = telemetryTenantRepository.findSchemeIdByStateSchemeId(schemaName, stateSchemeId);
+        if (stateResolvedSchemeId.isPresent()
+                && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, stateResolvedSchemeId.get())) {
+            return stateResolvedSchemeId.get();
         }
 
-        if (stateSchemeId != null
-                && telemetryTenantRepository.existsSchemeById(schemaName, stateSchemeId)
-                && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, stateSchemeId)) {
-            return stateSchemeId;
+        Optional<Long> centreResolvedSchemeId = telemetryTenantRepository.findSchemeIdByCentreSchemeId(schemaName, centreSchemeId);
+        if (centreResolvedSchemeId.isPresent()
+                && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, centreResolvedSchemeId.get())) {
+            return centreResolvedSchemeId.get();
         }
 
         throw new IllegalStateException("Operator is not mapped to the provided state or centre scheme");

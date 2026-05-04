@@ -35,6 +35,7 @@ class NationalDashboardRefreshTaskTest {
         nationalDashboardRefreshTask.runTask();
 
         verify(schemeRegularityService).refreshNationalDashboard(expectedStartDate, expectedEndDate);
+        verify(schemeRegularityService).getNationalDashboardLevel2MetricsForApi(expectedStartDate, expectedEndDate);
     }
 
     @Test
@@ -46,5 +47,6 @@ class NationalDashboardRefreshTaskTest {
         nationalDashboardRefreshTask.runTask();
 
         verify(schemeRegularityService).refreshNationalDashboard(expectedEndDate, expectedEndDate);
+        verify(schemeRegularityService).getNationalDashboardLevel2MetricsForApi(expectedEndDate, expectedEndDate);
     }
 }

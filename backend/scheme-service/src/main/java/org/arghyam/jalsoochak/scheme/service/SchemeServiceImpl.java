@@ -16,6 +16,8 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
@@ -119,10 +121,10 @@ public class SchemeServiceImpl implements SchemeService {
     private static final Map<String, Integer> OPERATING_STATUS_MAP = Map.of(
             "1", 1,
             "operative", 1,
+            "0", 0,
+            "non-operative", 0,
             "2", 2,
-            "non-operative", 2,
-            "3", 3,
-            "partially operative", 3
+            "partially operative", 2
     );
 
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("csv", "xlsx");
@@ -241,6 +243,61 @@ public class SchemeServiceImpl implements SchemeService {
                 .workStatusCounts(schemeDbRepository.countSchemesByWorkStatus(schemaName))
                 .operatingStatusCounts(schemeDbRepository.countSchemesByOperatingStatus(schemaName))
                 .build();
+    }
+
+    @Override
+    public SchemeStatusesResponseDTO getSchemeStatuses(Integer tenantId, int schemeId) {
+        if (tenantId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenantId is required");
+        }
+        if (schemeId < 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "schemeId must be a positive integer");
+        }
+        String schemaName = schemeDbRepository.findSchemaNameByTenantId(tenantId);
+        if (schemaName == null || schemaName.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+        SchemeStatusesResponseDTO statuses = schemeDbRepository.findSchemeStatusesById(schemaName, schemeId);
+        if (statuses == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
+        }
+        return statuses;
+    }
+
+    @Override
+    public void updateSchemeStatuses(String tenantCode, int schemeId, SchemeStatusUpdateRequestDTO request) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        if (schemeId < 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "schemeId must be a positive integer");
+        }
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
+        }
+
+        Integer workStatusCode = parseWorkStatus(request.getWorkStatus());
+        Integer operatingStatusCode = parseOperatingStatus(request.getOperatingStatus());
+        if (workStatusCode == null && operatingStatusCode == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "At least one of workStatus or operatingStatus must be provided"
+            );
+        }
+
+        int updatedBy = resolveCurrentUserId(schemaName);
+        Integer tenantId = schemeDbRepository.findTenantIdByUserId(schemaName, updatedBy);
+        boolean updated = schemeDbRepository.updateSchemeStatusesById(
+                schemaName,
+                schemeId,
+                workStatusCode,
+                operatingStatusCode,
+                updatedBy
+        );
+        if (!updated) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
+        }
+        List<SchemeDbRepository.SchemeAnalyticsRow> rows =
+                schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, List.of(schemeId));
+        publishSchemeDimensionEventsFromRows(tenantId, rows);
     }
 
     @Override
@@ -463,7 +520,7 @@ public class SchemeServiceImpl implements SchemeService {
                 parseDouble(values.get("longitude"), rowNumber, "longitude", errors);
                 parseEnum(values.get("work_status"), rowNumber, "work_status", WORK_STATUS_MAP, "Ongoing, Completed, Not Started, Handed Over or 1/2/3/4", errors);
                 if (!normalize(values.get("operating_status")).isBlank()) {
-                    parseEnum(values.get("operating_status"), rowNumber, "operating_status", OPERATING_STATUS_MAP, "Operative, Non-Operative, Partially Operative or 1/2/3", errors);
+                    parseEnum(values.get("operating_status"), rowNumber, "operating_status", OPERATING_STATUS_MAP, "Operative, Non-Operative, Partially Operative or 0/1/2", errors);
                 }
 
                 if (errors.size() == before && !stateSchemeId.isBlank()) {
@@ -958,6 +1015,8 @@ public class SchemeServiceImpl implements SchemeService {
             payload.put("level5DeptId", deptLevelFallback);
             payload.put("level6DeptId", deptLevelFallback);
             payload.put("status", row.operatingStatus());
+            payload.put("operating_status", row.operatingStatus());
+            payload.put("work_status", row.workStatus());
             kafkaProducer.publishJson(SCHEME_TOPIC, payload);
         }
     }
@@ -1062,13 +1121,13 @@ public class SchemeServiceImpl implements SchemeService {
         }
         try {
             int n = Integer.parseInt(v);
-            if (n >= 1 && n <= 3) {
+            if (n >= 0 && n <= 2) {
                 return n;
             }
         } catch (NumberFormatException ignored) {
         }
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Invalid operatingStatus. Expected one of: Operative, Non-Operative, Partially Operative or 1/2/3");
+                "Invalid operatingStatus. Expected one of: Operative, Non-Operative, Partially Operative or 0/1/2");
     }
 
     private void requireField(Map<String, String> values, int rowNumber, String field, List<SchemeUploadErrorDTO> errors) {

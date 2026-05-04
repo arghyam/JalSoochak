@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -25,6 +27,7 @@ public class GlificFlowResumeService {
     private static final String GRAPHQL_PATH = "/api";
 
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
 
     @Value("${glific.resume.enabled:false}")
     private boolean resumeEnabled;
@@ -41,8 +44,9 @@ public class GlificFlowResumeService {
     @Value("${glific.resume.flow-id:37172}")
     private String flowId;
 
-    public GlificFlowResumeService(RestTemplate restTemplate) {
+    public GlificFlowResumeService(RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
     }
 
     public void resumeReadingsFlow(String contactId, String jobId, CreateReadingResponse result) {
@@ -171,13 +175,11 @@ public class GlificFlowResumeService {
         resultPayload.put("quality_confidence", result != null ? result.getQualityConfidence() : null);
         resultPayload.put("last_confirmed_reading", result != null ? result.getLastConfirmedReading() : null);
 
-        Map<String, Object> wrappedResult = new HashMap<>();
-        wrappedResult.put("result", resultPayload);
-
+        String stringifiedResult = stringifyResult(resultPayload);
         Map<String, Object> variables = new HashMap<>();
         variables.put("flowId", flowId);
         variables.put("contactId", glificContactId);
-        variables.put("result", wrappedResult);
+        variables.put("result", stringifiedResult);
 
         Map<String, Object> body = new HashMap<>();
         body.put("query", mutation);
@@ -306,6 +308,14 @@ public class GlificFlowResumeService {
         }
 
         return String.join(" | ", parts);
+    }
+
+    private String stringifyResult(Map<String, Object> resultPayload) {
+        try {
+            return objectMapper.writeValueAsString(resultPayload);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize Glific resume result payload", e);
+        }
     }
 
     @SuppressWarnings("unchecked")

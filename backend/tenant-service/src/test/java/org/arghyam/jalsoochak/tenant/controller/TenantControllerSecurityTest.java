@@ -691,4 +691,59 @@ class TenantControllerSecurityTest {
                     .andExpect(status().isOk());
         }
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // POST /api/v1/tenants/{tenantId}/api-token — STATE_ADMIN (own) or SUPER_USER
+    // ──────────────────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("POST /api/v1/tenants/{tenantId}/api-token")
+    class GenerateApiTokenSecurity {
+
+        @Test
+        @DisplayName("Unauthenticated request returns 401")
+        void generateApiToken_Unauthenticated_Returns401() throws Exception {
+            mockMvc.perform(post("/api/v1/tenants/1/api-token"))
+                    .andExpect(status().isUnauthorized());
+
+            verify(tenantManagementService, never()).generateApiToken(anyInt());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN accessing own tenant proceeds")
+        void generateApiToken_StateAdmin_OwnTenant_Proceeds() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(1)).thenReturn(true);
+            when(tenantManagementService.generateApiToken(1))
+                    .thenReturn(org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO.builder()
+                            .token("js_testtoken").build());
+
+            mockMvc.perform(post("/api/v1/tenants/1/api-token")
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN accessing different tenant returns 403")
+        void generateApiToken_StateAdmin_DifferentTenant_Returns403() throws Exception {
+            when(tenantSecurityEvaluator.isOwnTenant(2)).thenReturn(false);
+
+            mockMvc.perform(post("/api/v1/tenants/2/api-token")
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_STATE_ADMIN"))))
+                    .andExpect(status().isForbidden());
+
+            verify(tenantManagementService, never()).generateApiToken(anyInt());
+        }
+
+        @Test
+        @DisplayName("SUPER_USER can generate for any tenant")
+        void generateApiToken_SuperUser_Proceeds() throws Exception {
+            when(tenantManagementService.generateApiToken(1))
+                    .thenReturn(org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO.builder()
+                            .token("js_testtoken").build());
+
+            mockMvc.perform(post("/api/v1/tenants/1/api-token")
+                    .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SUPER_USER"))))
+                    .andExpect(status().isOk());
+        }
+    }
 }

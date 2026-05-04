@@ -29,7 +29,7 @@ public interface SchemeStatusMaintenanceRepository extends JpaRepository<DimSche
     @Modifying
     @Query(value = """
             UPDATE analytics_schema.dim_scheme_table
-            SET status = :statusCode,
+            SET operating_status = :statusCode,
                 updated_at = CURRENT_TIMESTAMP
             WHERE scheme_id IN (:schemeIds)
             """, nativeQuery = true)
