@@ -13,15 +13,16 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import org.mockito.ArgumentCaptor;
-
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -34,17 +35,18 @@ import org.arghyam.jalsoochak.tenant.config.properties.TenantDefaultsProperties;
 import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
-import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
-import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelNameDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.LogoSource;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonItemDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
+import org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationHierarchyEditConstraintsResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationHierarchyResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationResponseDTO;
@@ -54,9 +56,6 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.ConfigStatusEnum;
 import org.arghyam.jalsoochak.tenant.enums.RegionTypeEnum;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import org.arghyam.jalsoochak.tenant.enums.StatusEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
@@ -76,17 +75,18 @@ import org.arghyam.jalsoochak.tenant.service.TenantSchedulerManager;
 import org.arghyam.jalsoochak.tenant.storage.ObjectStorageService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
-import org.springframework.mock.web.MockMultipartFile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -2348,24 +2348,25 @@ class TenantManagementServiceImplTest {
     @DisplayName("Generate API Token Tests")
     class GenerateApiTokenTests {
 
+        private static final String STATE_CODE = "KA";
         private static final Integer TENANT_ID = 1;
         private static final TenantResponseDTO TENANT =
-                TenantResponseDTO.builder().id(TENANT_ID).stateCode("KA").build();
+                TenantResponseDTO.builder().id(TENANT_ID).stateCode(STATE_CODE).build();
 
         @Test
         @DisplayName("Should generate token, persist hash, and return raw token once")
         void generateApiToken_Success() {
-            org.arghyam.jalsoochak.tenant.service.ApiKeyService.GeneratedApiToken generated =
-                    new org.arghyam.jalsoochak.tenant.service.ApiKeyService.GeneratedApiToken(
+            ApiKeyService.GeneratedApiToken generated =
+                    new ApiKeyService.GeneratedApiToken(
                             "js_rawtoken", "abc123hash");
 
-            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.of(TENANT));
+            when(tenantCommonRepository.findByStateCode(STATE_CODE)).thenReturn(Optional.of(TENANT));
             when(apiKeyService.generate()).thenReturn(generated);
             when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
             when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
 
-            org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO result =
-                    tenantManagementService.generateApiToken(TENANT_ID);
+            GenerateApiTokenResponseDTO result =
+                    tenantManagementService.generateApiToken(STATE_CODE);
 
             assertNotNull(result);
             assertEquals("js_rawtoken", result.getToken());
@@ -2378,22 +2379,11 @@ class TenantManagementServiceImplTest {
         @Test
         @DisplayName("Should throw ResourceNotFoundException when tenant does not exist")
         void generateApiToken_TenantNotFound_ThrowsResourceNotFoundException() {
-            when(tenantCommonRepository.findById(TENANT_ID)).thenReturn(Optional.empty());
+            when(tenantCommonRepository.findByStateCode(STATE_CODE)).thenReturn(Optional.empty());
 
             assertThrows(ResourceNotFoundException.class,
-                    () -> tenantManagementService.generateApiToken(TENANT_ID));
+                    () -> tenantManagementService.generateApiToken(STATE_CODE));
 
-            verify(apiKeyService, never()).generate();
-            verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
-        }
-
-        @Test
-        @DisplayName("Should throw IllegalArgumentException when tenant ID is system tenant")
-        void generateApiToken_SystemTenant_ThrowsIllegalArgumentException() {
-            assertThrows(IllegalArgumentException.class,
-                    () -> tenantManagementService.generateApiToken(TenantConstants.SYSTEM_TENANT_ID));
-
-            verify(tenantCommonRepository, never()).findById(any());
             verify(apiKeyService, never()).generate();
             verify(tenantCommonRepository, never()).upsertApiKeyHash(anyInt(), anyString(), any());
         }

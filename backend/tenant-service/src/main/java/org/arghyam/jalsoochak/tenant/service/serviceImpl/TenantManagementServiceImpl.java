@@ -1112,16 +1112,15 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
     @Override
     @Transactional
-    public GenerateApiTokenResponseDTO generateApiToken(Integer tenantId) {
-        validateNotSystemTenant(tenantId);
-        tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+    public GenerateApiTokenResponseDTO generateApiToken(String stateCode) {
+        TenantResponseDTO tenant = tenantCommonRepository.findByStateCode(stateCode)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for state code: " + stateCode));
 
         Integer currentUserId = resolveCurrentUserId();
         ApiKeyService.GeneratedApiToken generated = apiKeyService.generate();
-        tenantCommonRepository.upsertApiKeyHash(tenantId, generated.hash(), currentUserId);
+        tenantCommonRepository.upsertApiKeyHash(tenant.getId(), generated.hash(), currentUserId);
 
-        log.info("API token (re)generated for tenant [id={}]", tenantId);
+        log.info("API token (re)generated for tenant [stateCode={}]", stateCode);
         return GenerateApiTokenResponseDTO.builder().token(generated.rawToken()).build();
     }
 }
