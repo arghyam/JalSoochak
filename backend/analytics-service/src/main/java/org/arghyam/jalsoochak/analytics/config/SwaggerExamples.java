@@ -256,11 +256,15 @@ public final class SwaggerExamples {
                   {
                     "schemeId": 101,
                     "schemeName": "Scheme A",
+                    "stateSchemeId": 5001,
+                    "centreSchemeId": 6001,
                     "lastSuppliedDate": "2026-04-01"
                   },
                   {
                     "schemeId": 102,
                     "schemeName": "Scheme B",
+                    "stateSchemeId": 5002,
+                    "centreSchemeId": 6002,
                     "lastSuppliedDate": null
                   }
                 ]

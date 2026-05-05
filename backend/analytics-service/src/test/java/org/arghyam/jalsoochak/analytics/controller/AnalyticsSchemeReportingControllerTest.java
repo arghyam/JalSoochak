@@ -189,11 +189,15 @@ class AnalyticsSchemeReportingControllerTest {
                                 CriticalSchemesResponse.CriticalSchemeListItem.builder()
                                         .schemeId(101)
                                         .schemeName("Scheme A")
+                                        .stateSchemeId(5001)
+                                        .centreSchemeId(6001)
                                         .lastSuppliedDate(LocalDate.of(2026, 4, 1))
                                         .build(),
                                 CriticalSchemesResponse.CriticalSchemeListItem.builder()
                                         .schemeId(102)
                                         .schemeName("Scheme B")
+                                        .stateSchemeId(5002)
+                                        .centreSchemeId(6002)
                                         .lastSuppliedDate(null)
                                         .build()
                         ))
@@ -214,8 +218,12 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(jsonPath("$.data.schemes").isArray())
                 .andExpect(jsonPath("$.data.schemes[0].schemeId").value(101))
                 .andExpect(jsonPath("$.data.schemes[0].schemeName").value("Scheme A"))
+                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value(5001))
+                .andExpect(jsonPath("$.data.schemes[0].centreSchemeId").value(6001))
                 .andExpect(jsonPath("$.data.schemes[0].lastSuppliedDate").value("2026-04-01"))
                 .andExpect(jsonPath("$.data.schemes[1].schemeId").value(102))
+                .andExpect(jsonPath("$.data.schemes[1].stateSchemeId").value(5002))
+                .andExpect(jsonPath("$.data.schemes[1].centreSchemeId").value(6002))
                 .andExpect(jsonPath("$.data.schemes[1].lastSuppliedDate").value(nullValue()));
     }
 

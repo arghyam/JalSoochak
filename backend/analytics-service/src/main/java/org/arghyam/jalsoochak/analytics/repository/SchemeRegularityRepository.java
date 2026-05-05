@@ -2737,7 +2737,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT s.scheme_id, s.scheme_name
+                    SELECT s.scheme_id, s.scheme_name, s.state_scheme_id, s.centre_scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -2756,6 +2756,8 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
+                    ss.state_scheme_id,
+                    ss.centre_scheme_id,
                     ls.last_supplied_date
                 FROM schemes_in_scope ss
                 LEFT JOIN last_supply ls
@@ -2772,6 +2774,8 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new CriticalSchemeRow(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
+                        (Integer) rs.getObject("state_scheme_id"),
+                        (Integer) rs.getObject("centre_scheme_id"),
                         rs.getDate("last_supplied_date") == null ? null : rs.getDate("last_supplied_date").toLocalDate()
                 ),
                 lgdId,
@@ -2798,7 +2802,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT s.scheme_id, s.scheme_name
+                    SELECT s.scheme_id, s.scheme_name, s.state_scheme_id, s.centre_scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -2817,6 +2821,8 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
+                    ss.state_scheme_id,
+                    ss.centre_scheme_id,
                     ls.last_supplied_date
                 FROM schemes_in_scope ss
                 LEFT JOIN last_supply ls
@@ -2833,6 +2839,8 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new CriticalSchemeRow(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
+                        (Integer) rs.getObject("state_scheme_id"),
+                        (Integer) rs.getObject("centre_scheme_id"),
                         rs.getDate("last_supplied_date") == null ? null : rs.getDate("last_supplied_date").toLocalDate()
                 ),
                 departmentId,
@@ -6511,7 +6519,13 @@ public class SchemeRegularityRepository {
     public record SchemeStatusCount(Integer activeSchemeCount, Integer inactiveSchemeCount) {
     }
 
-    public record CriticalSchemeRow(Integer schemeId, String schemeName, LocalDate lastSuppliedDate) {
+    public record CriticalSchemeRow(
+            Integer schemeId,
+            String schemeName,
+            Integer stateSchemeId,
+            Integer centreSchemeId,
+            LocalDate lastSuppliedDate
+    ) {
     }
 
     public record ContinuousSchemeRow(Integer schemeId, String schemeName) {

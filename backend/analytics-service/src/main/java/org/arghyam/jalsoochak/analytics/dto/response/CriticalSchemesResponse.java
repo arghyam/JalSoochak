@@ -26,6 +26,8 @@ public class CriticalSchemesResponse {
     public static class CriticalSchemeListItem {
         private Integer schemeId;
         private String schemeName;
+        private Integer stateSchemeId;
+        private Integer centreSchemeId;
         private LocalDate lastSuppliedDate;
     }
 }
