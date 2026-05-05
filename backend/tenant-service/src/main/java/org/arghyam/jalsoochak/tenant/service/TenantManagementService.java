@@ -165,13 +165,13 @@ public interface TenantManagementService {
             Integer tenantId, String hierarchyType, List<LocationLevelConfigDTO> levels);
 
     /**
-     * Generates a new API token for the tenant (create-or-replace semantics).
+     * Generates a new API token for the tenant identified by {@code stateCode} (create-or-replace semantics).
      * The raw token is returned exactly once; only its SHA-256 hash is persisted.
      * Calling this again immediately invalidates the previous token.
      *
-     * @param tenantId ID of the tenant.
+     * @param stateCode the tenant's state code, extracted from the caller's JWT.
      * @return DTO containing the raw token (shown once).
      */
-    GenerateApiTokenResponseDTO generateApiToken(Integer tenantId);
+    GenerateApiTokenResponseDTO generateApiToken(String stateCode);
 
 }

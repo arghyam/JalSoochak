@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
@@ -13,6 +15,7 @@ import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.arghyam.jalsoochak.analytics.service.EscalationQueryService;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
+import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
 import org.arghyam.jalsoochak.analytics.service.OperatorAttendanceQueryService;
 import org.arghyam.jalsoochak.analytics.service.UserAlertTotalsService;
@@ -52,6 +55,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -96,6 +100,8 @@ class AnalyticsSchemeReportingControllerTest {
     private DimUserRepository dimUserRepository;
     @MockBean
     private FactEscalationRepository factEscalationRepository;
+    @MockBean
+    private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
     @ParameterizedTest
     @MethodSource("schemeStatusValidRoutes")
@@ -140,6 +146,267 @@ class AnalyticsSchemeReportingControllerTest {
     void getSchemeStatusCount_withNoId_returnsBadRequest() throws Exception {
         mockMvc.perform(get(BASE + "/schemes/status-count")
                         .param("tenant_id", String.valueOf(TENANT_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getCriticalSchemes_defaultCountOnly_routesToLgdService() throws Exception {
+        when(schemeRegularityService.getCriticalSchemesByLgd(eq(TENANT_ID), eq(101), eq(false), isNull(), isNull()))
+                .thenReturn(CriticalSchemesResponse.builder()
+                        .criticalSchemeCount(3L)
+                        .list(false)
+                        .page(null)
+                        .limit(null)
+                        .schemes(null)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/critical-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.criticalSchemeCount").value(3))
+                .andExpect(jsonPath("$.data.list").value(false))
+                .andExpect(jsonPath("$.data.schemes").value(nullValue()));
+
+        verify(schemeRegularityService, times(1))
+                .getCriticalSchemesByLgd(eq(TENANT_ID), eq(101), eq(false), isNull(), isNull());
+        verify(schemeRegularityService, never())
+                .getCriticalSchemesByDepartment(any(), any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void getCriticalSchemes_withListTrue_returnsCountAndList() throws Exception {
+        when(schemeRegularityService.getCriticalSchemesByDepartment(eq(TENANT_ID), eq(201), eq(true), eq(1), eq(2)))
+                .thenReturn(CriticalSchemesResponse.builder()
+                        .criticalSchemeCount(3L)
+                        .list(true)
+                        .page(1)
+                        .limit(2)
+                        .schemes(List.of(
+                                CriticalSchemesResponse.CriticalSchemeListItem.builder()
+                                        .schemeId(101)
+                                        .schemeName("Scheme A")
+                                        .stateSchemeId(5001)
+                                        .centreSchemeId(6001)
+                                        .lastSuppliedDate(LocalDate.of(2026, 4, 1))
+                                        .build(),
+                                CriticalSchemesResponse.CriticalSchemeListItem.builder()
+                                        .schemeId(102)
+                                        .schemeName("Scheme B")
+                                        .stateSchemeId(5002)
+                                        .centreSchemeId(6002)
+                                        .lastSuppliedDate(null)
+                                        .build()
+                        ))
+                        .build());
+
+        mockMvc.perform(get(BASE + "/critical-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("department_id", "201")
+                        .param("list", "true")
+                        .param("page", "1")
+                        .param("limit", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.criticalSchemeCount").value(3))
+                .andExpect(jsonPath("$.data.list").value(true))
+                .andExpect(jsonPath("$.data.page").value(1))
+                .andExpect(jsonPath("$.data.limit").value(2))
+                .andExpect(jsonPath("$.data.schemes").isArray())
+                .andExpect(jsonPath("$.data.schemes[0].schemeId").value(101))
+                .andExpect(jsonPath("$.data.schemes[0].schemeName").value("Scheme A"))
+                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value(5001))
+                .andExpect(jsonPath("$.data.schemes[0].centreSchemeId").value(6001))
+                .andExpect(jsonPath("$.data.schemes[0].lastSuppliedDate").value("2026-04-01"))
+                .andExpect(jsonPath("$.data.schemes[1].schemeId").value(102))
+                .andExpect(jsonPath("$.data.schemes[1].stateSchemeId").value(5002))
+                .andExpect(jsonPath("$.data.schemes[1].centreSchemeId").value(6002))
+                .andExpect(jsonPath("$.data.schemes[1].lastSuppliedDate").value(nullValue()));
+    }
+
+    @Test
+    void getCriticalSchemes_withBothIds_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/critical-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101")
+                        .param("department_id", "201"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getCriticalSchemes_withNoId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/critical-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getCriticalSchemes_withListTrue_andInvalidPage_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/critical-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101")
+                        .param("list", "true")
+                        .param("page", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getContinuousSchemes_defaultCountOnly_routesToLgdService() throws Exception {
+        when(schemeRegularityService.getContinuousSchemesByLgd(
+                eq(TENANT_ID), eq(101), eq(START), eq(END), eq(false), isNull(), isNull()))
+                .thenReturn(ContinuousSchemesResponse.builder()
+                        .continuousSchemeCount(5L)
+                        .list(false)
+                        .page(null)
+                        .limit(null)
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .schemes(null)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/continuous-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.continuousSchemeCount").value(5))
+                .andExpect(jsonPath("$.data.list").value(false))
+                .andExpect(jsonPath("$.data.schemes").value(nullValue()));
+
+        verify(schemeRegularityService, times(1)).getContinuousSchemesByLgd(
+                eq(TENANT_ID), eq(101), eq(START), eq(END), eq(false), isNull(), isNull());
+        verify(schemeRegularityService, never()).getContinuousSchemesByDepartment(
+                any(), any(), any(), any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void getContinuousSchemes_withListTrue_returnsCountAndList() throws Exception {
+        when(schemeRegularityService.getContinuousSchemesByDepartment(
+                eq(TENANT_ID), eq(201), eq(START), eq(END), eq(true), eq(1), eq(2)))
+                .thenReturn(ContinuousSchemesResponse.builder()
+                        .continuousSchemeCount(2L)
+                        .list(true)
+                        .page(1)
+                        .limit(2)
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .schemes(List.of(
+                                ContinuousSchemesResponse.ContinuousSchemeListItem.builder()
+                                        .schemeId(101)
+                                        .schemeName("Scheme A")
+                                        .build(),
+                                ContinuousSchemesResponse.ContinuousSchemeListItem.builder()
+                                        .schemeId(102)
+                                        .schemeName("Scheme B")
+                                        .build()
+                        ))
+                        .build());
+
+        mockMvc.perform(get(BASE + "/continuous-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("department_id", "201")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("list", "true")
+                        .param("page", "1")
+                        .param("limit", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.continuousSchemeCount").value(2))
+                .andExpect(jsonPath("$.data.list").value(true))
+                .andExpect(jsonPath("$.data.page").value(1))
+                .andExpect(jsonPath("$.data.limit").value(2))
+                .andExpect(jsonPath("$.data.schemes").isArray())
+                .andExpect(jsonPath("$.data.schemes[0].schemeId").value(101))
+                .andExpect(jsonPath("$.data.schemes[0].schemeName").value("Scheme A"));
+    }
+
+    @Test
+    void getContinuousSchemes_withBothIds_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/continuous-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101")
+                        .param("department_id", "201")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getContinuousSchemes_withNoId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/continuous-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getContinuousSchemes_withoutDates_usesTenantDataDefaultWindow() throws Exception {
+        when(defaultAnalyticsDateWindowProvider.defaultWindow())
+                .thenReturn(new DefaultAnalyticsDateWindowProvider.DateWindow(START, END));
+        when(schemeRegularityService.getContinuousSchemesByLgd(
+                eq(TENANT_ID), eq(101), eq(START), eq(END), eq(false), isNull(), isNull()))
+                .thenReturn(ContinuousSchemesResponse.builder()
+                        .continuousSchemeCount(5L)
+                        .list(false)
+                        .page(null)
+                        .limit(null)
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .schemes(null)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/continuous-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.continuousSchemeCount").value(5));
+
+        verify(defaultAnalyticsDateWindowProvider, times(1)).defaultWindow();
+        verify(schemeRegularityService, times(1)).getContinuousSchemesByLgd(
+                eq(TENANT_ID), eq(101), eq(START), eq(END), eq(false), isNull(), isNull());
+    }
+
+    @Test
+    void getContinuousSchemes_withOnlyOneDate_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/continuous-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101")
+                        .param("start_date", START.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getContinuousSchemes_withListTrue_andInvalidPage_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/continuous-schemes")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("lgd_id", "101")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("list", "true")
+                        .param("page", "0"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
@@ -286,6 +553,8 @@ class AnalyticsSchemeReportingControllerTest {
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
                                         .schemeId(1)
                                         .schemeName("Scheme A")
+                                        .stateSchemeId(10001)
+                                        .centreSchemeId(20001)
                                         .statusCode(1)
                                         .status("active")
                                         .supplyDays(2)
@@ -303,7 +572,9 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.parentLgdId").value(101))
-                .andExpect(jsonPath("$.data.schemes[0].schemeId").value(1));
+                .andExpect(jsonPath("$.data.schemes[0].schemeId").value(1))
+                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value(10001))
+                .andExpect(jsonPath("$.data.schemes[0].centreSchemeId").value(20001));
 
         verify(schemeRegularityService, times(1))
                 .getSchemeRegionReportByLgd(TENANT_ID, 101, START, END, null, null);
@@ -323,6 +594,8 @@ class AnalyticsSchemeReportingControllerTest {
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
                                         .schemeId(2)
                                         .schemeName("Scheme B")
+                                        .stateSchemeId(10002)
+                                        .centreSchemeId(20002)
                                         .statusCode(0)
                                         .status("inactive")
                                         .supplyDays(0)
@@ -340,7 +613,9 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.parentDepartmentId").value(201))
-                .andExpect(jsonPath("$.data.schemes[0].schemeId").value(2));
+                .andExpect(jsonPath("$.data.schemes[0].schemeId").value(2))
+                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value(10002))
+                .andExpect(jsonPath("$.data.schemes[0].centreSchemeId").value(20002));
 
         verify(schemeRegularityService, times(1))
                 .getSchemeRegionReportByDepartment(TENANT_ID, 201, START, END, null, null);
@@ -394,6 +669,8 @@ class AnalyticsSchemeReportingControllerTest {
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
                                         .schemeId(1)
                                         .schemeName("Scheme A")
+                                        .stateSchemeId(10001)
+                                        .centreSchemeId(20001)
                                         .statusCode(1)
                                         .status("active")
                                         .supplyDays(2)
@@ -414,8 +691,8 @@ class AnalyticsSchemeReportingControllerTest {
                         "attachment; filename=\"scheme-region-report_parent_lgd_name_2026-01-01_to_2026-01-31.csv\""))
                 .andExpect(content().contentTypeCompatibleWith("text/csv"))
                 .andExpect(content().string(startsWith(
-                        "scheme_id,scheme_name,status_code,status,supply_days,average_regularity,submission_days,submission_rate")))
-                .andExpect(content().string(containsString("1,Scheme A,1,active,2,0.6667,3,1.0")));
+                        "scheme_id,scheme_name,state_scheme_id,centre_scheme_id,status_code,status,supply_days,average_regularity,submission_days,submission_rate")))
+                .andExpect(content().string(containsString("1,Scheme A,10001,20001,1,active,2,0.6667,3,1.0")));
     }
 
     @Test
@@ -428,6 +705,8 @@ class AnalyticsSchemeReportingControllerTest {
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
                                         .schemeId(2)
                                         .schemeName("Scheme, B")
+                                        .stateSchemeId(10002)
+                                        .centreSchemeId(20002)
                                         .statusCode(0)
                                         .status("inactive")
                                         .supplyDays(0)
@@ -447,7 +726,7 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(header().string("Content-Disposition",
                         "attachment; filename=\"scheme-region-report_department_hq_2026-01-01_to_2026-01-31.csv\""))
                 .andExpect(content().contentTypeCompatibleWith("text/csv"))
-                .andExpect(content().string(containsString("2,\"Scheme, B\",0,inactive,0,0,1,0.3333")));
+                .andExpect(content().string(containsString("2,\"Scheme, B\",10002,20002,0,inactive,0,0,1,0.3333")));
     }
 
     @Test

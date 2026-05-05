@@ -1175,40 +1175,4 @@ class TenantControllerTest {
                     .andExpect(status().isNotFound());
         }
     }
-
-    @Nested
-    @DisplayName("POST /{tenantId}/api-token")
-    class GenerateApiTokenTests {
-
-        @Test
-        void generateApiToken_Success() throws Exception {
-            int tenantId = 1;
-            org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO response =
-                    org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO.builder()
-                            .token("js_somerawtoken")
-                            .build();
-
-            when(tenantManagementService.generateApiToken(tenantId)).thenReturn(response);
-
-            mockMvc.perform(post("/api/v1/tenants/{tenantId}/api-token", tenantId))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status").value(200))
-                    .andExpect(jsonPath("$.message").value("API token generated successfully"))
-                    .andExpect(jsonPath("$.data.token").value("js_somerawtoken"));
-
-            verify(tenantManagementService, times(1)).generateApiToken(tenantId);
-        }
-
-        @Test
-        void generateApiToken_TenantNotFound() throws Exception {
-            int tenantId = 99;
-            when(tenantManagementService.generateApiToken(tenantId))
-                    .thenThrow(new ResourceNotFoundException("Tenant not found: 99"));
-
-            mockMvc.perform(post("/api/v1/tenants/{tenantId}/api-token", tenantId))
-                    .andExpect(status().isNotFound());
-
-            verify(tenantManagementService, times(1)).generateApiToken(tenantId);
-        }
-    }
 }
