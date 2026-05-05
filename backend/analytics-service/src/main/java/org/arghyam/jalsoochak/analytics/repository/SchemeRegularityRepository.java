@@ -2634,6 +2634,442 @@ public class SchemeRegularityRepository {
         return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
     }
 
+    public long getCriticalSchemeCountByLgd(Integer tenantId, Integer lgdId, LocalDate cutoffDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                last_supply AS (
+                    SELECT
+                        m.scheme_id,
+                        MAX(m.reading_date)::date AS last_supplied_date
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                      ON ss.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT COUNT(*)::bigint AS critical_count
+                FROM schemes_in_scope ss
+                LEFT JOIN last_supply ls
+                  ON ls.scheme_id = ss.scheme_id
+                WHERE ls.last_supplied_date IS NULL
+                   OR ls.last_supplied_date < ?
+                """, schemeLgdColumn);
+
+        Long count = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                lgdId,
+                tenantId,
+                tenantId,
+                cutoffDate
+        );
+        return count == null ? 0L : count;
+    }
+
+    public long getCriticalSchemeCountByDepartment(Integer tenantId, Integer departmentId, LocalDate cutoffDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                last_supply AS (
+                    SELECT
+                        m.scheme_id,
+                        MAX(m.reading_date)::date AS last_supplied_date
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                      ON ss.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT COUNT(*)::bigint AS critical_count
+                FROM schemes_in_scope ss
+                LEFT JOIN last_supply ls
+                  ON ls.scheme_id = ss.scheme_id
+                WHERE ls.last_supplied_date IS NULL
+                   OR ls.last_supplied_date < ?
+                """, schemeDepartmentColumn);
+
+        Long count = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                departmentId,
+                tenantId,
+                tenantId,
+                cutoffDate
+        );
+        return count == null ? 0L : count;
+    }
+
+    public List<CriticalSchemeRow> getCriticalSchemesByLgd(
+            Integer tenantId,
+            Integer lgdId,
+            LocalDate cutoffDate,
+            Integer limit,
+            Integer offset
+    ) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT s.scheme_id, s.scheme_name
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                last_supply AS (
+                    SELECT
+                        m.scheme_id,
+                        MAX(m.reading_date)::date AS last_supplied_date
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                      ON ss.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    ss.scheme_id,
+                    ss.scheme_name,
+                    ls.last_supplied_date
+                FROM schemes_in_scope ss
+                LEFT JOIN last_supply ls
+                  ON ls.scheme_id = ss.scheme_id
+                WHERE ls.last_supplied_date IS NULL
+                   OR ls.last_supplied_date < ?
+                ORDER BY ls.last_supplied_date ASC NULLS FIRST, ss.scheme_id ASC
+                LIMIT ?
+                OFFSET ?
+                """, schemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new CriticalSchemeRow(
+                        rs.getInt("scheme_id"),
+                        rs.getString("scheme_name"),
+                        rs.getDate("last_supplied_date") == null ? null : rs.getDate("last_supplied_date").toLocalDate()
+                ),
+                lgdId,
+                tenantId,
+                tenantId,
+                cutoffDate,
+                limit,
+                offset
+        );
+    }
+
+    public List<CriticalSchemeRow> getCriticalSchemesByDepartment(
+            Integer tenantId,
+            Integer departmentId,
+            LocalDate cutoffDate,
+            Integer limit,
+            Integer offset
+    ) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT s.scheme_id, s.scheme_name
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                last_supply AS (
+                    SELECT
+                        m.scheme_id,
+                        MAX(m.reading_date)::date AS last_supplied_date
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                      ON ss.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    ss.scheme_id,
+                    ss.scheme_name,
+                    ls.last_supplied_date
+                FROM schemes_in_scope ss
+                LEFT JOIN last_supply ls
+                  ON ls.scheme_id = ss.scheme_id
+                WHERE ls.last_supplied_date IS NULL
+                   OR ls.last_supplied_date < ?
+                ORDER BY ls.last_supplied_date ASC NULLS FIRST, ss.scheme_id ASC
+                LIMIT ?
+                OFFSET ?
+                """, schemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new CriticalSchemeRow(
+                        rs.getInt("scheme_id"),
+                        rs.getString("scheme_name"),
+                        rs.getDate("last_supplied_date") == null ? null : rs.getDate("last_supplied_date").toLocalDate()
+                ),
+                departmentId,
+                tenantId,
+                tenantId,
+                cutoffDate,
+                limit,
+                offset
+        );
+    }
+
+    public long getContinuousSchemeCountByLgd(
+            Integer tenantId,
+            Integer lgdId,
+            LocalDate startDate,
+            LocalDate endDate,
+            int daysInRange
+    ) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT s.scheme_id, s.scheme_name
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                supply_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                      ON ss.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT COUNT(*)::bigint AS continuous_count
+                FROM schemes_in_scope ss
+                LEFT JOIN supply_days sd
+                  ON sd.scheme_id = ss.scheme_id
+                WHERE COALESCE(sd.supply_days, 0) = ?
+                """, schemeLgdColumn);
+
+        Long count = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                lgdId,
+                tenantId,
+                tenantId,
+                startDate,
+                endDate,
+                daysInRange
+        );
+        return count == null ? 0L : count;
+    }
+
+    public long getContinuousSchemeCountByDepartment(
+            Integer tenantId,
+            Integer departmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            int daysInRange
+    ) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT s.scheme_id, s.scheme_name
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                supply_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                      ON ss.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT COUNT(*)::bigint AS continuous_count
+                FROM schemes_in_scope ss
+                LEFT JOIN supply_days sd
+                  ON sd.scheme_id = ss.scheme_id
+                WHERE COALESCE(sd.supply_days, 0) = ?
+                """, schemeDepartmentColumn);
+
+        Long count = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                departmentId,
+                tenantId,
+                tenantId,
+                startDate,
+                endDate,
+                daysInRange
+        );
+        return count == null ? 0L : count;
+    }
+
+    public List<ContinuousSchemeRow> getContinuousSchemesByLgd(
+            Integer tenantId,
+            Integer lgdId,
+            LocalDate startDate,
+            LocalDate endDate,
+            int daysInRange,
+            Integer limit,
+            Integer offset
+    ) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT s.scheme_id, s.scheme_name
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                supply_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                      ON ss.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    ss.scheme_id,
+                    ss.scheme_name
+                FROM schemes_in_scope ss
+                LEFT JOIN supply_days sd
+                  ON sd.scheme_id = ss.scheme_id
+                WHERE COALESCE(sd.supply_days, 0) = ?
+                ORDER BY ss.scheme_id ASC
+                LIMIT ?
+                OFFSET ?
+                """, schemeLgdColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ContinuousSchemeRow(
+                        rs.getInt("scheme_id"),
+                        rs.getString("scheme_name")
+                ),
+                lgdId,
+                tenantId,
+                tenantId,
+                startDate,
+                endDate,
+                daysInRange,
+                limit,
+                offset
+        );
+    }
+
+    public List<ContinuousSchemeRow> getContinuousSchemesByDepartment(
+            Integer tenantId,
+            Integer departmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            int daysInRange,
+            Integer limit,
+            Integer offset
+    ) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT s.scheme_id, s.scheme_name
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                supply_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                      ON ss.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    ss.scheme_id,
+                    ss.scheme_name
+                FROM schemes_in_scope ss
+                LEFT JOIN supply_days sd
+                  ON sd.scheme_id = ss.scheme_id
+                WHERE COALESCE(sd.supply_days, 0) = ?
+                ORDER BY ss.scheme_id ASC
+                LIMIT ?
+                OFFSET ?
+                """, schemeDepartmentColumn);
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ContinuousSchemeRow(
+                        rs.getInt("scheme_id"),
+                        rs.getString("scheme_name")
+                ),
+                departmentId,
+                tenantId,
+                tenantId,
+                startDate,
+                endDate,
+                daysInRange,
+                limit,
+                offset
+        );
+    }
+
     public long getSchemeCountByLgdInScope(Integer tenantId, Integer lgdId) {
         Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
         if (lgdLevel == null) {
@@ -3199,6 +3635,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
+                        s.state_scheme_id,
+                        s.centre_scheme_id,
                         s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
@@ -3217,6 +3655,8 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
+                    ss.state_scheme_id,
+                    ss.centre_scheme_id,
                     ss.operating_status,
                     COALESCE(sd.supply_days, 0)::int AS supply_days,
                     COALESCE(sd.submission_days, 0)::int AS submission_days
@@ -3231,6 +3671,8 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
+                        (Integer) rs.getObject("state_scheme_id"),
+                        (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days")),
@@ -3252,6 +3694,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
+                        s.state_scheme_id,
+                        s.centre_scheme_id,
                         s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
@@ -3271,6 +3715,8 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
+                    ss.state_scheme_id,
+                    ss.centre_scheme_id,
                     ss.operating_status,
                     COALESCE(sd.supply_days, 0)::int AS supply_days,
                     COALESCE(sd.submission_days, 0)::int AS submission_days
@@ -3285,6 +3731,8 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
+                        (Integer) rs.getObject("state_scheme_id"),
+                        (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days")),
@@ -3308,6 +3756,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
+                        s.state_scheme_id,
+                        s.centre_scheme_id,
                         s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
@@ -3326,6 +3776,8 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
+                    ss.state_scheme_id,
+                    ss.centre_scheme_id,
                     ss.operating_status,
                     COALESCE(sd.supply_days, 0)::int AS supply_days,
                     COALESCE(sd.submission_days, 0)::int AS submission_days
@@ -3340,6 +3792,8 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
+                        (Integer) rs.getObject("state_scheme_id"),
+                        (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days")),
@@ -3362,6 +3816,8 @@ public class SchemeRegularityRepository {
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
+                        s.state_scheme_id,
+                        s.centre_scheme_id,
                         s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
@@ -3381,6 +3837,8 @@ public class SchemeRegularityRepository {
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
+                    ss.state_scheme_id,
+                    ss.centre_scheme_id,
                     ss.operating_status,
                     COALESCE(sd.supply_days, 0)::int AS supply_days,
                     COALESCE(sd.submission_days, 0)::int AS submission_days
@@ -3395,6 +3853,8 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> new SchemeRegularityListMetrics(
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
+                        (Integer) rs.getObject("state_scheme_id"),
+                        (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days")),
@@ -6051,6 +6511,12 @@ public class SchemeRegularityRepository {
     public record SchemeStatusCount(Integer activeSchemeCount, Integer inactiveSchemeCount) {
     }
 
+    public record CriticalSchemeRow(Integer schemeId, String schemeName, LocalDate lastSuppliedDate) {
+    }
+
+    public record ContinuousSchemeRow(Integer schemeId, String schemeName) {
+    }
+
     public record SchemeSubmissionMetrics(
             Integer schemeId,
             String schemeName,
@@ -6082,6 +6548,8 @@ public class SchemeRegularityRepository {
     public record SchemeRegularityListMetrics(
             Integer schemeId,
             String schemeName,
+            Integer stateSchemeId,
+            Integer centreSchemeId,
             Integer operatingStatus,
             Integer supplyDays,
             Integer submissionDays) {

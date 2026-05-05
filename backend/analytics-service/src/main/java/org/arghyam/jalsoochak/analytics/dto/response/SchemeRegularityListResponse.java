@@ -37,6 +37,8 @@ public class SchemeRegularityListResponse {
     public static class SchemeMetrics {
         private Integer schemeId;
         private String schemeName;
+        private Integer stateSchemeId;
+        private Integer centreSchemeId;
         private Integer statusCode;
         private String status;
         private Integer supplyDays;

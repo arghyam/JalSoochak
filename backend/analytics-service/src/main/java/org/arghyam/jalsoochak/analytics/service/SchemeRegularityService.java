@@ -16,6 +16,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResp
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserOutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SubmissionStatusSummaryResponse;
@@ -189,4 +191,28 @@ public interface SchemeRegularityService {
 
     SchemeRegularityListResponse getSchemeRegionReportByDepartment(
             Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count);
+
+    CriticalSchemesResponse getCriticalSchemesByLgd(
+            Integer tenantId, Integer lgdId, boolean list, Integer page, Integer limit);
+
+    CriticalSchemesResponse getCriticalSchemesByDepartment(
+            Integer tenantId, Integer departmentId, boolean list, Integer page, Integer limit);
+
+    ContinuousSchemesResponse getContinuousSchemesByLgd(
+            Integer tenantId,
+            Integer lgdId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit);
+
+    ContinuousSchemesResponse getContinuousSchemesByDepartment(
+            Integer tenantId,
+            Integer departmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit);
 }

@@ -220,6 +220,104 @@ public final class SwaggerExamples {
             }
             """;
 
+    public static final String CRITICAL_SCHEMES_COUNT_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "criticalSchemeCount": 3,
+                "list": false,
+                "page": null,
+                "limit": null,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A",
+                    "lastSuppliedDate": "2026-04-01"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B",
+                    "lastSuppliedDate": null
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String CRITICAL_SCHEMES_LIST_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "criticalSchemeCount": 3,
+                "list": true,
+                "page": 1,
+                "limit": 2,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A",
+                    "lastSuppliedDate": "2026-04-01"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B",
+                    "lastSuppliedDate": null
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String CONTINUOUS_SCHEMES_COUNT_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "continuousSchemeCount": 5,
+                "list": false,
+                "page": null,
+                "limit": null,
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B"
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String CONTINUOUS_SCHEMES_LIST_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "continuousSchemeCount": 2,
+                "list": true,
+                "page": 1,
+                "limit": 2,
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B"
+                  }
+                ]
+              }
+            }
+            """;
+
     public static final String SCHEMES_DASHBOARD_SUCCESS = """
             {
               "success": true,
