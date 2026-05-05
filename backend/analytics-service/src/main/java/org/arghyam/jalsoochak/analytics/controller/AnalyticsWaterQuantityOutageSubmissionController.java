@@ -24,6 +24,8 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -40,6 +42,7 @@ import java.time.LocalDate;
 @RequestMapping("/api/v1/analytics")
 @RequiredArgsConstructor
 @Tag(name = "Analytics - Water Quantity, Outages & Submission", description = "Water quantity metrics, outage/non-submission distributions, and submission status aggregates")
+@Slf4j
 public class AnalyticsWaterQuantityOutageSubmissionController {
 
     private final SchemeRegularityService schemeRegularityService;
@@ -185,7 +188,16 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     .success(false)
                     .data(null)
                     .build());
+        } catch (InvalidDataAccessApiUsageException e) {
+            // Spring wraps IllegalArgumentException thrown from @Repository beans.
+            // Treat "bad input" the same way as explicit IllegalArgumentException.
+            return ResponseEntity.badRequest().body(ApiResponse.<RegionWiseWaterQuantityResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
         } catch (Exception e) {
+            log.error("Failed water-quantity/region-wise (tenantId={}, parentLgdId={}, parentDepartmentId={}, startDate={}, endDate={})",
+                    tenantId, parentLgdId, parentDepartmentId, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<RegionWiseWaterQuantityResponse>builder()
                     .success(false)
                     .data(null)
