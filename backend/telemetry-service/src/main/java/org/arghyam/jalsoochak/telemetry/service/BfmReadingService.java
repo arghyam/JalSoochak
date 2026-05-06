@@ -167,7 +167,7 @@ public class BfmReadingService {
                         .correlationId(anomalyCorrelationId)
                         .qualityStatus("REJECTED")
                         .build();
-            } catch (IllegalArgumentException | NumberFormatException | ClassCastException ex) {
+            } catch (IllegalArgumentException | ClassCastException ex) {
                 log.error("FlowVision response parsing error for URL: {}", request.getReadingUrl(), ex);
                 String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                         AnomalyConstants.TYPE_FLOWVISION_INTEGRATION_ERROR,
