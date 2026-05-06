@@ -33,7 +33,7 @@ class GlificWebhookControllerUnitTest {
 
         ResponseEntity<ReadingWebhookAckResponse> response = controller.receive(
                 GlificWebhookRequest.builder()
-                        .contactId("919999999999")
+                        .contactId("91XXXXXXXXXX")
                         .mediaId("media-123")
                         .build()
         );
@@ -44,7 +44,31 @@ class GlificWebhookControllerUnitTest {
         assertEquals("accepted", response.getBody().getStatus());
         assertNotNull(response.getBody().getJobId());
         assertEquals(true, asyncService.wasCalled);
-        assertEquals("919999999999", asyncService.lastContactId);
+        assertEquals("91XXXXXXXXXX", asyncService.lastContactId);
+    }
+
+    @Test
+    void readingsReturns429WhenEnqueueReturnsFalse() {
+        StubGlificReadingsAsyncService asyncService = new StubGlificReadingsAsyncService();
+        asyncService.returnFalse = true;
+        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookController controller = new GlificWebhookController(service, asyncService);
+
+        ResponseEntity<ReadingWebhookAckResponse> response = controller.receive(
+                GlificWebhookRequest.builder()
+                        .contactId("91XXXXXXXXXX")
+                        .mediaId("media-123")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(false, response.getBody().isSuccess());
+        assertEquals("overloaded", response.getBody().getStatus());
+        assertEquals(null, response.getBody().getJobId());
+        assertNotNull(response.getHeaders().get("Retry-After"));
+        assertEquals("5", response.getHeaders().getFirst("Retry-After"));
+        assertEquals(true, asyncService.wasCalled);
     }
 
     @Test
@@ -53,7 +77,7 @@ class GlificWebhookControllerUnitTest {
         GlificWebhookController controller = new GlificWebhookController(service);
 
         ResponseEntity<IntroResponse> response = controller.languageSelection(
-                IntroRequest.builder().contactId("919999999999").build()
+                IntroRequest.builder().contactId("91XXXXXXXXXX").build()
         );
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
@@ -68,7 +92,7 @@ class GlificWebhookControllerUnitTest {
         GlificWebhookController controller = new GlificWebhookController(service);
 
         ResponseEntity<IntroResponse> response = controller.languageSelection(
-                IntroRequest.builder().contactId("919999999999").build()
+                IntroRequest.builder().contactId("91XXXXXXXXXX").build()
         );
 
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
@@ -82,7 +106,7 @@ class GlificWebhookControllerUnitTest {
         GlificWebhookController controller = new GlificWebhookController(service);
 
         ResponseEntity<IntroResponse> response = controller.selectedChannel(
-                SelectedChannelRequest.builder().contactId("919999999999").channel("1").build()
+                SelectedChannelRequest.builder().contactId("91XXXXXXXXXX").channel("1").build()
         );
 
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
@@ -97,7 +121,7 @@ class GlificWebhookControllerUnitTest {
 
         ResponseEntity<CreateReadingResponse> response = controller.location(
                 LocationReadingRequest.builder()
-                        .contact(LocationReadingRequest.Contact.builder().phone("919999999999").build())
+                        .contact(LocationReadingRequest.Contact.builder().phone("91XXXXXXXXXX").build())
                         .latitude(BigDecimal.valueOf(12.34))
                         .longitude(BigDecimal.valueOf(56.78))
                         .build()
@@ -126,7 +150,7 @@ class GlificWebhookControllerUnitTest {
                         .confirmedReading(new BigDecimal("123.4"))
                         .stateSchemeId("30178236")
                         .centreSchemeId("30244993")
-                        .phoneNumber("919999999999")
+                        .phoneNumber("91XXXXXXXXXX")
                         .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
                         .build()
         );
@@ -155,7 +179,7 @@ class GlificWebhookControllerUnitTest {
                         .confirmedReading(new BigDecimal("123.4"))
                         .stateSchemeId("30178236")
                         .centreSchemeId("30244993")
-                        .phoneNumber("919999999999")
+                        .phoneNumber("91XXXXXXXXXX")
                         .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
                         .build()
         );
@@ -213,15 +237,17 @@ class GlificWebhookControllerUnitTest {
     private static final class StubGlificReadingsAsyncService extends GlificReadingsAsyncService {
         private boolean wasCalled;
         private String lastContactId;
+        private boolean returnFalse;
 
         private StubGlificReadingsAsyncService() {
             super(null, null, Runnable::run);
         }
 
         @Override
-        public void enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
+        public boolean enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
             this.wasCalled = true;
             this.lastContactId = request != null ? request.getContactId() : null;
+            return !returnFalse;
         }
     }
 

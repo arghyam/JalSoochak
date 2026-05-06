@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 @Service
 @Slf4j
@@ -24,8 +25,18 @@ public class GlificReadingsAsyncService {
         this.glificSyncExecutor = glificSyncExecutor;
     }
 
-    public void enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
-        glificSyncExecutor.execute(() -> processAndResume(request, jobId));
+    /**
+     * Returns true if the job was accepted, false if the OCR thread pool is saturated.
+     * Callers should return HTTP 429 on false.
+     */
+    public boolean enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
+        try {
+            glificSyncExecutor.execute(() -> processAndResume(request, jobId));
+            return true;
+        } catch (RejectedExecutionException e) {
+            log.warn("OCR queue saturated, rejecting jobId={}", jobId);
+            return false;
+        }
     }
 
     private void processAndResume(GlificWebhookRequest request, String jobId) {

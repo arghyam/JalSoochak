@@ -185,7 +185,7 @@
                                 <include>org/arghyam/jalsoochak/telemetry/config/TenantContext*</include>
                                 <include>org/arghyam/jalsoochak/telemetry/config/TenantInterceptor*</include>
                             </includes>
-                            <rules>
+                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>
                                     <limits>

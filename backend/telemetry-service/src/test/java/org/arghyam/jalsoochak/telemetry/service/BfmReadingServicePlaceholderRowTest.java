@@ -66,12 +66,12 @@ class BfmReadingServicePlaceholderRowTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
 
         when(flowVisionService.extractReading("http://example.com/img.jpg")).thenReturn(
-                FlowVisionResult.builder()
+                Optional.of(FlowVisionResult.builder()
                         .correlationId("corr-1")
                         .qualityStatus("GOOD")
                         .qualityConfidence(new BigDecimal("0.95"))
                         .adjustedReading(new BigDecimal("123"))
-                        .build()
+                        .build())
         );
 
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
