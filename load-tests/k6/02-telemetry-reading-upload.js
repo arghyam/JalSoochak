@@ -104,11 +104,14 @@ export default function () {
     if (res.status === 200) {
       try {
         const body = res.json();
-        if (body.qualityStatus === 'REJECTED' || body.qualityStatus === 'UNREADABLE') {
-          rejectedReadings.add(1);
-        } else {
-          confirmedReadings.add(1);
+        if (body.qualityStatus) {
+          if (body.qualityStatus === 'REJECTED' || body.qualityStatus === 'UNREADABLE') {
+            rejectedReadings.add(1);
+          } else {
+            confirmedReadings.add(1);
+          }
         }
+        // If no qualityStatus, it's an ack payload — not a confirmed reading
       } catch (_) {
         // non-JSON body — already counted via errorRates above
       }

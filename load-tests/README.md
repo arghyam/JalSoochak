@@ -5,7 +5,7 @@ Automated load tests for three critical paths:
 | Script | Service | Endpoint(s) | Peak VUs |
 |--------|---------|-------------|----------|
 | `01-analytics-dashboard.js` | analytics-service | 5× GET dashboard endpoints | 500 |
-| `02-telemetry-reading-upload.js` | telemetry-service | POST /readings (OCR) + POST /manual-reading | 150 |
+| `02-telemetry-reading-upload.js` | telemetry-service | POST /readings/glific (OCR) + POST /manual-reading | 150 |
 | `03-flowvision-direct.js` | FlowVision AI | POST /extract-reading | 80 |
 
 ---
@@ -145,7 +145,7 @@ Each script records custom Trend metrics you can chart in Grafana:
 | `analytics_water_quantity_periodic_ms` | `/water-quantity/periodic` latency |
 | `analytics_submission_status_ms` | `/submission-status` latency |
 | `analytics_schemes_dashboard_ms` | `/schemes/dashboard` latency |
-| `telemetry_readings_ms` | `/readings` end-to-end (OCR included) |
+| `telemetry_readings_ms` | `/readings/glific` end-to-end (OCR included) |
 | `telemetry_manual_reading_ms` | `/manual-reading` (no OCR) |
 | `flowvision_extract_ms` | FlowVision `/extract-reading` |
 | `telemetry_confirmed_readings` | Count of readings with qualityStatus ≠ REJECTED |
@@ -157,6 +157,6 @@ Each script records custom Trend metrics you can chart in Grafana:
 
 ## Caution
 
-- **Telemetry `/readings`** writes to the staging database and publishes Kafka events on every call. Run during off-hours or in a dedicated load-test tenant to avoid polluting real operator data.
+- **Telemetry `/readings/glific`** writes to the staging database and publishes Kafka events on every call. Run during off-hours or in a dedicated load-test tenant to avoid polluting real operator data.
 - **FlowVision** is an external AI service. Spike tests (80 VUs) may exhaust processing quota. Co-ordinate with the FlowVision/Beehyv team before running the spike phase.
-- The `qualityStatus: REJECTED` telemetry response is a valid business outcome (low confidence, duplicate image, etc.) — it is **not** counted as a test failure. Only HTTP 5xx responses are failures.
+- The `qualityStatus: REJECTED` telemetry response is a valid business outcome (low confidence, duplicate image, etc.) — it is **not** counted as a test failure. Only HTTP 5xx responses and non-duplicate 4xx responses are failures.

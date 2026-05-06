@@ -48,6 +48,30 @@ class GlificWebhookControllerUnitTest {
     }
 
     @Test
+    void readingsReturns429WhenEnqueueReturnsFalse() {
+        StubGlificReadingsAsyncService asyncService = new StubGlificReadingsAsyncService();
+        asyncService.returnFalse = true;
+        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookController controller = new GlificWebhookController(service, asyncService);
+
+        ResponseEntity<ReadingWebhookAckResponse> response = controller.receive(
+                GlificWebhookRequest.builder()
+                        .contactId("919999999999")
+                        .mediaId("media-123")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(false, response.getBody().isSuccess());
+        assertEquals("overloaded", response.getBody().getStatus());
+        assertEquals(null, response.getBody().getJobId());
+        assertNotNull(response.getHeaders().get("Retry-After"));
+        assertEquals("5", response.getHeaders().getFirst("Retry-After"));
+        assertEquals(true, asyncService.wasCalled);
+    }
+
+    @Test
     void languageSelectionReturnsOkWhenServiceSucceeds() {
         GlificWebhookService service = new StubGlificWebhookService(false, false);
         GlificWebhookController controller = new GlificWebhookController(service);
@@ -213,6 +237,7 @@ class GlificWebhookControllerUnitTest {
     private static final class StubGlificReadingsAsyncService extends GlificReadingsAsyncService {
         private boolean wasCalled;
         private String lastContactId;
+        private boolean returnFalse;
 
         private StubGlificReadingsAsyncService() {
             super(null, null, Runnable::run);
@@ -222,7 +247,7 @@ class GlificWebhookControllerUnitTest {
         public boolean enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
             this.wasCalled = true;
             this.lastContactId = request != null ? request.getContactId() : null;
-            return true;
+            return !returnFalse;
         }
     }
 

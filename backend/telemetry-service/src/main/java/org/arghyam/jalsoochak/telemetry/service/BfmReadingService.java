@@ -97,7 +97,7 @@ public class BfmReadingService {
                     return CreateReadingResponse.builder()
                             .success(false)
                             .message("Could not read meter value from image. Please retry with a clearer photo.")
-                            .correlationId(UUID.randomUUID().toString())
+                            .correlationId(anomalyCorrelationId)
                             .qualityStatus("REJECTED")
                             .build();
                 }
@@ -128,7 +128,7 @@ public class BfmReadingService {
                     return CreateReadingResponse.builder()
                             .success(false)
                             .message("Could not read meter value from image. Please retry with a clearer photo.")
-                            .correlationId(UUID.randomUUID().toString())
+                            .correlationId(anomalyCorrelationId)
                             .qualityStatus("REJECTED")
                             .build();
                 }
@@ -161,7 +161,7 @@ public class BfmReadingService {
                 return CreateReadingResponse.builder()
                         .success(false)
                         .message("OCR failed. Please try again with a clearer image.")
-                        .correlationId(UUID.randomUUID().toString())
+                        .correlationId(anomalyCorrelationId)
                         .qualityStatus("REJECTED")
                         .build();
             }

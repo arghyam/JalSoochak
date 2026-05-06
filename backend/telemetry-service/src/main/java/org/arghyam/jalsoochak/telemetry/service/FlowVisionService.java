@@ -11,6 +11,7 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.HashMap;
@@ -35,6 +36,16 @@ public class FlowVisionService {
 
     public FlowVisionService(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
+    }
+
+    @PostConstruct
+    public void validateRetryProperties() {
+        if (retryMaxAttempts < 1) {
+            throw new IllegalArgumentException("flowvision.retry.max-attempts must be >= 1, got: " + retryMaxAttempts);
+        }
+        if (retryInitialBackoffMs < 0) {
+            throw new IllegalArgumentException("flowvision.retry.initial-backoff-ms must be >= 0, got: " + retryInitialBackoffMs);
+        }
     }
 
     public Optional<FlowVisionResult> extractReading(String readingUrl) {

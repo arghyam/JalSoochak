@@ -88,9 +88,11 @@ export default function () {
           });
         } else {
           ocrFailed.add(1);
+          errorRates.flowvision.add(1);
         }
       } catch (_) {
         ocrFailed.add(1);
+        errorRates.flowvision.add(1);
       }
     }
   });
