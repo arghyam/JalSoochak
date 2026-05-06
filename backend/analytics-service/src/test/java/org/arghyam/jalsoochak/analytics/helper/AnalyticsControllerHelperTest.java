@@ -25,6 +25,8 @@ class AnalyticsControllerHelperTest {
                         SchemeRegularityListResponse.SchemeMetrics.builder()
                                 .schemeId(1)
                                 .schemeName("Scheme, \"A\"")
+                                .stateSchemeId(10001)
+                                .centreSchemeId(20001)
                                 .statusCode(1)
                                 .status("active")
                                 .supplyDays(2)
@@ -35,6 +37,8 @@ class AnalyticsControllerHelperTest {
                         SchemeRegularityListResponse.SchemeMetrics.builder()
                                 .schemeId(2)
                                 .schemeName("Scheme B\nNorth")
+                                .stateSchemeId(null)
+                                .centreSchemeId(null)
                                 .statusCode(0)
                                 .status(null)
                                 .supplyDays(null)
@@ -47,9 +51,9 @@ class AnalyticsControllerHelperTest {
         String csv = AnalyticsControllerHelper.buildSchemeRegionReportCsv(response);
 
         assertEquals(
-                "scheme_id,scheme_name,status_code,status,supply_days,average_regularity,submission_days,submission_rate\n"
-                        + "1,\"Scheme, \"\"A\"\"\",1,active,2,0.6667,3,1.0\n"
-                        + "2,\"Scheme B\nNorth\",0,,,0,1,0.3333\n",
+                "scheme_id,scheme_name,state_scheme_id,centre_scheme_id,status_code,status,supply_days,average_regularity,submission_days,submission_rate\n"
+                        + "1,\"Scheme, \"\"A\"\"\",10001,20001,1,active,2,0.6667,3,1.0\n"
+                        + "2,\"Scheme B\nNorth\",,,0,,,0,1,0.3333\n",
                 csv);
     }
 

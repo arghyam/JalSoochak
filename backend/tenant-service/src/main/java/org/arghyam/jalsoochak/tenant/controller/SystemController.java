@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -36,7 +38,9 @@ public class SystemController {
     private final SystemManagementService systemManagementService;
 
     @Operation(summary = "Get system configurations", description = "Retrieves global platform settings. Super User only.")
-    @ApiResponse(responseCode = "200", description = "System configurations retrieved successfully")
+    @ApiResponse(responseCode = "200", description = "System configurations retrieved successfully",
+            content = @Content(mediaType = "application/json",
+                    schema = @Schema(implementation = SystemConfigResponseDTO.class)))
     @PreAuthorize("hasRole('SUPER_USER')")
     @GetMapping("/config")
     public ResponseEntity<ApiResponseDTO<SystemConfigResponseDTO>> getSystemConfigs(
@@ -58,7 +62,9 @@ public class SystemController {
     }
 
     @Operation(summary = "Set system configurations", description = "Updates global system settings. Super User only.")
-    @ApiResponse(responseCode = "200", description = "System configurations set successfully")
+    @ApiResponse(responseCode = "200", description = "System configurations set successfully",
+            content = @Content(mediaType = "application/json",
+                    schema = @Schema(implementation = SystemConfigResponseDTO.class)))
     @PreAuthorize("hasRole('SUPER_USER')")
     @PutMapping("/config")
     public ResponseEntity<ApiResponseDTO<SystemConfigResponseDTO>> setSystemConfigs(

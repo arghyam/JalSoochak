@@ -29,7 +29,9 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
+import org.arghyam.jalsoochak.tenant.exception.ForbiddenAccessException;
 import org.arghyam.jalsoochak.tenant.service.TenantManagementService;
+import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -75,7 +77,9 @@ public class TenantController {
         @Operation(summary = "Create a new tenant", description = "Registers a new tenant in the common schema and provisions a dedicated "
                         + "database schema (tenant_<stateCode>) with all required tables and indexes.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "201", description = "Tenant created and schema provisioned successfully"),
+                        @ApiResponse(responseCode = "201", description = "Tenant created and schema provisioned successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = TenantResponseDTO.class))),
                         @ApiResponse(responseCode = "400", description = "Invalid request — missing or malformed fields",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
                         @ApiResponse(responseCode = "409", description = "Tenant with the given state code already exists",
@@ -92,7 +96,9 @@ public class TenantController {
         }
 
         @Operation(summary = "Get all tenant's status summary", description = "Returns aggregate counts of all non-system tenants grouped by status: total, onboarded, configured, active, inactive, suspended, degraded, and archived.")
-        @ApiResponse(responseCode = "200", description = "Tenant summary retrieved successfully")
+        @ApiResponse(responseCode = "200", description = "Tenant summary retrieved successfully",
+                        content = @Content(mediaType = "application/json",
+                                        schema = @Schema(implementation = TenantSummaryResponseDTO.class)))
         @PreAuthorize("hasRole('SUPER_USER')")
         @GetMapping("/summary")
         public ResponseEntity<ApiResponseDTO<TenantSummaryResponseDTO>> getTenantSummary() {
@@ -104,7 +110,9 @@ public class TenantController {
         @Operation(summary = "List all tenants with pagination", description = "Returns a paginated list of tenants registered in the common schema, ordered by ID. "
                         + "Optionally filter by status and/or search by name (case-insensitive partial match).")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Paginated list of tenants"),
+                        @ApiResponse(responseCode = "200", description = "Paginated list of tenants",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = PageResponseDTO.class))),
                         @ApiResponse(responseCode = "400", description = "Invalid query parameter",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
@@ -121,7 +129,9 @@ public class TenantController {
 
         @Operation(summary = "Update tenant", description = "Updates the status of an existing tenant identified by tenantId.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Tenant updated successfully"),
+                        @ApiResponse(responseCode = "200", description = "Tenant updated successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = TenantResponseDTO.class))),
                         @ApiResponse(responseCode = "400", description = "Tenant updation failed",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant with given tenantId does not exist",
@@ -155,7 +165,9 @@ public class TenantController {
 
         @Operation(summary = "Get the configurations for a tenant", description = "Retrieves either all or the selected configuration key-value pairs for a specific tenant in a Map format.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Tenant configurations retrieved successfully"),
+                        @ApiResponse(responseCode = "200", description = "Tenant configurations retrieved successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = TenantConfigResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
@@ -172,7 +184,9 @@ public class TenantController {
         @Operation(summary = "Get public configurations for a tenant", description = "Returns only the configuration keys explicitly marked as public (isPublic=true). "
                         + "No authentication required. Suitable for use by public-facing dashboards.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Public tenant configurations retrieved successfully"),
+                        @ApiResponse(responseCode = "200", description = "Public tenant configurations retrieved successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = TenantConfigResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
@@ -195,7 +209,9 @@ public class TenantController {
                         + "Each known configuration key is listed with a CONFIGURED or PENDING status, "
                         + "along with an aggregate summary of total, configured, and pending counts.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Configuration status retrieved successfully"),
+                        @ApiResponse(responseCode = "200", description = "Configuration status retrieved successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = TenantConfigStatusResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
@@ -210,7 +226,9 @@ public class TenantController {
 
         @Operation(summary = "Set or update multiple tenant configurations", description = "Batch updates or creates configurations for the specified tenant using a Map structure.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Configurations set successfully"),
+                        @ApiResponse(responseCode = "200", description = "Configurations set successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = TenantConfigResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
@@ -229,7 +247,9 @@ public class TenantController {
                         + "URL (http/https): stored as a reference. "
                         + "In both cases, the previous managed object is deleted from storage if one existed.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Logo set and TENANT_LOGO config updated successfully"),
+                        @ApiResponse(responseCode = "200", description = "Logo set and TENANT_LOGO config updated successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = TenantConfigResponseDTO.class))),
                         @ApiResponse(responseCode = "400", description = "Neither or both of file/url provided, unsupported MIME type, or invalid URL",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
@@ -275,7 +295,9 @@ public class TenantController {
 
         @Operation(summary = "Get location hierarchy configuration for a tenant", description = "Retrieves the location hierarchy structure (levels) for the specified hierarchy type (LGD or DEPARTMENT).")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Location hierarchy configuration retrieved successfully"),
+                        @ApiResponse(responseCode = "200", description = "Location hierarchy configuration retrieved successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = LocationHierarchyResponseDTO.class))),
                         @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or tenant could not be resolved",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Hierarchy configuration not found for the tenant",
@@ -295,7 +317,9 @@ public class TenantController {
         @Operation(summary = "Get location hierarchy edit constraints", description = "Returns whether structural changes (add/remove levels) are permitted for the given hierarchy type. "
                         + "Structural changes are blocked when seeded location data exists in the master table.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Edit constraints retrieved successfully"),
+                        @ApiResponse(responseCode = "200", description = "Edit constraints retrieved successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = LocationHierarchyEditConstraintsResponseDTO.class))),
                         @ApiResponse(responseCode = "400", description = "Invalid hierarchy type",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
@@ -316,7 +340,9 @@ public class TenantController {
                         + "If no seeded data exists, full structural changes (add/remove levels) are allowed. "
                         + "If seeded data exists, only level name changes are permitted; structural changes return 409.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Location hierarchy updated successfully"),
+                        @ApiResponse(responseCode = "200", description = "Location hierarchy updated successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = LocationHierarchyResponseDTO.class))),
                         @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or empty levels",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
@@ -336,28 +362,39 @@ public class TenantController {
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "Location hierarchy updated successfully", updated));
         }
 
-        @Operation(summary = "Generate API token for a tenant",
-                        description = "Generates a new API token (create-or-replace). "
+        @Operation(summary = "Generate API token for the caller's tenant",
+                        description = "Generates a new API token (create-or-replace) for the STATE_ADMIN's own tenant. "
+                                        + "Tenant is resolved from the caller's JWT — no tenant ID required. "
                                         + "The raw token is returned exactly once and is never stored — save it immediately. "
                                         + "Calling this again invalidates the previous token.")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "API token generated successfully"),
+                        @ApiResponse(responseCode = "200", description = "API token generated successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = GenerateApiTokenResponseDTO.class))),
+                        @ApiResponse(responseCode = "403", description = "Caller is not a STATE_ADMIN or JWT is missing tenant_state_code claim",
+                                        content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
                         @ApiResponse(responseCode = "404", description = "Tenant not found",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })
-        @RequiresTenantAccess
-        @PostMapping("/{tenantId}/api-token")
-        public ResponseEntity<ApiResponseDTO<GenerateApiTokenResponseDTO>> generateApiToken(
-                        @PathVariable Integer tenantId) {
-                log.info("POST /api/v1/tenants/{}/api-token", tenantId);
+        @PreAuthorize("hasRole('STATE_ADMIN')")
+        @PostMapping("/api-token")
+        public ResponseEntity<ApiResponseDTO<GenerateApiTokenResponseDTO>> generateApiToken() {
+                String stateCode = SecurityUtils.getCurrentUserTenantStateCode();
+                if (stateCode == null || stateCode.isBlank()) {
+                        throw new ForbiddenAccessException(
+                                        "No tenant associated with this account");
+                }
+                log.info("POST /api/v1/tenants/api-token [stateCode={}]", stateCode);
                 return ResponseEntity.ok(ApiResponseDTO.of(200, "API token generated successfully",
-                                tenantManagementService.generateApiToken(tenantId)));
+                                tenantManagementService.generateApiToken(stateCode)));
         }
 
         @Operation(summary = "Get child locations by parent ID", description = "Fetches all child locations under the specified parent location in the given hierarchy type. "
                         + "Omit parentId to fetch root-level locations (where parent_id IS NULL).")
         @ApiResponses({
-                        @ApiResponse(responseCode = "200", description = "Child locations retrieved successfully"),
+                        @ApiResponse(responseCode = "200", description = "Child locations retrieved successfully",
+                                        content = @Content(mediaType = "application/json",
+                                                        schema = @Schema(implementation = LocationResponseDTO.class))),
                         @ApiResponse(responseCode = "400", description = "Invalid hierarchy type or tenant could not be resolved",
                                         content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
         })

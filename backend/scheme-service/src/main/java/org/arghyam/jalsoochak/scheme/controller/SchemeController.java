@@ -139,7 +139,7 @@ public class SchemeController {
         return ResponseEntity.noContent().build();
     }
 
-    @PreAuthorize("hasRole('STATE_ADMIN')")
+    @PreAuthorize("hasAnyRole('STATE_ADMIN','SUPER_STATE_ADMIN')")
     @PostMapping(value = "/schemes/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<SchemeUploadResponseDTO> uploadSchemes(
             @RequestParam("file") MultipartFile file
@@ -148,7 +148,7 @@ public class SchemeController {
         return ResponseEntity.ok(schemeService.uploadSchemes(file));
     }
 
-    @PreAuthorize("hasRole('STATE_ADMIN')")
+    @PreAuthorize("hasAnyRole('STATE_ADMIN','SUPER_STATE_ADMIN')")
     @PostMapping(value = "/schemes/mappings/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<SchemeUploadResponseDTO> uploadSchemeMappings(
             @RequestParam("file") MultipartFile file
