@@ -16,6 +16,7 @@ import java.util.Map;
 public class UploadAuthService {
 
     private static final String REQUIRED_UPLOAD_ROLE = "STATE_ADMIN";
+    private static final String REQUIRED_SUPER_UPLOAD_ROLE = "SUPER_STATE_ADMIN";
 
     private final JwtTokenValidator jwtTokenValidator;
     private final UserUploadRepository userUploadRepository;
@@ -28,10 +29,10 @@ public class UploadAuthService {
     }
 
     private void requireStateAdminRole(Jwt jwt) {
-        if (!hasRole(jwt, REQUIRED_UPLOAD_ROLE)) {
+        if (!hasRole(jwt, REQUIRED_UPLOAD_ROLE) && !hasRole(jwt, REQUIRED_SUPER_UPLOAD_ROLE)) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
-                    "Only " + REQUIRED_UPLOAD_ROLE + " can upload pump operators"
+                    "Only " + REQUIRED_UPLOAD_ROLE + " or " + REQUIRED_SUPER_UPLOAD_ROLE + " can upload pump operators"
             );
         }
     }
