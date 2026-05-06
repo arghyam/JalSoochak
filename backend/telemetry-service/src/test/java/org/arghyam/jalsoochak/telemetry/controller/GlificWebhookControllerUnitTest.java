@@ -219,9 +219,10 @@ class GlificWebhookControllerUnitTest {
         }
 
         @Override
-        public void enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
+        public boolean enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
             this.wasCalled = true;
             this.lastContactId = request != null ? request.getContactId() : null;
+            return true;
         }
     }
 
