@@ -97,7 +97,7 @@ class FlowVisionServiceTest {
 
         @Override
         @SuppressWarnings("unchecked")
-        public <T> ResponseEntity<T> exchange(String url, HttpMethod method, org.springframework.http.HttpEntity<?> requestEntity, ParameterizedTypeReference<T> responseType) throws RestClientException {
+        public <T> ResponseEntity<T> exchange(String url, HttpMethod method, org.springframework.http.HttpEntity<?> requestEntity, ParameterizedTypeReference<T> responseType, Object... uriVariables) throws RestClientException {
             callCount++;
             Object next = scriptedResponses.removeFirst();
             if (next instanceof RestClientException exception) {
