@@ -17,6 +17,8 @@ public final class AnomalyConstants {
     public static final int TYPE_OVER_WATER_SUPPLY = 8;
     // No meter reading submission due to operational issues (e.g. meter not working/damaged/others).
     public static final int TYPE_NO_SUBMISSION = 9;
+    // FlowVision integration error (API/client/schema errors).
+    public static final int TYPE_FLOWVISION_INTEGRATION_ERROR = 10;
 
     public static final int STATUS_OPEN = 1;
 }

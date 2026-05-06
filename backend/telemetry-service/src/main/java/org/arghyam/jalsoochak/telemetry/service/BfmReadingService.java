@@ -17,6 +17,9 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
@@ -134,10 +137,10 @@ public class BfmReadingService {
                 }
                 finalReading = ocrResult.getAdjustedReading();
                 confidenceLevel = ocrResult.getQualityConfidence();
-            } catch (Exception ex) {
-                log.error("FlowVision OCR failed for URL: {}", request.getReadingUrl(), ex);
+            } catch (HttpClientErrorException | HttpServerErrorException | ResourceAccessException ex) {
+                log.error("FlowVision integration error for URL: {}", request.getReadingUrl(), ex);
                 String anomalyCorrelationId = buildImageAnomalyCorrelationId(
-                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                        AnomalyConstants.TYPE_FLOWVISION_INTEGRATION_ERROR,
                         operatorInRequest.id(),
                         request.getSchemeId(),
                         request.getReadingUrl()
@@ -147,8 +150,8 @@ public class BfmReadingService {
                         tenantId,
                         operatorInRequest.id(),
                         request.getSchemeId(),
-                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                        "Unreadable image. OCR failed during extraction.",
+                        AnomalyConstants.TYPE_FLOWVISION_INTEGRATION_ERROR,
+                        "FlowVision integration error: " + ex.getClass().getSimpleName() + " - " + ex.getMessage(),
                         1,
                         null,
                         null,
@@ -160,7 +163,37 @@ public class BfmReadingService {
                 );
                 return CreateReadingResponse.builder()
                         .success(false)
-                        .message("OCR failed. Please try again with a clearer image.")
+                        .message("OCR service temporarily unavailable. Please try again later.")
+                        .correlationId(anomalyCorrelationId)
+                        .qualityStatus("REJECTED")
+                        .build();
+            } catch (IllegalArgumentException | NumberFormatException | ClassCastException ex) {
+                log.error("FlowVision response parsing error for URL: {}", request.getReadingUrl(), ex);
+                String anomalyCorrelationId = buildImageAnomalyCorrelationId(
+                        AnomalyConstants.TYPE_FLOWVISION_INTEGRATION_ERROR,
+                        operatorInRequest.id(),
+                        request.getSchemeId(),
+                        request.getReadingUrl()
+                );
+                recordImageAnomalyOncePerDay(
+                        schemaName,
+                        tenantId,
+                        operatorInRequest.id(),
+                        request.getSchemeId(),
+                        AnomalyConstants.TYPE_FLOWVISION_INTEGRATION_ERROR,
+                        "FlowVision response parsing error: " + ex.getClass().getSimpleName() + " - " + ex.getMessage(),
+                        1,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        anomalyCorrelationId
+                );
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message("OCR service error. Please try again later.")
                         .correlationId(anomalyCorrelationId)
                         .qualityStatus("REJECTED")
                         .build();

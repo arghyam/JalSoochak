@@ -70,8 +70,8 @@ const HEADERS = { 'Content-Type': 'application/json' };
 // ── Default function ──────────────────────────────────────────────────────────
 export default function () {
   const base      = `${BASE_URLS.telemetry}/api/v1/telemetry`;
-  // Deterministic per-iteration rotation using VU and iteration counters
-  const operatorIndex = ((__VU - 1) * 1000 + __ITER) % operators.length;
+  // Deterministic per-iteration rotation using VU and iteration counters with prime stride
+  const operatorIndex = ((__VU - 1) * 1009 + __ITER) % operators.length;
   const contactId = operators[operatorIndex];
   const mediaUrl  = imageUrls[Math.floor(Math.random() * imageUrls.length)];
 
@@ -91,8 +91,21 @@ export default function () {
 
     // HTTP 5xx = failure; qualityStatus REJECTED is a valid business outcome, not a failure
     // Accept 200 or duplicate-reading 400 (specific error message check)
-    const isDuplicateError = res.status === 400 &&
-      res.body && res.body.includes('duplicate');
+    let isDuplicateError = false;
+    let parsedBody = null;
+    if (res.status === 400 && res.body) {
+      try {
+        parsedBody = JSON.parse(res.body);
+        const errorCode = parsedBody.error && parsedBody.error.code;
+        const errorMessage = parsedBody.message || parsedBody.error && parsedBody.error.message || '';
+        isDuplicateError = errorCode === 'DUPLICATE_READING' ||
+                          errorCode === 'duplicate' ||
+                          errorMessage.toLowerCase().includes('duplicate');
+      } catch (_) {
+        // Fallback: if JSON parsing fails, check raw body
+        isDuplicateError = res.body.toLowerCase().includes('duplicate');
+      }
+    }
     const ok = check(res, {
       'readings_ocr: status 200 or duplicate 400': (r) => r.status === 200 || isDuplicateError,
     });
@@ -103,7 +116,7 @@ export default function () {
 
     if (res.status === 200) {
       try {
-        const body = res.json();
+        const body = parsedBody || JSON.parse(res.body);
         if (body.qualityStatus) {
           if (body.qualityStatus === 'REJECTED' || body.qualityStatus === 'UNREADABLE') {
             rejectedReadings.add(1);
