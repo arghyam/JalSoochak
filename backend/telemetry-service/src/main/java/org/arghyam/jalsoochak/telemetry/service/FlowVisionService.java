@@ -20,10 +20,10 @@ public class FlowVisionService {
     private String flowvisionUrl;
 
     @Value("${flowvision.retry.max-attempts:3}")
-    private int retryMaxAttempts;
+    private int retryMaxAttempts = 1;
 
     @Value("${flowvision.retry.initial-backoff-ms:300}")
-    private long retryInitialBackoffMs;
+    private long retryInitialBackoffMs = 0;
 
     private final RestTemplate restTemplate;
 
