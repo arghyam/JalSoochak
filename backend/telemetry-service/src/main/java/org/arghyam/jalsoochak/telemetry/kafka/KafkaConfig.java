@@ -65,7 +65,10 @@ public class KafkaConfig {
         ExponentialBackOff backOff = new ExponentialBackOff(10_000L, 2.0);
         backOff.setMaxInterval(60_000L);
         backOff.setMaxElapsedTime(90_000L);
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate());
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                kafkaTemplate(),
+                (consumerRecord, ex) -> 0
+        );
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
         errorHandler.addNotRetryableExceptions(DeserializationException.class);
         factory.setCommonErrorHandler(errorHandler);

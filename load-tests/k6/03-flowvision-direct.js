@@ -5,13 +5,13 @@
  *           telemetry service overhead. Use this to answer:
  *           "Is telemetry slow because of us, or because FlowVision is slow?"
  *
- * Target  : POST https://jalsoochak.beehyv.com/flowvision/v1/extract-reading
+ * Target  : POST https://staging.jalsoochak.in/flowvision/v1/extract-reading
  * Auth    : None (internal service, no API key required)
  * Profile : Conservative — ramp to 30 VUs steady, spike to 80.
  *           External AI service — run with care to avoid exhausting quota.
  *
  * Environment variables:
- *   FLOWVISION_BASE_URL  Base URL (default: https://jalsoochak.beehyv.com/flowvision)
+ *   FLOWVISION_BASE_URL  Base URL (default: https://staging.jalsoochak.in/flowvision)
  *
  * Data file:
  *   load-tests/k6/data/image-urls.csv — column: imageUrl
@@ -31,11 +31,17 @@ const ocrFailed  = new Counter('flowvision_ocr_failed');
 
 // ── Test data ─────────────────────────────────────────────────────────────────
 const imageUrls = new SharedArray('imageUrls', function () {
-  return open('./data/image-urls.csv')
+  const urls = open('./data/image-urls.csv')
     .split('\n')
     .slice(1)
     .filter((line) => line.trim())
     .map((line) => line.trim());
+
+  if (urls.length === 0) {
+    throw new Error('image-urls.csv is empty or malformed — no valid image URLs found');
+  }
+
+  return urls;
 });
 
 // ── k6 options ────────────────────────────────────────────────────────────────

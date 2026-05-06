@@ -69,7 +69,7 @@ class BfmReadingServiceAnomalyDedupTest {
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(
                 "tenant_up", 11L, 100L, AnomalyConstants.TYPE_UNREADABLE_IMAGE
         )).thenReturn(0, 1);
-        when(flowVisionService.extractReading("https://img.example.com/a.jpg")).thenReturn(null);
+        when(flowVisionService.extractReading("https://img.example.com/a.jpg")).thenReturn(Optional.empty());
 
         CreateReadingRequest request = CreateReadingRequest.builder()
                 .schemeId(100L)
@@ -123,11 +123,11 @@ class BfmReadingServiceAnomalyDedupTest {
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_up", 11L, 100L)).thenReturn(true);
         when(flowVisionService.extractReading("https://img.example.com/dup.jpg")).thenReturn(
-                FlowVisionResult.builder()
+                Optional.of(FlowVisionResult.builder()
                         .adjustedReading(new BigDecimal("123"))
                         .qualityConfidence(new BigDecimal("0.95"))
                         .correlationId("ocr-correlation")
-                        .build()
+                        .build())
         );
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_up", 100L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), LocalDateTime.now().minusDays(1))));

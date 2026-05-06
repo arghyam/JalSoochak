@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Real-time load test monitoring stack.
 # Start before running k6: docker compose -f load-tests/docker-compose-monitoring.yml up -d
 # Open Grafana at http://localhost:3000 (admin / admin)

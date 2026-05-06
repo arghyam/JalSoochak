@@ -8,7 +8,7 @@
  *           POST /manual-reading is also exercised to isolate DB/Kafka-only cost.
  *
  * Environment variables:
- *   TELEMETRY_BASE_URL  Base URL (default: https://jalsoochak.beehyv.com/telemetry)
+ *   TELEMETRY_BASE_URL  Base URL (default: https://staging.jalsoochak.in)
  *
  * Data files:
  *   load-tests/k6/data/operators.csv   — column: contactId
@@ -32,19 +32,31 @@ const confirmedReadings = new Counter('telemetry_confirmed_readings');
 
 // ── Test data ─────────────────────────────────────────────────────────────────
 const operators = new SharedArray('operators', function () {
-  return open('./data/operators.csv')
+  const ops = open('./data/operators.csv')
     .split('\n')
     .slice(1)
     .filter((line) => line.trim())
     .map((line) => line.trim());
+
+  if (ops.length === 0) {
+    throw new Error('operators.csv is empty or malformed — no valid operator contactIds found');
+  }
+
+  return ops;
 });
 
 const imageUrls = new SharedArray('imageUrls', function () {
-  return open('./data/image-urls.csv')
+  const urls = open('./data/image-urls.csv')
     .split('\n')
     .slice(1)
     .filter((line) => line.trim())
     .map((line) => line.trim());
+
+  if (urls.length === 0) {
+    throw new Error('image-urls.csv is empty or malformed — no valid image URLs found');
+  }
+
+  return urls;
 });
 
 // ── k6 options ────────────────────────────────────────────────────────────────
@@ -58,7 +70,9 @@ const HEADERS = { 'Content-Type': 'application/json' };
 // ── Default function ──────────────────────────────────────────────────────────
 export default function () {
   const base      = `${BASE_URLS.telemetry}/api/v1/telemetry`;
-  const contactId = operators[Math.floor(Math.random() * operators.length)];
+  // Deterministic per-iteration rotation using VU and iteration counters
+  const operatorIndex = ((__VU - 1) * 1000 + __ITER) % operators.length;
+  const contactId = operators[operatorIndex];
   const mediaUrl  = imageUrls[Math.floor(Math.random() * imageUrls.length)];
 
   // ── Path A: image upload with OCR (main production flow) ─────────────────
@@ -76,11 +90,16 @@ export default function () {
     });
 
     // HTTP 5xx = failure; qualityStatus REJECTED is a valid business outcome, not a failure
+    // Accept 200 or duplicate-reading 400 (specific error message check)
+    const isDuplicateError = res.status === 400 &&
+      res.body && res.body.includes('duplicate');
     const ok = check(res, {
-      'readings_ocr: status 200 or 400': (r) => r.status === 200 || r.status === 400,
+      'readings_ocr: status 200 or duplicate 400': (r) => r.status === 200 || isDuplicateError,
     });
     trends.telemetryReadings.add(res.timings.duration);
-    errorRates.telemetry.add(res.status >= 500);
+    // Count 5xx errors OR non-duplicate 4xx errors as failures
+    const isError = res.status >= 500 || (res.status >= 400 && res.status < 500 && !isDuplicateError);
+    errorRates.telemetry.add(isError);
 
     if (res.status === 200) {
       try {

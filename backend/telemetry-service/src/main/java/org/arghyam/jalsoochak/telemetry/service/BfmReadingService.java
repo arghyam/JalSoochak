@@ -70,8 +70,39 @@ public class BfmReadingService {
             }
 
             try {
-                ocrResult = flowVisionService.extractReading(request.getReadingUrl());
-                if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
+                Optional<FlowVisionResult> ocrResultOpt = flowVisionService.extractReading(request.getReadingUrl());
+                if (!ocrResultOpt.isPresent()) {
+                    String anomalyCorrelationId = buildImageAnomalyCorrelationId(
+                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                            operatorInRequest.id(),
+                            request.getSchemeId(),
+                            request.getReadingUrl()
+                    );
+                    recordImageAnomalyOncePerDay(
+                            schemaName,
+                            tenantId,
+                            operatorInRequest.id(),
+                            request.getSchemeId(),
+                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
+                            "Unreadable image. OCR could not extract a valid meter reading.",
+                            1,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0,
+                            anomalyCorrelationId
+                    );
+                    return CreateReadingResponse.builder()
+                            .success(false)
+                            .message("Could not read meter value from image. Please retry with a clearer photo.")
+                            .correlationId(UUID.randomUUID().toString())
+                            .qualityStatus("REJECTED")
+                            .build();
+                }
+                ocrResult = ocrResultOpt.get();
+                if (ocrResult.getAdjustedReading() == null) {
                     String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                             AnomalyConstants.TYPE_UNREADABLE_IMAGE,
                             operatorInRequest.id(),

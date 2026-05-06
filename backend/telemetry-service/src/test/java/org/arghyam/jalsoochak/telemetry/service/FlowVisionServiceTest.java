@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -12,10 +13,12 @@ import java.net.URI;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class FlowVisionServiceTest {
 
@@ -26,8 +29,10 @@ class FlowVisionServiceTest {
 
         FlowVisionService service = new FlowVisionService(restTemplate);
 
-        FlowVisionResult result = service.extractReading("https://image-url");
+        Optional<FlowVisionResult> resultOpt = service.extractReading("https://image-url");
 
+        assertTrue(resultOpt.isPresent());
+        FlowVisionResult result = resultOpt.get();
         assertNotNull(result);
         assertEquals("corr-123", result.getCorrelationId());
         assertEquals("123.4", result.getAdjustedReading().toPlainString());
@@ -35,15 +40,15 @@ class FlowVisionServiceTest {
     }
 
     @Test
-    void extractReadingReturnsNullOnException() {
+    void extractReadingReturnsEmptyOnException() {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new RestClientException("temporary"));
 
         FlowVisionService service = new FlowVisionService(restTemplate);
 
-        FlowVisionResult result = service.extractReading("https://image-url");
+        Optional<FlowVisionResult> resultOpt = service.extractReading("https://image-url");
 
-        assertNull(result);
+        assertFalse(resultOpt.isPresent());
         assertEquals(1, restTemplate.getCallCount());
     }
 
@@ -82,6 +87,17 @@ class FlowVisionServiceTest {
         @Override
         @SuppressWarnings("unchecked")
         public <T> ResponseEntity<T> exchange(String url, HttpMethod method, org.springframework.http.HttpEntity<?> requestEntity, Class<T> responseType, Object... uriVariables) throws RestClientException {
+            callCount++;
+            Object next = scriptedResponses.removeFirst();
+            if (next instanceof RestClientException exception) {
+                throw exception;
+            }
+            return (ResponseEntity<T>) next;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T> ResponseEntity<T> exchange(String url, HttpMethod method, org.springframework.http.HttpEntity<?> requestEntity, ParameterizedTypeReference<T> responseType) throws RestClientException {
             callCount++;
             Object next = scriptedResponses.removeFirst();
             if (next instanceof RestClientException exception) {

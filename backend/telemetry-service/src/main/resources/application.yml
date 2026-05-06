@@ -40,7 +40,8 @@ spring:
         max.block.ms: 10000
         request.timeout.ms: 30000
         retries: 3
-        acks: 1
+        acks: all
+        enable.idempotence: true
 
 minio:
   endpoint: ${MINIO_ENDPOINT}

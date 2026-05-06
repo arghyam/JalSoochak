@@ -1,9 +1,29 @@
 # JalSoochak V2 — Load Test Reference Report
-**Last updated:** 2026-05-05 (Run 9)  
-**Branch:** `k6-testing`  
-**Target:** `https://staging.jalsoochak.in`  
-**k6 version:** v1.7.1  
+**Last updated:** 2026-05-05 (Run 9)
+**Branch:** `k6-testing`
+**Target:** `https://staging.jalsoochak.in`
+**k6 version:** v1.7.1
 **Tester:** Claude Code (claude-sonnet-4-6)
+
+---
+
+## Environment
+
+The following environment variables are required for the services under test:
+
+| Variable | Purpose | Example Value |
+|----------|---------|---------------|
+| `GLIFIC_API_URL` | Glific GraphQL endpoint | `https://api.arghyam.glific.com/api` |
+| `GLIFIC_API_KEY` | Glific authentication token | `<token-from-glific-dashboard>` |
+| `GLIFIC_NUDGE_TEMPLATE_ID` | Template ID for nudge messages | `12345` |
+| `GLIFIC_ESCALATION_TEMPLATE_ID` | Template ID for escalation messages | `12346` |
+| `MINIO_ENDPOINT` | MinIO S3-compatible storage endpoint | `https://minio.staging.jalsoochak.in` |
+| `MINIO_ACCESS_KEY` | MinIO access key | `<minio-access-key>` |
+| `MINIO_SECRET_KEY` | MinIO secret key | `<minio-secret-key>` |
+| `MINIO_BUCKET` | MinIO bucket name for meter images | `jalsoochak-meter-images` |
+| `MINIO_BASE_URL` | Public-facing MinIO URL for media access | `https://minio.staging.jalsoochak.in/jalsoochak-meter-images` |
+
+These variables must be set on the staging/production environment where `message-service` and `telemetry-service` are running.
 
 ---
 

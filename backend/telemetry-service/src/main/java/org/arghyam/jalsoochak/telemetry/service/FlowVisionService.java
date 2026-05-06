@@ -3,13 +3,19 @@ package org.arghyam.jalsoochak.telemetry.service;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -31,7 +37,7 @@ public class FlowVisionService {
         this.restTemplate = restTemplate;
     }
 
-    public FlowVisionResult extractReading(String readingUrl) {
+    public Optional<FlowVisionResult> extractReading(String readingUrl) {
         Exception lastException = null;
         long backoffMs = retryInitialBackoffMs;
 
@@ -41,8 +47,13 @@ public class FlowVisionService {
                 if (attempt > 1) {
                     log.info("FlowVision succeeded on attempt {}/{}", attempt, retryMaxAttempts);
                 }
-                return result;
+                return Optional.of(result);
             } catch (Exception ex) {
+                // Only retry transient/retryable errors
+                if (isNonRetryable(ex)) {
+                    log.error("FlowVision non-retryable error for image {}: {}", readingUrl, ex.getMessage());
+                    throw ex;
+                }
                 lastException = ex;
                 if (attempt < retryMaxAttempts) {
                     log.warn("FlowVision attempt {}/{} failed for image {}, retrying in {}ms: {}",
@@ -53,7 +64,19 @@ public class FlowVisionService {
             }
         }
         log.error("FlowVision OCR call failed after {} attempts for image {}", retryMaxAttempts, readingUrl, lastException);
-        return null;
+        return Optional.empty();
+    }
+
+    private boolean isNonRetryable(Exception ex) {
+        // 4xx client errors (except 429) are non-retryable
+        if (ex instanceof HttpClientErrorException) {
+            HttpClientErrorException httpEx = (HttpClientErrorException) ex;
+            return httpEx.getStatusCode().value() != 429;
+        }
+        // Parsing and validation errors are non-retryable
+        return ex instanceof NumberFormatException
+                || ex instanceof ClassCastException
+                || ex instanceof IllegalArgumentException;
     }
 
     private FlowVisionResult doExtractReading(String readingUrl) {
@@ -66,11 +89,11 @@ public class FlowVisionService {
         HttpEntity<Map<String, String>> requestEntity =
                 new HttpEntity<>(payload, headers);
 
-        ResponseEntity<Map> responseEntity = restTemplate.exchange(
+        ResponseEntity<Map<String, Object>> responseEntity = restTemplate.exchange(
                 flowvisionUrl,
                 HttpMethod.POST,
                 requestEntity,
-                Map.class
+                new ParameterizedTypeReference<Map<String, Object>>() {}
         );
 
         if (!responseEntity.getStatusCode().is2xxSuccessful()) {
@@ -81,22 +104,34 @@ public class FlowVisionService {
 
         if (responseBody == null || !responseBody.containsKey("result")) {
             log.error("FlowVision response missing 'result'");
-            return null;
+            throw new IllegalArgumentException("FlowVision response missing 'result'");
         }
 
-        Map<String, Object> resultMap = (Map<String, Object>) responseBody.get("result");
+        Object resultObj = responseBody.get("result");
+        if (!(resultObj instanceof Map)) {
+            log.error("FlowVision 'result' is not a Map: {}", resultObj);
+            throw new IllegalArgumentException("FlowVision 'result' is not a Map: " + resultObj);
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> resultMap = (Map<String, Object>) resultObj;
 
-        if (resultMap == null || !"SUCCESS".equals(resultMap.get("status"))) {
+        if (!"SUCCESS".equals(resultMap.get("status"))) {
             log.warn("FlowVision OCR not successful: {}", resultMap);
-            return null;
+            throw new IllegalArgumentException("FlowVision OCR not successful: " + resultMap.get("status"));
         }
 
         if (!resultMap.containsKey("data")) {
             log.error("FlowVision result missing 'data'");
-            return null;
+            throw new IllegalArgumentException("FlowVision result missing 'data'");
         }
 
-        Map<String, Object> dataMap = (Map<String, Object>) resultMap.get("data");
+        Object dataObj = resultMap.get("data");
+        if (!(dataObj instanceof Map)) {
+            log.error("FlowVision 'data' is not a Map: {}", dataObj);
+            throw new IllegalArgumentException("FlowVision 'data' is not a Map: " + dataObj);
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> dataMap = (Map<String, Object>) dataObj;
 
         BigDecimal adjustedReading = null;
         Object meterReadingObj = dataMap.get("meterReading");
@@ -112,9 +147,10 @@ public class FlowVisionService {
             qualityConfidence = new BigDecimal(confidenceObj.toString());
         }
 
-        String correlationId = resultMap
-                .getOrDefault("correlationId", UUID.randomUUID().toString())
-                .toString();
+        Object correlationIdObj = resultMap.get("correlationId");
+        String correlationId = (correlationIdObj != null && !correlationIdObj.toString().isEmpty())
+                ? correlationIdObj.toString()
+                : UUID.randomUUID().toString();
 
         return FlowVisionResult.builder()
                 .adjustedReading(adjustedReading)

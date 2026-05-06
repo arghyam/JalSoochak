@@ -23,14 +23,24 @@ import { trends, errorRates, recordResponse, qs } from './lib/helpers.js';
 
 // ── Test data ─────────────────────────────────────────────────────────────────
 const tenants = new SharedArray('tenants', function () {
-  return open('./data/tenants.csv')
+  const rows = open('./data/tenants.csv')
     .split('\n')
     .slice(1)                         // skip header row
     .filter((line) => line.trim())
     .map((line) => {
-      const [tenant_id, lgd_id] = line.split(',');
-      return { tenant_id: tenant_id.trim(), lgd_id: lgd_id.trim() };
-    });
+      const parts = line.split(',');
+      if (parts.length < 2 || !parts[0].trim() || !parts[1].trim()) {
+        return null; // malformed row
+      }
+      return { tenant_id: parts[0].trim(), lgd_id: parts[1].trim() };
+    })
+    .filter((row) => row !== null);
+
+  if (rows.length === 0) {
+    throw new Error('tenants.csv is empty or malformed — no valid tenant rows found');
+  }
+
+  return rows;
 });
 
 // ── k6 options ────────────────────────────────────────────────────────────────

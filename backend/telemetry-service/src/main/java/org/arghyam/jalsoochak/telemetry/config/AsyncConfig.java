@@ -17,9 +17,10 @@ public class AsyncConfig {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(20);
         executor.setMaxPoolSize(50);
-        // Small queue: fail fast when both pool and queue are full rather than
-        // blocking Tomcat threads via CallerRunsPolicy.
-        executor.setQueueCapacity(100);
+        // Zero queue capacity: prefer thread growth over queuing, fail fast when
+        // thread pool is exhausted rather than queuing requests that may timeout.
+        executor.setQueueCapacity(0);
+        executor.setAllowCoreThreadTimeOut(true);
         executor.setThreadNamePrefix("glific-sync-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();

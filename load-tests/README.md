@@ -100,6 +100,28 @@ k6 run \
 
 ---
 
+## Required environment variables
+
+The backend services under test require the following environment variables to be configured on the deployment environment (not on the k6 client):
+
+### Message Service & Telemetry Service
+
+| Variable | Purpose | Example | Used by script |
+|----------|---------|---------|----------------|
+| `GLIFIC_API_URL` | Glific GraphQL endpoint | `https://api.arghyam.glific.com/api` | 02-telemetry (indirect via webhook flow) |
+| `GLIFIC_API_KEY` | Glific authentication token | `<token-from-glific-dashboard>` | 02-telemetry (indirect) |
+| `GLIFIC_NUDGE_TEMPLATE_ID` | HSM template ID for daily nudge messages | `12345` | — (cron-triggered, not load-tested) |
+| `GLIFIC_ESCALATION_TEMPLATE_ID` | HSM template ID for escalation messages with PDF attachment | `12346` | — (cron-triggered, not load-tested) |
+| `MINIO_ENDPOINT` | MinIO S3-compatible storage endpoint | `https://minio.staging.jalsoochak.in` | 02-telemetry (OCR image download) |
+| `MINIO_ACCESS_KEY` | MinIO access key | `<minio-access-key>` | 02-telemetry |
+| `MINIO_SECRET_KEY` | MinIO secret key | `<minio-secret-key>` | 02-telemetry |
+| `MINIO_BUCKET` | MinIO bucket name for meter reading images | `jalsoochak-meter-images` | 02-telemetry |
+| `MINIO_BASE_URL` | Public-facing base URL for media file access | `https://minio.staging.jalsoochak.in/jalsoochak-meter-images` | 02-telemetry |
+
+**Note:** These variables are **server-side configuration**, not k6 environment variables. They must be set on the staging or production environment where the services run. The k6 scripts only need `ANALYTICS_BASE_URL`, `TELEMETRY_BASE_URL`, and `FLOWVISION_BASE_URL` to point to the correct endpoints.
+
+---
+
 ## Thresholds (pass/fail criteria)
 
 | Service | p95 | p99 | Error rate |
