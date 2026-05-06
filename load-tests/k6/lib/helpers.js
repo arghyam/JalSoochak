@@ -40,7 +40,9 @@ export function recordResponse(label, res, trend, errorRate, extraChecks = {}) {
     ...extraChecks,
   });
   trend.add(res.timings.duration);
-  errorRate.add(!ok);
+  // Count both check failures and transport-level failures (DNS/TLS/timeout/connection errors)
+  const isTransportError = res.status === 0 && res.error;
+  errorRate.add(!ok || isTransportError);
 }
 
 /**

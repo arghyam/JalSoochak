@@ -6,8 +6,10 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -35,14 +37,16 @@ public class KafkaConfig {
     private String groupId;
 
     private final KafkaProperties kafkaProperties;
+    private final SslBundles sslBundles;
 
-    public KafkaConfig(KafkaProperties kafkaProperties) {
+    public KafkaConfig(KafkaProperties kafkaProperties, SslBundles sslBundles) {
         this.kafkaProperties = kafkaProperties;
+        this.sslBundles = sslBundles;
     }
 
     @Bean
     public ProducerFactory<String, String> producerFactory() {
-        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
+        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties(sslBundles));
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
@@ -51,7 +55,7 @@ public class KafkaConfig {
 
     @Bean
     public ProducerFactory<Object, Object> byteArrayProducerFactory() {
-        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
+        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties(sslBundles));
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);

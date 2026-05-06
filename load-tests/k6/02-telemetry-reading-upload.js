@@ -110,8 +110,8 @@ export default function () {
       'readings_ocr: status 200 or duplicate 400': (r) => r.status === 200 || isDuplicateError,
     });
     trends.telemetryReadings.add(res.timings.duration);
-    // Count 5xx errors OR non-duplicate 4xx errors as failures
-    const isError = res.status >= 500 || (res.status >= 400 && res.status < 500 && !isDuplicateError);
+    // Count 5xx errors OR non-duplicate 4xx errors OR transport failures as failures
+    const isError = res.status >= 500 || (res.status >= 400 && res.status < 500 && !isDuplicateError) || (res.status === 0 && res.error);
     errorRates.telemetry.add(isError);
 
     if (res.status === 200) {
