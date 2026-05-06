@@ -79,7 +79,17 @@ public class GlificWebhookController {
         try {
             String jobId = UUID.randomUUID().toString();
             if (glificReadingsAsyncService != null) {
-                glificReadingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
+                boolean enqueued = glificReadingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
+                if (!enqueued) {
+                    return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(
+                            ReadingWebhookAckResponse.builder()
+                                    .success(false)
+                                    .status("overloaded")
+                                    .jobId(null)
+                                    .message("Server is busy processing readings. Please retry in a few seconds.")
+                                    .build()
+                    );
+                }
             } else {
                 glificWebhookService.processImage(glificWebhookRequest);
             }

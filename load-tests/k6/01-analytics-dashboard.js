@@ -54,10 +54,10 @@ export default function () {
 
   sleep(0.5);
 
-  // 2. Scheme regularity average — uses parent_lgd_id, not tenant_id
+  // 2. Scheme regularity average — requires tenant_id
   group('scheme_regularity_average', function () {
     const res = http.get(
-      base + '/scheme-regularity/average' + qs({ parent_lgd_id: tenant.lgd_id, ...dates }),
+      base + '/scheme-regularity/average' + qs({ tenant_id: tenant.tenant_id, parent_lgd_id: tenant.lgd_id, ...dates }),
       { tags: { endpoint: 'scheme_regularity_average' } }
     );
     recordResponse('scheme_regularity_average', res, trends.schemeRegularity, errorRates.analytics);
@@ -76,10 +76,10 @@ export default function () {
 
   sleep(0.5);
 
-  // 4. Submission status — uses lgd_id, not tenant_id
+  // 4. Submission status — requires tenant_id
   group('submission_status', function () {
     const res = http.get(
-      base + '/submission-status' + qs({ lgd_id: tenant.lgd_id, ...dates }),
+      base + '/submission-status' + qs({ tenant_id: tenant.tenant_id, lgd_id: tenant.lgd_id, ...dates }),
       { tags: { endpoint: 'submission_status' } }
     );
     recordResponse('submission_status', res, trends.submissionStatus, errorRates.analytics);
@@ -87,10 +87,10 @@ export default function () {
 
   sleep(0.5);
 
-  // 5. Schemes dashboard — uses parent_lgd_id, not tenant_id
+  // 5. Schemes dashboard — requires tenant_id
   group('schemes_dashboard', function () {
     const res = http.get(
-      base + '/schemes/dashboard' + qs({ parent_lgd_id: tenant.lgd_id, ...dates }),
+      base + '/schemes/dashboard' + qs({ tenant_id: tenant.tenant_id, parent_lgd_id: tenant.lgd_id, ...dates }),
       { tags: { endpoint: 'schemes_dashboard' } }
     );
     recordResponse('schemes_dashboard', res, trends.schemesDashboard, errorRates.analytics);

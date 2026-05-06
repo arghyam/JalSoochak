@@ -70,7 +70,7 @@ export default function () {
       isMeterReplaced: false,
     });
 
-    const res = http.post(base + '/readings', payload, {
+    const res = http.post(base + '/readings/glific', payload, {
       headers: HEADERS,
       tags:    { endpoint: 'readings_image_ocr' },
     });

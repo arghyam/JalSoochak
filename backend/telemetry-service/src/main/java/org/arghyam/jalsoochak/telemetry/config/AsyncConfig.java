@@ -15,11 +15,13 @@ public class AsyncConfig {
     @Bean(name = "glificSyncExecutor")
     public Executor glificSyncExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5);
-        executor.setMaxPoolSize(20);
-        executor.setQueueCapacity(1000);
+        executor.setCorePoolSize(20);
+        executor.setMaxPoolSize(50);
+        // Small queue: fail fast when both pool and queue are full rather than
+        // blocking Tomcat threads via CallerRunsPolicy.
+        executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("glific-sync-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;
     }
@@ -27,11 +29,11 @@ public class AsyncConfig {
     @Bean(name = "kafkaPublisherExecutor")
     public Executor kafkaPublisherExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5);
-        executor.setMaxPoolSize(20);
-        executor.setQueueCapacity(1000);
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(30);
+        executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("kafka-pub-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;
     }
