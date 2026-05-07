@@ -3,10 +3,10 @@ package org.arghyam.jalsoochak.telemetry.dto.requests;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -32,11 +32,10 @@ public class AssamReadingRequest {
     @JsonProperty("confirmed_reading")
     private BigDecimal confirmedReading;
 
-    @NotBlank
     @JsonProperty("state_scheme_id")
     private String stateSchemeId;
 
-    @NotBlank
+    @JsonAlias({"center_scheme_id", "centerSchemeId", "centreSchemeId"})
     @JsonProperty("centre_scheme_id")
     private String centreSchemeId;
 
@@ -44,12 +43,17 @@ public class AssamReadingRequest {
     @JsonProperty("phone_number")
     private String phoneNumber;
 
-    @NotNull
     @JsonProperty("reading_date_time")
     private OffsetDateTime readingDateTime;
 
     @Valid
     private Geolocation geolocation;
+
+    @AssertTrue(message = "Either stateSchemeId or centreSchemeId must be provided")
+    private boolean isSchemeIdPresent() {
+        return (stateSchemeId != null && !stateSchemeId.isBlank())
+                || (centreSchemeId != null && !centreSchemeId.isBlank());
+    }
 
     @Data
     @Builder

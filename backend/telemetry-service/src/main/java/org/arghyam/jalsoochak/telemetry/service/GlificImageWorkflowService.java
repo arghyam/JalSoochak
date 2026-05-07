@@ -113,7 +113,9 @@ public class GlificImageWorkflowService {
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, operatorWithSchema.operator().tenantId())
             );
             Long schemeId = resolveAssamSchemeId(schemaName, operatorId, request.getStateSchemeId(), request.getCentreSchemeId());
-            LocalDateTime readingTime = request.getReadingDateTime().atZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+            LocalDateTime readingTime = request.getReadingDateTime() != null
+                    ? request.getReadingDateTime().atZoneSameInstant(ZoneOffset.UTC).toLocalDateTime()
+                    : null;
 
             CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
                     .schemeId(schemeId)
