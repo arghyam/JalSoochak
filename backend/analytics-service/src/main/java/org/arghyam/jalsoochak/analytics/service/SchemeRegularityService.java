@@ -198,6 +198,12 @@ public interface SchemeRegularityService {
     CriticalSchemesResponse getCriticalSchemesByDepartment(
             Integer tenantId, Integer departmentId, boolean list, Integer page, Integer limit);
 
+    CriticalSchemesResponse getCriticalSchemesByUser(
+            Integer tenantId, Integer userId, boolean list, Integer page, Integer limit);
+
+    CriticalSchemesResponse getCriticalSchemesByUserUuid(
+            Integer tenantId, UUID userUuid, boolean list, Integer page, Integer limit);
+
     ContinuousSchemesResponse getContinuousSchemesByLgd(
             Integer tenantId,
             Integer lgdId,
@@ -210,6 +216,15 @@ public interface SchemeRegularityService {
     ContinuousSchemesResponse getContinuousSchemesByDepartment(
             Integer tenantId,
             Integer departmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit);
+
+    ContinuousSchemesResponse getContinuousSchemesByUser(
+            Integer tenantId,
+            Integer userId,
             LocalDate startDate,
             LocalDate endDate,
             boolean list,

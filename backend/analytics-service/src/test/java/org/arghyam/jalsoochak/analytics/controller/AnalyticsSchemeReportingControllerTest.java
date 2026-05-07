@@ -260,6 +260,77 @@ class AnalyticsSchemeReportingControllerTest {
     }
 
     @Test
+    void getCriticalSchemesUser_defaultCountOnly_usesAuthRefUserId() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
+        when(schemeRegularityService.getCriticalSchemesByUser(eq(10), eq(9001), eq(false), isNull(), isNull()))
+                .thenReturn(org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse.builder()
+                        .criticalSchemeCount(2L)
+                        .list(false)
+                        .page(null)
+                        .limit(null)
+                        .schemes(null)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/critical-schemes/user")
+                        .principal(buildJwtAuthentication()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.criticalSchemeCount").value(2))
+                .andExpect(jsonPath("$.data.list").value(false))
+                .andExpect(jsonPath("$.data.schemes").value(nullValue()));
+
+        verify(schemeRegularityService, times(1))
+                .getCriticalSchemesByUser(eq(10), eq(9001), eq(false), isNull(), isNull());
+        verify(schemeRegularityService, never()).getCriticalSchemesByUserUuid(any(), any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void getCriticalSchemesUser_withListTrue_returnsCountAndList() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
+        when(schemeRegularityService.getCriticalSchemesByUser(eq(10), eq(9001), eq(true), eq(1), eq(2)))
+                .thenReturn(org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse.builder()
+                        .criticalSchemeCount(2L)
+                        .list(true)
+                        .page(1)
+                        .limit(2)
+                        .schemes(List.of(
+                                org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse.CriticalSchemeListItem.builder()
+                                        .schemeId(101)
+                                        .schemeName("Scheme A")
+                                        .stateSchemeId(5001)
+                                        .centreSchemeId(6001)
+                                        .lastSuppliedDate(LocalDate.of(2026, 4, 1))
+                                        .build(),
+                                org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse.CriticalSchemeListItem.builder()
+                                        .schemeId(102)
+                                        .schemeName("Scheme B")
+                                        .stateSchemeId(5002)
+                                        .centreSchemeId(6002)
+                                        .lastSuppliedDate(null)
+                                        .build()
+                        ))
+                        .build());
+
+        mockMvc.perform(get(BASE + "/critical-schemes/user")
+                        .principal(buildJwtAuthentication())
+                        .param("list", "true")
+                        .param("page", "1")
+                        .param("limit", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.criticalSchemeCount").value(2))
+                .andExpect(jsonPath("$.data.list").value(true))
+                .andExpect(jsonPath("$.data.page").value(1))
+                .andExpect(jsonPath("$.data.limit").value(2))
+                .andExpect(jsonPath("$.data.schemes[0].schemeId").value(101))
+                .andExpect(jsonPath("$.data.schemes[0].stateSchemeId").value(5001))
+                .andExpect(jsonPath("$.data.schemes[0].centreSchemeId").value(6001))
+                .andExpect(jsonPath("$.data.schemes[0].lastSuppliedDate").value("2026-04-01"));
+    }
+
+    @Test
     void getContinuousSchemes_defaultCountOnly_routesToLgdService() throws Exception {
         when(schemeRegularityService.getContinuousSchemesByLgd(
                 eq(TENANT_ID), eq(101), eq(START), eq(END), eq(false), isNull(), isNull()))
@@ -403,6 +474,79 @@ class AnalyticsSchemeReportingControllerTest {
         mockMvc.perform(get(BASE + "/continuous-schemes")
                         .param("tenant_id", String.valueOf(TENANT_ID))
                         .param("lgd_id", "101")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("list", "true")
+                        .param("page", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getContinuousSchemesForUser_defaultCountOnly_routesToUserService() throws Exception {
+        when(schemeRegularityService.getContinuousSchemesByUser(
+                eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull()))
+                .thenReturn(ContinuousSchemesResponse.builder()
+                        .continuousSchemeCount(3L)
+                        .list(false)
+                        .page(null)
+                        .limit(null)
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .schemes(null)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/continuous-schemes/user")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("user_id", "77")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.continuousSchemeCount").value(3))
+                .andExpect(jsonPath("$.data.list").value(false))
+                .andExpect(jsonPath("$.data.schemes").value(nullValue()));
+
+        verify(schemeRegularityService, times(1)).getContinuousSchemesByUser(
+                eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull());
+    }
+
+    @Test
+    void getContinuousSchemesForUser_withoutDates_usesTenantDataDefaultWindow() throws Exception {
+        when(defaultAnalyticsDateWindowProvider.defaultWindow())
+                .thenReturn(new DefaultAnalyticsDateWindowProvider.DateWindow(START, END));
+        when(schemeRegularityService.getContinuousSchemesByUser(
+                eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull()))
+                .thenReturn(ContinuousSchemesResponse.builder()
+                        .continuousSchemeCount(5L)
+                        .list(false)
+                        .page(null)
+                        .limit(null)
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .schemes(null)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/continuous-schemes/user")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("user_id", "77"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.continuousSchemeCount").value(5));
+
+        verify(defaultAnalyticsDateWindowProvider, times(1)).defaultWindow();
+        verify(schemeRegularityService, times(1)).getContinuousSchemesByUser(
+                eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull());
+    }
+
+    @Test
+    void getContinuousSchemesForUser_withListTrue_andInvalidPage_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/continuous-schemes/user")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("user_id", "77")
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("list", "true")
