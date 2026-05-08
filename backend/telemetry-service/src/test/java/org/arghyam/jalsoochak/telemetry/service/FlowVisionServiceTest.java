@@ -18,13 +18,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class FlowVisionServiceTest {
+    private static final String FLOW_VISION_URL = "https://example.com/flowvision/v1/extract-reading";
 
     @Test
     void extractReadingReturnsResultOnSuccess() {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse(), HttpStatus.OK));
 
-        FlowVisionService service = new FlowVisionService(restTemplate);
+        FlowVisionService service = new FlowVisionService(restTemplate, FLOW_VISION_URL);
 
         FlowVisionResult result = service.extractReading("https://image-url");
 
@@ -39,7 +40,7 @@ class FlowVisionServiceTest {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new RestClientException("temporary"));
 
-        FlowVisionService service = new FlowVisionService(restTemplate);
+        FlowVisionService service = new FlowVisionService(restTemplate, FLOW_VISION_URL);
 
         FlowVisionResult result = service.extractReading("https://image-url");
 

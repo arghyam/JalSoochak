@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -15,13 +16,15 @@ import java.util.UUID;
 @Slf4j
 public class FlowVisionService {
 
-    private static final String FLOWVISION_URL =
-            "https://jalsoochak.beehyv.com/flowvision/v1/extract-reading";
-
     private final RestTemplate restTemplate;
+    private final String flowVisionUrl;
 
-    public FlowVisionService(RestTemplate restTemplate) {
+    public FlowVisionService(
+            RestTemplate restTemplate,
+            @Value("${flowvision.url}") String flowVisionUrl
+    ) {
         this.restTemplate = restTemplate;
+        this.flowVisionUrl = flowVisionUrl;
     }
 
     public FlowVisionResult extractReading(String readingUrl) {
@@ -38,7 +41,7 @@ public class FlowVisionService {
                     new HttpEntity<>(payload, headers);
 
             ResponseEntity<Map> responseEntity = restTemplate.exchange(
-                    FLOWVISION_URL,
+                    flowVisionUrl,
                     HttpMethod.POST,
                     requestEntity,
                     Map.class
