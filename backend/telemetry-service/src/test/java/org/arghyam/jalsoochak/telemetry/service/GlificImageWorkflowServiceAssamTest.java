@@ -21,6 +21,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.anyString;
@@ -145,5 +146,46 @@ class GlificImageWorkflowServiceAssamTest {
                 new BigDecimal("56.78"),
                 11L
         );
+    }
+
+    @Test
+    void processAssamReadingAllowsMissingReadingDateTime() {
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .phoneNumber("919876543210")
+                .readingDateTime(null)
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+
+        CreateReadingResponse response = service.processAssamReading(request, 22);
+
+        assertNotNull(response);
+        assertEquals(true, response.isSuccess());
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        assertNull(requestCaptor.getValue().getReadingTime());
     }
 }

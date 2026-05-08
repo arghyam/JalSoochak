@@ -286,6 +286,87 @@ public class AnalyticsSchemeReportingController {
         }
     }
 
+    @GetMapping("/critical-schemes/user")
+    @Operation(
+            summary = "Get critical scheme count (and optionally list) for schemes mapped to the authenticated user",
+            description = "Same as /critical-schemes, but scoped to schemes mapped to the authenticated user via dim_user_scheme_mapping_table. tenant_id and user identity are extracted from the JWT. When list=false (default), only the count is computed/returned. When list=true, a paginated list is also returned.",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Critical schemes (user) fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = {
+                                            @ExampleObject(name = "count_only", value = SwaggerExamples.CRITICAL_SCHEMES_USER_COUNT_SUCCESS),
+                                            @ExampleObject(name = "with_list", value = SwaggerExamples.CRITICAL_SCHEMES_USER_LIST_SUCCESS)
+                                    }
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    )
+            }
+    )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
+    public ResponseEntity<ApiResponse<CriticalSchemesResponse>> getCriticalSchemesForUser(
+            JwtAuthenticationToken authentication,
+            @RequestParam(name = "list", required = false, defaultValue = "false") boolean list,
+            @RequestParam(name = "page", required = false) Integer page,
+            @RequestParam(name = "limit", required = false) Integer limit
+    ) {
+        try {
+            if (list) {
+                if (page != null && page < 1) {
+                    throw new IllegalArgumentException("page must be >= 1");
+                }
+                if (limit != null && limit < 1) {
+                    throw new IllegalArgumentException("limit must be >= 1");
+                }
+            }
+
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            if (userRef == null || userRef.tenantId() == null || userRef.tenantId() <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+
+            CriticalSchemesResponse data = userRef.userId() != null
+                    ? schemeRegularityService.getCriticalSchemesByUser(userRef.tenantId(), userRef.userId(), list, page, limit)
+                    : schemeRegularityService.getCriticalSchemesByUserUuid(userRef.tenantId(), userRef.userUuid(), list, page, limit);
+
+            return ResponseEntity.ok(ApiResponse.<CriticalSchemesResponse>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<CriticalSchemesResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<CriticalSchemesResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
     @GetMapping("/continuous-schemes")
     @Operation(
             summary = "Get continuous scheme count (and optionally list) for an LGD or department area",
@@ -363,6 +444,93 @@ public class AnalyticsSchemeReportingController {
             ContinuousSchemesResponse data = (lgdId != null)
                     ? schemeRegularityService.getContinuousSchemesByLgd(tenantId, lgdId, startDate, endDate, list, page, limit)
                     : schemeRegularityService.getContinuousSchemesByDepartment(tenantId, departmentId, startDate, endDate, list, page, limit);
+
+            return ResponseEntity.ok(ApiResponse.<ContinuousSchemesResponse>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<ContinuousSchemesResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<ContinuousSchemesResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        }
+    }
+
+    @GetMapping("/continuous-schemes/user")
+    @Operation(
+            summary = "Get continuous scheme count (and optionally list) for schemes mapped to a user",
+            description = "Same as /continuous-schemes, but scoped to schemes mapped to the given user via dim_user_scheme_mapping_table.",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Continuous schemes (user) fetched successfully",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = {
+                                            @ExampleObject(name = "count_only", value = SwaggerExamples.CONTINUOUS_SCHEMES_USER_COUNT_SUCCESS),
+                                            @ExampleObject(name = "with_list", value = SwaggerExamples.CONTINUOUS_SCHEMES_USER_LIST_SUCCESS)
+                                    }
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "500",
+                            description = "Unexpected error",
+                            content = @Content(
+                                    mediaType = "application/json",
+                                    schema = @Schema(implementation = ApiResponse.class),
+                                    examples = @ExampleObject(name = "failure", value = SwaggerExamples.GENERIC_FAILURE)
+                            )
+                    )
+            }
+    )
+    public ResponseEntity<ApiResponse<ContinuousSchemesResponse>> getContinuousSchemesForUser(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "user_id") Integer userId,
+            @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(name = "list", required = false, defaultValue = "false") boolean list,
+            @RequestParam(name = "page", required = false) Integer page,
+            @RequestParam(name = "limit", required = false) Integer limit
+    ) {
+        try {
+            if (startDate == null && endDate == null) {
+                DefaultAnalyticsDateWindowProvider.DateWindow window =
+                        defaultAnalyticsDateWindowProvider.defaultWindow();
+                startDate = window.startDate();
+                endDate = window.endDate();
+            } else if (startDate == null || endDate == null) {
+                throw new IllegalArgumentException("Provide both start_date and end_date together");
+            }
+            if (startDate.isAfter(endDate)) {
+                throw new IllegalArgumentException("start_date must be on or before end_date");
+            }
+            if (list) {
+                if (page != null && page < 1) {
+                    throw new IllegalArgumentException("page must be >= 1");
+                }
+                if (limit != null && limit < 1) {
+                    throw new IllegalArgumentException("limit must be >= 1");
+                }
+            }
+
+            ContinuousSchemesResponse data =
+                    schemeRegularityService.getContinuousSchemesByUser(tenantId, userId, startDate, endDate, list, page, limit);
 
             return ResponseEntity.ok(ApiResponse.<ContinuousSchemesResponse>builder()
                     .success(true)

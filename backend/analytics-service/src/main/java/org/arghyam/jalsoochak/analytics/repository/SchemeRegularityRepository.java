@@ -2722,6 +2722,119 @@ public class SchemeRegularityRepository {
         return count == null ? 0L : count;
     }
 
+    public long getCriticalSchemeCountByUserSchemes(Integer tenantId, Integer userId, LocalDate cutoffDate) {
+        String sql = """
+                WITH user_schemes AS (
+                    SELECT DISTINCT usm.scheme_id
+                    FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
+                    WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
+                ),
+                last_supply AS (
+                    SELECT
+                        m.scheme_id,
+                        MAX(m.reading_date)::date AS last_supplied_date
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN user_schemes us
+                      ON us.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT COUNT(*)::bigint AS critical_count
+                FROM user_schemes us
+                LEFT JOIN last_supply ls
+                  ON ls.scheme_id = us.scheme_id
+                WHERE ls.last_supplied_date IS NULL
+                   OR ls.last_supplied_date < ?
+                """;
+
+        Long count = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                userId,
+                tenantId,
+                tenantId,
+                cutoffDate
+        );
+        return count == null ? 0L : count;
+    }
+
+    public List<CriticalSchemeRow> getCriticalSchemesByUserSchemes(
+            Integer tenantId,
+            Integer userId,
+            LocalDate cutoffDate,
+            Integer limit,
+            Integer offset
+    ) {
+        String sql = """
+                WITH user_schemes AS (
+                    SELECT DISTINCT usm.scheme_id
+                    FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
+                    WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_details AS (
+                    SELECT
+                        s.scheme_id,
+                        s.scheme_name,
+                        s.state_scheme_id,
+                        s.centre_scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    JOIN user_schemes us
+                      ON us.scheme_id = s.scheme_id
+                    WHERE s.tenant_id = ?
+                ),
+                last_supply AS (
+                    SELECT
+                        m.scheme_id,
+                        MAX(m.reading_date)::date AS last_supplied_date
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN user_schemes us
+                      ON us.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.confirmed_reading > 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    sd.scheme_id,
+                    sd.scheme_name,
+                    sd.state_scheme_id,
+                    sd.centre_scheme_id,
+                    ls.last_supplied_date
+                FROM scheme_details sd
+                LEFT JOIN last_supply ls
+                  ON ls.scheme_id = sd.scheme_id
+                WHERE ls.last_supplied_date IS NULL
+                   OR ls.last_supplied_date < ?
+                ORDER BY ls.last_supplied_date ASC NULLS FIRST, sd.scheme_id ASC
+                LIMIT ?
+                OFFSET ?
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new CriticalSchemeRow(
+                        rs.getInt("scheme_id"),
+                        rs.getString("scheme_name"),
+                        (Integer) rs.getObject("state_scheme_id"),
+                        (Integer) rs.getObject("centre_scheme_id"),
+                        rs.getDate("last_supplied_date") == null ? null : rs.getDate("last_supplied_date").toLocalDate()
+                ),
+                userId,
+                tenantId,
+                tenantId,
+                tenantId,
+                cutoffDate,
+                limit,
+                offset
+        );
+    }
+
     public List<CriticalSchemeRow> getCriticalSchemesByLgd(
             Integer tenantId,
             Integer lgdId,
@@ -2954,6 +3067,53 @@ public class SchemeRegularityRepository {
         return count == null ? 0L : count;
     }
 
+    public long getContinuousSchemeCountByUserSchemes(
+            Integer tenantId,
+            Integer userId,
+            LocalDate startDate,
+            LocalDate endDate,
+            int daysInRange
+    ) {
+        String sql = """
+                WITH user_schemes AS (
+                    SELECT DISTINCT usm.scheme_id
+                    FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
+                    WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
+                ),
+                supply_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN user_schemes us
+                      ON us.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT COUNT(*)::bigint AS continuous_count
+                FROM user_schemes us
+                LEFT JOIN supply_days sd
+                  ON sd.scheme_id = us.scheme_id
+                WHERE COALESCE(sd.supply_days, 0) = ?
+                """;
+
+        Long count = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                userId,
+                tenantId,
+                tenantId,
+                startDate,
+                endDate,
+                daysInRange
+        );
+        return count == null ? 0L : count;
+    }
+
     public List<ContinuousSchemeRow> getContinuousSchemesByLgd(
             Integer tenantId,
             Integer lgdId,
@@ -3006,6 +3166,74 @@ public class SchemeRegularityRepository {
                         rs.getString("scheme_name")
                 ),
                 lgdId,
+                tenantId,
+                tenantId,
+                startDate,
+                endDate,
+                daysInRange,
+                limit,
+                offset
+        );
+    }
+
+    public List<ContinuousSchemeRow> getContinuousSchemesByUserSchemes(
+            Integer tenantId,
+            Integer userId,
+            LocalDate startDate,
+            LocalDate endDate,
+            int daysInRange,
+            Integer limit,
+            Integer offset
+    ) {
+        String sql = """
+                WITH user_schemes AS (
+                    SELECT DISTINCT usm.scheme_id
+                    FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
+                    WHERE usm.user_id = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_details AS (
+                    SELECT
+                        s.scheme_id,
+                        s.scheme_name
+                    FROM analytics_schema.dim_scheme_table s
+                    JOIN user_schemes us
+                      ON us.scheme_id = s.scheme_id
+                    WHERE s.tenant_id = ?
+                ),
+                supply_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN user_schemes us
+                      ON us.scheme_id = m.scheme_id
+                    WHERE m.tenant_id = ?
+                      AND m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    sd.scheme_id,
+                    sd.scheme_name
+                FROM scheme_details sd
+                LEFT JOIN supply_days sdy
+                  ON sdy.scheme_id = sd.scheme_id
+                WHERE COALESCE(sdy.supply_days, 0) = ?
+                ORDER BY sd.scheme_id ASC
+                LIMIT ?
+                OFFSET ?
+                """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ContinuousSchemeRow(
+                        rs.getInt("scheme_id"),
+                        rs.getString("scheme_name")
+                ),
+                userId,
+                tenantId,
                 tenantId,
                 tenantId,
                 startDate,

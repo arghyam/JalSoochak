@@ -2216,6 +2216,61 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     }
 
     @Override
+    public CriticalSchemesResponse getCriticalSchemesByUser(
+            Integer tenantId, Integer userId, boolean list, Integer page, Integer limit) {
+        validateTenantInput(tenantId);
+        validateUserInput(userId);
+
+        int sanitizedDays = Math.max(0, criticalAfterDays);
+        LocalDate cutoffDate = LocalDate.now(IST_ZONE).minusDays(sanitizedDays);
+
+        long criticalCount = schemeRegularityRepository.getCriticalSchemeCountByUserSchemes(tenantId, userId, cutoffDate);
+        if (!list) {
+            return CriticalSchemesResponse.builder()
+                    .criticalSchemeCount(criticalCount)
+                    .list(false)
+                    .page(null)
+                    .limit(null)
+                    .schemes(null)
+                    .build();
+        }
+
+        int effectivePage = page == null ? 1 : page;
+        int effectiveLimit = limit == null ? DEFAULT_PAGE_COUNT : limit;
+        if (effectivePage < 1) {
+            throw new IllegalArgumentException("page must be >= 1");
+        }
+        if (effectiveLimit < 1) {
+            throw new IllegalArgumentException("limit must be >= 1");
+        }
+        int offset = (effectivePage - 1) * effectiveLimit;
+        List<SchemeRegularityRepository.CriticalSchemeRow> rows =
+                schemeRegularityRepository.getCriticalSchemesByUserSchemes(tenantId, userId, cutoffDate, effectiveLimit, offset);
+
+        return CriticalSchemesResponse.builder()
+                .criticalSchemeCount(criticalCount)
+                .list(true)
+                .page(effectivePage)
+                .limit(effectiveLimit)
+                .schemes(rows.stream()
+                        .map(r -> CriticalSchemesResponse.CriticalSchemeListItem.builder()
+                                .schemeId(r.schemeId())
+                                .schemeName(r.schemeName())
+                                .stateSchemeId(r.stateSchemeId())
+                                .centreSchemeId(r.centreSchemeId())
+                                .lastSuppliedDate(r.lastSuppliedDate())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    @Override
+    public CriticalSchemesResponse getCriticalSchemesByUserUuid(
+            Integer tenantId, UUID userUuid, boolean list, Integer page, Integer limit) {
+        return getCriticalSchemesByUser(tenantId, resolveUserIdByUuid(userUuid), list, page, limit);
+    }
+
+    @Override
     public ContinuousSchemesResponse getContinuousSchemesByLgd(
             Integer tenantId,
             Integer lgdId,
@@ -2317,6 +2372,66 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
                 schemeRegularityRepository.getContinuousSchemesByDepartment(
                         tenantId, departmentId, startDate, endDate, daysInRange, effectiveLimit, offset);
+
+        return ContinuousSchemesResponse.builder()
+                .continuousSchemeCount(continuousCount)
+                .list(true)
+                .page(effectivePage)
+                .limit(effectiveLimit)
+                .startDate(startDate)
+                .endDate(endDate)
+                .daysInRange(daysInRange)
+                .schemes(rows.stream()
+                        .map(r -> ContinuousSchemesResponse.ContinuousSchemeListItem.builder()
+                                .schemeId(r.schemeId())
+                                .schemeName(r.schemeName())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    @Override
+    public ContinuousSchemesResponse getContinuousSchemesByUser(
+            Integer tenantId,
+            Integer userId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit
+    ) {
+        validateTenantInput(tenantId);
+        validateUserInput(userId);
+        validateDateRange(startDate, endDate);
+
+        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        long continuousCount = schemeRegularityRepository.getContinuousSchemeCountByUserSchemes(
+                tenantId, userId, startDate, endDate, daysInRange);
+        if (!list) {
+            return ContinuousSchemesResponse.builder()
+                    .continuousSchemeCount(continuousCount)
+                    .list(false)
+                    .page(null)
+                    .limit(null)
+                    .startDate(startDate)
+                    .endDate(endDate)
+                    .daysInRange(daysInRange)
+                    .schemes(null)
+                    .build();
+        }
+
+        int effectivePage = page == null ? 1 : page;
+        int effectiveLimit = limit == null ? DEFAULT_PAGE_COUNT : limit;
+        if (effectivePage < 1) {
+            throw new IllegalArgumentException("page must be >= 1");
+        }
+        if (effectiveLimit < 1) {
+            throw new IllegalArgumentException("limit must be >= 1");
+        }
+        int offset = (effectivePage - 1) * effectiveLimit;
+        List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
+                schemeRegularityRepository.getContinuousSchemesByUserSchemes(
+                        tenantId, userId, startDate, endDate, daysInRange, effectiveLimit, offset);
 
         return ContinuousSchemesResponse.builder()
                 .continuousSchemeCount(continuousCount)
