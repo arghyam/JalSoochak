@@ -227,7 +227,8 @@ public class GlificWebhookController {
             @RequestBody TriggerWelcomeMessageRequest request) {
         try {
             String phone = request != null ? request.resolvePhoneNumber() : "";
-            IntroResponse response = welcomeMessageService.triggerWelcomeMessage(phone);
+            boolean isSingleTenant = request != null && request.resolveSingleTenant();
+            IntroResponse response = welcomeMessageService.triggerWelcomeMessage(phone, isSingleTenant);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             String safeContactId = request != null ? request.resolvePhoneNumber() : null;
