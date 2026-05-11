@@ -115,14 +115,36 @@ public class SingleTenantTelemetryController {
             telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
 
+            boolean hasPhoneNumber = request.getPhoneNumber() != null && !request.getPhoneNumber().isBlank();
+            boolean hasImageId = request.getImageId() != null && !request.getImageId().isBlank();
+            boolean hasConfirmedReading = request.getConfirmedReading() != null;
+
+            if (!hasPhoneNumber) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "phoneNumber must be provided"
+                );
+            }
+
             if (request.getConfirmedReading() == null) {
                 throw new ResponseStatusException(
                         HttpStatus.BAD_REQUEST,
                         "confirmedReading must be provided for update"
                 );
             }
+
+            String resolvedIdentifier = request.getPhoneNumber();
+            if (hasConfirmedReading && hasImageId) {
+                log.debug("Both confirmedReading and imageId provided; confirmedReading update takes precedence.");
+            }
+            if (resolvedIdentifier == null || resolvedIdentifier.isBlank()) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "phoneNumber must be provided"
+                );
+            }
             CreateReadingResponse response = bfmReadingService.updateConfirmedReading(
-                    request.getCorrelationId(),
+                    resolvedIdentifier,
                     request.getConfirmedReading()
             );
             return ResponseEntity.ok(
