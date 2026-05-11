@@ -63,14 +63,14 @@ public class SingleTenantTelemetryController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                         ReadingsApiResponse.builder()
                                 .success(false)
-                                .data(toReadingsDataResponse(response, true))
+                                .data(toReadingsDataResponse(response, false))
                                 .build()
                 );
             }
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
-                            .data(toReadingsDataResponse(response, false))
+                            .data(toReadingsDataResponse(response, true))
                             .build()
             );
         } catch (ResponseStatusException e) {
@@ -78,7 +78,6 @@ public class SingleTenantTelemetryController {
                     ReadingsApiResponse.builder()
                             .success(false)
                             .data(ReadingsDataResponse.builder()
-                                    .correlationId(request != null ? request.getPhoneNumber() : null)
                                     .message(e.getReason())
                                     .qualityStatus("REJECTED")
                                     .build())
@@ -92,7 +91,6 @@ public class SingleTenantTelemetryController {
                     ReadingsApiResponse.builder()
                             .success(false)
                             .data(ReadingsDataResponse.builder()
-                                    .correlationId(safeContactId)
                                     .qualityStatus("REJECTED")
                                     .message("Failed to process reading")
                                     .build())
@@ -130,7 +128,7 @@ public class SingleTenantTelemetryController {
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
-                            .data(toReadingsDataResponse(response, false))
+                            .data(toReadingsDataResponse(response, true))
                             .build()
             );
         } catch (ResponseStatusException e) {
@@ -138,20 +136,17 @@ public class SingleTenantTelemetryController {
                     ReadingsApiResponse.builder()
                             .success(false)
                             .data(ReadingsDataResponse.builder()
-                                    .correlationId(request != null ? request.getCorrelationId() : null)
                                     .message(e.getReason())
                                     .qualityStatus("REJECTED")
                                     .build())
                             .build()
             );
         } catch (Exception e) {
-            String correlationId = request != null ? request.getCorrelationId() : null;
             log.error("Error updating reading: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                     ReadingsApiResponse.builder()
                             .success(false)
                             .data(ReadingsDataResponse.builder()
-                                    .correlationId(correlationId)
                                     .qualityStatus("REJECTED")
                                     .message("Failed to update reading")
                                     .build())
