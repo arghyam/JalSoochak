@@ -22,7 +22,7 @@ public class WelcomeMessageService {
     private final TenantConfigRepository tenantConfigRepository;
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
 
-    public IntroResponse triggerWelcomeMessage(String phoneNumber) {
+    public IntroResponse triggerWelcomeMessage(String phoneNumber, boolean isSingleTenant) {
         if (phoneNumber == null || phoneNumber.isBlank()) {
             throw new IllegalArgumentException("phoneNumber/contactId is required");
         }
@@ -44,8 +44,9 @@ public class WelcomeMessageService {
         String message = resolveWelcomeTemplate(tenantId, languageKey, language)
                 .map(tpl -> tpl
                         .replace("{name}", name)
-                        .replace("{state}", safeState(state)))
-                .orElseGet(() -> buildWelcomeMessage(languageKey, name, state));
+                        .replace("{state}", safeState(state))
+                        .replace("{start_keyword}", resolveStartKeyword(isSingleTenant)))
+                .orElseGet(() -> buildWelcomeMessage(languageKey, name, state, isSingleTenant));
         return IntroResponse.builder()
                 .success(true)
                 .correlationId(operatorWithSchema.operator().phoneNumber())
@@ -60,8 +61,9 @@ public class WelcomeMessageService {
         return name.trim();
     }
 
-    private String buildWelcomeMessage(String languageKey, String name, String state) {
+    private String buildWelcomeMessage(String languageKey, String name, String state, boolean isSingleTenant) {
         String normalized = languageKey == null ? "english" : languageKey.toLowerCase(Locale.ROOT);
+        String startKeyword = resolveStartKeyword(isSingleTenant);
         return switch (normalized) {
             case "hindi" -> """
                     प्रिय %s,
@@ -72,8 +74,8 @@ public class WelcomeMessageService {
                     - बल्क फ्लो मीटर की फोटो साझा करना
                     - जल आपूर्ति से जुड़ी समस्याएं रिपोर्ट करना
 
-                    शुरू करने के लिए START लिखें।
-                    """.formatted(name, safeState(state));
+                    शुरू करने के लिए %s लिखें।
+                    """.formatted(name, safeState(state), startKeyword);
             case "assamese", "as", "as_in" -> """
                     প্ৰিয় %s,
 
@@ -83,8 +85,8 @@ public class WelcomeMessageService {
                     - বাল্ক ফ্ল’ মিটাৰৰ ফটো পঠাব পাৰে
                     - পানী যোগানৰ সমস্যা জনাব পাৰে
 
-                    আৰম্ভ কৰিবলৈ START লিখক।
-                    """.formatted(name, safeState(state));
+                    আৰম্ভ কৰিবলৈ %s লিখক।
+                    """.formatted(name, safeState(state), startKeyword);
             default -> """
                     Dear %s,
 
@@ -94,9 +96,13 @@ public class WelcomeMessageService {
                     - Share photos of the bulk flow meter
                     - Report water supply issues
 
-                    Reply START to begin.
-                    """.formatted(name, safeState(state));
+                    Reply %s to begin.
+                    """.formatted(name, safeState(state), startKeyword);
         };
+    }
+
+    private String resolveStartKeyword(boolean isSingleTenant) {
+        return isSingleTenant ? "STARTTENANT" : "START";
     }
 
     /**
