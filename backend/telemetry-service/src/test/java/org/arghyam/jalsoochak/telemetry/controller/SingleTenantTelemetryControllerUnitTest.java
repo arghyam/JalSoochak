@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class SingleTenantTelemetryControllerUnitTest {
 
     @Test
-    void assamReadingsReturnsOkWithoutCorrelationIdOnSuccess() {
+    void assamReadingsReturnsOkWithCorrelationIdOnSuccess() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -47,11 +47,11 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(true, response.getBody().isSuccess());
         assertNotNull(response.getBody().getData());
         assertEquals("assam-reading-ok", response.getBody().getData().getMessage());
-        assertNull(response.getBody().getData().getCorrelationId());
+        assertEquals("corr-hidden", response.getBody().getData().getCorrelationId());
     }
 
     @Test
-    void assamReadingsReturnsUnauthorizedWithCorrelationIdOnFailure() {
+    void assamReadingsReturnsUnauthorizedWithoutCorrelationIdOnFailure() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
@@ -71,7 +71,7 @@ class SingleTenantTelemetryControllerUnitTest {
         assertNotNull(response.getBody());
         assertEquals(false, response.getBody().isSuccess());
         assertNotNull(response.getBody().getData());
-        assertEquals("919999999999", response.getBody().getData().getCorrelationId());
+        assertNull(response.getBody().getData().getCorrelationId());
     }
 
     @Test
@@ -96,6 +96,7 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(false, response.getBody().isSuccess());
         assertNotNull(response.getBody().getData());
         assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
+        assertNull(response.getBody().getData().getCorrelationId());
     }
 
     @Test
@@ -117,7 +118,7 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertNotNull(response.getBody());
         assertEquals(false, response.getBody().isSuccess());
-        assertEquals("corr-123", response.getBody().getData().getCorrelationId());
+        assertNull(response.getBody().getData().getCorrelationId());
     }
 
     @Test
@@ -139,7 +140,7 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
         assertNotNull(response.getBody());
         assertEquals(false, response.getBody().isSuccess());
-        assertEquals("corr-123", response.getBody().getData().getCorrelationId());
+        assertNull(response.getBody().getData().getCorrelationId());
     }
 
     private static final class StubGlificWebhookService extends GlificWebhookService {
