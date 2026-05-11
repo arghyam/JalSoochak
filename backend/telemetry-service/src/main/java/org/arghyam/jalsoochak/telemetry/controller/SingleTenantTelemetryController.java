@@ -116,8 +116,16 @@ public class SingleTenantTelemetryController {
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
 
             boolean hasPhoneNumber = request.getPhoneNumber() != null && !request.getPhoneNumber().isBlank();
+            boolean hasCorrelationId = request.getCorrelationId() != null && !request.getCorrelationId().isBlank();
             boolean hasImageId = request.getImageId() != null && !request.getImageId().isBlank();
             boolean hasConfirmedReading = request.getConfirmedReading() != null;
+
+            if (!hasCorrelationId) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "correlationId must be provided"
+                );
+            }
 
             if (!hasPhoneNumber) {
                 throw new ResponseStatusException(
@@ -133,7 +141,7 @@ public class SingleTenantTelemetryController {
                 );
             }
 
-            String resolvedIdentifier = request.getPhoneNumber();
+            String resolvedIdentifier = request.getCorrelationId();
             if (hasConfirmedReading && hasImageId) {
                 log.debug("Both confirmedReading and imageId provided; confirmedReading update takes precedence.");
             }
