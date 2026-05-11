@@ -75,6 +75,30 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     @Test
+    void assamReadingsReturnsBadRequestAndSuccessFalseWhenServiceRejects() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(true),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+                "js_valid_key",
+                AssamReadingRequest.builder()
+                        .readingUrl("https://example.com/meter.jpg")
+                        .phoneNumber("919999999999")
+                        .stateSchemeId("30178236")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(false, response.getBody().isSuccess());
+        assertNotNull(response.getBody().getData());
+        assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
+    }
+
+    @Test
     void updateReadingsReturnsBadRequestWhenConfirmedReadingMissing() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
@@ -119,12 +143,27 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     private static final class StubGlificWebhookService extends GlificWebhookService {
+        private final boolean rejected;
+
         private StubGlificWebhookService() {
+            this(false);
+        }
+
+        private StubGlificWebhookService(boolean rejected) {
             super(null, null, null, null);
+            this.rejected = rejected;
         }
 
         @Override
         public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+            if (rejected) {
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .qualityStatus("REJECTED")
+                        .message("Operator is not mapped to the provided state or centre scheme")
+                        .correlationId("corr-rejected")
+                        .build();
+            }
             return CreateReadingResponse.builder()
                     .success(true)
                     .message("assam-reading-ok")
