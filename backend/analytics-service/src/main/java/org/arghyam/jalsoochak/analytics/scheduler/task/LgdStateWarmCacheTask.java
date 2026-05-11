@@ -107,7 +107,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
                         endDate,
                         scale.name().toLowerCase());
             } catch (Exception ex) {
-                log.warn("Warm-cache failed for state lgd_id={}, tenant_id={}: {}", lgdId, tenantId, ex.getMessage());
+                log.warn("Warm-cache failed for state lgd_id={}, tenant_id={}", lgdId, tenantId, ex);
             }
         }
 

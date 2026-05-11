@@ -126,6 +126,9 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /water-supply/average-per-region (tenantId={}, parentLgdId={}, parentDepartmentId={}, scope={}, startDate={}, endDate={})",
+                    tenantId, parentLgdId, parentDepartmentId, scope, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<AverageWaterSupplyResponse>builder()
                     .success(false)
                     .data(null)
@@ -267,6 +270,9 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /water-quantity/periodic (lgdId={}, departmentId={}, startDate={}, endDate={}, scale={})",
+                    lgdId, departmentId, startDate, endDate, scale, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<PeriodicWaterQuantityResponse>builder()
                     .success(false)
                     .data(null)
@@ -326,6 +332,9 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /outage-reasons (tenantId={}, parentLgdId={}, parentDepartmentId={}, startDate={}, endDate={})",
+                    tenantId, parentLgdId, parentDepartmentId, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<OutageReasonSchemeCountResponse>builder()
                     .success(false)
                     .data(null)
@@ -396,6 +405,9 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /outage-reasons/periodic (tenantId={}, lgdId={}, departmentId={}, startDate={}, endDate={}, scale={})",
+                    tenantId, lgdId, departmentId, startDate, endDate, scale, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<PeriodicOutageReasonSchemeCountResponse>builder()
                     .success(false)
                     .data(null)
@@ -494,6 +506,9 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /non-submission-reasons (tenantId={}, parentLgdId={}, parentDepartmentId={}, startDate={}, endDate={})",
+                    tenantId, parentLgdId, parentDepartmentId, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NonSubmissionReasonSchemeCountResponse>builder()
                     .success(false)
                     .data(null)
@@ -625,6 +640,9 @@ public class AnalyticsWaterQuantityOutageSubmissionController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /submission-status (tenantId={}, lgdId={}, departmentId={}, startDate={}, endDate={})",
+                    tenantId, lgdId, departmentId, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<SubmissionStatusSummaryResponse>builder()
                     .success(false)
                     .data(null)
