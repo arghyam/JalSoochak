@@ -144,7 +144,7 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     @Test
-    void updateReadingsUsesPhoneNumberWhenCorrelationIdMissing() {
+    void updateReadingsReturnsBadRequestWhenCorrelationIdMissing() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -159,10 +159,33 @@ class SingleTenantTelemetryControllerUnitTest {
                         .build()
         );
 
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(false, response.getBody().isSuccess());
+        assertEquals("correlationId must be provided", response.getBody().getData().getMessage());
+    }
+
+    @Test
+    void updateReadingsUsesPhoneNumberWhenCorrelationIdMissing() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .phoneNumber("919999999999")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
         assertEquals(true, response.getBody().isSuccess());
-        assertEquals("919999999999", response.getBody().getData().getCorrelationId());
+        assertEquals("corr-123", response.getBody().getData().getCorrelationId());
     }
 
     private static final class StubGlificWebhookService extends GlificWebhookService {
