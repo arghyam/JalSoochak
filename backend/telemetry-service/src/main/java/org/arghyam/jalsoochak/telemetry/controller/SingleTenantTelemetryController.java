@@ -56,6 +56,17 @@ public class SingleTenantTelemetryController {
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
 
             CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
+            boolean rejected = response == null
+                    || !response.isSuccess()
+                    || "REJECTED".equalsIgnoreCase(response.getQualityStatus());
+            if (rejected) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                        ReadingsApiResponse.builder()
+                                .success(false)
+                                .data(toReadingsDataResponse(response, true))
+                                .build()
+                );
+            }
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
@@ -150,6 +161,12 @@ public class SingleTenantTelemetryController {
     }
 
     private ReadingsDataResponse toReadingsDataResponse(CreateReadingResponse response, boolean includeCorrelationId) {
+        if (response == null) {
+            return ReadingsDataResponse.builder()
+                    .qualityStatus("REJECTED")
+                    .message("Failed to process reading")
+                    .build();
+        }
         return ReadingsDataResponse.builder()
                 .correlationId(includeCorrelationId ? response.getCorrelationId() : null)
                 .meterReading(response.getMeterReading())
