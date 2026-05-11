@@ -1,0 +1,162 @@
+package org.arghyam.jalsoochak.telemetry.controller;
+
+import jakarta.validation.Valid;
+import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
+import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
+import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
+import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+@RestController
+@RequestMapping("/api/v1/telemetry")
+public class SingleTenantTelemetryController {
+
+    private static final Logger log = LoggerFactory.getLogger(SingleTenantTelemetryController.class);
+
+    private final GlificWebhookService glificWebhookService;
+    private final TelemetryApiKeyService telemetryApiKeyService;
+    private final BfmReadingService bfmReadingService;
+
+    public SingleTenantTelemetryController(GlificWebhookService glificWebhookService,
+                                           TelemetryApiKeyService telemetryApiKeyService,
+                                           BfmReadingService bfmReadingService) {
+        this.glificWebhookService = glificWebhookService;
+        this.telemetryApiKeyService = telemetryApiKeyService;
+        this.bfmReadingService = bfmReadingService;
+    }
+
+    @PostMapping(
+            value = "/readings",
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<ReadingsApiResponse> receiveAssamReading(
+            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
+            @RequestBody @Valid AssamReadingRequest request
+    ) {
+        try {
+            if (telemetryApiKeyService == null) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "API key service not configured");
+            }
+            Integer tenantId = telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
+
+            CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
+            return ResponseEntity.ok(
+                    ReadingsApiResponse.builder()
+                            .success(true)
+                            .data(toReadingsDataResponse(response, false))
+                            .build()
+            );
+        } catch (ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(
+                    ReadingsApiResponse.builder()
+                            .success(false)
+                            .data(ReadingsDataResponse.builder()
+                                    .correlationId(request != null ? request.getPhoneNumber() : null)
+                                    .message(e.getReason())
+                                    .qualityStatus("REJECTED")
+                                    .build())
+                            .build()
+            );
+        } catch (Exception e) {
+            String safeContactId = request != null ? request.getPhoneNumber() : null;
+            log.error("Error processing Assam reading: {}", e.getMessage(), e);
+            log.debug("Error processing Assam reading for phoneNumber {}: {}", safeContactId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    ReadingsApiResponse.builder()
+                            .success(false)
+                            .data(ReadingsDataResponse.builder()
+                                    .correlationId(safeContactId)
+                                    .qualityStatus("REJECTED")
+                                    .message("Failed to process reading")
+                                    .build())
+                            .build()
+            );
+        }
+    }
+
+    @PutMapping(
+            value = "/readings",
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<ReadingsApiResponse> updateReading(
+            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
+            @RequestBody @Valid UpdateReadingRequest request
+    ) {
+        try {
+            if (telemetryApiKeyService == null) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "API key service not configured");
+            }
+            telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
+
+            if (request.getConfirmedReading() == null) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "confirmedReading must be provided for update"
+                );
+            }
+            CreateReadingResponse response = bfmReadingService.updateConfirmedReading(
+                    request.getCorrelationId(),
+                    request.getConfirmedReading()
+            );
+            return ResponseEntity.ok(
+                    ReadingsApiResponse.builder()
+                            .success(true)
+                            .data(toReadingsDataResponse(response, false))
+                            .build()
+            );
+        } catch (ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(
+                    ReadingsApiResponse.builder()
+                            .success(false)
+                            .data(ReadingsDataResponse.builder()
+                                    .correlationId(request != null ? request.getCorrelationId() : null)
+                                    .message(e.getReason())
+                                    .qualityStatus("REJECTED")
+                                    .build())
+                            .build()
+            );
+        } catch (Exception e) {
+            String correlationId = request != null ? request.getCorrelationId() : null;
+            log.error("Error updating reading: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    ReadingsApiResponse.builder()
+                            .success(false)
+                            .data(ReadingsDataResponse.builder()
+                                    .correlationId(correlationId)
+                                    .qualityStatus("REJECTED")
+                                    .message("Failed to update reading")
+                                    .build())
+                            .build()
+            );
+        }
+    }
+
+    private ReadingsDataResponse toReadingsDataResponse(CreateReadingResponse response, boolean includeCorrelationId) {
+        return ReadingsDataResponse.builder()
+                .correlationId(includeCorrelationId ? response.getCorrelationId() : null)
+                .meterReading(response.getMeterReading())
+                .qualityStatus(response.getQualityStatus())
+                .qualityConfidence(response.getQualityConfidence())
+                .lastConfirmedReading(response.getLastConfirmedReading())
+                .message(response.getMessage())
+                .build();
+    }
+}
