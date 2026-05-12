@@ -1076,8 +1076,18 @@ public class GlificMeterWorkflowService {
                         AnomalyConstants.STATUS_OPEN,
                         correlationId
                 );
-                // Keep submitted/manual value as-is for context, but clamp confirmed reading at previous confirmed.
-                effectiveConfirmedReading = previousSnapshot.confirmedReading();
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message(localizationService.localizeMessage(
+                                "Reading rejected because it is below the last confirmed reading. Submitted: " + toPlain(manualReadingValue)
+                                        + ". Last confirmed: " + toPlain(previousSnapshot.confirmedReading()) + ".",
+                                languageKey
+                        ))
+                        .qualityStatus("REJECTED")
+                        .correlationId(correlationId)
+                        .meterReading(manualReadingValue)
+                        .lastConfirmedReading(previousSnapshot.confirmedReading())
+                        .build();
             }
 
             // Tenant-configured water supply threshold validation (relative to WATER_NORM).
