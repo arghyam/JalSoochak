@@ -59,3 +59,10 @@ logging:
     name: ${LOG_FILE_PATH:../logger/logs/backend-services.log}
   pattern:
     level: "service=${spring.application.name} %5p"
+
+scheme:
+  activity-sync:
+    enabled: ${SCHEME_ACTIVITY_SYNC_ENABLED:true}
+    cron: ${SCHEME_ACTIVITY_SYNC_CRON:0 0 0 * * *}
+    zone: ${SCHEME_ACTIVITY_SYNC_ZONE:Asia/Kolkata}
+    inactivity-days: ${SCHEME_INACTIVITY_DAYS:30}
