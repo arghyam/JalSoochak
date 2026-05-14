@@ -755,6 +755,122 @@ public class SchemeDbRepository {
         }
     }
 
+    public List<String> findAllActiveTenantSchemas() {
+        String sql = """
+                SELECT state_code
+                FROM common_schema.tenant_master_table
+                WHERE deleted_at IS NULL
+                  AND state_code IS NOT NULL
+                  AND btrim(state_code) <> ''
+                """;
+        List<String> stateCodes = jdbcTemplate.query(sql, (rs, n) -> rs.getString("state_code"));
+        List<String> schemas = new ArrayList<>(stateCodes.size());
+        for (String code : stateCodes) {
+            if (code == null || code.isBlank()) {
+                continue;
+            }
+            schemas.add("tenant_" + code.trim().toLowerCase(Locale.ROOT));
+        }
+        return schemas;
+    }
+
+    public void ensureIsActiveColumnExists(String schemaName) {
+        validateSchemaName(schemaName);
+        String alterSql = String.format("""
+                ALTER TABLE %s.scheme_master_table
+                ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE
+                """, schemaName);
+        jdbcTemplate.execute(alterSql);
+    }
+
+    public int syncIsActiveByRecentFlowReadings(String schemaName, int inactivityDays) {
+        validateSchemaName(schemaName);
+        int days = Math.max(1, inactivityDays);
+        String sql = String.format("""
+                UPDATE %1$s.scheme_master_table sm
+                SET is_active = EXISTS (
+                        SELECT 1
+                        FROM %1$s.flow_reading_table fr
+                        WHERE fr.scheme_id = sm.id
+                          AND fr.deleted_at IS NULL
+                          AND fr.reading_date >= CURRENT_DATE - CAST(? AS INTEGER)
+                    ),
+                    updated_at = NOW()
+                WHERE sm.deleted_at IS NULL
+                  AND sm.is_active IS DISTINCT FROM EXISTS (
+                        SELECT 1
+                        FROM %1$s.flow_reading_table fr
+                        WHERE fr.scheme_id = sm.id
+                          AND fr.deleted_at IS NULL
+                          AND fr.reading_date >= CURRENT_DATE - CAST(? AS INTEGER)
+                    )
+                """, schemaName);
+        return jdbcTemplate.update(sql, days, days);
+    }
+
+    public int syncIsActiveByRecentFlowReadingsInBatches(String schemaName, int inactivityDays, int batchSize) {
+        validateSchemaName(schemaName);
+        int days = Math.max(1, inactivityDays);
+        int size = Math.max(100, batchSize);
+        int totalUpdated = 0;
+        int lastSeenId = 0;
+
+        while (true) {
+            List<Integer> ids = findSchemeIdsBatch(schemaName, lastSeenId, size);
+            if (ids.isEmpty()) {
+                break;
+            }
+            totalUpdated += syncIsActiveForSchemeIds(schemaName, ids, days);
+            lastSeenId = ids.get(ids.size() - 1);
+        }
+        return totalUpdated;
+    }
+
+    private List<Integer> findSchemeIdsBatch(String schemaName, int lastSeenId, int batchSize) {
+        String sql = String.format("""
+                SELECT id
+                FROM %s.scheme_master_table
+                WHERE deleted_at IS NULL
+                  AND id > ?
+                ORDER BY id
+                LIMIT ?
+                """, schemaName);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> rs.getInt("id"), lastSeenId, batchSize);
+    }
+
+    private int syncIsActiveForSchemeIds(String schemaName, List<Integer> schemeIds, int inactivityDays) {
+        if (schemeIds == null || schemeIds.isEmpty()) {
+            return 0;
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(schemeIds.size(), "?"));
+        String sql = String.format("""
+                UPDATE %1$s.scheme_master_table sm
+                SET is_active = EXISTS (
+                        SELECT 1
+                        FROM %1$s.flow_reading_table fr
+                        WHERE fr.scheme_id = sm.id
+                          AND fr.deleted_at IS NULL
+                          AND fr.reading_date >= CURRENT_DATE - CAST(? AS INTEGER)
+                    ),
+                    updated_at = NOW()
+                WHERE sm.deleted_at IS NULL
+                  AND sm.id IN (%2$s)
+                  AND sm.is_active IS DISTINCT FROM EXISTS (
+                        SELECT 1
+                        FROM %1$s.flow_reading_table fr
+                        WHERE fr.scheme_id = sm.id
+                          AND fr.deleted_at IS NULL
+                          AND fr.reading_date >= CURRENT_DATE - CAST(? AS INTEGER)
+                    )
+                """, schemaName, placeholders);
+
+        List<Object> args = new ArrayList<>(schemeIds.size() + 2);
+        args.add(inactivityDays);
+        args.addAll(schemeIds);
+        args.add(inactivityDays);
+        return jdbcTemplate.update(sql, args.toArray());
+    }
+
     /**
      * Batch lookup of LGD location IDs by lgd_code (case-insensitive).
      * Returns a map keyed by lower(lgd_code).
