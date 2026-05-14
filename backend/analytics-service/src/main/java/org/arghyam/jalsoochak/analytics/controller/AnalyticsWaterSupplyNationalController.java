@@ -80,6 +80,7 @@ public class AnalyticsWaterSupplyNationalController {
                     .data(schemeRegularityService.getNationalDashboardBoundariesForApi())
                     .build());
         } catch (Exception e) {
+            log.error("Failed GET /national/dashboard/boundary", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardBoundaryResponse>builder()
                     .success(false)
                     .data(null)
@@ -113,6 +114,7 @@ public class AnalyticsWaterSupplyNationalController {
                     .data(schemeRegularityService.getNationalDashboardLevel2BoundariesForApi())
                     .build());
         } catch (Exception e) {
+            log.error("Failed GET /national/dashboard/boundary/district", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardLevel2BoundaryResponse>builder()
                     .success(false)
                     .data(null)
@@ -148,6 +150,7 @@ public class AnalyticsWaterSupplyNationalController {
                     .data(schemeRegularityService.getNationalDashboardForApi(startDate, endDate))
                     .build());
         } catch (Exception e) {
+            log.error("Failed GET /national/dashboard (startDate={}, endDate={})", startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<NationalDashboardResponse>builder()
                     .success(false)
                     .data(null)

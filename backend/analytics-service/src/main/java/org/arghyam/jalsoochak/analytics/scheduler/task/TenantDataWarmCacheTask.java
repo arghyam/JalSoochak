@@ -74,7 +74,7 @@ public class TenantDataWarmCacheTask implements AnalyticsScheduledTask {
                 log.info("Warm-cache completed for tenant_id={}, level1_lgd_id={}, range {} to {}",
                         tenantId, level1LgdId, startDate, endDate);
             } catch (Exception ex) {
-                log.warn("Warm-cache failed for tenant_id={}: {}", tenantId, ex.getMessage());
+                log.warn("Warm-cache failed for tenant_id={}", tenantId, ex);
             }
         }
 

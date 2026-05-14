@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.TenantBoundaryGeoJsonResponse;
@@ -34,6 +35,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/analytics")
 @Tag(name = "Analytics - Tenants & Schemes", description = "Tenant metadata, scheme dimensions, and raw meter reading queries")
+@Slf4j
 public class AnalyticsTenantSchemeController {
 
     private final DimTenantRepository dimTenantRepository;
@@ -96,6 +98,7 @@ public class AnalyticsTenantSchemeController {
                     .data(dimTenantRepository.findByTenantIdGreaterThan(0))
                     .build());
         } catch (Exception e) {
+            log.error("Failed GET /tenants", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<DimTenant>>builder()
                     .success(false)
                     .data(null)
@@ -183,6 +186,9 @@ public class AnalyticsTenantSchemeController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed GET /tenant_data (tenantId={}, parentLgdId={}, parentDepartmentId={}, startDate={}, endDate={})",
+                    tenantId, parentLgdId, parentDepartmentId, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<TenantDetailsResponse>builder()
                     .success(false)
                     .data(null)
@@ -254,6 +260,9 @@ public class AnalyticsTenantSchemeController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed GET /tenant_boundaries (tenantId={}, parentLgdId={}, parentDepartmentId={})",
+                    tenantId, parentLgdId, parentDepartmentId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<TenantBoundaryGeoJsonResponse>builder()
                     .success(false)
                     .data(null)
@@ -341,6 +350,9 @@ public class AnalyticsTenantSchemeController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed GET /tenant_performance_score (tenantId={}, parentLgdId={}, parentDepartmentId={}, startDate={}, endDate={})",
+                    tenantId, parentLgdId, parentDepartmentId, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<TenantPerformanceScoreResponse>builder()
                     .success(false)
                     .data(null)
@@ -383,6 +395,7 @@ public class AnalyticsTenantSchemeController {
                     .data(data)
                     .build());
         } catch (Exception e) {
+            log.error("Failed GET /schemes (tenantId={})", tenantId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<DimScheme>>builder()
                     .success(false)
                     .data(null)
@@ -449,6 +462,9 @@ public class AnalyticsTenantSchemeController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed GET /meter-readings (tenantId={}, schemeId={}, startDate={}, endDate={})",
+                    tenantId, schemeId, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<List<FactMeterReading>>builder()
                     .success(false)
                     .data(null)

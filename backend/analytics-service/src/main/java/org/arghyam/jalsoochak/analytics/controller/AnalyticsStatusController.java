@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.dto.response.AnomalyStatusDto;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
@@ -22,6 +23,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/analytics")
 @Tag(name = "Analytics - Statuses", description = "Lookup lists for anomaly and escalation status filters")
+@Slf4j
 public class AnalyticsStatusController {
 
     @GetMapping("/anomalies/statuses")
@@ -58,6 +60,7 @@ public class AnalyticsStatusController {
                     .data(statuses)
                     .build());
         } catch (Exception e) {
+            log.error("Failed GET /api/v1/analytics/anomalies/statuses", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.<List<StatusItemDto>>builder()
                             .success(false)
@@ -100,6 +103,7 @@ public class AnalyticsStatusController {
                     .data(statuses)
                     .build());
         } catch (Exception e) {
+            log.error("Failed GET /api/v1/analytics/escalations/statuses", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.<List<StatusItemDto>>builder()
                             .success(false)

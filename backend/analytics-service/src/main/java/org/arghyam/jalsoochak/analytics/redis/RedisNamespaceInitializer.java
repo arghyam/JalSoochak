@@ -39,7 +39,7 @@ public class RedisNamespaceInitializer {
             redisTemplate.opsForValue().set(appName + ":meta:lastHeartbeat", now);
             log.info("Redis namespace initialized for service '{}'", appName);
         } catch (Exception ex) {
-            log.warn("Unable to write service metadata to Redis for '{}': {}", appName, ex.getMessage());
+            log.warn("Unable to write service metadata to Redis for '{}'", appName, ex);
         }
     }
 }

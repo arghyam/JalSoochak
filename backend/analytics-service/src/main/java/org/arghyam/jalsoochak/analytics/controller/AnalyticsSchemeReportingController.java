@@ -132,6 +132,9 @@ public class AnalyticsSchemeReportingController {
                     .data(null)
                     .build());
         } catch (Exception ex) {
+            log.error(
+                    "Failed PUT /escalations/status (tenantId={}, uuid={}, escalationId={}, correlationId={})",
+                    tenantId, userUuid, escalationId, correlationId, ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<Map<String, Object>>builder()
                     .success(false)
                     .data(null)

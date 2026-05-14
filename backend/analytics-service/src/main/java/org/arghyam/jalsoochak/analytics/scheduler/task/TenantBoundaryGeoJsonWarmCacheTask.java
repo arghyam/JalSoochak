@@ -63,7 +63,7 @@ public class TenantBoundaryGeoJsonWarmCacheTask implements AnalyticsScheduledTas
 
                 log.info("Warm-cache completed for tenant_id={}, level1_lgd_id={}", tenantId, level1LgdId);
             } catch (Exception ex) {
-                log.warn("Warm-cache failed for tenant_id={}: {}", tenantId, ex.getMessage());
+                log.warn("Warm-cache failed for tenant_id={}", tenantId, ex);
             }
         }
 
