@@ -293,21 +293,10 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         validateMapLgdLevelCascade(tenantId, tenant.getStateCode(), request.getConfigs());
         validateDeptMapLevelCascade(tenantId, tenant.getStateCode(), request.getConfigs());
 
-        // When DISPLAY_DEPARTMENT_MAPS is effectively FALSE (request or persisted), cascade all dept
-        // level keys to FALSE so the DB stays consistent and incoming level TRUEs are skipped below.
-        boolean deptMapsEffectivelyFalse = "FALSE".equalsIgnoreCase(
-                effectiveDeptMapsToggle(tenantId, request.getConfigs()));
-        if (deptMapsEffectivelyFalse) {
-            cascadeDeptMapsToFalse(tenantId, tenant.getStateCode(), currentUserId);
-        }
-
         Map<TenantConfigKeyEnum, ConfigValueDTO> results = new HashMap<>();
 
         for (Map.Entry<TenantConfigKeyEnum, JsonNode> entry : request.getConfigs().entrySet()) {
             TenantConfigKeyEnum key = entry.getKey();
-            if (deptMapsEffectivelyFalse && DEPT_MAP_LEVELS.contains(key)) {
-                continue;
-            }
             if (key.isManagedValue()) {
                 throw new InvalidConfigKeyException(
                         key + " is managed by a dedicated endpoint and cannot be set via the generic config API.");
@@ -975,73 +964,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         validateLevelCascade(tenantId, "tenant_" + stateCode.toLowerCase(), RegionTypeEnum.LGD, MAP_LGD_LEVELS, configs);
     }
 
-    /**
-     * Returns the effective string value ("TRUE"/"FALSE") for DISPLAY_DEPARTMENT_MAPS,
-     * merging the persisted DB value with any incoming override in the request.
-     * Absent = "TRUE" (system default).
-     */
-    private String effectiveDeptMapsToggle(Integer tenantId, Map<TenantConfigKeyEnum, JsonNode> configs) {
-        String persisted = tenantCommonRepository
-                .findConfigByTenantAndKey(tenantId, TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS.name())
-                .map(cfg -> {
-                    try {
-                        String raw = objectMapper.readValue(cfg.getConfigValue(), SimpleConfigValueDTO.class).getValue();
-                        if (!"TRUE".equalsIgnoreCase(raw) && !"FALSE".equalsIgnoreCase(raw)) {
-                            log.warn("Invalid persisted value for DISPLAY_DEPARTMENT_MAPS: '{}', defaulting to TRUE", raw);
-                            return "TRUE";
-                        }
-                        return raw.toUpperCase();
-                    } catch (JsonProcessingException e) {
-                        log.warn("Could not parse persisted DISPLAY_DEPARTMENT_MAPS: {}", e.getMessage());
-                        return "TRUE";
-                    }
-                })
-                .orElse("TRUE");
-
-        JsonNode override = configs.get(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS);
-        if (override != null) {
-            String val = override.isTextual() ? override.asText() : override.path("value").asText();
-            if (!"TRUE".equalsIgnoreCase(val) && !"FALSE".equalsIgnoreCase(val)) {
-                log.warn("Invalid override value for DISPLAY_DEPARTMENT_MAPS: '{}', ignoring override", val);
-                return persisted;
-            }
-            return val.toUpperCase();
-        }
-        return persisted;
-    }
-
-    /**
-     * Writes FALSE for all active department level map keys so the persisted state stays consistent
-     * whenever DISPLAY_DEPARTMENT_MAPS is effectively FALSE. Absent hierarchy means 0 active levels
-     * (no writes), consistent with setDefaultConfigs, validateMapLgdLevelCascade, and
-     * validateDeptMapLevelCascade.
-     */
-    private void cascadeDeptMapsToFalse(Integer tenantId, String stateCode, Integer currentUserId) {
-        String schemaName = "tenant_" + stateCode.toLowerCase();
-        LocationConfigDTO deptHierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, RegionTypeEnum.DEPARTMENT);
-        List<TenantConfigKeyEnum> active = computeActiveLevels(deptHierarchy, DEPT_MAP_LEVELS);
-        try {
-            String falseValue = objectMapper.writeValueAsString(new SimpleConfigValueDTO("FALSE"));
-            for (TenantConfigKeyEnum levelKey : active) {
-                tenantCommonRepository.upsertConfig(tenantId, levelKey.name(), falseValue, currentUserId)
-                        .orElseThrow(() -> new ConfigurationException(
-                                "Failed to cascade FALSE to " + levelKey.name() + " for tenant [id=" + tenantId + "]"));
-            }
-        } catch (JsonProcessingException e) {
-            throw new InvalidConfigValueException("Failed to serialize FALSE for department map level keys", e);
-        }
-        log.info("Cascaded DISPLAY_DEPARTMENT_MAPS=FALSE to all active dept level map keys [tenantId={}]", tenantId);
-    }
-
-    /**
-     * Validates the department level map cascade rule against both incoming request and persisted state.
-     * Skipped when the effective value of DISPLAY_DEPARTMENT_MAPS is FALSE — all level keys are forced
-     * FALSE by cascadeDeptMapsToFalse in that case, so cascade validation is irrelevant.
-     */
     private void validateDeptMapLevelCascade(Integer tenantId, String stateCode, Map<TenantConfigKeyEnum, JsonNode> configs) {
-        if ("FALSE".equalsIgnoreCase(effectiveDeptMapsToggle(tenantId, configs))) {
-            return;
-        }
         validateLevelCascade(tenantId, "tenant_" + stateCode.toLowerCase(), RegionTypeEnum.DEPARTMENT, DEPT_MAP_LEVELS, configs);
     }
 
