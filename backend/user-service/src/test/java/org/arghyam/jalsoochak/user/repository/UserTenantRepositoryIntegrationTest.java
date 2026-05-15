@@ -462,6 +462,44 @@ class UserTenantRepositoryIntegrationTest {
         }
     }
 
+    // ── activateStaffUser ─────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("activateStaffUser")
+    class ActivateStaffUser {
+
+        @Test
+        @DisplayName("sets status to ACTIVE for an inactive user")
+        void activatesInactiveUser() {
+            Long id = insertUser("uuid-act", "act@mp.gov", "91XXXXXXXXXA", "Act User", 3, "KEYCLOAK_MANAGED");
+            repo.deactivateStaffUser(SCHEMA, id, null);
+            assertThat(repo.findUserById(SCHEMA, id).orElseThrow().status())
+                    .isEqualTo(TenantUserStatus.INACTIVE.code);
+
+            int affected = repo.activateStaffUser(SCHEMA, id, null);
+            assertThat(affected).isEqualTo(1);
+
+            TenantUserRecord after = repo.findUserById(SCHEMA, id).orElseThrow();
+            assertThat(after.status()).isEqualTo(TenantUserStatus.ACTIVE.code);
+        }
+
+        @Test
+        @DisplayName("returns 0 (idempotent) for an already active user")
+        void isIdempotentForAlreadyActiveUser() {
+            Long id = insertUser("uuid-act2", "act2@mp.gov", "91XXXXXXXXXB", "Act2 User", 3, "KEYCLOAK_MANAGED");
+
+            int affected = repo.activateStaffUser(SCHEMA, id, null);
+            assertThat(affected).isZero();
+        }
+
+        @Test
+        @DisplayName("returns 0 when user does not exist")
+        void returnsZeroForNonexistentUser() {
+            int affected = repo.activateStaffUser(SCHEMA, 99999L, null);
+            assertThat(affected).isZero();
+        }
+    }
+
     // ── schema validation ─────────────────────────────────────────────────────
 
     @Nested
