@@ -1,5 +1,8 @@
+app:
+  single-tenant-mode: ${SINGLE_TENANT_MODE:false}
+
 server:
-  port: 8287
+  port: 8086
 
 spring:
   config:

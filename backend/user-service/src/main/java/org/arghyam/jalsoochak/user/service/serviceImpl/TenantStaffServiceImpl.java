@@ -223,6 +223,50 @@ public class TenantStaffServiceImpl implements TenantStaffService {
         log.info("Staff user deactivated: staffUserId={} tenantCode={}", id, tenantCode);
     }
 
+    @Override
+    public void activateStaff(Long id, String tenantCode, Authentication caller) {
+        String callerTenantCode = SecurityUtils.extractTenantCode(caller);
+        String callerRole = SecurityUtils.extractRole(caller).orElse(null);
+
+        boolean isSuperUser = "SUPER_USER".equalsIgnoreCase(callerRole);
+        boolean isStateAdmin = "STATE_ADMIN".equalsIgnoreCase(callerRole);
+        if (!isSuperUser && (!isStateAdmin || callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(tenantCode))) {
+            throw new ForbiddenAccessException("Only a STATE_ADMIN within their own tenant or a SUPER_USER may activate staff");
+        }
+
+        String schema = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        TenantUserRecord user = userTenantRepository.findUserById(schema, id)
+                .orElseThrow(() -> new ResourceNotFoundException("Staff user not found: " + id));
+
+        if (user.status() != null && user.status() == TenantUserStatus.ACTIVE.code) {
+            throw new BadRequestException("Staff user is already active");
+        }
+
+        Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode).orElse(null);
+        Long actorId = resolveActorId(caller, tenantId);
+
+        int affected = userTenantRepository.activateStaffUser(schema, id, actorId);
+        if (affected == 0) {
+            log.info("Staff activation: user already active due to a concurrent request — staffUserId={}", id);
+        }
+
+        if (affected > 0) {
+            if (tenantId != null) {
+                userAnalyticsEventPublisher.publishStaffUserUpdatedAfterCommit(
+                        id, tenantId,
+                        user.userTypeId() != null ? user.userTypeId().intValue() : null,
+                        user.keycloakUuid(),
+                        user.email(),
+                        TenantUserStatus.ACTIVE.code
+                );
+            } else {
+                log.warn("Cannot publish staff activation analytics: tenantId not found for tenantCode={}", tenantCode);
+            }
+        }
+
+        log.info("Staff user activated: staffUserId={} tenantCode={}", id, tenantCode);
+    }
+
     /** Resolves the DB actor id from the JWT; falls back to null (system action) if not found. */
     private Long resolveActorId(Authentication caller, Integer tenantId) {
         if (tenantId == null) {

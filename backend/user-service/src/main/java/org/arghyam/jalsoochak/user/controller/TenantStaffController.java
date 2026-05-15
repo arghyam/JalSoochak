@@ -88,6 +88,18 @@ public class TenantStaffController {
     }
 
     @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
+    @PostMapping("/staff/{id}/activate")
+    public ResponseEntity<ApiResponseDTO<Void>> activateStaff(
+            @PathVariable @Positive Long id,
+            @RequestParam @NotBlank String tenantCode,
+            Authentication authentication) {
+        log.info("POST /api/v1/tenant/user/staff/{}/activate tenantCode={} caller={}",
+                id, tenantCode, authentication != null ? authentication.getName() : "anonymous");
+        tenantStaffService.activateStaff(id, tenantCode, authentication);
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Staff user activated successfully"));
+    }
+
+    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN')")
     @PostMapping("/welcome")
     public ResponseEntity<ApiResponseDTO<WelcomeMessageResponseDTO>> sendWelcomeMessages(
             @RequestParam String tenantCode,
