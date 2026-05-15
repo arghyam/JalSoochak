@@ -427,6 +427,25 @@ public class UserTenantRepository {
     }
 
     /**
+     * Activates a staff user by setting {@code status} to {@code ACTIVE} (1).
+     * Only updates rows whose current {@code status} is not already {@code ACTIVE},
+     * making the operation idempotent. Soft-deleted rows are excluded.
+     *
+     * @return number of rows updated: 1 if activated, 0 if already active or not found
+     */
+    @SuppressWarnings("java:S2077")
+    public int activateStaffUser(String schemaName, Long userId, Long actorId) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                UPDATE %s.user_table
+                SET status = ?, updated_by = ?, updated_at = NOW()
+                WHERE id = ? AND status != ? AND deleted_at IS NULL
+                """, schemaName);
+        return jdbcTemplate.update(sql,
+                TenantUserStatus.ACTIVE.code, actorId, userId, TenantUserStatus.ACTIVE.code);
+    }
+
+    /**
      * Returns UUIDs of users in the given tenant schema whose {@code title_hash} matches
      * the provided HMAC-SHA256 hex value. Used for exact case-insensitive name search.
      */
