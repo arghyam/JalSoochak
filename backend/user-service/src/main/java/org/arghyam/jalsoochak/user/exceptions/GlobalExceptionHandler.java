@@ -194,6 +194,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_ACCEPTABLE, "Requested media type not acceptable");
     }
 
+    @ExceptionHandler(StorageException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleStorage(StorageException ex) {
+        log.error("Object storage failure: {}", ex.getMessage(), ex);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Report storage is currently unavailable");
+    }
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiErrorResponseDTO> handleDataIntegrity(DataIntegrityViolationException ex) {
         Throwable cause = ex.getMostSpecificCause();
