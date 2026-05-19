@@ -41,9 +41,14 @@ public class StorageProperties {
     @NotBlank
     private String bucket = "user-service-assets";
 
-    /** Dedicated bucket for cached staff reports (CSV/XLSX). */
+    /**
+     * Single shared bucket for all cached report artifacts across resource types
+     * (staff, operators, …). The resource type is encoded as a path
+     * segment inside the bucket, not as a separate bucket — so this name should
+     * stay generic. Default matches the plan's recommended naming.
+     */
     @NotBlank
-    private String reportsBucket = "staff-reports";
+    private String reportsBucket = "jalsoochak-reports";
 
     /** TTL (seconds) for presigned GET URLs returned to clients. */
     private long presignedTtlSeconds = 3600L;
