@@ -46,6 +46,8 @@ class StaffReportControllerTest {
     @Autowired private ObjectMapper objectMapper;
     @MockBean private AppProperties appProperties;
     @MockBean private StaffReportService staffReportService;
+    @MockBean(name = "userSecurity")
+    private org.arghyam.jalsoochak.user.config.UserSecurityEvaluator userSecurity;
 
     private static ReportResponseDTO sampleResponse(String format, boolean cached) {
         return ReportResponseDTO.builder()

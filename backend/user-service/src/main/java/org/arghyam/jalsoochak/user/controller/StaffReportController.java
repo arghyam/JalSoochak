@@ -33,7 +33,7 @@ public class StaffReportController {
      * what STATE_ADMIN sees in the UI for the same filters.
      */
     @PostMapping("/staff/reports")
-    @PreAuthorize("hasRole('STATE_ADMIN')")
+    @PreAuthorize("hasRole('STATE_ADMIN') and @userSecurity.canAccessTenant(#tenantCode, authentication)")
     public ResponseEntity<ApiResponseDTO<ReportResponseDTO>> generateStaffReport(
             @RequestParam @NotBlank String tenantCode,
             @RequestParam(defaultValue = "CSV") String format,
