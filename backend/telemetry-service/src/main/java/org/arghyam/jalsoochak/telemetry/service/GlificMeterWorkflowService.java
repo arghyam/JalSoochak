@@ -1108,14 +1108,17 @@ public class GlificMeterWorkflowService {
 
                     BigDecimal previousConfirmed = previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null);
                     LocalDateTime previousConfirmedAt = previousSnapshotOpt.map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null);
+                    BigDecimal baselineReading = previousConfirmed != null ? previousConfirmed : BigDecimal.ZERO;
+                    BigDecimal minAllowedReading = baselineReading.add(minAllowed);
+                    BigDecimal maxAllowedReading = baselineReading.add(maxAllowed);
 
-                    if (effectiveConfirmedReading.compareTo(minAllowed) < 0) {
+                    if (effectiveConfirmedReading.compareTo(minAllowedReading) < 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
                                 operatorWithSchema.operator().id(),
                                 schemeId,
                                 AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                                "Manual reading is below allowed minimum (" + toPlain(minAllowed) + ").",
+                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ").",
                                 AnomalyConstants.STATUS_OPEN
                         );
                         telemetryEventPublisher.publishAnomalyRecorded(
@@ -1130,7 +1133,7 @@ public class GlificMeterWorkflowService {
                                 previousConfirmed,
                                 previousConfirmedAt,
                                 0,
-                                "Manual reading is below allowed minimum (" + toPlain(minAllowed) + ").",
+                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ").",
                                 AnomalyConstants.STATUS_OPEN,
                                 null
                         );
@@ -1145,7 +1148,7 @@ public class GlificMeterWorkflowService {
                                 .success(false)
                                 .message(localizationService.localizeMessage(
                                         "Reading rejected because it is below the allowed minimum. Submitted: " + toPlain(effectiveConfirmedReading)
-                                                + ". Minimum allowed: " + toPlain(minAllowed) + ".",
+                                                + ". Minimum allowed reading: " + toPlain(minAllowedReading) + ".",
                                         languageKey
                                 ))
                                 .qualityStatus("REJECTED")
@@ -1154,13 +1157,13 @@ public class GlificMeterWorkflowService {
                                 .lastConfirmedReading(previousConfirmed)
                                 .build();
                     }
-                    if (effectiveConfirmedReading.compareTo(maxAllowed) > 0) {
+                    if (effectiveConfirmedReading.compareTo(maxAllowedReading) > 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
                                 operatorWithSchema.operator().id(),
                                 schemeId,
                                 AnomalyConstants.TYPE_OVER_WATER_SUPPLY,
-                                "Manual reading is above allowed maximum (" + toPlain(maxAllowed) + ").",
+                                "Manual reading is above allowed maximum reading (" + toPlain(maxAllowedReading) + ").",
                                 AnomalyConstants.STATUS_OPEN
                         );
                         telemetryEventPublisher.publishAnomalyRecorded(
@@ -1175,7 +1178,7 @@ public class GlificMeterWorkflowService {
                                 previousConfirmed,
                                 previousConfirmedAt,
                                 0,
-                                "Manual reading is above allowed maximum (" + toPlain(maxAllowed) + ").",
+                                "Manual reading is above allowed maximum reading (" + toPlain(maxAllowedReading) + ").",
                                 AnomalyConstants.STATUS_OPEN,
                                 null
                         );
@@ -1183,7 +1186,7 @@ public class GlificMeterWorkflowService {
                                 .success(false)
                                 .message(localizationService.localizeMessage(
                                         "Reading rejected because it is above the allowed maximum. Submitted: " + toPlain(effectiveConfirmedReading)
-                                                + ". Maximum allowed: " + toPlain(maxAllowed) + ".",
+                                                + ". Maximum allowed reading: " + toPlain(maxAllowedReading) + ".",
                                         languageKey
                                 ))
                                 .qualityStatus("REJECTED")

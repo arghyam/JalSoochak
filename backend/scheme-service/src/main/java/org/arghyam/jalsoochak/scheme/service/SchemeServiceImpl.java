@@ -12,6 +12,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
+import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
@@ -38,9 +39,15 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStreamWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -133,6 +140,7 @@ public class SchemeServiceImpl implements SchemeService {
     private final SchemeDbRepository schemeDbRepository;
     private final SchemeUploadChunkProcessor chunkProcessor;
     private final KafkaProducer kafkaProducer;
+    private final MinioService minioService;
 
     @Override
     public PageResponseDTO<SchemeDTO> listSchemes(
@@ -348,6 +356,134 @@ public class SchemeServiceImpl implements SchemeService {
                 .totalRows(totalRows)
                 .uploadedRows(processed.uploadedRows())
                 .build();
+    }
+
+    @Override
+    public ReportLinkResponseDTO downloadSchemesReport() {
+        String schemaName = requireTenantSchema();
+        int actorUserId = resolveCurrentUserId(schemaName);
+        List<SchemeDTO> schemes = schemeDbRepository.findAllSchemes(schemaName);
+        byte[] file = toSchemeCsv(schemes);
+        String objectKey = buildObjectKey(schemaName, "scheme", "csv");
+        String link = minioService.upload(file, objectKey);
+        saveReportRecord(schemaName, actorUserId, "SCHEME", "csv", objectKey, file.length, schemes.size());
+        return ReportLinkResponseDTO.builder().link(link).build();
+    }
+
+    @Override
+    public ReportLinkResponseDTO downloadSchemeMappingsReport() {
+        String schemaName = requireTenantSchema();
+        int actorUserId = resolveCurrentUserId(schemaName);
+        List<SchemeMappingDTO> mappings = schemeDbRepository.findAllSchemeMappings(schemaName);
+        byte[] file = toSchemeMappingCsv(mappings);
+        String objectKey = buildObjectKey(schemaName, "scheme_mapping", "csv");
+        String link = minioService.upload(file, objectKey);
+        saveReportRecord(schemaName, actorUserId, "SCHEME_MAPPING", "csv", objectKey, file.length, mappings.size());
+        return ReportLinkResponseDTO.builder().link(link).build();
+    }
+
+    private void saveReportRecord(
+            String schemaName,
+            int actorUserId,
+            String reportType,
+            String format,
+            String objectKey,
+            long fileSizeBytes,
+            int rowCount
+    ) {
+        String paramsJson = "{}";
+        String paramsHash = sha256Hex(paramsJson);
+        long dataVersion = schemeDbRepository.currentDataVersion(schemaName, reportType);
+        schemeDbRepository.insertReportRecord(
+                schemaName,
+                UUID.randomUUID().toString(),
+                reportType,
+                format,
+                paramsHash,
+                paramsJson,
+                dataVersion,
+                minioService.getBucket(),
+                objectKey,
+                rowCount,
+                fileSizeBytes,
+                actorUserId
+        );
+    }
+
+    private byte[] toSchemeCsv(List<SchemeDTO> rows) {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream();
+             OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8);
+             var csv = CSVFormat.DEFAULT.builder()
+                     .setHeader(
+                             "id", "uuid", "state_scheme_id", "centre_scheme_id", "scheme_name",
+                             "fhtc_count", "planned_fhtc", "house_hold_count", "latitude",
+                             "longitude", "channel", "work_status", "operating_status")
+                     .build().print(writer)) {
+            for (SchemeDTO row : rows) {
+                csv.printRecord(
+                        row.getId(),
+                        row.getUuid(),
+                        row.getStateSchemeId(),
+                        row.getCentreSchemeId(),
+                        row.getSchemeName(),
+                        row.getFhtcCount(),
+                        row.getPlannedFhtc(),
+                        row.getHouseHoldCount(),
+                        row.getLatitude(),
+                        row.getLongitude(),
+                        row.getChannel(),
+                        row.getWorkStatus(),
+                        row.getOperatingStatus()
+                );
+            }
+            csv.flush();
+            return output.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to generate scheme report", e);
+        }
+    }
+
+    private byte[] toSchemeMappingCsv(List<SchemeMappingDTO> rows) {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream();
+             OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8);
+             var csv = CSVFormat.DEFAULT.builder()
+                     .setHeader("id", "scheme_id", "state_scheme_id", "scheme_name", "village_lgd_code", "village_name", "sub_division_name")
+                     .build().print(writer)) {
+            for (SchemeMappingDTO row : rows) {
+                csv.printRecord(
+                        row.id(),
+                        row.schemeId(),
+                        row.stateSchemeId(),
+                        row.schemeName(),
+                        row.villageLgdCode(),
+                        row.villageName(),
+                        row.subDivisionName()
+                );
+            }
+            csv.flush();
+            return output.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to generate scheme-mapping report", e);
+        }
+    }
+
+    private String buildObjectKey(String schemaName, String reportType, String format) {
+        return "reports/" + schemaName + "/" + reportType + "/"
+                + OffsetDateTime.now(ZoneOffset.UTC).toEpochSecond() + "-" + UUID.randomUUID() + "." + format;
+    }
+
+    private String sha256Hex(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm unavailable", e);
+        }
     }
 
     private void validateFile(MultipartFile file) {

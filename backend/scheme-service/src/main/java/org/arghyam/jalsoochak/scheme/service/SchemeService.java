@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -53,4 +54,8 @@ public interface SchemeService {
     SchemeUploadResponseDTO uploadSchemes(MultipartFile file);
 
     SchemeUploadResponseDTO uploadSchemeMappings(MultipartFile file);
+
+    ReportLinkResponseDTO downloadSchemesReport();
+
+    ReportLinkResponseDTO downloadSchemeMappingsReport();
 }
