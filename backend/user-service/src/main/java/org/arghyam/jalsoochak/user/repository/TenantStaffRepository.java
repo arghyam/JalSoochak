@@ -256,6 +256,46 @@ public class TenantStaffRepository {
         return new StaffPage(items, total == null ? 0 : total);
     }
 
+    /**
+     * Returns the full filtered staff list with no pagination — used by the
+     * staff-report export. Reuses the same WHERE builder as
+     * {@link #listStaffPage} so the dataset matches what STATE_ADMIN sees in
+     * the UI for identical filters. Schemes are attached the same way.
+     *
+     * <p>Output is ordered by {@code u.id ASC} so identical filters yield
+     * deterministic, byte-identical exports — important for the report cache.
+     * Re-sorting by other columns is a viewer concern (Excel / CSV reader).
+     */
+    public List<TenantStaffResponseDTO> listAllStaffForExport(
+            String schemaName,
+            List<String> roles,
+            Integer status,
+            String name
+    ) {
+        validateSchemaName(schemaName);
+        SqlAndArgs where = buildWhere(roles, status, name);
+
+        String sql = String.format("""
+                SELECT u.id,
+                       u.uuid,
+                       u.title,
+                       u.email,
+                       u.phone_number,
+                       u.status,
+                       ut.c_name AS role
+                FROM %s.user_table u
+                LEFT JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type
+                WHERE u.deleted_at IS NULL
+                  %s
+                ORDER BY u.id ASC
+                """, schemaName, where.sql());
+
+        List<TenantStaffResponseDTO> rows = jdbcTemplate.query(sql, staffRowMapper(), where.args().toArray());
+        attachSchemes(schemaName, rows);
+        return rows;
+    }
+
     private record SqlAndArgs(String sql, List<Object> args) {}
 
     /**
