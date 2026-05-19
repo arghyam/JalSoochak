@@ -235,3 +235,31 @@ CREATE TABLE common_schema.tenant_config_master_table (
     deleted_at   TIMESTAMP,
     deleted_by   INTEGER
 );
+
+-- ── V30: per-tenant report cache + data-version tracking ──────────────────
+
+CREATE TABLE tenant_mp.reports_table (
+    id              UUID         PRIMARY KEY,
+    report_type     VARCHAR(64)  NOT NULL,
+    format          VARCHAR(8)   NOT NULL,
+    params_hash     CHAR(64)     NOT NULL,
+    params_json     JSONB        NOT NULL,
+    data_version    BIGINT       NOT NULL,
+    bucket          VARCHAR(128) NOT NULL,
+    object_key      VARCHAR(512) NOT NULL,
+    row_count       INTEGER,
+    file_size_bytes BIGINT,
+    generated_by    INTEGER      NOT NULL REFERENCES tenant_mp.user_table(id),
+    generated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    UNIQUE (report_type, format, params_hash, data_version)
+);
+
+CREATE TABLE tenant_mp.data_versions_table (
+    resource_type VARCHAR(64) PRIMARY KEY,
+    version       BIGINT      NOT NULL DEFAULT 1,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO tenant_mp.data_versions_table (resource_type, version)
+VALUES ('STAFF_USERS', 1)
+ON CONFLICT (resource_type) DO NOTHING;

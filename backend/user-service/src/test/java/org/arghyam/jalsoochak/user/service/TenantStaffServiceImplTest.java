@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
@@ -61,6 +62,7 @@ class TenantStaffServiceImplTest {
     @Mock private KeycloakProvider keycloakProvider;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock private StaffKeycloakService staffKeycloakService;
+    @Mock private DataVersionRepository dataVersionRepository;
 
     private TenantStaffServiceImpl service;
 
@@ -72,7 +74,8 @@ class TenantStaffServiceImplTest {
     void setUp() {
         service = new TenantStaffServiceImpl(
                 tenantStaffRepository, userTenantRepository, userCommonRepository,
-                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService);
+                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService,
+                dataVersionRepository);
         ReflectionTestUtils.setField(service, "allowedUpdateRoles",
                 List.of("SECTION_OFFICER", "DISTRICT_OFFICER"));
     }
