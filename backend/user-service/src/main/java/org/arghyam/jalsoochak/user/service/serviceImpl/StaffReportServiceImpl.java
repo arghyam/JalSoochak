@@ -153,14 +153,24 @@ public class StaffReportServiceImpl implements StaffReportService {
                     generatedBy,
                     null
             );
-            boolean inserted = reportsRepository.insertIfAbsent(schema, candidate, paramsJson);
-
-            ReportsRepository.ReportRecord winning = inserted
-                    ? reportsRepository.findByCacheKey(schema, definition.type(), format.key(), paramsHash, dataVersion)
-                            .orElse(candidate)
-                    : reportsRepository.findByCacheKey(schema, definition.type(), format.key(), paramsHash, dataVersion)
-                            .orElseThrow(() -> new IllegalStateException(
-                                    "Cache row vanished after ON CONFLICT DO NOTHING for hash=" + paramsHash));
+            boolean inserted;
+            ReportsRepository.ReportRecord winning;
+            try {
+                inserted = reportsRepository.insertIfAbsent(schema, candidate, paramsJson);
+                winning = inserted
+                        ? reportsRepository.findByCacheKey(schema, definition.type(), format.key(), paramsHash, dataVersion)
+                                .orElse(candidate)
+                        : reportsRepository.findByCacheKey(schema, definition.type(), format.key(), paramsHash, dataVersion)
+                                .orElseThrow(() -> new IllegalStateException(
+                                        "Cache row vanished after ON CONFLICT DO NOTHING for hash=" + paramsHash));
+            } catch (Exception dbEx) {
+                try {
+                    objectStorageService.delete(bucket, objectKey);
+                } catch (Exception delEx) {
+                    log.warn("Failed to delete orphaned report object after DB failure: bucket={} key={}", bucket, objectKey, delEx);
+                }
+                throw dbEx;
+            }
 
             log.info("Staff report generated: tenantCode={} format={} reportId={} rows={} bytes={} cached={}",
                     tenantCode, format.key(), winning.id(), rows.size(), size, !inserted);

@@ -90,6 +90,7 @@ public class StaffReportDefinition implements ReportDefinition<TenantStaffRespon
         }
         StringBuilder sb = new StringBuilder();
         for (SchemeSummaryDTO s : schemes) {
+            if (s == null) continue;
             String name = s.schemeName();
             if (name == null || name.isEmpty()) continue;
             if (sb.length() > 0) sb.append("; ");
@@ -121,7 +122,11 @@ public class StaffReportDefinition implements ReportDefinition<TenantStaffRespon
         }
         String normalized = status.trim();
         if (normalized.matches("^[0-9]+$")) {
-            return Integer.parseInt(normalized);
+            try {
+                return Integer.parseInt(normalized);
+            } catch (NumberFormatException e) {
+                throw new BadRequestException("Invalid status value: " + status);
+            }
         }
         return switch (normalized.toUpperCase(Locale.ROOT)) {
             case "ACTIVE" -> TenantUserStatus.ACTIVE.code;

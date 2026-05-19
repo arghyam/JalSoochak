@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.user.config.properties;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
@@ -51,5 +52,6 @@ public class StorageProperties {
     private String reportsBucket = "jalsoochak-reports";
 
     /** TTL (seconds) for presigned GET URLs returned to clients. */
+    @Positive
     private long presignedTtlSeconds = 3600L;
 }

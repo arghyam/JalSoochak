@@ -196,7 +196,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(StorageException.class)
     public ResponseEntity<ApiErrorResponseDTO> handleStorage(StorageException ex) {
-        log.error("Object storage failure: {}", ex.getMessage(), ex);
+        log.error("Object storage failure", ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Report storage is currently unavailable");
     }
 

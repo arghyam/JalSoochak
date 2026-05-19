@@ -254,6 +254,9 @@ CREATE TABLE tenant_mp.reports_table (
     UNIQUE (report_type, format, params_hash, data_version)
 );
 
+CREATE INDEX idx_mp_reports_type_gen_at
+    ON tenant_mp.reports_table (report_type, generated_at DESC);
+
 CREATE TABLE tenant_mp.data_versions_table (
     resource_type VARCHAR(64) PRIMARY KEY,
     version       BIGINT      NOT NULL DEFAULT 1,

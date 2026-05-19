@@ -41,8 +41,8 @@ public class StaffReportController {
             Authentication authentication
     ) {
         ReportFormat fmt = ReportFormat.fromString(format);
-        log.info("POST /api/v1/tenant/user/staff/reports tenantCode={} format={} caller={}",
-                tenantCode, fmt.key(), authentication != null ? authentication.getName() : "anonymous");
+        log.info("POST /api/v1/tenant/user/staff/reports tenantCode={} format={}", tenantCode, fmt.key());
+        log.debug("POST /api/v1/tenant/user/staff/reports caller={}", authentication != null ? authentication.getName() : "anonymous");
         ReportResponseDTO response = staffReportService.generate(tenantCode, fmt, request, authentication);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Staff report ready", response));
     }

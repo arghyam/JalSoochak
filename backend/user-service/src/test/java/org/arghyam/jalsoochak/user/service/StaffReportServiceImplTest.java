@@ -39,6 +39,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -198,6 +199,28 @@ class StaffReportServiceImplTest {
                 any(), anyLong(), eq("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
         verify(reportsRepository, times(2)).findByCacheKey(eq(SCHEMA), eq("TENANT_STAFF"), eq("XLSX"),
                 anyString(), eq(5L));
+    }
+
+    @Test
+    @DisplayName("DB persistence failure after upload triggers object deletion to avoid orphans")
+    void orphanedUploadDeletedOnDbFailure() {
+        when(dataVersionRepository.getCurrent(SCHEMA, ResourceType.STAFF_USERS)).thenReturn(3L);
+        when(reportsRepository.findByCacheKey(eq(SCHEMA), eq("TENANT_STAFF"), eq("CSV"), anyString(), eq(3L)))
+                .thenReturn(Optional.empty());
+        when(userTenantRepository.findUserByKeycloakUuid(SCHEMA, KC_UUID))
+                .thenReturn(Optional.of(callingUser));
+        when(tenantStaffRepository.listAllStaffForExport(eq(SCHEMA), any(), any(), any()))
+                .thenReturn(List.of());
+        when(reportsRepository.insertIfAbsent(eq(SCHEMA), any(), anyString()))
+                .thenThrow(new RuntimeException("DB down"));
+
+        assertThatThrownBy(() -> service.generate(TENANT_CODE, ReportFormat.CSV,
+                new StaffReportRequestDTO(null, null, null), authentication()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("DB down");
+
+        verify(objectStorageService).upload(eq("staff-reports"), anyString(), any(), anyLong(), anyString());
+        verify(objectStorageService).delete(eq("staff-reports"), anyString());
     }
 
     @Test

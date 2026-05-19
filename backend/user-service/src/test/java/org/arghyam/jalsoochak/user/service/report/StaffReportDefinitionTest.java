@@ -99,6 +99,28 @@ class StaffReportDefinitionTest {
     }
 
     @Test
+    @DisplayName("schemes column skips null SchemeSummaryDTO elements without NPE")
+    void schemesColumnSkipsNullElement() {
+        java.util.List<SchemeSummaryDTO> schemes = new java.util.ArrayList<>();
+        schemes.add(new SchemeSummaryDTO(1L, "Valid", null, null));
+        schemes.add(null);
+        schemes.add(new SchemeSummaryDTO(3L, "Also Valid", null, null));
+        TenantStaffResponseDTO row = TenantStaffResponseDTO.builder().schemes(schemes).build();
+        Object cell = definition.schema().columns().get(7).extractor().apply(row);
+        assertThat(cell).isEqualTo("Valid; Also Valid");
+    }
+
+    @Test
+    @DisplayName("parseStatus rejects numeric value exceeding Integer.MAX_VALUE with BadRequestException")
+    void parseStatusRejectsOverflowNumeric() {
+        String overflow = String.valueOf((long) Integer.MAX_VALUE + 1); // "2147483648"
+        assertThatThrownBy(() -> definition.fetch("tenant_mp",
+                new StaffReportRequestDTO(null, overflow, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("Invalid status value");
+    }
+
+    @Test
     @DisplayName("normalize lower-cases / dedupes / sorts roles and trims status & name")
     void normalizeRoles() {
         StaffReportRequestDTO in = new StaffReportRequestDTO(

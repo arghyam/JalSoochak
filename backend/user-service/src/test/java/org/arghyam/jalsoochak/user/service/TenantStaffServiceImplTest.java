@@ -349,6 +349,7 @@ class TenantStaffServiceImplTest {
             verify(userCommonRepository).findTenantIdByStateCode("mp");
             verify(userTenantRepository).updateUserRole("tenant_mp", 10L, 4L);
             verify(tenantStaffRepository).findStaffById("tenant_mp", 10L);
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -474,6 +475,7 @@ class TenantStaffServiceImplTest {
             verify(userTenantRepository).deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull());
             verify(userAnalyticsEventPublisher).publishStaffUserUpdatedAfterCommit(
                     eq(10L), eq(1), anyInt(), anyString(), anyString(), anyInt());
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -559,6 +561,7 @@ class TenantStaffServiceImplTest {
             service.deactivateStaff(10L, "mp", auth);
 
             verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
+            verify(dataVersionRepository, never()).bump(any(), any());
         }
     }
 
@@ -603,6 +606,7 @@ class TenantStaffServiceImplTest {
             verify(staffKeycloakService, never()).revokeKeycloakAccount(any(), any(), any());
             verify(userAnalyticsEventPublisher).publishStaffUserUpdatedAfterCommit(
                     eq(10L), eq(1), anyInt(), anyString(), anyString(), eq(TenantUserStatus.ACTIVE.code));
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -683,6 +687,7 @@ class TenantStaffServiceImplTest {
 
             verify(userAnalyticsEventPublisher, never()).publishStaffUserUpdatedAfterCommit(
                     anyLong(), anyInt(), anyInt(), anyString(), anyString(), anyInt());
+            verify(dataVersionRepository, never()).bump(any(), any());
         }
     }
 }

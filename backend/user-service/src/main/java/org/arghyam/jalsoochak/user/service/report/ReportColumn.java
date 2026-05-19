@@ -10,4 +10,9 @@ import java.util.function.Function;
  * @param extractor function applied to each row to produce the cell value;
  *                  the writer is responsible for null-safe stringification
  */
-public record ReportColumn<T>(String header, Function<T, ?> extractor) {}
+public record ReportColumn<T>(String header, Function<T, ?> extractor) {
+    public ReportColumn {
+        if (header == null) throw new NullPointerException("header must not be null");
+        if (extractor == null) throw new NullPointerException("extractor must not be null");
+    }
+}

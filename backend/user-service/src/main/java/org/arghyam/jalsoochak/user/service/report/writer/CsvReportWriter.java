@@ -29,17 +29,17 @@ public class CsvReportWriter implements ReportWriter {
                 .setHeader(schema.headers().toArray(new String[0]))
                 .build();
         BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8));
-        try (CSVPrinter printer = new CSVPrinter(writer, fmt)) {
-            List<ReportColumn<T>> columns = schema.columns();
-            int width = columns.size();
-            for (T row : rows) {
-                Object[] cells = new Object[width];
-                for (int i = 0; i < width; i++) {
-                    Object v = columns.get(i).extractor().apply(row);
-                    cells[i] = v == null ? "" : v.toString();
-                }
-                printer.printRecord(cells);
+        CSVPrinter printer = new CSVPrinter(writer, fmt);
+        List<ReportColumn<T>> columns = schema.columns();
+        int width = columns.size();
+        for (T row : rows) {
+            Object[] cells = new Object[width];
+            for (int i = 0; i < width; i++) {
+                Object v = columns.get(i).extractor().apply(row);
+                cells[i] = v == null ? "" : v.toString();
             }
+            printer.printRecord(cells);
         }
+        printer.flush();
     }
 }

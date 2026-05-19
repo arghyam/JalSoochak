@@ -41,7 +41,7 @@ public class StorageConfig {
                 .region(Region.of(props.getRegion()));
 
         if (hasCustomEndpoint(props)) {
-            log.info("[Storage] Using custom endpoint: {} (path-style enabled)", props.getEndpoint());
+            log.info("[Storage] Using custom endpoint: {} (path-style enabled)", sanitizeEndpoint(props.getEndpoint()));
             builder.endpointOverride(URI.create(props.getEndpoint()))
                     .serviceConfiguration(S3Configuration.builder()
                             .pathStyleAccessEnabled(true)
@@ -127,5 +127,17 @@ public class StorageConfig {
 
     private static boolean hasCustomEndpoint(StorageProperties props) {
         return props.getEndpoint() != null && !props.getEndpoint().isBlank();
+    }
+
+    private static String sanitizeEndpoint(String endpoint) {
+        try {
+            URI uri = URI.create(endpoint);
+            String host = uri.getHost();
+            int port = uri.getPort();
+            String base = uri.getScheme() + "://" + (host != null ? host : "");
+            return port > 0 ? base + ":" + port : base;
+        } catch (Exception e) {
+            return "<unparseable-endpoint>";
+        }
     }
 }

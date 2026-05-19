@@ -64,7 +64,7 @@ public class UserSecurityEvaluator {
             String callerUuid = SecurityUtils.getKeycloakId(authentication);
             Optional<AdminUserRow> caller = userCommonRepository.findAdminUserByUuid(callerUuid);
             if (caller.isEmpty() || caller.get().status() != AdminUserStatus.ACTIVE) {
-                log.warn("Request to user {} denied: caller '{}' is missing or inactive", userId, callerUuid);
+                log.warn("Request to user {} denied: caller '{}' is missing or inactive", userId, maskId(callerUuid));
                 return false;
             }
 
@@ -132,6 +132,11 @@ public class UserSecurityEvaluator {
      * {@code SpelEvaluationException}, bypassing domain {@code @ExceptionHandler}s
      * and surfacing as 500 instead of 403.
      */
+    private static String maskId(String id) {
+        if (id == null || id.length() <= 8) return "****";
+        return id.substring(0, 4) + "****" + id.substring(id.length() - 4);
+    }
+
     public boolean canAccessTenant(String tenantCode, Authentication authentication) {
         if (tenantCode == null || tenantCode.isBlank()) {
             log.warn("Tenant access denied: tenantCode is null or blank");
@@ -141,7 +146,7 @@ public class UserSecurityEvaluator {
             String callerUuid = SecurityUtils.getKeycloakId(authentication);
             Optional<AdminUserRow> caller = userCommonRepository.findAdminUserByUuid(callerUuid);
             if (caller.isEmpty() || caller.get().status() != AdminUserStatus.ACTIVE) {
-                log.warn("Request to tenant '{}' denied: caller '{}' is missing or inactive", tenantCode, callerUuid);
+                log.warn("Request to tenant '{}' denied: caller '{}' is missing or inactive", tenantCode, maskId(callerUuid));
                 return false;
             }
 
