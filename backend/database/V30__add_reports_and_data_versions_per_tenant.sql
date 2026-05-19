@@ -268,23 +268,59 @@ BEGIN
         )', schema_name);
 
     EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %1$I.pumps_scheme_mapping_table (
+            id              SERIAL          PRIMARY KEY,
+            uuid            VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+            pump_model      VARCHAR(255),
+            efficiency      FLOAT,
+            head            FLOAT,
+            discharge_rate  FLOAT,
+            scheme_id       INTEGER         NOT NULL,
+            status          INTEGER         NOT NULL,
+            created_at      TIMESTAMP       DEFAULT NOW(),
+            updated_at      TIMESTAMP       DEFAULT NOW(),
+            created_by      INTEGER,
+            updated_by      INTEGER,
+            deleted_at      TIMESTAMP,
+            deleted_by      INTEGER,
+
+            CONSTRAINT fk_pumps_scheme
+                FOREIGN KEY (scheme_id)
+                REFERENCES %1$I.scheme_master_table(id),
+            CONSTRAINT fk_pumps_created_by
+                FOREIGN KEY (created_by)
+                REFERENCES common_schema.tenant_admin_user_master_table(id),
+            CONSTRAINT fk_pumps_updated_by
+                FOREIGN KEY (updated_by)
+                REFERENCES common_schema.tenant_admin_user_master_table(id),
+            CONSTRAINT fk_pumps_deleted_by
+                FOREIGN KEY (deleted_by)
+                REFERENCES common_schema.tenant_admin_user_master_table(id)
+        )', schema_name);
+
+    EXECUTE format('
         CREATE TABLE IF NOT EXISTS %1$I.flow_reading_table (
             id                          SERIAL          PRIMARY KEY,
             uuid                        VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
             scheme_id                   INTEGER         NOT NULL,
-            reading_at                  TIMESTAMP       NOT NULL,
+            observation_time            TIMESTAMP       NOT NULL,
             reading_date                DATE            NOT NULL,
             extracted_reading           NUMERIC,
             confirmed_reading           NUMERIC,
             correlation_id              VARCHAR(255)    NOT NULL,
             quantity                    NUMERIC         NOT NULL DEFAULT 0,
-            channel                     INTEGER,
+            quality_flag                VARCHAR(20)     NOT NULL DEFAULT ''provisional'',
+            status                      VARCHAR(20)     NOT NULL DEFAULT ''active'',
+            payload_json                JSONB,
+            channel                     VARCHAR(50),
+            reported_via                VARCHAR(50),
+            duration                    INTEGER,
+            image_url                   TEXT            DEFAULT '''',
             ai_confidence_percentage    NUMERIC,
             latitude                    DOUBLE PRECISION,
             longitude                   DOUBLE PRECISION,
             meter_change_reason         TEXT,
             issue_report_reason         TEXT,
-            image_url                   TEXT            DEFAULT '''',
             created_by                  INTEGER         NOT NULL,
             created_at                  TIMESTAMP       NOT NULL DEFAULT NOW(),
             updated_by                  INTEGER         NOT NULL,
@@ -300,7 +336,10 @@ BEGIN
                 REFERENCES %1$I.user_table(id),
             CONSTRAINT fk_flow_updated_by
                 FOREIGN KEY (updated_by)
-                REFERENCES %1$I.user_table(id)
+                REFERENCES %1$I.user_table(id),
+            CONSTRAINT fk_flow_deleted_by
+                FOREIGN KEY (deleted_by)
+                REFERENCES common_schema.tenant_admin_user_master_table(id)
         )', schema_name);
 
     EXECUTE format('
@@ -347,26 +386,39 @@ BEGIN
 
     EXECUTE format('
         CREATE TABLE IF NOT EXISTS %1$I.anomaly_table (
-            id              SERIAL          PRIMARY KEY,
-            uuid            VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
-            user_id         INTEGER,
-            scheme_id       INTEGER,
-            type            INTEGER         NOT NULL,
-            detail          TEXT            NOT NULL,
-            created_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
-            status          INTEGER         NOT NULL,
-            remark          TEXT,
-            resolved_by     INTEGER,
-            resolved_at     TIMESTAMP,
-            deleted_at      TIMESTAMP,
-            deleted_by      INTEGER,
+            id                          SERIAL          PRIMARY KEY,
+            uuid                        VARCHAR(36)     NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+            user_id                     INTEGER         NOT NULL,
+            scheme_id                   INTEGER         NOT NULL,
+            type                        INTEGER         NOT NULL,
+            reason                      TEXT,
+            ai_reading                  NUMERIC,
+            ai_confidence_percentage    NUMERIC,
+            overridden_reading          NUMERIC,
+            retries                     INTEGER         DEFAULT 0,
+            previous_reading            NUMERIC,
+            previous_reading_date       TIMESTAMP,
+            consecutive_days_overridden INTEGER         DEFAULT 0,
+            remarks                     TEXT,
+            resolved_by                 INTEGER,
+            resolved_at                 TIMESTAMP,
+            created_at                  TIMESTAMP       NOT NULL DEFAULT NOW(),
+            status                      INTEGER         NOT NULL,
+            deleted_at                  TIMESTAMP,
+            deleted_by                  INTEGER,
 
             CONSTRAINT fk_anomaly_user
                 FOREIGN KEY (user_id)
                 REFERENCES %1$I.user_table(id),
             CONSTRAINT fk_anomaly_scheme
                 FOREIGN KEY (scheme_id)
-                REFERENCES %1$I.scheme_master_table(id)
+                REFERENCES %1$I.scheme_master_table(id),
+            CONSTRAINT fk_anomaly_resolved_by
+                FOREIGN KEY (resolved_by)
+                REFERENCES %1$I.user_table(id),
+            CONSTRAINT fk_anomaly_deleted_by
+                FOREIGN KEY (deleted_by)
+                REFERENCES common_schema.tenant_admin_user_master_table(id)
         )', schema_name);
 
     EXECUTE format('
@@ -465,6 +517,9 @@ BEGIN
     EXECUTE format('CREATE INDEX idx_%1$s_scheme_state_id    ON %1$I.scheme_master_table(state_scheme_id)',   schema_name);
     EXECUTE format('CREATE INDEX idx_%1$s_scheme_centre_id   ON %1$I.scheme_master_table(centre_scheme_id)',  schema_name);
     EXECUTE format('CREATE INDEX idx_%1$s_scheme_channel     ON %1$I.scheme_master_table(channel)',           schema_name);
+
+    -- pumps_scheme_mapping_table
+    EXECUTE format('CREATE INDEX idx_%1$s_psm_scheme         ON %1$I.pumps_scheme_mapping_table(scheme_id)', schema_name);
 
     -- scheme_lgd_mapping_table
     EXECUTE format('CREATE INDEX idx_%1$s_slm_scheme         ON %1$I.scheme_lgd_mapping_table(scheme_id)',     schema_name);
