@@ -622,6 +622,37 @@ class GlobalExceptionHandlerTest {
         }
     }
 
+    // ── StorageException ─────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("handleStorage")
+    class HandleStorage {
+
+        @Test
+        @DisplayName("returns 500 with a masked, user-safe message")
+        void returns500() {
+            StorageException ex = new StorageException("MinIO unreachable: endpoint=...");
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleStorage(ex);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().getMessage())
+                    .isEqualTo("Report storage is currently unavailable");
+        }
+
+        @Test
+        @DisplayName("does not leak internal details or wrapped causes to the client")
+        void doesNotLeakCause() {
+            StorageException ex = new StorageException("upload failed for key: secret-key/x",
+                    new IllegalStateException("AKIA-redacted"));
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleStorage(ex);
+
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().getMessage()).doesNotContain("AKIA");
+            assertThat(response.getBody().getMessage()).doesNotContain("secret-key");
+        }
+    }
+
     // ── Unexpected Exception ──────────────────────────────────────────────────
 
     @Nested

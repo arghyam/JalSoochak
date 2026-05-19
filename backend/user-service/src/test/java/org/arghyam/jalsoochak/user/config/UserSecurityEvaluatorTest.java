@@ -340,4 +340,125 @@ class UserSecurityEvaluatorTest {
             assertFalse(result);
         }
     }
+
+    // ── canAccessTenant ──────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("canAccessTenant")
+    class CanAccessTenant {
+
+        @Test
+        @DisplayName("returns false for null tenantCode without DB lookup")
+        void nullTenantCode_returnsFalse() {
+            assertFalse(evaluator.canAccessTenant(null, stateAdminAuth("MP")));
+            verify(userCommonRepository, never()).findAdminUserByUuid(anyString());
+        }
+
+        @Test
+        @DisplayName("returns false for blank tenantCode without DB lookup")
+        void blankTenantCode_returnsFalse() {
+            assertFalse(evaluator.canAccessTenant("   ", stateAdminAuth("MP")));
+            verify(userCommonRepository, never()).findAdminUserByUuid(anyString());
+        }
+
+        @Test
+        @DisplayName("returns false when caller is not found in DB")
+        void callerMissing_returnsFalse() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.empty());
+            assertFalse(evaluator.canAccessTenant("MP", stateAdminAuth("MP")));
+        }
+
+        @Test
+        @DisplayName("returns false when caller is inactive (stale/orphaned token)")
+        void inactiveCaller_returnsFalse() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid"))
+                    .thenReturn(Optional.of(inactiveAdminRow("sa-uuid")));
+            assertFalse(evaluator.canAccessTenant("MP", stateAdminAuth("MP")));
+        }
+
+        @Test
+        @DisplayName("SUPER_USER bypasses tenant matching entirely")
+        void superUser_bypassesTenant() {
+            when(userCommonRepository.findAdminUserByUuid("su-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("su-uuid")));
+            assertTrue(evaluator.canAccessTenant("TR", superUserAuth()));
+            verify(userCommonRepository, never()).findTenantStatusByTenantId(anyInt());
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN bypasses tenant matching entirely")
+        void superStateAdmin_bypassesTenant() {
+            when(userCommonRepository.findAdminUserByUuid("ssa-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("ssa-uuid")));
+            assertTrue(evaluator.canAccessTenant("TR", superStateAdminAuth("MP")));
+            verify(userCommonRepository, never()).findTenantStatusByTenantId(anyInt());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN with matching tenant_state_code and ACTIVE tenant → true")
+        void stateAdmin_matchingTenant_returnsTrue() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3));
+
+            assertTrue(evaluator.canAccessTenant("MP", stateAdminAuth("MP")));
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN tenant matching is case-insensitive")
+        void stateAdmin_caseInsensitiveMatch() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3));
+
+            assertTrue(evaluator.canAccessTenant("mp", stateAdminAuth("MP")));
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN requesting a different tenant → false")
+        void stateAdmin_crossTenant_returnsFalse() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+
+            assertFalse(evaluator.canAccessTenant("TR", stateAdminAuth("MP")));
+            verify(userCommonRepository, never()).findTenantStatusByTenantId(anyInt());
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN without tenant_state_code claim → false")
+        void stateAdmin_missingTenantClaim_returnsFalse() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+
+            assertFalse(evaluator.canAccessTenant("MP", stateAdminAuthNoTenant()));
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN with tenant lifecycle that denies access → false")
+        void stateAdmin_tenantLifecycleDenies_returnsFalse() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.empty());
+
+            assertFalse(evaluator.canAccessTenant("MP", stateAdminAuth("MP")));
+        }
+
+        @Test
+        @DisplayName("caller with neither admin role → false")
+        void noRole_returnsFalse() {
+            when(userCommonRepository.findAdminUserByUuid("anon-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("anon-uuid")));
+
+            assertFalse(evaluator.canAccessTenant("MP", noRoleAuth()));
+        }
+
+        @Test
+        @DisplayName("returns false (not 500) when an unexpected RuntimeException is thrown")
+        void returnsFalseOnUnexpectedException() {
+            when(userCommonRepository.findAdminUserByUuid(anyString()))
+                    .thenThrow(new QueryTimeoutException("db slow"));
+
+            assertFalse(evaluator.canAccessTenant("MP", stateAdminAuth("MP")));
+        }
+    }
 }

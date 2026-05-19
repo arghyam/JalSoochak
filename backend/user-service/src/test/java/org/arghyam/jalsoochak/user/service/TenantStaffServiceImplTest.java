@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
@@ -61,6 +62,7 @@ class TenantStaffServiceImplTest {
     @Mock private KeycloakProvider keycloakProvider;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock private StaffKeycloakService staffKeycloakService;
+    @Mock private DataVersionRepository dataVersionRepository;
 
     private TenantStaffServiceImpl service;
 
@@ -72,7 +74,8 @@ class TenantStaffServiceImplTest {
     void setUp() {
         service = new TenantStaffServiceImpl(
                 tenantStaffRepository, userTenantRepository, userCommonRepository,
-                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService);
+                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService,
+                dataVersionRepository);
         ReflectionTestUtils.setField(service, "allowedUpdateRoles",
                 List.of("SECTION_OFFICER", "DISTRICT_OFFICER"));
     }
@@ -346,6 +349,7 @@ class TenantStaffServiceImplTest {
             verify(userCommonRepository).findTenantIdByStateCode("mp");
             verify(userTenantRepository).updateUserRole("tenant_mp", 10L, 4L);
             verify(tenantStaffRepository).findStaffById("tenant_mp", 10L);
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -471,6 +475,7 @@ class TenantStaffServiceImplTest {
             verify(userTenantRepository).deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull());
             verify(userAnalyticsEventPublisher).publishStaffUserUpdatedAfterCommit(
                     eq(10L), eq(1), anyInt(), anyString(), anyString(), anyInt());
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -556,6 +561,7 @@ class TenantStaffServiceImplTest {
             service.deactivateStaff(10L, "mp", auth);
 
             verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
+            verify(dataVersionRepository, never()).bump(any(), any());
         }
     }
 
@@ -600,6 +606,7 @@ class TenantStaffServiceImplTest {
             verify(staffKeycloakService, never()).revokeKeycloakAccount(any(), any(), any());
             verify(userAnalyticsEventPublisher).publishStaffUserUpdatedAfterCommit(
                     eq(10L), eq(1), anyInt(), anyString(), anyString(), eq(TenantUserStatus.ACTIVE.code));
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -680,6 +687,7 @@ class TenantStaffServiceImplTest {
 
             verify(userAnalyticsEventPublisher, never()).publishStaffUserUpdatedAfterCommit(
                     anyLong(), anyInt(), anyInt(), anyString(), anyString(), anyInt());
+            verify(dataVersionRepository, never()).bump(any(), any());
         }
     }
 }
