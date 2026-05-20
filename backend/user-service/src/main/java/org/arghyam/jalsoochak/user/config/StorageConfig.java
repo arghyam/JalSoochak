@@ -51,8 +51,11 @@ public class StorageConfig {
     }
 
     /**
-     * S3Presigner bean — generates short-lived URLs for object downloads.
-     * Configured with the same credentials/region/endpoint as {@link #s3Client}.
+     * S3Presigner bean — always signs against the internal {@code storage.endpoint}.
+     * MinIO validates the signature using the Host it receives from the reverse proxy
+     * (configured via {@code proxy_set_header Host $proxy_host}), which matches the
+     * internal host baked into the signature. The public-facing URL rewrite (origin
+     * swap + path prefix) is applied post-sign in {@link S3CompatibleStorageService}.
      */
     @Bean
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
@@ -64,6 +67,7 @@ public class StorageConfig {
                 .region(Region.of(props.getRegion()));
 
         if (hasCustomEndpoint(props)) {
+            log.info("[Storage] Presigner using internal endpoint: {}", sanitizeEndpoint(props.getEndpoint()));
             builder.endpointOverride(URI.create(props.getEndpoint()))
                     .serviceConfiguration(S3Configuration.builder()
                             .pathStyleAccessEnabled(true)
@@ -76,10 +80,11 @@ public class StorageConfig {
     @ConditionalOnProperty(name = "storage.enabled", havingValue = "true")
     public ObjectStorageService s3CompatibleStorageService(S3Client s3Client, S3Presigner s3Presigner,
                                                            StorageProperties props) {
-        log.info("[Storage] Activating S3-compatible storage [bucket={}, reportsBucket={}, endpoint={}]",
+        log.info("[Storage] Activating S3-compatible storage [bucket={}, reportsBucket={}, endpoint={}, presignedBaseUrl={}]",
                 props.getBucket(), props.getReportsBucket(),
-                props.getEndpoint() != null ? props.getEndpoint() : "AWS default");
-        return new S3CompatibleStorageService(s3Client, s3Presigner);
+                props.getEndpoint() != null ? props.getEndpoint() : "AWS default",
+                props.getPresignedBaseUrl() != null ? props.getPresignedBaseUrl() : "none (using endpoint)");
+        return new S3CompatibleStorageService(s3Client, s3Presigner, props.getPresignedBaseUrl());
     }
 
     /**

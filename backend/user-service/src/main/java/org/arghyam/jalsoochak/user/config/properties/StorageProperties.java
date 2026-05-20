@@ -51,6 +51,16 @@ public class StorageProperties {
     @NotBlank
     private String reportsBucket = "jalsoochak-reports";
 
+    /**
+     * Public base URL for presigned GET URLs returned to clients.
+     * Use this when MinIO/S3 is behind a reverse proxy or NAT and the internal
+     * {@code storage.endpoint} differs from the externally reachable address.
+     * When set, the scheme+host+port of the SDK-generated URL is replaced with
+     * this value before returning it to callers. Leave blank to use the URL
+     * exactly as produced by the SDK (i.e. based on {@code storage.endpoint}).
+     */
+    private String presignedBaseUrl;
+
     /** TTL (seconds) for presigned GET URLs returned to clients. */
     @Positive
     private long presignedTtlSeconds = 3600L;
