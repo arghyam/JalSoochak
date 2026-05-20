@@ -47,6 +47,9 @@ class BfmReadingServiceAnomalyDedupTest {
     @Mock
     private TenantConfigRepository tenantConfigRepository;
 
+    @Mock
+    private GlificOperatorContextService glificOperatorContextService;
+
     private BfmReadingService service;
 
     @BeforeEach
@@ -56,7 +59,8 @@ class BfmReadingServiceAnomalyDedupTest {
                 flowVisionService,
                 telemetryEventPublisher,
                 tenantConfigRepository,
-                new ObjectMapper()
+                new ObjectMapper(),
+                glificOperatorContextService
         );
     }
 
