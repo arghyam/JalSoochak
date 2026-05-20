@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
@@ -61,6 +62,7 @@ class TenantStaffServiceImplTest {
     @Mock private KeycloakProvider keycloakProvider;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock private StaffKeycloakService staffKeycloakService;
+    @Mock private DataVersionRepository dataVersionRepository;
 
     private TenantStaffServiceImpl service;
 
@@ -72,7 +74,8 @@ class TenantStaffServiceImplTest {
     void setUp() {
         service = new TenantStaffServiceImpl(
                 tenantStaffRepository, userTenantRepository, userCommonRepository,
-                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService);
+                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService,
+                dataVersionRepository);
         ReflectionTestUtils.setField(service, "allowedUpdateRoles",
                 List.of("SECTION_OFFICER", "DISTRICT_OFFICER"));
     }
@@ -346,6 +349,7 @@ class TenantStaffServiceImplTest {
             verify(userCommonRepository).findTenantIdByStateCode("mp");
             verify(userTenantRepository).updateUserRole("tenant_mp", 10L, 4L);
             verify(tenantStaffRepository).findStaffById("tenant_mp", 10L);
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -471,6 +475,7 @@ class TenantStaffServiceImplTest {
             verify(userTenantRepository).deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull());
             verify(userAnalyticsEventPublisher).publishStaffUserUpdatedAfterCommit(
                     eq(10L), eq(1), anyInt(), anyString(), anyString(), anyInt());
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -556,6 +561,133 @@ class TenantStaffServiceImplTest {
             service.deactivateStaff(10L, "mp", auth);
 
             verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
+            verify(dataVersionRepository, never()).bump(any(), any());
+        }
+    }
+
+    // --- activateStaff ---
+
+    @Nested
+    @DisplayName("activateStaff")
+    class ActivateStaff {
+
+        private static final TenantUserRecord INACTIVE_SECTION_OFFICER = new TenantUserRecord(
+                10L, 1, "919876543210", "officer@test.com", 3L, "SECTION_OFFICER",
+                "Officer", "kc-uuid", TenantUserStatus.INACTIVE.code, null);
+
+        private Authentication stateAdminAuth(String tenantCode) {
+            Authentication auth = mock(Authentication.class);
+            when(auth.getAuthorities()).thenAnswer(inv -> List.of(
+                    new SimpleGrantedAuthority("TENANT_" + tenantCode.toUpperCase()),
+                    new SimpleGrantedAuthority("ROLE_STATE_ADMIN")));
+            return auth;
+        }
+
+        private Authentication superUserAuth() {
+            Authentication auth = mock(Authentication.class);
+            when(auth.getAuthorities()).thenAnswer(inv ->
+                    List.of(new SimpleGrantedAuthority("ROLE_SUPER_USER")));
+            return auth;
+        }
+
+        @Test
+        @DisplayName("successfully activates inactive staff user without touching Keycloak")
+        void activatesStaffSuccessfully() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(INACTIVE_SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.activateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(1);
+
+            service.activateStaff(10L, "mp", auth);
+
+            verify(userTenantRepository).activateStaffUser(eq("tenant_mp"), eq(10L), isNull());
+            verify(staffKeycloakService, never()).revokeKeycloakAccount(any(), any(), any());
+            verify(userAnalyticsEventPublisher).publishStaffUserUpdatedAfterCommit(
+                    eq(10L), eq(1), anyInt(), anyString(), anyString(), eq(TenantUserStatus.ACTIVE.code));
+            verify(dataVersionRepository).bump("tenant_mp", org.arghyam.jalsoochak.user.enums.ResourceType.STAFF_USERS);
+        }
+
+        @Test
+        @DisplayName("throws ForbiddenAccessException when state admin targets a different tenant")
+        void throwsForbiddenWhenStateAdminActivatesOtherTenant() {
+            Authentication auth = stateAdminAuth("TR");
+
+            assertThatThrownBy(() -> service.activateStaff(10L, "mp", auth))
+                    .isInstanceOf(ForbiddenAccessException.class)
+                    .hasMessageContaining("own tenant");
+        }
+
+        @Test
+        @DisplayName("SUPER_USER can activate staff across tenants without tenant check")
+        void superUserCanActivateAcrossTenants() {
+            Authentication auth = superUserAuth();
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(INACTIVE_SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.activateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(1);
+
+            service.activateStaff(10L, "mp", auth);
+
+            verify(userTenantRepository).activateStaffUser(eq("tenant_mp"), eq(10L), isNull());
+        }
+
+        @Test
+        @DisplayName("throws ResourceNotFoundException when user does not exist")
+        void throwsNotFoundWhenUserNotFound() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 99L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.activateStaff(99L, "mp", auth))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Staff user not found");
+        }
+
+        @Test
+        @DisplayName("throws BadRequestException when user is already active")
+        void throwsBadRequestWhenUserAlreadyActive() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(SECTION_OFFICER));
+
+            assertThatThrownBy(() -> service.activateStaff(10L, "mp", auth))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("already active");
+        }
+
+        @Test
+        @DisplayName("skips analytics event when tenantId cannot be resolved")
+        void skipsAnalyticsWhenTenantIdNotFound() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(INACTIVE_SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.empty());
+            when(userTenantRepository.activateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(1);
+
+            service.activateStaff(10L, "mp", auth);
+
+            verify(userAnalyticsEventPublisher, never()).publishStaffUserUpdatedAfterCommit(
+                    anyLong(), anyInt(), anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("logs and continues when activateStaffUser returns 0 (concurrent activation)")
+        void logsAndContinuesOnConcurrentActivation() {
+            Authentication auth = stateAdminAuth("MP");
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(INACTIVE_SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.activateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(0);
+
+            service.activateStaff(10L, "mp", auth);
+
+            verify(userAnalyticsEventPublisher, never()).publishStaffUserUpdatedAfterCommit(
+                    anyLong(), anyInt(), anyInt(), anyString(), anyString(), anyInt());
+            verify(dataVersionRepository, never()).bump(any(), any());
         }
     }
 }

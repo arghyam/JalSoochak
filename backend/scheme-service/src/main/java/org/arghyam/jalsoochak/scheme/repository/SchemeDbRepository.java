@@ -97,6 +97,121 @@ public class SchemeDbRepository {
                 .build());
     }
 
+    public List<SchemeMappingDTO> findAllSchemeMappings(String schemaName) {
+        validateSchemaName(schemaName);
+        boolean hasDept = hasDepartmentTables(schemaName);
+        String sql = hasDept
+                ? String.format("""
+                SELECT slm.id,
+                       sm.id AS scheme_id,
+                       sm.state_scheme_id,
+                       sm.scheme_name,
+                       lgd.lgd_code AS village_lgd_code,
+                       lgd.title AS village_name,
+                       dept.title AS sub_division_name
+                FROM %s.scheme_lgd_mapping_table slm
+                JOIN %s.scheme_master_table sm
+                  ON sm.id = slm.scheme_id AND sm.deleted_at IS NULL
+                JOIN %s.lgd_location_master_table lgd
+                  ON lgd.id = slm.parent_lgd_id AND lgd.deleted_at IS NULL
+                LEFT JOIN %s.scheme_department_mapping_table sdm
+                  ON sdm.scheme_id = sm.id AND sdm.deleted_at IS NULL
+                LEFT JOIN %s.department_location_master_table dept
+                  ON dept.id = sdm.parent_department_id AND dept.deleted_at IS NULL
+                WHERE slm.deleted_at IS NULL
+                ORDER BY slm.id DESC
+                """, schemaName, schemaName, schemaName, schemaName, schemaName)
+                : String.format("""
+                SELECT slm.id,
+                       sm.id AS scheme_id,
+                       sm.state_scheme_id,
+                       sm.scheme_name,
+                       lgd.lgd_code AS village_lgd_code,
+                       lgd.title AS village_name,
+                       NULL::varchar AS sub_division_name
+                FROM %s.scheme_lgd_mapping_table slm
+                JOIN %s.scheme_master_table sm
+                  ON sm.id = slm.scheme_id AND sm.deleted_at IS NULL
+                JOIN %s.lgd_location_master_table lgd
+                  ON lgd.id = slm.parent_lgd_id AND lgd.deleted_at IS NULL
+                WHERE slm.deleted_at IS NULL
+                ORDER BY slm.id DESC
+                """, schemaName, schemaName, schemaName);
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> SchemeMappingDTO.builder()
+                .id(rs.getLong("id"))
+                .schemeId((Integer) rs.getObject("scheme_id"))
+                .stateSchemeId(rs.getString("state_scheme_id"))
+                .schemeName(rs.getString("scheme_name"))
+                .villageLgdCode(rs.getString("village_lgd_code"))
+                .villageName(rs.getString("village_name"))
+                .subDivisionName(rs.getString("sub_division_name"))
+                .build());
+    }
+
+    public long currentDataVersion(String schemaName, String resourceType) {
+        validateSchemaName(schemaName);
+        String updateSql = String.format("""
+                INSERT INTO %s.data_versions_table (resource_type, version)
+                VALUES (?, 1)
+                ON CONFLICT (resource_type) DO NOTHING
+                """, schemaName);
+        jdbcTemplate.update(updateSql, resourceType);
+
+        String selectSql = String.format("""
+                SELECT version
+                FROM %s.data_versions_table
+                WHERE resource_type = ?
+                LIMIT 1
+                """, schemaName);
+        Long version = jdbcTemplate.queryForObject(selectSql, Long.class, resourceType);
+        return version == null ? 1L : version;
+    }
+
+    public void insertReportRecord(
+            String schemaName,
+            String id,
+            String reportType,
+            String format,
+            String paramsHash,
+            String paramsJson,
+            long dataVersion,
+            String bucket,
+            String objectKey,
+            Integer rowCount,
+            Long fileSizeBytes,
+            int generatedBy
+    ) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                INSERT INTO %s.reports_table
+                  (id, report_type, format, params_hash, params_json, data_version, bucket, object_key,
+                   row_count, file_size_bytes, generated_by, generated_at)
+                VALUES (CAST(? AS UUID), ?, ?, ?, CAST(? AS JSONB), ?, ?, ?, ?, ?, ?, NOW())
+                ON CONFLICT (report_type, format, params_hash, data_version)
+                DO UPDATE SET
+                    bucket = EXCLUDED.bucket,
+                    object_key = EXCLUDED.object_key,
+                    row_count = EXCLUDED.row_count,
+                    file_size_bytes = EXCLUDED.file_size_bytes,
+                    generated_by = EXCLUDED.generated_by,
+                    generated_at = NOW()
+                """, schemaName);
+        jdbcTemplate.update(sql,
+                id,
+                reportType,
+                format,
+                paramsHash,
+                paramsJson,
+                dataVersion,
+                bucket,
+                objectKey,
+                rowCount,
+                fileSizeBytes,
+                generatedBy
+        );
+    }
+
     public List<SchemeDTO> listSchemes(
             String schemaName,
             String stateSchemeId,
@@ -753,6 +868,122 @@ public class SchemeDbRepository {
         } catch (EmptyResultDataAccessException ex) {
             return null;
         }
+    }
+
+    public List<String> findAllActiveTenantSchemas() {
+        String sql = """
+                SELECT state_code
+                FROM common_schema.tenant_master_table
+                WHERE deleted_at IS NULL
+                  AND state_code IS NOT NULL
+                  AND btrim(state_code) <> ''
+                """;
+        List<String> stateCodes = jdbcTemplate.query(sql, (rs, n) -> rs.getString("state_code"));
+        List<String> schemas = new ArrayList<>(stateCodes.size());
+        for (String code : stateCodes) {
+            if (code == null || code.isBlank()) {
+                continue;
+            }
+            schemas.add("tenant_" + code.trim().toLowerCase(Locale.ROOT));
+        }
+        return schemas;
+    }
+
+    public void ensureIsActiveColumnExists(String schemaName) {
+        validateSchemaName(schemaName);
+        String alterSql = String.format("""
+                ALTER TABLE %s.scheme_master_table
+                ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE
+                """, schemaName);
+        jdbcTemplate.execute(alterSql);
+    }
+
+    public int syncIsActiveByRecentFlowReadings(String schemaName, int inactivityDays) {
+        validateSchemaName(schemaName);
+        int days = Math.max(1, inactivityDays);
+        String sql = String.format("""
+                UPDATE %1$s.scheme_master_table sm
+                SET is_active = EXISTS (
+                        SELECT 1
+                        FROM %1$s.flow_reading_table fr
+                        WHERE fr.scheme_id = sm.id
+                          AND fr.deleted_at IS NULL
+                          AND fr.reading_date >= CURRENT_DATE - CAST(? AS INTEGER)
+                    ),
+                    updated_at = NOW()
+                WHERE sm.deleted_at IS NULL
+                  AND sm.is_active IS DISTINCT FROM EXISTS (
+                        SELECT 1
+                        FROM %1$s.flow_reading_table fr
+                        WHERE fr.scheme_id = sm.id
+                          AND fr.deleted_at IS NULL
+                          AND fr.reading_date >= CURRENT_DATE - CAST(? AS INTEGER)
+                    )
+                """, schemaName);
+        return jdbcTemplate.update(sql, days, days);
+    }
+
+    public int syncIsActiveByRecentFlowReadingsInBatches(String schemaName, int inactivityDays, int batchSize) {
+        validateSchemaName(schemaName);
+        int days = Math.max(1, inactivityDays);
+        int size = Math.max(100, batchSize);
+        int totalUpdated = 0;
+        int lastSeenId = 0;
+
+        while (true) {
+            List<Integer> ids = findSchemeIdsBatch(schemaName, lastSeenId, size);
+            if (ids.isEmpty()) {
+                break;
+            }
+            totalUpdated += syncIsActiveForSchemeIds(schemaName, ids, days);
+            lastSeenId = ids.get(ids.size() - 1);
+        }
+        return totalUpdated;
+    }
+
+    private List<Integer> findSchemeIdsBatch(String schemaName, int lastSeenId, int batchSize) {
+        String sql = String.format("""
+                SELECT id
+                FROM %s.scheme_master_table
+                WHERE deleted_at IS NULL
+                  AND id > ?
+                ORDER BY id
+                LIMIT ?
+                """, schemaName);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> rs.getInt("id"), lastSeenId, batchSize);
+    }
+
+    private int syncIsActiveForSchemeIds(String schemaName, List<Integer> schemeIds, int inactivityDays) {
+        if (schemeIds == null || schemeIds.isEmpty()) {
+            return 0;
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(schemeIds.size(), "?"));
+        String sql = String.format("""
+                UPDATE %1$s.scheme_master_table sm
+                SET is_active = EXISTS (
+                        SELECT 1
+                        FROM %1$s.flow_reading_table fr
+                        WHERE fr.scheme_id = sm.id
+                          AND fr.deleted_at IS NULL
+                          AND fr.reading_date >= CURRENT_DATE - CAST(? AS INTEGER)
+                    ),
+                    updated_at = NOW()
+                WHERE sm.deleted_at IS NULL
+                  AND sm.id IN (%2$s)
+                  AND sm.is_active IS DISTINCT FROM EXISTS (
+                        SELECT 1
+                        FROM %1$s.flow_reading_table fr
+                        WHERE fr.scheme_id = sm.id
+                          AND fr.deleted_at IS NULL
+                          AND fr.reading_date >= CURRENT_DATE - CAST(? AS INTEGER)
+                    )
+                """, schemaName, placeholders);
+
+        List<Object> args = new ArrayList<>(schemeIds.size() + 2);
+        args.add(inactivityDays);
+        args.addAll(schemeIds);
+        args.add(inactivityDays);
+        return jdbcTemplate.update(sql, args.toArray());
     }
 
     /**

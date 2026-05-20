@@ -43,8 +43,7 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for map display config validation in {@link TenantManagementServiceImpl}:
  * - LGD level cascade: level N FALSE forces levels N+1..max FALSE
- * - Dept level cascade: same rule, gated on DISPLAY_DEPARTMENT_MAPS toggle
- * - DISPLAY_DEPARTMENT_MAPS=FALSE auto-writes FALSE to all active dept level keys
+ * - Dept level cascade: same rule
  * - Hierarchy depth: validation only applies to levels that exist in the tenant's hierarchy
  */
 @ExtendWith(MockitoExtension.class)
@@ -257,100 +256,5 @@ class MapDisplayConfigValidationTest {
                     .hasMessageContaining("DISPLAY_DEPARTMENT_MAP_LEVEL_4");
         }
 
-        @Test
-        void deptLevelValidation_skipped_whenDisplayDeptMapsMasterIsFalseInRequest() throws Exception {
-            // DISPLAY_DEPARTMENT_MAPS=FALSE in request → dept level cascade skipped entirely
-            stubLgdHierarchy(0);
-            // DEPARTMENT hierarchy stub needed for cascadeDeptMapsToFalse
-            stubDeptHierarchy(4);
-            String falseJson = objectMapper.writeValueAsString(Map.of("value", "FALSE"));
-            for (TenantConfigKeyEnum k : List.of(
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_3,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_4)) {
-                when(tenantCommonRepository.upsertConfig(eq(TENANT_ID), eq(k.name()), any(), eq(99)))
-                        .thenReturn(Optional.of(ConfigDTO.builder().configKey(k.name()).configValue(falseJson).build()));
-            }
-            stubUpsert(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE");
-
-            // LEVEL_1=FALSE + LEVEL_2=TRUE is a cascade violation — but since the master toggle is
-            // FALSE the level-wise check is skipped entirely and both keys are ignored in the upsert
-            // loop (all levels are auto-cascaded to FALSE by cascadeDeptMapsToFalse instead).
-            assertThatNoException().isThrownBy(() ->
-                    service.setTenantConfigs(TENANT_ID, requestWith(Map.of(
-                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE",
-                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1, "FALSE",
-                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2, "TRUE"))));
-        }
-
-        @Test
-        void deptLevelValidation_skipped_whenPersistedDisplayDeptMapsIsFalse() throws Exception {
-            stubLgdHierarchy(0);
-            when(tenantCommonRepository.findConfigByTenantAndKey(TENANT_ID, "DISPLAY_DEPARTMENT_MAPS"))
-                    .thenReturn(Optional.of(persistedConfig(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE")));
-            // No dept hierarchy → cascadeDeptMapsToFalse is a no-op (0 active levels); no upsert stubs needed.
-
-            // LEVEL_1=FALSE + LEVEL_2=TRUE is a cascade violation — but since the master is persistently
-            // FALSE the level-wise check is skipped and both keys are dropped in the upsert loop.
-            assertThatNoException().isThrownBy(() ->
-                    service.setTenantConfigs(TENANT_ID, requestWith(Map.of(
-                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1, "FALSE",
-                            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2, "TRUE"))));
-        }
-    }
-
-    // ── DISPLAY_DEPARTMENT_MAPS=FALSE auto-cascade ─────────────────────────────
-
-    @Nested
-    class DeptMapsToggleFalseCascade {
-
-        @Test
-        void settingDisplayDeptMapsToFalse_writesAllActiveLevelsToFalse() throws Exception {
-            stubLgdHierarchy(0);
-            stubDeptHierarchy(3);
-
-            String falseJson = objectMapper.writeValueAsString(Map.of("value", "FALSE"));
-            stubUpsert(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE");
-            for (TenantConfigKeyEnum k : List.of(
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_3)) {
-                when(tenantCommonRepository.upsertConfig(eq(TENANT_ID), eq(k.name()), any(), eq(99)))
-                        .thenReturn(Optional.of(ConfigDTO.builder().configKey(k.name()).configValue(falseJson).build()));
-            }
-
-            service.setTenantConfigs(TENANT_ID, requestWith(Map.of(
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "FALSE")));
-
-            // Verify FALSE was written for each of the 3 active dept levels
-            verify(tenantCommonRepository).upsertConfig(eq(TENANT_ID),
-                    eq(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1.name()), contains("FALSE"), eq(99));
-            verify(tenantCommonRepository).upsertConfig(eq(TENANT_ID),
-                    eq(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2.name()), contains("FALSE"), eq(99));
-            verify(tenantCommonRepository).upsertConfig(eq(TENANT_ID),
-                    eq(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_3.name()), contains("FALSE"), eq(99));
-            // Level 4 does not exist in the dept hierarchy — should NOT be written
-            verify(tenantCommonRepository, never()).upsertConfig(eq(TENANT_ID),
-                    eq(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_4.name()), any(), any());
-        }
-
-        @Test
-        void settingDisplayDeptMapsToTrue_doesNotCascadeAnything() throws Exception {
-            stubLgdHierarchy(0);
-            stubDeptHierarchy(3);
-            stubUpsert(TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "TRUE");
-
-            service.setTenantConfigs(TENANT_ID, requestWith(Map.of(
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS, "TRUE")));
-
-            // No dept level keys should be auto-written
-            for (TenantConfigKeyEnum k : List.of(
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_3)) {
-                verify(tenantCommonRepository, never()).upsertConfig(eq(TENANT_ID), eq(k.name()), any(), any());
-            }
-        }
     }
 }

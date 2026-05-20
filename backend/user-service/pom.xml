@@ -23,6 +23,8 @@
         <spring-kafka.version>3.1.4</spring-kafka.version>
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.32</lombok.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
+        <aws-sdk.version>2.34.0</aws-sdk.version>
     </properties>
 
     <dependencyManagement>
@@ -31,6 +33,13 @@
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
                 <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -143,6 +152,22 @@
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
             <version>5.3.0</version>
+        </dependency>
+
+        <!-- AWS SDK v2 S3 (provider-agnostic object storage — works with AWS S3,
+             MinIO, Cloudflare R2, DigitalOcean Spaces, etc.). Includes the
+             S3Presigner used for generating short-lived report download URLs. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+
+        <!-- Testcontainers MinIO module — drives the S3-compatible code path in
+             end-to-end report tests against a real S3 API. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>minio</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

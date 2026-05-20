@@ -97,6 +97,22 @@ pii:
   encryption-key: ${PII_ENCRYPTION_KEY}
   hmac-key: ${PII_HMAC_KEY}
 
+# ──────────────────────────────────────────────────────────────
+# Object Storage (S3-compatible — AWS S3 / MinIO / R2 / DO Spaces / …)
+# Used by the staff-report cache to persist generated CSV/XLSX files
+# and serve them via short-lived presigned URLs.
+# ──────────────────────────────────────────────────────────────
+storage:
+  enabled:       ${STORAGE_ENABLED:false}      # true to activate S3-compatible storage
+  provider:      ${STORAGE_PROVIDER:s3}
+  endpoint:      ${STORAGE_ENDPOINT:}          # blank = real AWS S3; set to MinIO/R2/etc. URL for custom providers
+  region:        ${STORAGE_REGION:ap-south-1}
+  access-key:    ${STORAGE_ACCESS_KEY:}
+  secret-key:    ${STORAGE_SECRET_KEY:}
+  bucket:        ${STORAGE_BUCKET:user-service-assets}
+  reports-bucket: ${STORAGE_REPORTS_BUCKET:jalsoochak-reports}   # shared across all resource types 
+  presigned-ttl-seconds: ${STORAGE_PRESIGNED_TTL_SECONDS:3600}
+
 otp:
   expiry-minutes: ${OTP_EXPIRY_MINUTES:10}
   max-attempts: ${OTP_MAX_ATTEMPTS:3}

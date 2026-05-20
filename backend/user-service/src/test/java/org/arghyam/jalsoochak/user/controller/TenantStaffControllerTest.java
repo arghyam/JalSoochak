@@ -260,6 +260,83 @@ class TenantStaffControllerTest {
     }
 
     @Nested
+    @DisplayName("POST /api/v1/tenant/user/staff/{id}/activate")
+    class ActivateStaff {
+
+        @Test
+        @DisplayName("returns 200 on successful activation")
+        void returns200() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/activate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message").value("Staff user activated successfully"));
+        }
+
+        @Test
+        @DisplayName("returns 400 for non-positive id")
+        void returns400ForNonPositiveId() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/0/activate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 400 when tenantCode is blank")
+        void returns400ForBlankTenantCode() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/activate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "   "))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 400 when tenantCode is missing")
+        void returns400ForMissingTenantCode() throws Exception {
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/activate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN")))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 403 on ForbiddenAccessException")
+        void returns403OnForbidden() throws Exception {
+            doThrow(new ForbiddenAccessException("forbidden"))
+                    .when(tenantStaffService).activateStaff(any(), any(), any());
+
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/activate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("returns 400 on BadRequestException (already active)")
+        void returns400OnAlreadyActive() throws Exception {
+            doThrow(new BadRequestException("already active"))
+                    .when(tenantStaffService).activateStaff(any(), any(), any());
+
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/activate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 404 on ResourceNotFoundException")
+        void returns404OnNotFound() throws Exception {
+            doThrow(new ResourceNotFoundException("not found"))
+                    .when(tenantStaffService).activateStaff(any(), any(), any());
+
+            mockMvc.perform(post("/api/v1/tenant/user/staff/10/activate")
+                            .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isNotFound());
+        }
+    }
+
+    @Nested
     @DisplayName("POST /api/v1/tenant/user/welcome")
     class SendWelcomeMessages {
 

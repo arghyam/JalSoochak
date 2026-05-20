@@ -141,50 +141,43 @@ public enum TenantConfigKeyEnum implements ConfigKey {
     EMAIL_TEMPLATE_JSON(ConfigType.GENERIC, SimpleConfigValueDTO.class, false, false, false),
 
     /**
-     * Master toggle for department maps.
-     * TRUE or FALSE. If FALSE, no department-level maps are shown and all
-     * DISPLAY_DEPARTMENT_MAP_LEVEL_N keys are automatically set to FALSE.
-     */
-    DISPLAY_DEPARTMENT_MAPS(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, true),
-
-    /**
      * Display map for department level 1.
-     * TRUE or FALSE. Default: TRUE. Only evaluated when DISPLAY_DEPARTMENT_MAPS is TRUE.
+     * TRUE or FALSE. Default: TRUE.
      * If set to FALSE, all lower levels (2–6) must also be FALSE.
      */
     DISPLAY_DEPARTMENT_MAP_LEVEL_1(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
 
     /**
      * Display map for department level 2.
-     * TRUE or FALSE. Default: TRUE. Only evaluated when DISPLAY_DEPARTMENT_MAPS is TRUE.
+     * TRUE or FALSE. Default: TRUE.
      * If set to FALSE, all lower levels (3–6) must also be FALSE.
      */
     DISPLAY_DEPARTMENT_MAP_LEVEL_2(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
 
     /**
      * Display map for department level 3.
-     * TRUE or FALSE. Default: TRUE. Only evaluated when DISPLAY_DEPARTMENT_MAPS is TRUE.
+     * TRUE or FALSE. Default: TRUE.
      * If set to FALSE, all lower levels (4–6) must also be FALSE.
      */
     DISPLAY_DEPARTMENT_MAP_LEVEL_3(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
 
     /**
      * Display map for department level 4.
-     * TRUE or FALSE. Default: TRUE. Only evaluated when DISPLAY_DEPARTMENT_MAPS is TRUE.
+     * TRUE or FALSE. Default: TRUE.
      * If set to FALSE, all lower levels (5–6) must also be FALSE.
      */
     DISPLAY_DEPARTMENT_MAP_LEVEL_4(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
 
     /**
      * Display map for department level 5.
-     * TRUE or FALSE. Default: TRUE. Only evaluated when DISPLAY_DEPARTMENT_MAPS is TRUE.
+     * TRUE or FALSE. Default: TRUE.
      * If set to FALSE, level 6 must also be FALSE.
      */
     DISPLAY_DEPARTMENT_MAP_LEVEL_5(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
 
     /**
      * Display map for department level 6.
-     * TRUE or FALSE. Default: TRUE. Only evaluated when DISPLAY_DEPARTMENT_MAPS is TRUE.
+     * TRUE or FALSE. Default: TRUE.
      */
     DISPLAY_DEPARTMENT_MAP_LEVEL_6(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
 

@@ -7,11 +7,13 @@ import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.user.dto.request.UpdateStaffRoleRequestDTO;
 import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
+import org.arghyam.jalsoochak.user.enums.ResourceType;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
@@ -47,6 +49,7 @@ public class TenantStaffServiceImpl implements TenantStaffService {
     private final KeycloakProvider keycloakProvider;
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final StaffKeycloakService staffKeycloakService;
+    private final DataVersionRepository dataVersionRepository;
 
     @Value("${staff.allowed-update-roles:SECTION_OFFICER,DISTRICT_OFFICER}")
     private List<String> allowedUpdateRoles;
@@ -135,6 +138,9 @@ public class TenantStaffServiceImpl implements TenantStaffService {
                 throw new ResourceNotFoundException("User not found during role update: " + id);
             }
 
+            // Invalidate the staff-report cache in the same transaction as the mutation.
+            dataVersionRepository.bump(schema, ResourceType.STAFF_USERS);
+
             Integer tenantId = userCommonRepository.findTenantIdByStateCode(request.tenantCode())
                     .orElse(null);
             if (tenantId == null) {
@@ -200,6 +206,8 @@ public class TenantStaffServiceImpl implements TenantStaffService {
         if (affected == 0) {
             // Concurrent deactivation won the race — not an error, outcome is the same.
             log.info("Staff deactivation: user already deactivated by a concurrent request — staffUserId={}", id);
+        } else {
+            dataVersionRepository.bump(schema, ResourceType.STAFF_USERS);
         }
 
         // Revoke Keycloak account outside the transactional boundary. Best-effort — failure is
@@ -221,6 +229,52 @@ public class TenantStaffServiceImpl implements TenantStaffService {
         }
 
         log.info("Staff user deactivated: staffUserId={} tenantCode={}", id, tenantCode);
+    }
+
+    @Override
+    public void activateStaff(Long id, String tenantCode, Authentication caller) {
+        String callerTenantCode = SecurityUtils.extractTenantCode(caller);
+        String callerRole = SecurityUtils.extractRole(caller).orElse(null);
+
+        boolean isSuperUser = "SUPER_USER".equalsIgnoreCase(callerRole);
+        boolean isStateAdmin = "STATE_ADMIN".equalsIgnoreCase(callerRole);
+        if (!isSuperUser && (!isStateAdmin || callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(tenantCode))) {
+            throw new ForbiddenAccessException("Only a STATE_ADMIN within their own tenant or a SUPER_USER may activate staff");
+        }
+
+        String schema = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        TenantUserRecord user = userTenantRepository.findUserById(schema, id)
+                .orElseThrow(() -> new ResourceNotFoundException("Staff user not found: " + id));
+
+        if (user.status() != null && user.status() == TenantUserStatus.ACTIVE.code) {
+            throw new BadRequestException("Staff user is already active");
+        }
+
+        Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode).orElse(null);
+        Long actorId = resolveActorId(caller, tenantId);
+
+        int affected = userTenantRepository.activateStaffUser(schema, id, actorId);
+        if (affected == 0) {
+            log.info("Staff activation: user already active due to a concurrent request — staffUserId={}", id);
+        } else {
+            dataVersionRepository.bump(schema, ResourceType.STAFF_USERS);
+        }
+
+        if (affected > 0) {
+            if (tenantId != null) {
+                userAnalyticsEventPublisher.publishStaffUserUpdatedAfterCommit(
+                        id, tenantId,
+                        user.userTypeId() != null ? user.userTypeId().intValue() : null,
+                        user.keycloakUuid(),
+                        user.email(),
+                        TenantUserStatus.ACTIVE.code
+                );
+            } else {
+                log.warn("Cannot publish staff activation analytics: tenantId not found for tenantCode={}", tenantCode);
+            }
+        }
+
+        log.info("Staff user activated: staffUserId={} tenantCode={}", id, tenantCode);
     }
 
     /** Resolves the DB actor id from the JWT; falls back to null (system action) if not found. */
