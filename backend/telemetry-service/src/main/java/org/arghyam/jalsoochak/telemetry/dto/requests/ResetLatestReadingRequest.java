@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ResetLatestReadingRequest {
 
-    @JsonAlias("phoneNumber")
-    @JsonProperty("phone_number")
-    private String phoneNumber;
+    @JsonAlias({"contact_id", "contactId"})
+    @JsonProperty("contactId")
+    private String contactId;
 }

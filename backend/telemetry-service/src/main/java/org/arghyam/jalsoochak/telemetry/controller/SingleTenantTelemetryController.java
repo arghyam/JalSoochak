@@ -202,11 +202,11 @@ public class SingleTenantTelemetryController {
             telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
 
-            if (request.getPhoneNumber() == null || request.getPhoneNumber().isBlank()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber must be provided");
+            if (request.getContactId() == null || request.getContactId().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contactId must be provided");
             }
 
-            CreateReadingResponse response = bfmReadingService.resetLatestConfirmedReadingByPhone(request.getPhoneNumber());
+            CreateReadingResponse response = bfmReadingService.resetLatestConfirmedReadingByPhone(request.getContactId());
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
