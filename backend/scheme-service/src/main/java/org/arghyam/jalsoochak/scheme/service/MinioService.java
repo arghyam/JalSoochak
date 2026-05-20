@@ -9,7 +9,6 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URLConnection;
 
 @Service
 public class MinioService {
@@ -32,17 +31,20 @@ public class MinioService {
 
     public String upload(byte[] file, String objectName) {
         try (InputStream inputStream = new ByteArrayInputStream(file)) {
-            String contentType = URLConnection.guessContentTypeFromStream(inputStream);
-            if (contentType == null) {
-                contentType = "application/octet-stream";
-            }
-            inputStream.reset();
+            return upload(inputStream, file.length, objectName, "text/csv");
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to upload report to MinIO", e);
+        }
+    }
+
+    public String upload(InputStream inputStream, long size, String objectName, String contentType) {
+        try {
             minioClient.putObject(
                     PutObjectArgs.builder()
                             .bucket(bucket)
                             .object(objectName)
-                            .stream(inputStream, file.length, -1)
-                            .contentType(contentType)
+                            .stream(inputStream, size, -1)
+                            .contentType(contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType)
                             .build()
             );
             return buildObjectUrl(objectName);
@@ -53,6 +55,10 @@ public class MinioService {
 
     public String getBucket() {
         return bucket;
+    }
+
+    public String getObjectUrl(String objectName) {
+        return buildObjectUrl(objectName);
     }
 
     private String buildObjectUrl(String objectName) {

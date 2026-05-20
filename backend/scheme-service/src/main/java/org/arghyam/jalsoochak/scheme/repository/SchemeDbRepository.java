@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
@@ -18,9 +19,11 @@ import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.Optional;
 import java.util.Set;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 @Repository
@@ -149,6 +152,94 @@ public class SchemeDbRepository {
                 .build());
     }
 
+    public void streamAllSchemes(String schemaName, Consumer<SchemeDTO> consumer) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT id, uuid, state_scheme_id, centre_scheme_id, scheme_name,
+                       fhtc_count, planned_fhtc, house_hold_count,
+                       latitude, longitude, channel, work_status, operating_status
+                FROM %s.scheme_master_table
+                WHERE deleted_at IS NULL
+                ORDER BY id DESC
+                """, schemaName);
+
+        jdbcTemplate.query(con -> {
+            PreparedStatement ps = con.prepareStatement(sql);
+            ps.setFetchSize(1_000);
+            return ps;
+        }, (RowCallbackHandler) rs -> consumer.accept(SchemeDTO.builder()
+                .id(rs.getInt("id"))
+                .uuid(rs.getString("uuid"))
+                .stateSchemeId(rs.getString("state_scheme_id"))
+                .centreSchemeId(rs.getString("centre_scheme_id"))
+                .schemeName(rs.getString("scheme_name"))
+                .fhtcCount(rs.getInt("fhtc_count"))
+                .plannedFhtc(rs.getInt("planned_fhtc"))
+                .houseHoldCount(rs.getInt("house_hold_count"))
+                .latitude((Double) rs.getObject("latitude"))
+                .longitude((Double) rs.getObject("longitude"))
+                .channel(rs.getInt("channel"))
+                .workStatus(workStatusLabel((Integer) rs.getObject("work_status")))
+                .operatingStatus(operatingStatusLabel((Integer) rs.getObject("operating_status")))
+                .build()));
+    }
+
+    public void streamAllSchemeMappings(String schemaName, Consumer<SchemeMappingDTO> consumer) {
+        validateSchemaName(schemaName);
+        boolean hasDept = hasDepartmentTables(schemaName);
+        String sql = hasDept
+                ? String.format("""
+                SELECT slm.id,
+                       sm.id AS scheme_id,
+                       sm.state_scheme_id,
+                       sm.scheme_name,
+                       lgd.lgd_code AS village_lgd_code,
+                       lgd.title AS village_name,
+                       dept.title AS sub_division_name
+                FROM %s.scheme_lgd_mapping_table slm
+                JOIN %s.scheme_master_table sm
+                  ON sm.id = slm.scheme_id AND sm.deleted_at IS NULL
+                JOIN %s.lgd_location_master_table lgd
+                  ON lgd.id = slm.parent_lgd_id AND lgd.deleted_at IS NULL
+                LEFT JOIN %s.scheme_department_mapping_table sdm
+                  ON sdm.scheme_id = sm.id AND sdm.deleted_at IS NULL
+                LEFT JOIN %s.department_location_master_table dept
+                  ON dept.id = sdm.parent_department_id AND dept.deleted_at IS NULL
+                WHERE slm.deleted_at IS NULL
+                ORDER BY slm.id DESC
+                """, schemaName, schemaName, schemaName, schemaName, schemaName)
+                : String.format("""
+                SELECT slm.id,
+                       sm.id AS scheme_id,
+                       sm.state_scheme_id,
+                       sm.scheme_name,
+                       lgd.lgd_code AS village_lgd_code,
+                       lgd.title AS village_name,
+                       NULL::varchar AS sub_division_name
+                FROM %s.scheme_lgd_mapping_table slm
+                JOIN %s.scheme_master_table sm
+                  ON sm.id = slm.scheme_id AND sm.deleted_at IS NULL
+                JOIN %s.lgd_location_master_table lgd
+                  ON lgd.id = slm.parent_lgd_id AND lgd.deleted_at IS NULL
+                WHERE slm.deleted_at IS NULL
+                ORDER BY slm.id DESC
+                """, schemaName, schemaName, schemaName);
+
+        jdbcTemplate.query(con -> {
+            PreparedStatement ps = con.prepareStatement(sql);
+            ps.setFetchSize(1_000);
+            return ps;
+        }, (RowCallbackHandler) rs -> consumer.accept(SchemeMappingDTO.builder()
+                .id(rs.getLong("id"))
+                .schemeId((Integer) rs.getObject("scheme_id"))
+                .stateSchemeId(rs.getString("state_scheme_id"))
+                .schemeName(rs.getString("scheme_name"))
+                .villageLgdCode(rs.getString("village_lgd_code"))
+                .villageName(rs.getString("village_name"))
+                .subDivisionName(rs.getString("sub_division_name"))
+                .build()));
+    }
+
     public long currentDataVersion(String schemaName, String resourceType) {
         validateSchemaName(schemaName);
         String updateSql = String.format("""
@@ -210,6 +301,31 @@ public class SchemeDbRepository {
                 fileSizeBytes,
                 generatedBy
         );
+    }
+
+    public Optional<String> findReportObjectKey(
+            String schemaName,
+            String reportType,
+            String format,
+            String paramsHash,
+            long dataVersion
+    ) {
+        validateSchemaName(schemaName);
+        String sql = String.format("""
+                SELECT object_key
+                FROM %s.reports_table
+                WHERE report_type = ?
+                  AND format = ?
+                  AND params_hash = ?
+                  AND data_version = ?
+                LIMIT 1
+                """, schemaName);
+        List<String> keys = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("object_key"),
+                reportType, format, paramsHash, dataVersion);
+        if (keys.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(keys.get(0));
     }
 
     public List<SchemeDTO> listSchemes(
