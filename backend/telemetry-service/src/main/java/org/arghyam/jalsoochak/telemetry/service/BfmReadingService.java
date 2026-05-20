@@ -192,8 +192,15 @@ public class BfmReadingService {
                     AnomalyConstants.STATUS_OPEN,
                     correlationId
             );
-            // Keep extracted reading as-is, but prevent confirmed reading from going below the previous confirmed value.
-            effectiveConfirmedReading = previousSnapshot.confirmedReading();
+            return CreateReadingResponse.builder()
+                    .success(false)
+                    .message("Reading rejected because it is below the last confirmed reading. Submitted: "
+                            + toPlain(confirmedReading) + ". Last confirmed: " + toPlain(previousSnapshot.confirmedReading()) + ".")
+                    .correlationId(correlationId)
+                    .meterReading(confirmedReading)
+                    .qualityStatus("REJECTED")
+                    .lastConfirmedReading(previousSnapshot.confirmedReading())
+                    .build();
         }
 
         Optional<WaterSupplyThreshold> thresholdOpt = !isMeterReplaced ? loadWaterSupplyThreshold(tenantId) : Optional.empty();
