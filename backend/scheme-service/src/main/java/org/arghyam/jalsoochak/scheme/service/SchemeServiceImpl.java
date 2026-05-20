@@ -506,8 +506,9 @@ public class SchemeServiceImpl implements SchemeService {
             long fileSize = Files.size(tempFile);
             String link;
             try (InputStream input = Files.newInputStream(tempFile)) {
-                link = minioService.upload(input, fileSize, objectKey, "text/csv");
+                minioService.upload(input, fileSize, objectKey, "text/csv");
             }
+            link = minioService.getObjectUrl(objectKey);
             saveReportRecord(schemaName, actorUserId, reportType, REPORT_FORMAT_CSV, paramsJson, paramsHash, dataVersion, objectKey, fileSize, rowCount.get());
             return ReportLinkResponseDTO.builder().link(link).build();
         } catch (IOException e) {
@@ -563,8 +564,9 @@ public class SchemeServiceImpl implements SchemeService {
             long fileSize = Files.size(tempFile);
             String link;
             try (InputStream input = Files.newInputStream(tempFile)) {
-                link = minioService.upload(input, fileSize, objectKey, "text/csv");
+                minioService.upload(input, fileSize, objectKey, "text/csv");
             }
+            link = minioService.getObjectUrl(objectKey);
             saveReportRecord(schemaName, actorUserId, reportType, REPORT_FORMAT_CSV, paramsJson, paramsHash, dataVersion, objectKey, fileSize, rowCount.get());
             return ReportLinkResponseDTO.builder().link(link).build();
         } catch (IOException e) {
