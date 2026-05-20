@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -38,6 +39,7 @@ public class BfmReadingService {
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
+    private final GlificOperatorContextService glificOperatorContextService;
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
                                                String schemaName,
@@ -406,6 +408,53 @@ public class BfmReadingService {
                 .message("Reading updated successfully")
                 .correlationId(reading.correlationId())
                 .meterReading(confirmedReading)
+                .qualityStatus("CONFIRMED")
+                .build();
+    }
+
+    @Transactional
+    public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber must be provided");
+        }
+
+        var operatorWithSchema = glificOperatorContextService.resolveOperatorWithSchema(phoneNumber);
+        String schemaName = operatorWithSchema.schemaName();
+        TelemetryOperator operator = operatorWithSchema.operator();
+
+        TelemetryLatestFlowReadingRecord latestReading = telemetryTenantRepository
+                .findLatestFlowReadingByOperator(schemaName, operator.id())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No reading found for operator"));
+
+        telemetryTenantRepository.updateConfirmedReading(
+                schemaName,
+                latestReading.id(),
+                BigDecimal.ZERO,
+                operator.id()
+        );
+
+        LocalDateTime readingAt = latestReading.readingAt() != null ? latestReading.readingAt() : LocalDateTime.now();
+        LocalDate readingDate = latestReading.readingDate() != null ? latestReading.readingDate() : readingAt.toLocalDate();
+        telemetryEventPublisher.publishMeterReadingRecorded(
+                operator.tenantId(),
+                latestReading.schemeId(),
+                operator.id(),
+                latestReading.extractedReading(),
+                BigDecimal.ZERO,
+                null,
+                latestReading.imageUrl(),
+                readingAt,
+                null,
+                readingDate,
+                1,
+                0
+        );
+
+        return CreateReadingResponse.builder()
+                .success(true)
+                .message("Latest confirmed reading reset to 0")
+                .correlationId(latestReading.correlationId())
+                .meterReading(BigDecimal.ZERO)
                 .qualityStatus("CONFIRMED")
                 .build();
     }

@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.controller;
 
 import jakarta.validation.Valid;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
@@ -179,6 +180,57 @@ public class SingleTenantTelemetryController {
                             .data(ReadingsDataResponse.builder()
                                     .qualityStatus("REJECTED")
                                     .message("Failed to update reading")
+                                    .build())
+                            .build()
+            );
+        }
+    }
+
+    @PostMapping(
+            value = "/readings/reset-latest",
+            consumes = "application/json",
+            produces = "application/json"
+    )
+    public ResponseEntity<ReadingsApiResponse> resetLatestReading(
+            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
+            @RequestBody @Valid ResetLatestReadingRequest request
+    ) {
+        try {
+            if (telemetryApiKeyService == null) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "API key service not configured");
+            }
+            telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
+
+            if (request.getPhoneNumber() == null || request.getPhoneNumber().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber must be provided");
+            }
+
+            CreateReadingResponse response = bfmReadingService.resetLatestConfirmedReadingByPhone(request.getPhoneNumber());
+            return ResponseEntity.ok(
+                    ReadingsApiResponse.builder()
+                            .success(true)
+                            .data(toReadingsDataResponse(response, true))
+                            .build()
+            );
+        } catch (ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(
+                    ReadingsApiResponse.builder()
+                            .success(false)
+                            .data(ReadingsDataResponse.builder()
+                                    .message(e.getReason())
+                                    .qualityStatus("REJECTED")
+                                    .build())
+                            .build()
+            );
+        } catch (Exception e) {
+            log.error("Error resetting latest reading: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    ReadingsApiResponse.builder()
+                            .success(false)
+                            .data(ReadingsDataResponse.builder()
+                                    .qualityStatus("REJECTED")
+                                    .message("Failed to reset latest reading")
                                     .build())
                             .build()
             );
