@@ -196,12 +196,6 @@ public class SingleTenantTelemetryController {
             @RequestBody @Valid ResetLatestReadingRequest request
     ) {
         try {
-            if (telemetryApiKeyService == null) {
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "API key service not configured");
-            }
-            telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
-
             if (request.getContactId() == null || request.getContactId().isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contactId must be provided");
             }
