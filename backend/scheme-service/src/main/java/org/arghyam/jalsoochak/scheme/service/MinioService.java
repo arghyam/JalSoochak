@@ -11,7 +11,11 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Service
 public class MinioService {
@@ -67,14 +71,23 @@ public class MinioService {
     }
 
     public String getObjectUrl(String objectName) {
+        return getObjectUrl(objectName, null);
+    }
+
+    public String getObjectUrl(String objectName, String downloadFilename) {
         try {
             int expirySeconds = Math.toIntExact(presignedTtl.getSeconds());
+            Map<String, String> queryParams = new LinkedHashMap<>();
+            if (downloadFilename != null && !downloadFilename.isBlank()) {
+                queryParams.put("response-content-disposition", contentDisposition(downloadFilename));
+            }
             String sdkUrl = minioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
                             .method(Method.GET)
                             .bucket(bucket)
                             .object(objectName)
                             .expiry(expirySeconds)
+                            .extraQueryParams(queryParams)
                             .build()
             );
             return rewritePublicUrl(sdkUrl);
@@ -108,5 +121,11 @@ public class MinioService {
         } catch (URISyntaxException e) {
             throw new RuntimeException("Failed to rewrite MinIO presigned URL", e);
         }
+    }
+
+    private static String contentDisposition(String filename) {
+        String safeAscii = filename.replaceAll("[\"\\r\\n]", "_");
+        String encoded = URLEncoder.encode(safeAscii, StandardCharsets.UTF_8).replace("+", "%20");
+        return "attachment; filename=\"" + safeAscii + "\"; filename*=UTF-8''" + encoded;
     }
 }
