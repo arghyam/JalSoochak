@@ -69,6 +69,8 @@ minio:
   access-key: ${MINIO_ACCESS_KEY}
   secret-key: ${MINIO_SECRET_KEY}
   region: ${MINIO_REGION:us-east-1}
+  presigned-base-url: ${MINIO_PRESIGNED_BASE_URL:}
+  presigned-ttl-seconds: ${MINIO_PRESIGNED_TTL_SECONDS:3600}
 
 scheme:
   activity-sync:

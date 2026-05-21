@@ -46,7 +46,7 @@ class S3CompatibleStorageServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new S3CompatibleStorageService(s3Client, s3Presigner);
+        service = new S3CompatibleStorageService(s3Client, s3Presigner, null);
     }
 
     @Nested
@@ -216,6 +216,67 @@ class S3CompatibleStorageServiceTest {
                     .isInstanceOf(StorageException.class)
                     .hasMessageContaining("Failed to presign URL for key: k");
             verifyNoInteractions(s3Client);
+        }
+    }
+
+    @Nested
+    @DisplayName("rewritePublicUrl")
+    class RewritePublicUrl {
+
+        @Test
+        @DisplayName("no-op when presignedBaseUrl is null")
+        void noopWhenNull() {
+            S3CompatibleStorageService svc = new S3CompatibleStorageService(s3Client, s3Presigner, null);
+            URI sdk = URI.create("http://3.7.6.143:9000/bucket/key?X-Amz-Signature=abc&X-Amz-Expires=3600");
+            assertThat(svc.rewritePublicUrl(sdk)).isEqualTo(sdk);
+        }
+
+        @Test
+        @DisplayName("no-op when presignedBaseUrl is blank")
+        void noopWhenBlank() {
+            S3CompatibleStorageService svc = new S3CompatibleStorageService(s3Client, s3Presigner, "   ");
+            URI sdk = URI.create("http://3.7.6.143:9000/bucket/key?X-Amz-Signature=abc");
+            assertThat(svc.rewritePublicUrl(sdk)).isEqualTo(sdk);
+        }
+
+        @Test
+        @DisplayName("rewrites origin and prepends path prefix, preserving query string")
+        void rewritesOriginAndPathPrefix() {
+            S3CompatibleStorageService svc = new S3CompatibleStorageService(
+                    s3Client, s3Presigner, "https://jalsoochak.in/minio");
+            URI sdk = URI.create("http://3.7.6.143:9000/jalsoochak-reports/staff/file.csv?X-Amz-Signature=abc&X-Amz-Expires=3600");
+
+            URI result = svc.rewritePublicUrl(sdk);
+
+            assertThat(result.getScheme()).isEqualTo("https");
+            assertThat(result.getHost()).isEqualTo("jalsoochak.in");
+            assertThat(result.getPort()).isEqualTo(-1);
+            assertThat(result.getPath()).isEqualTo("/minio/jalsoochak-reports/staff/file.csv");
+            assertThat(result.getQuery()).isEqualTo("X-Amz-Signature=abc&X-Amz-Expires=3600");
+        }
+
+        @Test
+        @DisplayName("trailing slash in presignedBaseUrl does not produce double slash in path")
+        void noDoubleSlash() {
+            S3CompatibleStorageService svc = new S3CompatibleStorageService(
+                    s3Client, s3Presigner, "https://jalsoochak.in/minio/");
+            URI sdk = URI.create("http://3.7.6.143:9000/bucket/key?sig=x");
+
+            URI result = svc.rewritePublicUrl(sdk);
+
+            assertThat(result.getPath()).isEqualTo("/minio/bucket/key");
+        }
+
+        @Test
+        @DisplayName("works when presignedBaseUrl has no path prefix (origin-only rewrite)")
+        void originOnlyRewrite() {
+            S3CompatibleStorageService svc = new S3CompatibleStorageService(
+                    s3Client, s3Presigner, "https://minio.jalsoochak.in");
+            URI sdk = URI.create("http://3.7.6.143:9000/bucket/key?sig=x");
+
+            URI result = svc.rewritePublicUrl(sdk);
+
+            assertThat(result.toString()).isEqualTo("https://minio.jalsoochak.in/bucket/key?sig=x");
         }
     }
 }

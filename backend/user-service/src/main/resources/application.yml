@@ -106,6 +106,7 @@ storage:
   enabled:       ${STORAGE_ENABLED:false}      # true to activate S3-compatible storage
   provider:      ${STORAGE_PROVIDER:s3}
   endpoint:      ${STORAGE_ENDPOINT:}          # blank = real AWS S3; set to MinIO/R2/etc. URL for custom providers
+  presigned-base-url: ${STORAGE_PRESIGNED_BASE_URL:}  # public-facing base URL for presigned URLs (e.g. https://minio.example.com); leave blank to use storage.endpoint
   region:        ${STORAGE_REGION:ap-south-1}
   access-key:    ${STORAGE_ACCESS_KEY:}
   secret-key:    ${STORAGE_SECRET_KEY:}
