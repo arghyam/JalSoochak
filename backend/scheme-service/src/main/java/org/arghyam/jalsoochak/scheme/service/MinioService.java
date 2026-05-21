@@ -21,7 +21,7 @@ import java.util.Map;
 public class MinioService {
 
     private final MinioClient minioClient;
-    private final String bucket;
+    private final String reportsBucket;
     private final String endpoint;
     private final String presignedBaseUrl;
     private final Duration presignedTtl;
@@ -29,10 +29,10 @@ public class MinioService {
     public MinioService(@Value("${minio.endpoint}") String endpoint,
                         @Value("${minio.access-key}") String accessKey,
                         @Value("${minio.secret-key}") String secretKey,
-                        @Value("${minio.bucket}") String bucket,
+                        @Value("${minio.reports-bucket:jalsoochak-reports}") String reportsBucket,
                         @Value("${minio.presigned-base-url:}") String presignedBaseUrl,
                         @Value("${minio.presigned-ttl-seconds:3600}") long presignedTtlSeconds) {
-        this.bucket = bucket;
+        this.reportsBucket = reportsBucket;
         this.endpoint = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
         this.presignedBaseUrl = presignedBaseUrl;
         this.presignedTtl = Duration.ofSeconds(Math.max(presignedTtlSeconds, 1L));
@@ -54,7 +54,7 @@ public class MinioService {
         try {
             minioClient.putObject(
                     PutObjectArgs.builder()
-                            .bucket(bucket)
+                            .bucket(reportsBucket)
                             .object(objectName)
                             .stream(inputStream, size, -1)
                             .contentType(contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType)
@@ -67,7 +67,7 @@ public class MinioService {
     }
 
     public String getBucket() {
-        return bucket;
+        return reportsBucket;
     }
 
     public String getObjectUrl(String objectName) {
@@ -84,7 +84,7 @@ public class MinioService {
             String sdkUrl = minioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
                             .method(Method.GET)
-                            .bucket(bucket)
+                            .bucket(reportsBucket)
                             .object(objectName)
                             .expiry(expirySeconds)
                             .extraQueryParams(queryParams)
