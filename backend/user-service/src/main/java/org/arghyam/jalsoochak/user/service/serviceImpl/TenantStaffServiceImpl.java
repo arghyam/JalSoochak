@@ -183,7 +183,7 @@ public class TenantStaffServiceImpl implements TenantStaffService {
         String callerTenantCode = SecurityUtils.extractTenantCode(caller);
         String callerRole = SecurityUtils.extractRole(caller).orElse(null);
 
-        boolean isSuperUser = "SUPER_USER".equalsIgnoreCase(callerRole);
+        boolean isSuperUser = "SUPER_USER".equalsIgnoreCase(callerRole) || "SUPER_STATE_ADMIN".equalsIgnoreCase(callerRole);
         boolean isStateAdmin = "STATE_ADMIN".equalsIgnoreCase(callerRole);
         if (!isSuperUser && (!isStateAdmin || callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(tenantCode))) {
             throw new ForbiddenAccessException("Only a STATE_ADMIN within their own tenant or a SUPER_USER may deactivate staff");
@@ -236,7 +236,7 @@ public class TenantStaffServiceImpl implements TenantStaffService {
         String callerTenantCode = SecurityUtils.extractTenantCode(caller);
         String callerRole = SecurityUtils.extractRole(caller).orElse(null);
 
-        boolean isSuperUser = "SUPER_USER".equalsIgnoreCase(callerRole);
+        boolean isSuperUser = "SUPER_USER".equalsIgnoreCase(callerRole) || "SUPER_STATE_ADMIN".equalsIgnoreCase(callerRole);
         boolean isStateAdmin = "STATE_ADMIN".equalsIgnoreCase(callerRole);
         if (!isSuperUser && (!isStateAdmin || callerTenantCode == null || !callerTenantCode.equalsIgnoreCase(tenantCode))) {
             throw new ForbiddenAccessException("Only a STATE_ADMIN within their own tenant or a SUPER_USER may activate staff");
