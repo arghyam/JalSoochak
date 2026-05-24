@@ -294,7 +294,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 ArgumentMatchers.eq(10L),
                 ArgumentMatchers.eq(1L),
                 any(),
-                ArgumentMatchers.eq(AnomalyConstants.TYPE_LOW_WATER_SUPPLY)
+                ArgumentMatchers.eq(AnomalyConstants.TYPE_LOW_WATER_SUPPLY),
+                ArgumentMatchers.anyString()
         );
 
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
