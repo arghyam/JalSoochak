@@ -632,7 +632,8 @@ public class GlificMeterWorkflowService {
                         schemeId,
                         operatorWithSchema.operator().id(),
                         LocalDate.now(),
-                        anomalyType
+                        anomalyType,
+                        resolvedIssueReason
                 );
             } else {
                 telemetryTenantRepository.createIssueReportRecord(
@@ -847,7 +848,8 @@ public class GlificMeterWorkflowService {
                     schemeId,
                     operatorWithSchema.operator().id(),
                     LocalDate.now(),
-                    anomalyType
+                    anomalyType,
+                    resolvedIssueReason
             );
 
             String fallbackMessage = "Issue reported. Thank you.";
@@ -937,7 +939,8 @@ public class GlificMeterWorkflowService {
                     schemeId,
                     operatorWithSchema.operator().id(),
                     LocalDate.now(),
-                    AnomalyConstants.TYPE_NO_SUBMISSION
+                    AnomalyConstants.TYPE_NO_SUBMISSION,
+                    issueReason
             );
 
             String languageKey = localizationService.normalizeLanguageKey(
@@ -1142,7 +1145,8 @@ public class GlificMeterWorkflowService {
                                 schemeId,
                                 operatorWithSchema.operator().id(),
                                 today,
-                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY
+                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ")."
                         );
                         return CreateReadingResponse.builder()
                                 .success(false)
@@ -1501,51 +1505,21 @@ public class GlificMeterWorkflowService {
             Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt = telemetryTenantRepository
                     .findEarliestCompletedFlowReadingAfterDate(operatorWithSchema.schemaName(), schemeId, operatorId, targetDay);
 
-            // Threshold bounds (water quantity implied by the reading deltas).
-            // Effective thresholds:
-            // - Prefer tenant-specific TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD, else fall back to system-level WATER_QUANTITY_SUPPLY_THRESHOLD (tenant_id=0).
-            Optional<WaterSupplyThreshold> thresholdOpt = loadWaterSupplyThreshold(tenantId);
-            Optional<BigDecimal> waterNormOpt = loadWaterNorm(tenantId);
-            if (thresholdOpt.isPresent() && waterNormOpt.isPresent() && dayBeforeTargetOpt.isPresent()) {
-                WaterSupplyThreshold threshold = thresholdOpt.get();
-                BigDecimal waterNorm = waterNormOpt.get();
-                BigDecimal minAllowedQty = waterNorm
-                        .multiply(BigDecimal.valueOf(100.0d - threshold.undersupplyThresholdPercent()))
-                        .divide(BigDecimal.valueOf(100.0d), 6, RoundingMode.HALF_UP);
-                BigDecimal maxAllowedQty = waterNorm
-                        .multiply(BigDecimal.valueOf(100.0d + threshold.oversupplyThresholdPercent()))
-                        .divide(BigDecimal.valueOf(100.0d), 6, RoundingMode.HALF_UP);
-
-                BigDecimal qtyForTargetDay = readingValue.subtract(dayBeforeTargetOpt.get().confirmedReading());
-                if (qtyForTargetDay.compareTo(minAllowedQty) < 0 || qtyForTargetDay.compareTo(maxAllowedQty) > 0) {
+            if (dayBeforeTargetOpt.isPresent()) {
+                TelemetryCompletedFlowReading dayBeforeTarget = dayBeforeTargetOpt.get();
+                if (readingValue.compareTo(dayBeforeTarget.confirmedReading()) <= 0) {
                     return CreateReadingResponse.builder()
                             .success(false)
                             .message(localizationService.localizeMessage(
-                                    "Updated reading implies water quantity for " + targetDay + " (" + toPlain(qtyForTargetDay)
-                                            + ") outside allowed range [" + toPlain(minAllowedQty) + ", " + toPlain(maxAllowedQty) + "].",
+                                    "Reading must be greater than the reading on " + dayBeforeTarget.readingDate()
+                                            + " (" + toPlain(dayBeforeTarget.confirmedReading()) + "). Submitted reading: "
+                                            + toPlain(readingValue) + ".",
                                     languageKey
                             ))
                             .qualityStatus("REJECTED")
                             .correlationId(request.getContactId())
                             .meterReading(readingValue)
                             .build();
-                }
-
-                if (dayAfterTargetOpt.isPresent()) {
-                    BigDecimal qtyForDayAfter = dayAfterTargetOpt.get().confirmedReading().subtract(readingValue);
-                    if (qtyForDayAfter.compareTo(minAllowedQty) < 0 || qtyForDayAfter.compareTo(maxAllowedQty) > 0) {
-                        return CreateReadingResponse.builder()
-                                .success(false)
-                                .message(localizationService.localizeMessage(
-                                        "Updated reading implies water quantity for " + dayAfterTargetOpt.get().readingDate() + " (" + toPlain(qtyForDayAfter)
-                                                + ") outside allowed range [" + toPlain(minAllowedQty) + ", " + toPlain(maxAllowedQty) + "].",
-                                        languageKey
-                                ))
-                                .qualityStatus("REJECTED")
-                                .correlationId(request.getContactId())
-                                .meterReading(readingValue)
-                                .build();
-                    }
                 }
             }
 

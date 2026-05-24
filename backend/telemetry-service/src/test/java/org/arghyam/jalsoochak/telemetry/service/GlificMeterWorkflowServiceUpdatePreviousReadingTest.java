@@ -5,7 +5,6 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingReque
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
-import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -22,6 +21,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
@@ -37,9 +37,6 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
 
     @Mock
     private GlificLocalizationService localizationService;
-
-    @Mock
-    private TenantConfigRepository tenantConfigRepository;
 
     @Mock
     private GlificMessageTemplatesService templatesService;
@@ -82,19 +79,19 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
 
         CreateReadingResponse resp = service.updatePreviousReadingMessage(UpdatedPreviousReadingRequest.builder()
                 .contactId("919999999999")
-                .reading("900")
+                .reading("1100")
                 .build());
 
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("CONFIRMED", resp.getQualityStatus());
-        verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("900"), 1L);
+        verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("1100"), 1L);
         verify(telemetryEventPublisher).publishWaterQuantityRecorded(
                 1,
                 10L,
                 1L,
                 targetDate,
-                new BigDecimal("-100"),
+                new BigDecimal("100"),
                 1
         );
         verify(telemetryEventPublisher).publishWaterQuantityRecorded(
@@ -102,13 +99,13 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
                 10L,
                 1L,
                 nextDate,
-                new BigDecimal("300"),
+                new BigDecimal("100"),
                 1
         );
     }
 
     @Test
-    void updatePreviousReadingRejectsWhenImpliedQuantityOutsideConfiguredThresholds() {
+    void updatePreviousReadingRejectsWhenNotGreaterThanPreviousConfirmedReading() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -117,6 +114,8 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.localizeMessage(anyString(), eq("english")))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
@@ -130,32 +129,24 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
                 .thenReturn(Optional.of(new TelemetryCompletedFlowReading(11L, "corr-3", 1L, previousDate, new BigDecimal("1000"))));
         when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDate("tenant_test", 10L, 1L, targetDate))
                 .thenReturn(Optional.of(new TelemetryCompletedFlowReading(33L, "corr-1", 1L, nextDate, new BigDecimal("1200"))));
-
-        // Config: norm=100; under=20% => min=80; over=30% => max=130
-        when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
-                .thenReturn(Optional.of("{\"value\":\"100\"}"));
-        when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
-                .thenReturn(Optional.empty());
-        when(tenantConfigRepository.findConfigValue(1, "WATER_QUANTITY_SUPPLY_THRESHOLD"))
-                .thenReturn(Optional.empty());
-        when(tenantConfigRepository.findConfigValue(0, "WATER_QUANTITY_SUPPLY_THRESHOLD"))
-                .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":20.0,\"oversupplyThresholdPercent\":30.0}"));
-
-        // Update target day (today-2) to 1050 => qtyTarget=50, below min(80) => reject
         CreateReadingResponse resp = service.updatePreviousReadingMessage(UpdatedPreviousReadingRequest.builder()
                 .contactId("919999999999")
-                .reading("1050")
+                .reading("1000")
                 .build());
 
         assertNotNull(resp);
         assertEquals(false, resp.isSuccess());
         assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(
+                "Reading must be greater than the reading on " + previousDate + " (1000). Submitted reading: 1000.",
+                resp.getMessage()
+        );
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryEventPublisher, never()).publishWaterQuantityRecorded(any(), anyLong(), anyLong(), any(), any(), any());
     }
 
     @Test
-    void updatePreviousReadingUpdatesWhenWithinBoundsAndThresholds() {
+    void updatePreviousReadingUpdatesWhenGreaterThanPreviousConfirmedReading() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -177,17 +168,6 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
                 .thenReturn(Optional.of(new TelemetryCompletedFlowReading(11L, "corr-3", 1L, previousDate, new BigDecimal("1000"))));
         when(telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDate("tenant_test", 10L, 1L, targetDate))
                 .thenReturn(Optional.of(new TelemetryCompletedFlowReading(33L, "corr-1", 1L, nextDate, new BigDecimal("1200"))));
-
-        when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
-                .thenReturn(Optional.of("{\"value\":\"100\"}"));
-        when(tenantConfigRepository.findConfigValue(1, "TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD"))
-                .thenReturn(Optional.empty());
-        when(tenantConfigRepository.findConfigValue(1, "WATER_QUANTITY_SUPPLY_THRESHOLD"))
-                .thenReturn(Optional.empty());
-        when(tenantConfigRepository.findConfigValue(0, "WATER_QUANTITY_SUPPLY_THRESHOLD"))
-                .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":20.0,\"oversupplyThresholdPercent\":30.0}"));
-
-        // Update target day (today-2) to 1110 => qtyTarget=110 (OK), qtyNext=90 (OK)
         CreateReadingResponse resp = service.updatePreviousReadingMessage(UpdatedPreviousReadingRequest.builder()
                 .contactId("919999999999")
                 .reading("1110")

@@ -89,7 +89,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 eq(10L),
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION)
+                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
+                eq("Meter not working")
         );
         verify(telemetryEventPublisher).publishAnomalyRecorded(
                 eq(1),
@@ -202,7 +203,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 eq(10L),
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
-                eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY)
+                eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY),
+                eq("No Water Supply")
         );
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 org.mockito.ArgumentMatchers.anyString(),
@@ -331,7 +333,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 eq(10L),
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION)
+                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
+                eq("pipe leakage")
         );
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 org.mockito.ArgumentMatchers.anyString(),
@@ -389,7 +392,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 eq(10L),
                 eq(1L),
                 org.mockito.ArgumentMatchers.any(),
-                eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY)
+                eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY),
+                eq("No Water Supply")
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 org.mockito.ArgumentMatchers.anyString(),
