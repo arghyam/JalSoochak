@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserLanguagePreferenceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +36,8 @@ class GlificSelectionServiceSelectedItemTest {
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
     @Mock
+    private UserChannelPreferenceRepository userChannelPreferenceRepository;
+    @Mock
     private UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     @Mock
     private GlificContactSyncService glificContactSyncService;
@@ -47,6 +50,7 @@ class GlificSelectionServiceSelectedItemTest {
                 tenantConfigRepository,
                 templatesService,
                 telemetryTenantRepository,
+                userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 glificContactSyncService,
                 new ObjectMapper()
@@ -103,6 +107,7 @@ class GlificSelectionServiceSelectedItemTest {
                 tenantConfigRepository,
                 templatesService,
                 telemetryTenantRepository,
+                userChannelPreferenceRepository,
                 userLanguagePreferenceRepository,
                 glificContactSyncService,
                 new ObjectMapper()

@@ -14,6 +14,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserLanguagePreferenceRepository;
 import org.springframework.stereotype.Service;
 
@@ -40,6 +41,7 @@ public class GlificSelectionService {
     private final TenantConfigRepository tenantConfigRepository;
     private final GlificMessageTemplatesService templatesService;
     private final TelemetryTenantRepository telemetryTenantRepository;
+    private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final UserLanguagePreferenceRepository userLanguagePreferenceRepository;
     private final GlificContactSyncService glificContactSyncService;
     private final ObjectMapper objectMapper;
@@ -49,6 +51,7 @@ public class GlificSelectionService {
                                   TenantConfigRepository tenantConfigRepository,
                                   GlificMessageTemplatesService templatesService,
                                   TelemetryTenantRepository telemetryTenantRepository,
+                                  UserChannelPreferenceRepository userChannelPreferenceRepository,
                                   UserLanguagePreferenceRepository userLanguagePreferenceRepository,
                                   GlificContactSyncService glificContactSyncService,
                                   ObjectMapper objectMapper) {
@@ -57,6 +60,7 @@ public class GlificSelectionService {
         this.tenantConfigRepository = tenantConfigRepository;
         this.templatesService = templatesService;
         this.telemetryTenantRepository = telemetryTenantRepository;
+        this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.userLanguagePreferenceRepository = userLanguagePreferenceRepository;
         this.glificContactSyncService = glificContactSyncService;
         this.objectMapper = objectMapper;
@@ -296,6 +300,7 @@ public class GlificSelectionService {
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
             telemetryTenantRepository.updateSchemeChannel(operatorWithSchema.schemaName(), schemeId, selectedChannelId);
+            userChannelPreferenceRepository.upsert(tenantId, request.getContactId(), selectedChannel);
 
             String confirmationTemplate = templatesService
                     .resolveScreenConfirmationTemplate(tenantId, "CHANNEL_SELECTION", languageKey)

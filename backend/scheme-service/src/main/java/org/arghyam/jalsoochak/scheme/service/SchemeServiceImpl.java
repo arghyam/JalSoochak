@@ -51,6 +51,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -142,6 +143,7 @@ public class SchemeServiceImpl implements SchemeService {
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("csv", "xlsx");
     private static final DataFormatter DATA_FORMATTER = new DataFormatter();
     private static final String REPORT_FORMAT_CSV = "csv";
+    private static final DateTimeFormatter REPORT_FILENAME_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm");
     private final ConcurrentHashMap<String, Object> reportGenerationLocks = new ConcurrentHashMap<>();
 
     private final SchemeDbRepository schemeDbRepository;
@@ -452,8 +454,11 @@ public class SchemeServiceImpl implements SchemeService {
     }
 
     private String findCachedReportLink(String schemaName, String reportType, String paramsHash, long dataVersion) {
+        String tenantCode = tenantCodeFromSchema(schemaName);
+        String filenamePrefix = "SCHEME".equals(reportType) ? "scheme_report" : "scheme_mapping_report";
+        String filename = buildDownloadFilename(filenamePrefix, tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
         return schemeDbRepository.findReportObjectKey(schemaName, reportType, REPORT_FORMAT_CSV, paramsHash, dataVersion)
-                .map(minioService::getObjectUrl)
+                .map(key -> minioService.getObjectUrl(key, filename))
                 .orElse(null);
     }
 
@@ -508,7 +513,9 @@ public class SchemeServiceImpl implements SchemeService {
             try (InputStream input = Files.newInputStream(tempFile)) {
                 minioService.upload(input, fileSize, objectKey, "text/csv");
             }
-            link = minioService.getObjectUrl(objectKey);
+            String tenantCode = tenantCodeFromSchema(schemaName);
+            String filename = buildDownloadFilename("scheme_report", tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
+            link = minioService.getObjectUrl(objectKey, filename);
             saveReportRecord(schemaName, actorUserId, reportType, REPORT_FORMAT_CSV, paramsJson, paramsHash, dataVersion, objectKey, fileSize, rowCount.get());
             return ReportLinkResponseDTO.builder().link(link).build();
         } catch (IOException e) {
@@ -566,7 +573,9 @@ public class SchemeServiceImpl implements SchemeService {
             try (InputStream input = Files.newInputStream(tempFile)) {
                 minioService.upload(input, fileSize, objectKey, "text/csv");
             }
-            link = minioService.getObjectUrl(objectKey);
+            String tenantCode = tenantCodeFromSchema(schemaName);
+            String filename = buildDownloadFilename("scheme_mapping_report", tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
+            link = minioService.getObjectUrl(objectKey, filename);
             saveReportRecord(schemaName, actorUserId, reportType, REPORT_FORMAT_CSV, paramsJson, paramsHash, dataVersion, objectKey, fileSize, rowCount.get());
             return ReportLinkResponseDTO.builder().link(link).build();
         } catch (IOException e) {
@@ -583,8 +592,34 @@ public class SchemeServiceImpl implements SchemeService {
     }
 
     private String buildObjectKey(String schemaName, String reportType, String format) {
-        return "reports/" + schemaName + "/" + reportType + "/"
-                + OffsetDateTime.now(ZoneOffset.UTC).toEpochSecond() + "-" + UUID.randomUUID() + "." + format;
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        String tenantCode = tenantCodeFromSchema(schemaName).toLowerCase(Locale.ROOT);
+        return String.format("%s/reports/%s/%04d/%02d/%s.%s",
+                tenantCode,
+                reportType,
+                now.getYear(),
+                now.getMonthValue(),
+                UUID.randomUUID(),
+                format);
+    }
+
+    private String tenantCodeFromSchema(String schemaName) {
+        if (schemaName == null) {
+            return "NA";
+        }
+        String prefix = "tenant_";
+        if (schemaName.startsWith(prefix) && schemaName.length() > prefix.length()) {
+            return schemaName.substring(prefix.length()).toUpperCase(Locale.ROOT);
+        }
+        return schemaName.toUpperCase(Locale.ROOT);
+    }
+
+    private String buildDownloadFilename(String prefix, String tenantCode, OffsetDateTime generatedAt) {
+        OffsetDateTime stamp = generatedAt != null ? generatedAt : OffsetDateTime.now(ZoneOffset.UTC);
+        return String.format("%s_%s_%s.csv",
+                prefix,
+                tenantCode,
+                REPORT_FILENAME_TIMESTAMP.format(stamp.atZoneSameInstant(ZoneOffset.UTC)));
     }
 
     private String sha256Hex(String text) {

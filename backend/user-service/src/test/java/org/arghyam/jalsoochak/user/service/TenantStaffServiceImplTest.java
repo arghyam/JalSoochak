@@ -459,6 +459,13 @@ class TenantStaffServiceImplTest {
             return auth;
         }
 
+        private Authentication superStateAdminAuth() {
+            Authentication auth = mock(Authentication.class);
+            when(auth.getAuthorities()).thenAnswer(inv ->
+                    List.of(new SimpleGrantedAuthority("ROLE_SUPER_STATE_ADMIN")));
+            return auth;
+        }
+
         @Test
         @DisplayName("successfully deactivates active staff user")
         void deactivatesStaffSuccessfully() {
@@ -492,6 +499,22 @@ class TenantStaffServiceImplTest {
         @DisplayName("SUPER_USER can deactivate staff across tenants without tenant check")
         void superUserCanDeactivateAcrossTenants() {
             Authentication auth = superUserAuth();
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(1);
+
+            service.deactivateStaff(10L, "mp", auth);
+
+            verify(staffKeycloakService).revokeKeycloakAccount(eq(SECTION_OFFICER), eq("tenant_mp"), isNull());
+            verify(userTenantRepository).deactivateStaffUser(eq("tenant_mp"), eq(10L), isNull());
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN can deactivate staff without tenant check")
+        void superStateAdminCanDeactivate() {
+            Authentication auth = superStateAdminAuth();
             when(userTenantRepository.findUserById("tenant_mp", 10L))
                     .thenReturn(Optional.of(SECTION_OFFICER));
             when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
@@ -590,6 +613,13 @@ class TenantStaffServiceImplTest {
             return auth;
         }
 
+        private Authentication superStateAdminAuth() {
+            Authentication auth = mock(Authentication.class);
+            when(auth.getAuthorities()).thenAnswer(inv ->
+                    List.of(new SimpleGrantedAuthority("ROLE_SUPER_STATE_ADMIN")));
+            return auth;
+        }
+
         @Test
         @DisplayName("successfully activates inactive staff user without touching Keycloak")
         void activatesStaffSuccessfully() {
@@ -623,6 +653,21 @@ class TenantStaffServiceImplTest {
         @DisplayName("SUPER_USER can activate staff across tenants without tenant check")
         void superUserCanActivateAcrossTenants() {
             Authentication auth = superUserAuth();
+            when(userTenantRepository.findUserById("tenant_mp", 10L))
+                    .thenReturn(Optional.of(INACTIVE_SECTION_OFFICER));
+            when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
+            when(userTenantRepository.activateStaffUser(eq("tenant_mp"), eq(10L), isNull()))
+                    .thenReturn(1);
+
+            service.activateStaff(10L, "mp", auth);
+
+            verify(userTenantRepository).activateStaffUser(eq("tenant_mp"), eq(10L), isNull());
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN can activate staff without tenant check")
+        void superStateAdminCanActivate() {
+            Authentication auth = superStateAdminAuth();
             when(userTenantRepository.findUserById("tenant_mp", 10L))
                     .thenReturn(Optional.of(INACTIVE_SECTION_OFFICER));
             when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));

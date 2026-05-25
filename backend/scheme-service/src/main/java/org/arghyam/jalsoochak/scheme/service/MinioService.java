@@ -11,13 +11,17 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Service
 public class MinioService {
 
     private final MinioClient minioClient;
-    private final String bucket;
+    private final String reportsBucket;
     private final String endpoint;
     private final String presignedBaseUrl;
     private final Duration presignedTtl;
@@ -25,10 +29,10 @@ public class MinioService {
     public MinioService(@Value("${minio.endpoint}") String endpoint,
                         @Value("${minio.access-key}") String accessKey,
                         @Value("${minio.secret-key}") String secretKey,
-                        @Value("${minio.bucket}") String bucket,
+                        @Value("${minio.reports-bucket:jalsoochak-reports}") String reportsBucket,
                         @Value("${minio.presigned-base-url:}") String presignedBaseUrl,
                         @Value("${minio.presigned-ttl-seconds:3600}") long presignedTtlSeconds) {
-        this.bucket = bucket;
+        this.reportsBucket = reportsBucket;
         this.endpoint = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
         this.presignedBaseUrl = presignedBaseUrl;
         this.presignedTtl = Duration.ofSeconds(Math.max(presignedTtlSeconds, 1L));
@@ -50,7 +54,7 @@ public class MinioService {
         try {
             minioClient.putObject(
                     PutObjectArgs.builder()
-                            .bucket(bucket)
+                            .bucket(reportsBucket)
                             .object(objectName)
                             .stream(inputStream, size, -1)
                             .contentType(contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType)
@@ -63,18 +67,27 @@ public class MinioService {
     }
 
     public String getBucket() {
-        return bucket;
+        return reportsBucket;
     }
 
     public String getObjectUrl(String objectName) {
+        return getObjectUrl(objectName, null);
+    }
+
+    public String getObjectUrl(String objectName, String downloadFilename) {
         try {
             int expirySeconds = Math.toIntExact(presignedTtl.getSeconds());
+            Map<String, String> queryParams = new LinkedHashMap<>();
+            if (downloadFilename != null && !downloadFilename.isBlank()) {
+                queryParams.put("response-content-disposition", contentDisposition(downloadFilename));
+            }
             String sdkUrl = minioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
                             .method(Method.GET)
-                            .bucket(bucket)
+                            .bucket(reportsBucket)
                             .object(objectName)
                             .expiry(expirySeconds)
+                            .extraQueryParams(queryParams)
                             .build()
             );
             return rewritePublicUrl(sdkUrl);
@@ -108,5 +121,11 @@ public class MinioService {
         } catch (URISyntaxException e) {
             throw new RuntimeException("Failed to rewrite MinIO presigned URL", e);
         }
+    }
+
+    private static String contentDisposition(String filename) {
+        String safeAscii = filename.replaceAll("[\"\\r\\n]", "_");
+        String encoded = URLEncoder.encode(safeAscii, StandardCharsets.UTF_8).replace("+", "%20");
+        return "attachment; filename=\"" + safeAscii + "\"; filename*=UTF-8''" + encoded;
     }
 }

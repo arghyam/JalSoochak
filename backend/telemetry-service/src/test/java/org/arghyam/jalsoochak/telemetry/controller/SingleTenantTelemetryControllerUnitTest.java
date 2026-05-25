@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
@@ -188,6 +189,28 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals("corr-123", response.getBody().getData().getCorrelationId());
     }
 
+    @Test
+    void resetLatestReadingIsPublicAndDoesNotRequireApiKey() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.empty()),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                null,
+                ResetLatestReadingRequest.builder()
+                        .contactId("919999999999")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(true, response.getBody().isSuccess());
+        assertEquals("Latest reading reset successfully", response.getBody().getData().getMessage());
+        assertEquals("CONFIRMED", response.getBody().getData().getQualityStatus());
+    }
+
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean rejected;
 
@@ -250,6 +273,19 @@ class SingleTenantTelemetryControllerUnitTest {
                     .message("Reading updated successfully")
                     .correlationId(correlationId)
                     .meterReading(confirmedReading)
+                    .qualityStatus("CONFIRMED")
+                    .build();
+        }
+
+        @Override
+        public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+            if (throwError) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad request");
+            }
+            return CreateReadingResponse.builder()
+                    .success(true)
+                    .message("Latest reading reset successfully")
+                    .correlationId(phoneNumber)
                     .qualityStatus("CONFIRMED")
                     .build();
         }
