@@ -30,6 +30,8 @@ import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.arghyam.jalsoochak.user.exceptions.KeycloakOperationException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
+import org.arghyam.jalsoochak.user.enums.ResourceType;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
@@ -76,6 +78,7 @@ public class AuthServiceImpl implements AuthService {
     private final TokenService tokenService;
     private final ObjectMapper objectMapper;
     private final MetadataDecryptionHelper metadataDecryptionHelper;
+    private final DataVersionRepository dataVersionRepository;
 
     @Override
     public AuthResult login(LoginRequestDTO request) {
@@ -295,6 +298,7 @@ public class AuthServiceImpl implements AuthService {
                 // Use the same Keycloak UUID so both tables share a single identity key
                 userTenantRepository.createUser(schema, keycloakUuid, tenantId, title, email, pendingUser.adminLevel(),
                         request.getPhoneNumber(), "KEYCLOAK_MANAGED", 0L);
+                dataVersionRepository.bump(schema, ResourceType.STAFF_USERS);
             }
 
             log.info("activateAccount – account activated successfully, role={}", role);

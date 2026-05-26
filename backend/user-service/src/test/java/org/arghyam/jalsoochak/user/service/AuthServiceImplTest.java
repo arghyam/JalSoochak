@@ -40,6 +40,8 @@ import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
+import org.arghyam.jalsoochak.user.enums.ResourceType;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
@@ -115,6 +117,9 @@ class AuthServiceImplTest {
     @Mock
     private MetadataDecryptionHelper metadataDecryptionHelper;
 
+    @Mock
+    private DataVersionRepository dataVersionRepository;
+
     private AuthServiceImpl authService;
 
     @BeforeEach
@@ -122,7 +127,7 @@ class AuthServiceImplTest {
         authService = new AuthServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
                 userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, passwordResetProperties,
-                frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper
+                frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper, dataVersionRepository
         );
     }
 
@@ -671,6 +676,7 @@ class AuthServiceImplTest {
             assertEquals("91XXXXXXXXXX", result.tokenResponse().getPhoneNumber());
             verify(userCommonRepository).consumeActiveTokenOfType(hash, "INVITE");
             verify(userCommonRepository).activatePendingAdminUser(eq(10L), anyString(), anyString());
+            verify(dataVersionRepository, never()).bump(anyString(), any());
         }
 
         @Test
@@ -762,6 +768,7 @@ class AuthServiceImplTest {
             verify(userCommonRepository).activatePendingAdminUser(eq(30L), anyString(), anyString());
             verify(userTenantRepository).createUser(eq("tenant_mp"), anyString(), any(), eq("Hybrid Admin"),
                     eq("newssa@example.com"), any(), anyString(), anyString(), any());
+            verify(dataVersionRepository).bump("tenant_mp", ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -807,6 +814,7 @@ class AuthServiceImplTest {
             verify(userCommonRepository).activatePendingAdminUser(eq(20L), anyString(), anyString());
             verify(userTenantRepository).createUser(eq("tenant_mp"), anyString(), any(), eq("State Admin"),
                     eq("newsa@example.com"), any(), anyString(), anyString(), any());
+            verify(dataVersionRepository).bump("tenant_mp", ResourceType.STAFF_USERS);
         }
     }
 }

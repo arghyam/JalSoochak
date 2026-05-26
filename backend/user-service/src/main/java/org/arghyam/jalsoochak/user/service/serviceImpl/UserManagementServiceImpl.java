@@ -21,6 +21,8 @@ import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UnauthorizedAccessException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
+import org.arghyam.jalsoochak.user.enums.ResourceType;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
@@ -75,6 +77,7 @@ public class UserManagementServiceImpl implements UserManagementService {
     private final ObjectMapper objectMapper;
     private final PiiEncryptionService pii;
     private final MetadataDecryptionHelper metadataDecryptionHelper;
+    private final DataVersionRepository dataVersionRepository;
 
     @Override
     @Transactional
@@ -536,6 +539,7 @@ public class UserManagementServiceImpl implements UserManagementService {
                 String fn = rep.getFirstName() != null ? rep.getFirstName() : "";
                 String ln = rep.getLastName() != null ? rep.getLastName() : "";
                 userTenantRepository.updateUserProfile(schema, user.id(), (fn + " " + ln).trim(), phoneToSet);
+                dataVersionRepository.bump(schema, ResourceType.STAFF_USERS);
             }
         }
     }
