@@ -234,13 +234,18 @@ app:
   base-url: ${APP_BASE_URL:http://localhost:8085}
 
 # ──────────────────────────────────────────────────────────────
-# Notification Guard
-# Set NOTIFICATIONS_DRY_RUN=true in dev/test to suppress all
-# outbound Glific API calls while keeping the Kafka pipeline live.
+# Notification Guards (per channel)
+# Set NOTIFICATIONS_WHATSAPP_DRY_RUN=true to suppress outbound Glific
+# (WhatsApp) API calls while keeping the Kafka pipeline live.
+# Set NOTIFICATIONS_SMS_DRY_RUN=true to suppress SMSCountry OTP
+# delivery (note: login OTPs will not reach users when enabled).
 # ──────────────────────────────────────────────────────────────
 
 notifications:
-  dry-run: ${NOTIFICATIONS_DRY_RUN:false}
+  whatsapp:
+    dry-run: ${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}
+  sms:
+    dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
 
 # ──────────────────────────────────────────────────────────────
 # Glific GraphQL API (WhatsApp HSM)

@@ -330,7 +330,8 @@ All Glific and storage properties can be overridden via environment variables.
 | `minio.bucket` | `MINIO_BUCKET` | No | Bucket name (default: `escalation-reports`) |
 | `minio.base-url` | `MINIO_BASE_URL` | No | Public base URL for PDF links |
 | `app.base-url` | `APP_BASE_URL` | No | Public URL of message-service itself |
-| `notifications.dry-run` | `NOTIFICATIONS_DRY_RUN` | No | Set `true` to suppress all Glific API calls |
+| `notifications.whatsapp.dry-run` | `NOTIFICATIONS_WHATSAPP_DRY_RUN` | No | Set `true` to suppress all Glific (WhatsApp) API calls |
+| `notifications.sms.dry-run` | `NOTIFICATIONS_SMS_DRY_RUN` | No | Set `true` to suppress SMSCountry OTP delivery (login OTPs will not reach users) |
 | `escalation.report.dir` | — | No | Local PDF output directory (default: `/tmp/escalation-reports/`) |
 
 ---
