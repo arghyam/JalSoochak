@@ -55,7 +55,7 @@ public class SmsCountryService {
     @Value("${smscountry.dlt-header-id:}")
     private String dltHeaderId;
 
-    @Value("${notifications.dry-run:false}")
+    @Value("${notifications.sms.dry-run:false}")
     private boolean dryRun;
 
     public SmsCountryService(WebClient.Builder webClientBuilder) {
