@@ -1,7 +1,9 @@
 package org.arghyam.jalsoochak.user.service;
 
+import org.arghyam.jalsoochak.user.enums.ResourceType;
 import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserEventPublisher;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.UserUploadRepository;
@@ -40,6 +42,7 @@ class PumpOperatorUploadChunkProcessorTest {
     @Mock private UserEventPublisher userEventPublisher;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock private StaffKeycloakService staffKeycloakService;
+    @Mock private DataVersionRepository dataVersionRepository;
 
     private PumpOperatorUploadChunkProcessor processor;
 
@@ -53,7 +56,7 @@ class PumpOperatorUploadChunkProcessorTest {
     void setUp() {
         processor = new PumpOperatorUploadChunkProcessor(
                 userTenantRepository, userUploadRepository,
-                userEventPublisher, userAnalyticsEventPublisher, staffKeycloakService);
+                userEventPublisher, userAnalyticsEventPublisher, staffKeycloakService, dataVersionRepository);
     }
 
     private Map<String, Integer> userTypeIds() {
@@ -134,6 +137,7 @@ class PumpOperatorUploadChunkProcessorTest {
             assertThat(result.skippedRows()).isZero();
             verify(userTenantRepository).createUser(eq(SCHEMA), anyString(), eq(10), anyString(),
                     anyString(), eq(4), eq("919876543210"), anyString(), eq(1L));
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -158,6 +162,7 @@ class PumpOperatorUploadChunkProcessorTest {
             assertThat(result.uploadedRows()).isEqualTo(1);
             verify(userTenantRepository).createUser(eq(SCHEMA), anyString(), eq(10), eq("Sita Devi"),
                     anyString(), eq(4), eq("919876543211"), anyString(), eq(1L));
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -182,6 +187,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             assertThat(result.uploadedRows()).isEqualTo(1);
             verify(userUploadRepository).findSchemeId(SCHEMA, "SS-NOTCACHED", null);
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -203,6 +209,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             assertThat(result.uploadedRows()).isZero();
             assertThat(result.skippedRows()).isEqualTo(1);
+            verify(dataVersionRepository, never()).bump(anyString(), any());
         }
     }
 
@@ -235,6 +242,7 @@ class PumpOperatorUploadChunkProcessorTest {
             assertThat(result.uploadedRows()).isEqualTo(1);
             verify(userTenantRepository).updateUserProfile(SCHEMA, 55L, "New Name", "919876543214");
             verify(userTenantRepository).updateUserLanguageId(SCHEMA, 55L, 1);
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -263,6 +271,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             verify(staffKeycloakService).revokeKeycloakAccount(existingUserDiffPhone, SCHEMA, ACTOR.id());
             verify(userTenantRepository).updateUserProfile(SCHEMA, 55L, "New Name", "919876543214");
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -285,6 +294,7 @@ class PumpOperatorUploadChunkProcessorTest {
                     List.of(uploadRow), schemeCache, new HashSet<>());
 
             verify(staffKeycloakService, never()).revokeKeycloakAccount(any(), anyString(), anyLong());
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -307,6 +317,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             assertThat(result.skippedRows()).isEqualTo(1);
             verify(userTenantRepository, never()).updateUserProfile(any(), anyLong(), anyString(), anyString());
+            verify(dataVersionRepository, never()).bump(anyString(), any());
         }
     }
 
@@ -331,6 +342,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             assertThat(result.skippedRows()).isEqualTo(1);
             verify(userTenantRepository, never()).findUserByPhone(any(), any());
+            verify(dataVersionRepository, never()).bump(anyString(), any());
         }
 
         @Test
@@ -348,6 +360,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             assertThat(result.skippedRows()).isEqualTo(1);
             verify(userTenantRepository, never()).findUserByPhone(any(), any());
+            verify(dataVersionRepository, never()).bump(anyString(), any());
         }
 
         @Test
@@ -373,6 +386,7 @@ class PumpOperatorUploadChunkProcessorTest {
 
             // good row uploaded, bad row skipped
             assertThat(result.uploadedRows() + result.skippedRows()).isEqualTo(2);
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
 
         @Test
@@ -398,6 +412,7 @@ class PumpOperatorUploadChunkProcessorTest {
             // Section officers use type ID 3
             verify(userTenantRepository).createUser(eq(SCHEMA), anyString(), eq(10), anyString(),
                     anyString(), eq(3), eq("919876543219"), anyString(), eq(1L));
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
     }
 
@@ -435,6 +450,7 @@ class PumpOperatorUploadChunkProcessorTest {
             verify(userUploadRepository).markUserSchemeMappingsDeleted(eq(SCHEMA), anyList(), anyInt());
             // User should be in the cleared set after processing
             assertThat(cleared).contains(88L);
+            verify(dataVersionRepository).bump(SCHEMA, ResourceType.STAFF_USERS);
         }
     }
 }

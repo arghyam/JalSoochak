@@ -2,9 +2,11 @@ package org.arghyam.jalsoochak.user.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.user.enums.ResourceType;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserEventPublisher;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserSchemeMappingCreateRow;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
@@ -34,6 +36,7 @@ public class PumpOperatorUploadChunkProcessor {
     private final UserEventPublisher userEventPublisher;
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final StaffKeycloakService staffKeycloakService;
+    private final DataVersionRepository dataVersionRepository;
 
     public record UploadRow(
             int rowNumber,
@@ -229,6 +232,10 @@ public class PumpOperatorUploadChunkProcessor {
                     String.valueOf(preferredLanguageId),
                     new ArrayList<>(phonesToNotify)
             );
+        }
+
+        if (uploaded > 0) {
+            dataVersionRepository.bump(schemaName, ResourceType.STAFF_USERS);
         }
 
         log.info("[pump-operator-upload] chunk_processed rows={} uploaded={} skipped={} mappings_inserted={}",
