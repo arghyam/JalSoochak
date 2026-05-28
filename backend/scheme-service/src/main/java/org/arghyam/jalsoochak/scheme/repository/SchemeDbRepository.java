@@ -1242,6 +1242,25 @@ public class SchemeDbRepository {
         }
     }
 
+    public String findUserPhoneNumberById(String schemaName, Integer userId) {
+        validateSchemaName(schemaName);
+        if (userId == null) {
+            return null;
+        }
+        String sql = String.format("""
+                SELECT phone_number
+                FROM %s.user_table
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """, schemaName);
+        try {
+            return jdbcTemplate.queryForObject(sql, String.class, userId);
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
     public boolean isUserStateAdmin(String schemaName, Integer userId) {
         validateSchemaName(schemaName);
         if (userId == null) {
