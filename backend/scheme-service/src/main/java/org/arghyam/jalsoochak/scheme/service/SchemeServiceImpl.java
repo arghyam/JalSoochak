@@ -151,6 +151,7 @@ public class SchemeServiceImpl implements SchemeService {
     private final SchemeUploadChunkProcessor chunkProcessor;
     private final KafkaProducer kafkaProducer;
     private final MinioService minioService;
+    private final PiiEncryptionService piiEncryptionService;
 
     @Override
     public PageResponseDTO<SchemeDTO> listSchemes(
@@ -250,15 +251,20 @@ public class SchemeServiceImpl implements SchemeService {
         }
 
         int userId = resolveCurrentUserId(schemaName);
+        String resolvedPhoneNumber = phoneNumberClaim;
+        if (resolvedPhoneNumber == null || resolvedPhoneNumber.isBlank()) {
+            String encrypted = schemeDbRepository.findUserPhoneNumberById(schemaName, userId);
+            resolvedPhoneNumber = piiEncryptionService != null ? piiEncryptionService.safeDecrypt(encrypted) : null;
+        }
         int size = clampLimit(limit);
         int p = Math.max(0, page);
         int offset = p * size;
 
         List<SchemeYesterdayFinalReadingDTO> rows =
                 schemeDbRepository.listSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName, offset, size);
-        if (phoneNumberClaim != null && !phoneNumberClaim.isBlank()) {
+        if (resolvedPhoneNumber != null && !resolvedPhoneNumber.isBlank()) {
             for (SchemeYesterdayFinalReadingDTO row : rows) {
-                row.setPhoneNumber(phoneNumberClaim);
+                row.setPhoneNumber(resolvedPhoneNumber);
             }
         }
         long total = schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName);
