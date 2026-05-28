@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.service.SchemeService;
 import org.springframework.http.MediaType;
@@ -24,6 +25,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/scheme")
@@ -63,6 +66,15 @@ public class SchemeController {
                 firstNonBlank(operatingStatus, operatingstatus),
                 status
         ));
+    }
+
+    @GetMapping("/schemes/yesterday-final-readings")
+    public ResponseEntity<List<SchemeYesterdayFinalReadingDTO>> listSchemesWithYesterdayFinalReading(
+            @RequestParam String tenantCode,
+            @RequestParam(required = false) String schemeName
+    ) {
+        log.info("GET /api/v1/scheme/schemes/yesterday-final-readings called");
+        return ResponseEntity.ok(schemeService.listSchemesWithYesterdayFinalReading(tenantCode, schemeName));
     }
 
     private static String firstNonBlank(String a, String b) {

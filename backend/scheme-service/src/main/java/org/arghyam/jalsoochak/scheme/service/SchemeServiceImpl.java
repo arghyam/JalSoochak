@@ -21,6 +21,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
@@ -229,6 +230,12 @@ public class SchemeServiceImpl implements SchemeService {
         );
         long total = schemeDbRepository.countSchemeMappings(schemaName, name, workStatusCode, operatingStatusCode, status, villageLgdCode, subDivisionName);
         return PageResponseDTO.of(rows, total, p, size);
+    }
+
+    @Override
+    public List<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String tenantCode, String schemeName) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        return schemeDbRepository.listSchemesWithYesterdayFinalReading(schemaName, schemeName);
     }
 
     @Override
