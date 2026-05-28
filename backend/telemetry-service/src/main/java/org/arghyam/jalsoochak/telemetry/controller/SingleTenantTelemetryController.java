@@ -66,7 +66,7 @@ public class SingleTenantTelemetryController {
             @RequestBody @Valid UpdateYesterdayFinalReadingBySchemeRequest request
     ) {
         return ResponseEntity.ok(
-                telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(schemeId, request.getReading())
+                telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(schemeId, request.getPhoneNumber(), request.getReading())
         );
     }
 

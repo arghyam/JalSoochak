@@ -7,8 +7,6 @@ import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -23,16 +21,22 @@ public class TelemetrySchemeReadingService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
 
-    public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId, BigDecimal finalReading) {
+    public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
+                                                                                            String phoneNumber,
+                                                                                            BigDecimal finalReading) {
         if (schemeId == null || schemeId < 1) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "schemeId must be a positive integer");
+        }
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber is required");
         }
         if (finalReading == null || finalReading.compareTo(BigDecimal.ZERO) <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reading must be greater than zero");
         }
 
         String schemaName = requireTenantSchema();
-        Long updaterUserId = resolveCurrentUserId(schemaName);
+        Long updaterUserId = telemetryTenantRepository.findUserIdByPhone(schemaName, phoneNumber)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for phoneNumber"));
         Integer tenantId = telemetryTenantRepository.findTenantIdBySchemaName(schemaName);
         if (tenantId == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found for schema");
@@ -118,34 +122,5 @@ public class TelemetrySchemeReadingService {
         return schemaName;
     }
 
-    private Long resolveCurrentUserId(String schemaName) {
-        var auth = SecurityContextHolder.getContext().getAuthentication();
-        if (!(auth instanceof JwtAuthenticationToken jwtAuth)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No valid authentication");
-        }
-        var jwt = jwtAuth.getToken();
-
-        // Verify the caller's tenant_state_code maps to the requested schema.
-        String tenantStateCode = jwt.getClaimAsString("tenant_state_code");
-        if (tenantStateCode == null || tenantStateCode.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized to operate on this tenant");
-        }
-        String expectedSchema = "tenant_" + tenantStateCode.trim().toLowerCase();
-        if (!schemaName.equals(expectedSchema)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized to operate on this tenant");
-        }
-
-        String email = jwt.getClaimAsString("email");
-        if (email == null || email.isBlank()) {
-            email = jwt.getClaimAsString("preferred_username");
-        }
-        if (email == null || email.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token missing user identity");
-        }
-        Long userId = telemetryTenantRepository.findUserIdByEmail(schemaName, email);
-        if (userId == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for token");
-        }
-        return userId;
-    }
+    // No JWT authentication for this endpoint. We resolve the user by phone number and then enforce scheme mapping.
 }

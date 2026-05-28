@@ -2002,6 +2002,20 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst().orElse(null);
     }
 
+    public Optional<Long> findUserIdByPhone(String schemaName, String phoneNumber) {
+        validateSchemaName(schemaName);
+        Optional<TelemetryOperator> operatorOpt = findOperatorByPhone(schemaName, phoneNumber);
+        return operatorOpt.map(TelemetryOperator::id);
+    }
+
+    private Optional<TelemetryOperator> findOperatorByPhone(String schemaName, String phoneNumber) {
+        String normalized = normalizePhone(phoneNumber);
+        if (normalized == null || normalized.isBlank()) {
+            return Optional.empty();
+        }
+        return findOperatorByPhone(schemaName, phoneNumber, normalized);
+    }
+
     private Long toLong(Object value) {
         if (value == null) {
             return null;
