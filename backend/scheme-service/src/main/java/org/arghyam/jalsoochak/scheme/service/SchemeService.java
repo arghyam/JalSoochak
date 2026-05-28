@@ -44,7 +44,7 @@ public interface SchemeService {
             String subDivisionName
     );
 
-    List<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String tenantCode, String schemeName);
+    PageResponseDTO<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String tenantCode, int page, int limit, String schemeName);
 
     SchemeCountsDTO getSchemeCounts(String tenantCode);
 

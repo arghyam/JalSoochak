@@ -1261,6 +1261,61 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    public boolean isUserMappedToScheme(String schemaName, Long userId, Long schemeId) {
+        validateSchemaName(schemaName);
+        if (userId == null || userId < 1 || schemeId == null || schemeId < 1) {
+            return false;
+        }
+        String sql = String.format("""
+                SELECT 1
+                FROM %s.user_scheme_mapping_table
+                WHERE user_id = ?
+                  AND scheme_id = ?
+                  AND status = 1
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """, schemaName);
+        List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> 1, userId, schemeId);
+        return !rows.isEmpty();
+    }
+
+    public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingOnDateForUser(String schemaName,
+                                                                                               Long schemeId,
+                                                                                               Long userId,
+                                                                                               LocalDate readingDate) {
+        validateSchemaName(schemaName);
+        if (schemeId == null || schemeId < 1 || userId == null || userId < 1 || readingDate == null) {
+            return Optional.empty();
+        }
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND created_by = ?
+                  AND reading_date = ?
+                  AND extracted_reading > 0
+                  AND confirmed_reading > 0
+                  AND deleted_at IS NULL
+                ORDER BY %s DESC, created_at DESC, id DESC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryCompletedFlowReading(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                schemeId,
+                userId,
+                readingDate
+        );
+        return rows.stream().findFirst();
+    }
+
     public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingBeforeDateForScheme(String schemaName,
                                                                                                       Long schemeId,
                                                                                                       LocalDate beforeDate) {
