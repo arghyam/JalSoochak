@@ -15,5 +15,5 @@ public class SchemeYesterdayFinalReadingDTO {
     private Integer schemeId;
     private String schemeName;
     private BigDecimal yesterdayFinalReading;
+    private String phoneNumber;
 }
-
