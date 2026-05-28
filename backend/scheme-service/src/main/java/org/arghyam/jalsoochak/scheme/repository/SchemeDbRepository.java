@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,6 +34,7 @@ public class SchemeDbRepository {
     private final JdbcTemplate jdbcTemplate;
     private static final Pattern SAFE_SCHEMA = Pattern.compile("^[a-z_][a-z0-9_]*$");
     private final ConcurrentHashMap<String, Boolean> deptTablesExistCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Boolean> columnExistsCache = new ConcurrentHashMap<>();
     private static final Map<Integer, String> WORK_STATUS_LABELS = Map.of(
             1, "Ongoing",
             2, "Completed",
@@ -396,6 +398,80 @@ public class SchemeDbRepository {
                   %s
                 """, schemaName, where.sql());
         Long total = jdbcTemplate.queryForObject(sql, Long.class, where.args().toArray());
+        return total == null ? 0 : total;
+    }
+
+    public List<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReadingForUser(String schemaName,
+                                                                                            int userId,
+                                                                                            String schemeName,
+                                                                                            int offset,
+                                                                                            int limit) {
+        validateSchemaName(schemaName);
+
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        StringBuilder sql = new StringBuilder(String.format("""
+                SELECT sm.id AS scheme_id,
+                       sm.scheme_name,
+                       COALESCE(fr.confirmed_reading, 0) AS yesterday_final_reading
+                FROM %1$s.user_scheme_mapping_table usm
+                JOIN %1$s.scheme_master_table sm
+                  ON sm.id = usm.scheme_id
+                LEFT JOIN LATERAL (
+                    SELECT confirmed_reading
+                    FROM %1$s.flow_reading_table
+                    WHERE scheme_id = sm.id
+                      AND reading_date = CURRENT_DATE - 1
+                      AND deleted_at IS NULL
+                    ORDER BY %2$s DESC, created_at DESC, id DESC
+                    LIMIT 1
+                ) fr ON TRUE
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
+                """, schemaName, timeColumn));
+
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        if (schemeName != null && !schemeName.isBlank()) {
+            sql.append(" AND sm.scheme_name ILIKE ? ");
+            args.add("%" + schemeName.trim() + "%");
+        }
+        sql.append(" ORDER BY sm.id DESC ");
+        sql.append(" LIMIT ? OFFSET ? ");
+        args.add(limit);
+        args.add(offset);
+
+        return jdbcTemplate.query(
+                sql.toString(),
+                (rs, rowNum) -> SchemeYesterdayFinalReadingDTO.builder()
+                        .schemeId((Integer) rs.getObject("scheme_id"))
+                        .schemeName(rs.getString("scheme_name"))
+                        .yesterdayFinalReading(rs.getBigDecimal("yesterday_final_reading"))
+                        .build(),
+                args.toArray()
+        );
+    }
+
+    public long countSchemesWithYesterdayFinalReadingForUser(String schemaName, int userId, String schemeName) {
+        validateSchemaName(schemaName);
+        StringBuilder sql = new StringBuilder(String.format("""
+                SELECT COUNT(1)
+                FROM %1$s.user_scheme_mapping_table usm
+                JOIN %1$s.scheme_master_table sm
+                  ON sm.id = usm.scheme_id
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
+                """, schemaName));
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        if (schemeName != null && !schemeName.isBlank()) {
+            sql.append(" AND sm.scheme_name ILIKE ? ");
+            args.add("%" + schemeName.trim() + "%");
+        }
+        Long total = jdbcTemplate.queryForObject(sql.toString(), Long.class, args.toArray());
         return total == null ? 0 : total;
     }
 
@@ -1146,6 +1222,45 @@ public class SchemeDbRepository {
         }
     }
 
+    public Integer findUserIdByUuid(String schemaName, String uuid) {
+        validateSchemaName(schemaName);
+        if (uuid == null || uuid.isBlank()) {
+            return null;
+        }
+
+        String sql = String.format("""
+                SELECT id
+                FROM %s.user_table
+                WHERE uuid = ?
+                  AND deleted_at IS NULL
+                """, schemaName);
+
+        try {
+            return jdbcTemplate.queryForObject(sql, Integer.class, uuid.trim());
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
+    public String findUserPhoneNumberById(String schemaName, Integer userId) {
+        validateSchemaName(schemaName);
+        if (userId == null) {
+            return null;
+        }
+        String sql = String.format("""
+                SELECT phone_number
+                FROM %s.user_table
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """, schemaName);
+        try {
+            return jdbcTemplate.queryForObject(sql, String.class, userId);
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
     public boolean isUserStateAdmin(String schemaName, Integer userId) {
         validateSchemaName(schemaName);
         if (userId == null) {
@@ -1488,6 +1603,31 @@ public class SchemeDbRepository {
             String sdm = jdbcTemplate.queryForObject("SELECT to_regclass(?)", String.class, s + ".scheme_department_mapping_table");
             return dept != null && sdm != null;
         });
+    }
+
+    private boolean columnExists(String schemaName, String tableName, String columnName) {
+        String key = schemaName + "|" + tableName + "|" + columnName;
+        return columnExistsCache.computeIfAbsent(key, k -> {
+            String sql = """
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = ?
+                      AND table_name = ?
+                      AND column_name = ?
+                    LIMIT 1
+                    """;
+            List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> 1, schemaName, tableName, columnName);
+            return !rows.isEmpty();
+        });
+    }
+
+    /**
+     * flow_reading_table time column differs across tenant schema versions:
+     * - legacy: reading_at
+     * - newer:  observation_time
+     */
+    private String resolveFlowReadingTimeColumn(String schemaName) {
+        return columnExists(schemaName, "flow_reading_table", "observation_time") ? "observation_time" : "reading_at";
     }
 
     private Set<Integer> findExistingIds(String schemaName, String table, List<Integer> ids) {

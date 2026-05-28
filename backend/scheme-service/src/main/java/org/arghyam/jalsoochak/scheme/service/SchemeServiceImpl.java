@@ -21,6 +21,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
@@ -150,6 +151,7 @@ public class SchemeServiceImpl implements SchemeService {
     private final SchemeUploadChunkProcessor chunkProcessor;
     private final KafkaProducer kafkaProducer;
     private final MinioService minioService;
+    private final PiiEncryptionService piiEncryptionService;
 
     @Override
     public PageResponseDTO<SchemeDTO> listSchemes(
@@ -229,6 +231,51 @@ public class SchemeServiceImpl implements SchemeService {
         );
         long total = schemeDbRepository.countSchemeMappings(schemaName, name, workStatusCode, operatingStatusCode, status, villageLgdCode, subDivisionName);
         return PageResponseDTO.of(rows, total, p, size);
+    }
+
+    @Override
+    public PageResponseDTO<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String tenantCode,
+                                                                                                int page,
+                                                                                                int limit,
+                                                                                                String schemeName) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        String phoneNumberClaim = null;
+        if (auth instanceof JwtAuthenticationToken jwtAuth) {
+            var jwt = jwtAuth.getToken();
+            phoneNumberClaim = firstNonBlank(
+                    jwt.getClaimAsString("phone_number"),
+                    firstNonBlank(jwt.getClaimAsString("phoneNumber"),
+                            firstNonBlank(jwt.getClaimAsString("phone"), jwt.getClaimAsString("mobile")))
+            );
+        }
+
+        int userId = resolveCurrentUserId(schemaName);
+        String resolvedPhoneNumber = phoneNumberClaim;
+        if (resolvedPhoneNumber == null || resolvedPhoneNumber.isBlank()) {
+            String encrypted = schemeDbRepository.findUserPhoneNumberById(schemaName, userId);
+            resolvedPhoneNumber = piiEncryptionService != null ? piiEncryptionService.safeDecrypt(encrypted) : null;
+        }
+        int size = clampLimit(limit);
+        int p = Math.max(0, page);
+        int offset = p * size;
+
+        List<SchemeYesterdayFinalReadingDTO> rows =
+                schemeDbRepository.listSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName, offset, size);
+        if (resolvedPhoneNumber != null && !resolvedPhoneNumber.isBlank()) {
+            for (SchemeYesterdayFinalReadingDTO row : rows) {
+                row.setPhoneNumber(resolvedPhoneNumber);
+            }
+        }
+        long total = schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName);
+        return PageResponseDTO.of(rows, total, p, size);
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) {
+            return a;
+        }
+        return b;
     }
 
     @Override
@@ -1350,6 +1397,13 @@ public class SchemeServiceImpl implements SchemeService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token missing user identity");
         }
         Integer userId = schemeDbRepository.findUserIdByEmail(schemaName, email);
+        if (userId == null) {
+            // Many Keycloak setups use a preferred_username that isn't the DB email. The JWT subject is stable.
+            String userUuid = jwt.getSubject();
+            if (userUuid != null && !userUuid.isBlank()) {
+                userId = schemeDbRepository.findUserIdByUuid(schemaName, userUuid);
+            }
+        }
         if (userId == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for token");
         }

@@ -89,7 +89,7 @@ public class GlificWhatsAppService {
     private final GlificGraphQLClient client;
     private final ObjectMapper objectMapper;
 
-    @Value("${notifications.dry-run:false}")
+    @Value("${notifications.whatsapp.dry-run:false}")
     private boolean dryRun;
 
     @Value("${glific.template.nudge-id:}")
@@ -111,7 +111,7 @@ public class GlificWhatsAppService {
     void validateTemplates() {
         if (dryRun) {
             log.warn("[Glific] DRY-RUN mode active — all Glific API calls will be suppressed."
-                    + " Set NOTIFICATIONS_DRY_RUN=false for production.");
+                    + " Set NOTIFICATIONS_WHATSAPP_DRY_RUN=false for production.");
             return;
         }
         if (nudgeFlowId == null || nudgeFlowId.isBlank()
