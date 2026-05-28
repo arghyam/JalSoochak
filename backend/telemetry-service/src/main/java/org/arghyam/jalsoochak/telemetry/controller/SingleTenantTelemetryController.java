@@ -18,14 +18,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
@@ -75,9 +75,33 @@ public class SingleTenantTelemetryController {
             }
         }
         log.info("PATCH /api/v1/telemetry/schemes/{}/yesterday-final-reading phone={}", schemeId, masked);
-        return ResponseEntity.ok(
-                telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(schemeId, request.getPhoneNumber(), request.getReading())
-        );
+        try {
+            return ResponseEntity.ok(
+                    telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(
+                            schemeId,
+                            request.getPhoneNumber(),
+                            request.getReading()
+                    )
+            );
+        } catch (ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(
+                    UpdateYesterdayFinalReadingBySchemeResponse.builder()
+                            .success(false)
+                            .schemeId(schemeId)
+                            .finalReading(request != null ? request.getReading() : null)
+                            .message(e.getReason())
+                            .build()
+            );
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    UpdateYesterdayFinalReadingBySchemeResponse.builder()
+                            .success(false)
+                            .schemeId(schemeId)
+                            .finalReading(request != null ? request.getReading() : null)
+                            .message("Internal error")
+                            .build()
+            );
+        }
     }
 
     @PostMapping(

@@ -13,7 +13,10 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -56,12 +59,36 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized for this scheme");
             }
 
+            // Update is scoped to the scheme/day (not strictly to the user's own submissions).
             Optional<TelemetryCompletedFlowReading> targetDayRecordOpt =
-                    telemetryTenantRepository.findLatestCompletedFlowReadingOnDateForUser(schemaName, schemeId, updaterUserId, targetDay);
+                    telemetryTenantRepository.findLatestCompletedFlowReadingOnDate(schemaName, schemeId, targetDay);
+            TelemetryCompletedFlowReading targetDayRecord;
+            boolean createdTargetDayRecord = false;
             if (targetDayRecordOpt.isEmpty()) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No completed reading found for yesterday for this user");
+                // No completed reading yesterday for this scheme; create one so we can still apply the correction.
+                String correlationId = "manual-prev-" + UUID.randomUUID();
+                LocalDateTime readingAt = LocalDateTime.of(targetDay, LocalTime.of(23, 59, 59));
+                Long readingId = telemetryTenantRepository.createFlowReading(
+                        schemaName,
+                        schemeId,
+                        updaterUserId,
+                        readingAt,
+                        BigDecimal.ZERO,
+                        finalReading,
+                        correlationId,
+                        "",
+                        null
+                );
+                if (readingId == null) {
+                    throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create yesterday reading record");
+                }
+                targetDayRecord = new TelemetryCompletedFlowReading(readingId, correlationId, updaterUserId, targetDay, finalReading);
+                createdTargetDayRecord = true;
+                log.info("[update-yesterday-final-reading] created targetDayRecord id={} date={} createdBy={}",
+                        targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
+            } else {
+                targetDayRecord = targetDayRecordOpt.get();
             }
-            TelemetryCompletedFlowReading targetDayRecord = targetDayRecordOpt.get();
             log.info("[update-yesterday-final-reading] targetDayRecord id={} date={} createdBy={}",
                     targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
 
@@ -85,8 +112,10 @@ public class TelemetrySchemeReadingService {
                 log.info("[update-yesterday-final-reading] previousRecord none");
             }
 
-            telemetryTenantRepository.updateReadingValues(schemaName, targetDayRecord.id(), finalReading, updaterUserId);
-            log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={}", targetDayRecord.id(), finalReading);
+            // Always treat this as a "confirmed correction": keep extracted_reading untouched (or 0 for created rows).
+            telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId);
+            log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={} createdRecord={}",
+                    targetDayRecord.id(), finalReading, createdTargetDayRecord);
 
             BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
                     .map(TelemetryCompletedFlowReading::confirmedReading)
