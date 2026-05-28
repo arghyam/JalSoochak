@@ -238,6 +238,17 @@ public class SchemeServiceImpl implements SchemeService {
                                                                                                 int limit,
                                                                                                 String schemeName) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        String phoneNumberClaim = null;
+        if (auth instanceof JwtAuthenticationToken jwtAuth) {
+            var jwt = jwtAuth.getToken();
+            phoneNumberClaim = firstNonBlank(
+                    jwt.getClaimAsString("phone_number"),
+                    firstNonBlank(jwt.getClaimAsString("phoneNumber"),
+                            firstNonBlank(jwt.getClaimAsString("phone"), jwt.getClaimAsString("mobile")))
+            );
+        }
+
         int userId = resolveCurrentUserId(schemaName);
         int size = clampLimit(limit);
         int p = Math.max(0, page);
@@ -245,8 +256,20 @@ public class SchemeServiceImpl implements SchemeService {
 
         List<SchemeYesterdayFinalReadingDTO> rows =
                 schemeDbRepository.listSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName, offset, size);
+        if (phoneNumberClaim != null && !phoneNumberClaim.isBlank()) {
+            for (SchemeYesterdayFinalReadingDTO row : rows) {
+                row.setPhoneNumber(phoneNumberClaim);
+            }
+        }
         long total = schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName);
         return PageResponseDTO.of(rows, total, p, size);
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) {
+            return a;
+        }
+        return b;
     }
 
     @Override
