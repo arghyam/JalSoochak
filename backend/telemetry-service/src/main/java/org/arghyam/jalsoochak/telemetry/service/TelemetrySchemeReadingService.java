@@ -99,17 +99,10 @@ public class TelemetrySchemeReadingService {
 
             if (dayBeforeTargetOpt.isPresent()) {
                 TelemetryCompletedFlowReading dayBeforeTarget = dayBeforeTargetOpt.get();
-                log.info("[update-yesterday-final-reading] previousRecord date={} reading={}",
+                log.info("[update-yesterday-final-reading] previousRecord date={} reading={} (no min-check enforced)",
                         dayBeforeTarget.readingDate(), dayBeforeTarget.confirmedReading());
-                if (finalReading.compareTo(dayBeforeTarget.confirmedReading()) <= 0) {
-                    throw new ResponseStatusException(
-                            HttpStatus.BAD_REQUEST,
-                            "reading must be greater than the reading on " + dayBeforeTarget.readingDate()
-                                    + " (" + dayBeforeTarget.confirmedReading().toPlainString() + ")"
-                    );
-                }
             } else {
-                log.info("[update-yesterday-final-reading] previousRecord none");
+                log.info("[update-yesterday-final-reading] previousRecord none (no min-check enforced)");
             }
 
             // Always treat this as a "confirmed correction": keep extracted_reading untouched (or 0 for created rows).
