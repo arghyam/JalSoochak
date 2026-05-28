@@ -233,9 +233,20 @@ public class SchemeServiceImpl implements SchemeService {
     }
 
     @Override
-    public List<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String tenantCode, String schemeName) {
+    public PageResponseDTO<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String tenantCode,
+                                                                                                int page,
+                                                                                                int limit,
+                                                                                                String schemeName) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        return schemeDbRepository.listSchemesWithYesterdayFinalReading(schemaName, schemeName);
+        int userId = resolveCurrentUserId(schemaName);
+        int size = clampLimit(limit);
+        int p = Math.max(0, page);
+        int offset = p * size;
+
+        List<SchemeYesterdayFinalReadingDTO> rows =
+                schemeDbRepository.listSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName, offset, size);
+        long total = schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName);
+        return PageResponseDTO.of(rows, total, p, size);
     }
 
     @Override

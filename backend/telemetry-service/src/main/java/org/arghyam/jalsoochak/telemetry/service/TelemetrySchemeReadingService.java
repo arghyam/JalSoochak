@@ -40,10 +40,14 @@ public class TelemetrySchemeReadingService {
 
         LocalDate targetDay = LocalDate.now().minusDays(1);
 
+        if (!telemetryTenantRepository.isUserMappedToScheme(schemaName, updaterUserId, schemeId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized for this scheme");
+        }
+
         Optional<TelemetryCompletedFlowReading> targetDayRecordOpt =
-                telemetryTenantRepository.findLatestCompletedFlowReadingOnDate(schemaName, schemeId, targetDay);
+                telemetryTenantRepository.findLatestCompletedFlowReadingOnDateForUser(schemaName, schemeId, updaterUserId, targetDay);
         if (targetDayRecordOpt.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No completed reading found for yesterday");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No completed reading found for yesterday for this user");
         }
         TelemetryCompletedFlowReading targetDayRecord = targetDayRecordOpt.get();
 

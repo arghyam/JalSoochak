@@ -401,7 +401,11 @@ public class SchemeDbRepository {
         return total == null ? 0 : total;
     }
 
-    public List<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String schemaName, String schemeName) {
+    public List<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReadingForUser(String schemaName,
+                                                                                            int userId,
+                                                                                            String schemeName,
+                                                                                            int offset,
+                                                                                            int limit) {
         validateSchemaName(schemaName);
 
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
@@ -409,7 +413,9 @@ public class SchemeDbRepository {
                 SELECT sm.id AS scheme_id,
                        sm.scheme_name,
                        COALESCE(fr.confirmed_reading, 0) AS yesterday_final_reading
-                FROM %1$s.scheme_master_table sm
+                FROM %1$s.user_scheme_mapping_table usm
+                JOIN %1$s.scheme_master_table sm
+                  ON sm.id = usm.scheme_id
                 LEFT JOIN LATERAL (
                     SELECT confirmed_reading
                     FROM %1$s.flow_reading_table
@@ -419,15 +425,22 @@ public class SchemeDbRepository {
                     ORDER BY %2$s DESC, created_at DESC, id DESC
                     LIMIT 1
                 ) fr ON TRUE
-                WHERE sm.deleted_at IS NULL
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
                 """, schemaName, timeColumn));
 
         List<Object> args = new ArrayList<>();
+        args.add(userId);
         if (schemeName != null && !schemeName.isBlank()) {
             sql.append(" AND sm.scheme_name ILIKE ? ");
             args.add("%" + schemeName.trim() + "%");
         }
         sql.append(" ORDER BY sm.id DESC ");
+        sql.append(" LIMIT ? OFFSET ? ");
+        args.add(limit);
+        args.add(offset);
 
         return jdbcTemplate.query(
                 sql.toString(),
@@ -438,6 +451,28 @@ public class SchemeDbRepository {
                         .build(),
                 args.toArray()
         );
+    }
+
+    public long countSchemesWithYesterdayFinalReadingForUser(String schemaName, int userId, String schemeName) {
+        validateSchemaName(schemaName);
+        StringBuilder sql = new StringBuilder(String.format("""
+                SELECT COUNT(1)
+                FROM %1$s.user_scheme_mapping_table usm
+                JOIN %1$s.scheme_master_table sm
+                  ON sm.id = usm.scheme_id
+                WHERE usm.user_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND sm.deleted_at IS NULL
+                """, schemaName));
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        if (schemeName != null && !schemeName.isBlank()) {
+            sql.append(" AND sm.scheme_name ILIKE ? ");
+            args.add("%" + schemeName.trim() + "%");
+        }
+        Long total = jdbcTemplate.queryForObject(sql.toString(), Long.class, args.toArray());
+        return total == null ? 0 : total;
     }
 
     public List<SchemeMappingDTO> listSchemeMappings(

@@ -69,12 +69,14 @@ public class SchemeController {
     }
 
     @GetMapping("/schemes/yesterday-final-readings")
-    public ResponseEntity<List<SchemeYesterdayFinalReadingDTO>> listSchemesWithYesterdayFinalReading(
+    public ResponseEntity<PageResponseDTO<SchemeYesterdayFinalReadingDTO>> listSchemesWithYesterdayFinalReading(
             @RequestParam String tenantCode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int limit,
             @RequestParam(required = false) String schemeName
     ) {
         log.info("GET /api/v1/scheme/schemes/yesterday-final-readings called");
-        return ResponseEntity.ok(schemeService.listSchemesWithYesterdayFinalReading(tenantCode, schemeName));
+        return ResponseEntity.ok(schemeService.listSchemesWithYesterdayFinalReading(tenantCode, page, limit, schemeName));
     }
 
     private static String firstNonBlank(String a, String b) {
