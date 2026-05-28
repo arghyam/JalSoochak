@@ -1369,6 +1369,13 @@ public class SchemeServiceImpl implements SchemeService {
         }
         Integer userId = schemeDbRepository.findUserIdByEmail(schemaName, email);
         if (userId == null) {
+            // Many Keycloak setups use a preferred_username that isn't the DB email. The JWT subject is stable.
+            String userUuid = jwt.getSubject();
+            if (userUuid != null && !userUuid.isBlank()) {
+                userId = schemeDbRepository.findUserIdByUuid(schemaName, userUuid);
+            }
+        }
+        if (userId == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for token");
         }
         return userId;

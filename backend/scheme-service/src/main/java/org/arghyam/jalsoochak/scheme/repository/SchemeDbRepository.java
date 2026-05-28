@@ -1222,6 +1222,26 @@ public class SchemeDbRepository {
         }
     }
 
+    public Integer findUserIdByUuid(String schemaName, String uuid) {
+        validateSchemaName(schemaName);
+        if (uuid == null || uuid.isBlank()) {
+            return null;
+        }
+
+        String sql = String.format("""
+                SELECT id
+                FROM %s.user_table
+                WHERE uuid = ?
+                  AND deleted_at IS NULL
+                """, schemaName);
+
+        try {
+            return jdbcTemplate.queryForObject(sql, Integer.class, uuid.trim());
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
     public boolean isUserStateAdmin(String schemaName, Integer userId) {
         validateSchemaName(schemaName);
         if (userId == null) {
