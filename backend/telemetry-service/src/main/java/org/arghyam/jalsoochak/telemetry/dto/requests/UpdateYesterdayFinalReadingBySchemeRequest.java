@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.dto.requests;
 
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -14,8 +15,10 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 @Builder
 public class UpdateYesterdayFinalReadingBySchemeRequest {
+    @NotBlank
+    private String phoneNumber;
+
     @NotNull
     @DecimalMin(value = "0", inclusive = false)
     private BigDecimal reading;
 }
-
