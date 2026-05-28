@@ -65,6 +65,16 @@ public class SingleTenantTelemetryController {
             @PathVariable Long schemeId,
             @RequestBody @Valid UpdateYesterdayFinalReadingBySchemeRequest request
     ) {
+        String masked = request != null ? request.getPhoneNumber() : null;
+        if (masked != null) {
+            masked = masked.replaceAll("\\D", "");
+            if (masked.length() > 4) {
+                masked = "****" + masked.substring(masked.length() - 4);
+            } else {
+                masked = "****";
+            }
+        }
+        log.info("PATCH /api/v1/telemetry/schemes/{}/yesterday-final-reading phone={}", schemeId, masked);
         return ResponseEntity.ok(
                 telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(schemeId, request.getPhoneNumber(), request.getReading())
         );
