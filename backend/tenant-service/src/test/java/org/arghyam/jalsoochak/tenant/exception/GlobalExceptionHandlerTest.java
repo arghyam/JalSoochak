@@ -1,6 +1,18 @@
 package org.arghyam.jalsoochak.tenant.exception;
 
-import com.fasterxml.jackson.databind.exc.InvalidFormatException;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.arghyam.jalsoochak.tenant.dto.common.ApiErrorResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +24,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -20,12 +34,11 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Path;
 
 /**
  * Unit tests for GlobalExceptionHandler.
@@ -39,6 +52,109 @@ class GlobalExceptionHandlerTest {
     @BeforeEach
     void setUp() {
         handler = new GlobalExceptionHandler();
+    }
+
+    @Nested
+    @DisplayName("Authentication Handler Tests")
+    class AuthenticationHandlerTests {
+
+        @Test
+        @DisplayName("Should handle AuthenticationException and return 401")
+        void testHandleAuthenticationException() {
+            AuthenticationException ex = new AuthenticationException("Token expired") {};
+
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleAuthenticationException(ex);
+
+            assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertEquals(401, response.getBody().getStatus());
+            assertEquals("Unauthorized", response.getBody().getError());
+            assertEquals("Authentication required", response.getBody().getMessage());
+        }
+    }
+
+    @Nested
+    @DisplayName("Access Denied Handler Tests")
+    class AccessDeniedHandlerTests {
+
+        @Test
+        @DisplayName("Should handle AccessDeniedException and return 403")
+        void testHandleAccessDeniedException() {
+            AccessDeniedException ex = new AccessDeniedException("Insufficient scope");
+
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleAccessDeniedException(ex);
+
+            assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertEquals(403, response.getBody().getStatus());
+            assertEquals("Forbidden", response.getBody().getError());
+            assertEquals("Access denied", response.getBody().getMessage());
+        }
+    }
+
+    @Nested
+    @DisplayName("ConstraintViolation Handler Tests")
+    class ConstraintViolationHandlerTests {
+
+        @Test
+        @DisplayName("Should handle ConstraintViolationException and return 400 with field errors")
+        @SuppressWarnings("unchecked")
+        void testHandleConstraintViolation() {
+            ConstraintViolation<Object> violation = mock(ConstraintViolation.class);
+            Path path = mock(Path.class);
+            when(path.toString()).thenReturn("createRequest.name");
+            when(violation.getPropertyPath()).thenReturn(path);
+            when(violation.getMessage()).thenReturn("must not be blank");
+
+            ConstraintViolationException ex = new ConstraintViolationException(Set.of(violation));
+
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleConstraintViolation(ex);
+
+            assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertEquals(400, response.getBody().getStatus());
+            assertEquals("Validation failed", response.getBody().getMessage());
+            assertNotNull(response.getBody().getFieldErrors());
+        }
+
+        @Test
+        @DisplayName("Should extract last segment of dotted path as field name")
+        @SuppressWarnings("unchecked")
+        void testHandleConstraintViolation_extractsLastSegmentAsFieldName() {
+            ConstraintViolation<Object> violation = mock(ConstraintViolation.class);
+            Path path = mock(Path.class);
+            when(path.toString()).thenReturn("object.nested.fieldName");
+            when(violation.getPropertyPath()).thenReturn(path);
+            when(violation.getMessage()).thenReturn("must not be null");
+
+            ConstraintViolationException ex = new ConstraintViolationException(Set.of(violation));
+
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleConstraintViolation(ex);
+
+            @SuppressWarnings("unchecked")
+            java.util.List<java.util.Map<String, String>> fieldErrors =
+                    (java.util.List<java.util.Map<String, String>>) response.getBody().getFieldErrors();
+            assertThat(fieldErrors).anyMatch(e -> "fieldName".equals(e.get("field")));
+        }
+    }
+
+    @Nested
+    @DisplayName("StorageException Handler Tests")
+    class StorageExceptionHandlerTests {
+
+        @Test
+        @DisplayName("Should handle StorageException and return 500 with safe message")
+        void testHandleStorageException() {
+            StorageException ex = new StorageException("S3 upload failed: connection refused");
+
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleStorageException(ex);
+
+            assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertEquals(500, response.getBody().getStatus());
+            assertEquals("Internal Server Error", response.getBody().getError());
+            assertEquals("File storage operation failed", response.getBody().getMessage());
+        }
     }
 
     @Nested
@@ -217,6 +333,19 @@ class GlobalExceptionHandlerTest {
             assertEquals(500, response.getBody().getStatus());
             assertEquals("Internal Server Error", response.getBody().getError());
             assertEquals("Configuration processing failed", response.getBody().getMessage());
+        }
+
+        @Test
+        @DisplayName("Should handle ConfigurationException with cause and return 500")
+        void testHandleConfigurationException_WithCause() {
+            ConfigurationException ex = new ConfigurationException(
+                    "Config parse error", new RuntimeException("root cause"));
+
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleConfigurationException(ex);
+
+            assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+            assertEquals("Configuration processing failed", response.getBody().getMessage());
+            assertNotNull(ex.getCause());
         }
     }
 

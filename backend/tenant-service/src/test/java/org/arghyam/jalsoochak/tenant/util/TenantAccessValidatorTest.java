@@ -376,5 +376,69 @@ class TenantAccessValidatorTest {
         void isAccessibleToSystemUserSuperStateAdminArchived() {
             assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusEnum.ARCHIVED, TenantAccessRole.SUPER_STATE_ADMIN));
         }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns false for null role")
+        void isAccessibleToSystemUserNullRole() {
+            assertFalse(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusEnum.ACTIVE, null));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns false for null tenantStatus (non-ARCHIVED path)")
+        void isAccessibleToSystemUserNullTenantStatus() {
+            assertFalse(TenantAccessValidator.isAccessibleToSystemUser(null, TenantAccessRole.SUPER_USER));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns true for STATE_ADMIN accessing ONBOARDED")
+        void isAccessibleToSystemUserStateAdminOnboarded() {
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusEnum.ONBOARDED, TenantAccessRole.STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns true for STATE_ADMIN accessing INACTIVE")
+        void isAccessibleToSystemUserStateAdminInactive() {
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusEnum.INACTIVE, TenantAccessRole.STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns true for STATE_ADMIN accessing SUSPENDED")
+        void isAccessibleToSystemUserStateAdminSuspended() {
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusEnum.SUSPENDED, TenantAccessRole.STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns true for STATE_ADMIN accessing DEGRADED")
+        void isAccessibleToSystemUserStateAdminDegraded() {
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusEnum.DEGRADED, TenantAccessRole.STATE_ADMIN));
+        }
+    }
+
+    @Nested
+    @DisplayName("Null Parameter Guard Tests")
+    class NullParameterGuardTests {
+
+        @Test
+        @DisplayName("validateSystemUserAccess throws when role is null")
+        void validateSystemUserAccess_throwsWhenRoleIsNull() {
+            ForbiddenAccessException ex = assertThrows(ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateSystemUserAccess(TenantStatusEnum.ACTIVE, null));
+            assertTrue(ex.getMessage().contains("invalid user role"));
+        }
+
+        @Test
+        @DisplayName("validateStaffUserAccess throws when tenantStatus is null")
+        void validateStaffUserAccess_throwsWhenTenantStatusIsNull() {
+            assertThrows(ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateStaffUserAccess(null));
+        }
+
+        @Test
+        @DisplayName("validateTenantAccess throws when role is null")
+        void validateTenantAccess_throwsWhenRoleIsNull() {
+            ForbiddenAccessException ex = assertThrows(ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateTenantAccess(TenantStatusEnum.ACTIVE, null));
+            assertTrue(ex.getMessage().contains("invalid user role"));
+        }
     }
 }

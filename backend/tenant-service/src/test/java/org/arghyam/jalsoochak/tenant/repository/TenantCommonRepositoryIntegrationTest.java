@@ -259,6 +259,7 @@ class TenantCommonRepositoryIntegrationTest {
         @Test
         @DisplayName("excludes soft-deleted tenants")
         void findAll_excludesSoftDeleted() {
+            insertTenant("KL", "Kerala", TenantStatusEnum.ACTIVE);
             TenantResponseDTO t = insertTenant("OR", "Odisha", TenantStatusEnum.ACTIVE);
             jdbcTemplate.update(
                     "UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?",
@@ -267,6 +268,7 @@ class TenantCommonRepositoryIntegrationTest {
             List<TenantResponseDTO> result = repository.findAll();
 
             assertThat(result).extracting(TenantResponseDTO::getStateCode)
+                    .isNotEmpty()
                     .doesNotContain("OR");
         }
     }
@@ -341,6 +343,7 @@ class TenantCommonRepositoryIntegrationTest {
         @Test
         @DisplayName("excludes soft-deleted tenants")
         void findAll_paginated_excludesSoftDeleted() {
+            insertTenant("KL", "Kerala", TenantStatusEnum.ACTIVE);
             TenantResponseDTO t = insertTenant("SK", "Sikkim", TenantStatusEnum.ACTIVE);
             jdbcTemplate.update(
                     "UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?",
@@ -348,7 +351,9 @@ class TenantCommonRepositoryIntegrationTest {
 
             List<TenantResponseDTO> result = repository.findAll(10, 0, null, null);
 
-            assertThat(result).extracting(TenantResponseDTO::getStateCode).doesNotContain("SK");
+            assertThat(result).extracting(TenantResponseDTO::getStateCode)
+                    .isNotEmpty()
+                    .doesNotContain("SK");
         }
 
         @Test
