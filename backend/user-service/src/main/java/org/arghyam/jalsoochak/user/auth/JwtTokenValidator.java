@@ -15,6 +15,7 @@ import java.security.KeyFactory;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Component
 public class JwtTokenValidator {
@@ -22,7 +23,7 @@ public class JwtTokenValidator {
     private final String issuerUri;
     private final String keycloakPublicKey;
 
-    private volatile JwtDecoder decoder;
+    private final AtomicReference<JwtDecoder> decoderRef = new AtomicReference<>();
 
     public JwtTokenValidator(
             @Value("${KEYCLOAK_ISSUER_URI:}") String issuerUri,
@@ -41,14 +42,15 @@ public class JwtTokenValidator {
     }
 
     private JwtDecoder getDecoder() {
-        JwtDecoder local = decoder;
+        JwtDecoder local = decoderRef.get();
         if (local != null) {
             return local;
         }
 
         synchronized (this) {
-            if (decoder != null) {
-                return decoder;
+            local = decoderRef.get();
+            if (local != null) {
+                return local;
             }
             if (keycloakPublicKey.isBlank()) {
                 throw new IllegalStateException("KEYCLOAK_PUBLIC_KEY is not configured for user-service");
@@ -63,7 +65,7 @@ public class JwtTokenValidator {
                     : JwtValidators.createDefaultWithIssuer(issuerUri);
             nimbus.setJwtValidator(validator);
 
-            decoder = nimbus;
+            decoderRef.set(nimbus);
             return nimbus;
         }
     }
