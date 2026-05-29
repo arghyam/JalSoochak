@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.tenant.service;
 
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.event.EscalationEvent;
+import org.arghyam.jalsoochak.tenant.event.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.tenant.repository.NudgeRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -352,7 +353,11 @@ class EscalationSchedulerServiceTest {
 
         escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
 
-        verify(kafkaProducer).publishJson(eq("common-topic"), any(EscalationEvent.class));
+        ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        EscalationEvent event = captor.getValue();
+        assertThat(event.getOperators()).hasSize(1);
+        assertThat(event.getOperators().get(0).getUserId()).isEqualTo(999);
     }
 
     @Test
@@ -372,7 +377,15 @@ class EscalationSchedulerServiceTest {
 
         escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
 
-        verify(kafkaProducer).publishJson(eq("common-topic"), any(EscalationEvent.class));
+        ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        EscalationEvent event = captor.getValue();
+        assertThat(event.getOperators()).hasSize(1);
+        OperatorEscalationDetail detail = event.getOperators().get(0);
+        assertThat(detail.getPhoneNumber()).isNull();
+        assertThat(detail.getUserId()).isNull();
+        // correlationId must be a valid UUID (derived from the random UUID branch)
+        assertThat(detail.getCorrelationId()).isNotNull();
     }
 
     @Test

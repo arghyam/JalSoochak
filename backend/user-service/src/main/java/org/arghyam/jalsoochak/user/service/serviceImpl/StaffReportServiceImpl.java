@@ -129,10 +129,15 @@ public class StaffReportServiceImpl implements StaffReportService {
 
         FileAttribute<Set<PosixFilePermission>> ownerOnly =
                 PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"));
+        String tmpPrefix = "report-" + definition.type().toLowerCase(Locale.ROOT) + "-";
+        String tmpSuffix = "." + format.extension();
         Path tmp = null;
         try {
-            tmp = Files.createTempFile("report-" + definition.type().toLowerCase(Locale.ROOT) + "-",
-                    "." + format.extension(), ownerOnly);
+            try {
+                tmp = Files.createTempFile(tmpPrefix, tmpSuffix, ownerOnly);
+            } catch (UnsupportedOperationException e) {
+                tmp = Files.createTempFile(tmpPrefix, tmpSuffix);
+            }
             try (OutputStream out = Files.newOutputStream(tmp)) {
                 writer.write(definition.schema(), rows, out);
             }
