@@ -63,6 +63,21 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized for this scheme");
             }
 
+            // Find the baseline reading to compare against before making any DB changes.
+            // We compare against the latest completed (confirmed) reading before targetDay.
+            Optional<TelemetryCompletedFlowReading> baselineOpt =
+                    telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDateForScheme(schemaName, schemeId, targetDay);
+            if (baselineOpt.isPresent()) {
+                TelemetryCompletedFlowReading baseline = baselineOpt.get();
+                BigDecimal minReading = baseline.confirmedReading();
+                if (minReading != null && finalReading.compareTo(minReading) <= 0) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_REQUEST,
+                            "reading must be greater than last confirmed reading (" + baseline.readingDate() + ")"
+                    );
+                }
+            }
+
             // Update is scoped to the scheme/day (not strictly to the user's own submissions).
             Optional<TelemetryCompletedFlowReading> targetDayRecordOpt =
                     telemetryTenantRepository.findLatestCompletedFlowReadingOnDate(schemaName, schemeId, targetDay);
@@ -96,28 +111,9 @@ public class TelemetrySchemeReadingService {
             log.info("[update-yesterday-final-reading] targetDayRecord id={} date={} createdBy={}",
                     targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
 
-            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt =
-                    telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDateForScheme(schemaName, schemeId, targetDay);
+            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = baselineOpt;
             Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt =
                     telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(schemaName, schemeId, targetDay);
-
-            // Enforce a monotonic correction: target day's confirmed reading must be > the previous day's confirmed reading.
-            // For the default case (editing yesterday), this is the "must be greater than 2 days ago" check.
-            LocalDate previousDay = targetDay.minusDays(1);
-            Optional<TelemetryCompletedFlowReading> previousDayExactOpt =
-                    telemetryTenantRepository.findLatestCompletedFlowReadingOnDate(schemaName, schemeId, previousDay);
-            Optional<TelemetryCompletedFlowReading> minRecordOpt = previousDayExactOpt.isPresent()
-                    ? previousDayExactOpt
-                    : dayBeforeTargetOpt;
-            if (minRecordOpt.isPresent()) {
-                BigDecimal minReading = minRecordOpt.get().confirmedReading();
-                if (minReading != null && finalReading.compareTo(minReading) <= 0) {
-                    throw new ResponseStatusException(
-                            HttpStatus.BAD_REQUEST,
-                            "reading must be greater than previous day's final reading (" + previousDay + ")"
-                    );
-                }
-            }
 
             if (dayBeforeTargetOpt.isPresent()) {
                 TelemetryCompletedFlowReading dayBeforeTarget = dayBeforeTargetOpt.get();
@@ -132,7 +128,7 @@ public class TelemetrySchemeReadingService {
             log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={} createdRecord={}",
                     targetDayRecord.id(), finalReading, createdTargetDayRecord);
 
-            BigDecimal previousDayConfirmedReading = minRecordOpt
+            BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
                     .map(TelemetryCompletedFlowReading::confirmedReading)
                     .orElse(BigDecimal.ZERO);
             BigDecimal targetDayWaterQuantity = finalReading.subtract(previousDayConfirmedReading);
