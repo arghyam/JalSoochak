@@ -28,7 +28,8 @@ public class TelemetrySchemeReadingService {
 
     public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
                                                                                             String phoneNumber,
-                                                                                            BigDecimal finalReading) {
+                                                                                            BigDecimal finalReading,
+                                                                                            LocalDate date) {
         String maskedPhone = maskPhone(phoneNumber);
         try {
             if (schemeId == null || schemeId < 1) {
@@ -51,7 +52,10 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found for schema");
             }
 
-            LocalDate targetDay = LocalDate.now().minusDays(1);
+            LocalDate targetDay = date != null ? date : LocalDate.now().minusDays(1);
+            if (!targetDay.isBefore(LocalDate.now())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "date must be in the past");
+            }
 
             boolean mapped = telemetryTenantRepository.isUserMappedToScheme(schemaName, updaterUserId, schemeId);
             log.info("[update-yesterday-final-reading] resolved userId={} mappedToScheme={}", updaterUserId, mapped);
@@ -97,6 +101,24 @@ public class TelemetrySchemeReadingService {
             Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt =
                     telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(schemaName, schemeId, targetDay);
 
+            // Enforce a monotonic correction: target day's confirmed reading must be > the previous day's confirmed reading.
+            // For the default case (editing yesterday), this is the "must be greater than 2 days ago" check.
+            LocalDate previousDay = targetDay.minusDays(1);
+            Optional<TelemetryCompletedFlowReading> previousDayExactOpt =
+                    telemetryTenantRepository.findLatestCompletedFlowReadingOnDate(schemaName, schemeId, previousDay);
+            Optional<TelemetryCompletedFlowReading> minRecordOpt = previousDayExactOpt.isPresent()
+                    ? previousDayExactOpt
+                    : dayBeforeTargetOpt;
+            if (minRecordOpt.isPresent()) {
+                BigDecimal minReading = minRecordOpt.get().confirmedReading();
+                if (minReading != null && finalReading.compareTo(minReading) <= 0) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_REQUEST,
+                            "reading must be greater than previous day's final reading (" + previousDay + ")"
+                    );
+                }
+            }
+
             if (dayBeforeTargetOpt.isPresent()) {
                 TelemetryCompletedFlowReading dayBeforeTarget = dayBeforeTargetOpt.get();
                 log.info("[update-yesterday-final-reading] previousRecord date={} reading={} (no min-check enforced)",
@@ -110,7 +132,7 @@ public class TelemetrySchemeReadingService {
             log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={} createdRecord={}",
                     targetDayRecord.id(), finalReading, createdTargetDayRecord);
 
-            BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
+            BigDecimal previousDayConfirmedReading = minRecordOpt
                     .map(TelemetryCompletedFlowReading::confirmedReading)
                     .orElse(BigDecimal.ZERO);
             BigDecimal targetDayWaterQuantity = finalReading.subtract(previousDayConfirmedReading);
@@ -143,7 +165,7 @@ public class TelemetrySchemeReadingService {
                     .schemeId(schemeId)
                     .readingDate(targetDay.toString())
                     .finalReading(finalReading)
-                    .message("Yesterday final reading updated successfully.")
+                    .message("Final reading updated successfully.")
                     .build();
         } catch (ResponseStatusException e) {
             log.info("[update-yesterday-final-reading] rejected schemeId={} phone={} status={} reason={}",
