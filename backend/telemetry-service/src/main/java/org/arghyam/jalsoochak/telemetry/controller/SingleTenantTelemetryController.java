@@ -24,9 +24,13 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/v1/telemetry")
@@ -63,6 +67,8 @@ public class SingleTenantTelemetryController {
     )
     public ResponseEntity<UpdateYesterdayFinalReadingBySchemeResponse> updateYesterdayFinalReadingByScheme(
             @PathVariable Long schemeId,
+            @RequestParam(value = "date", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestBody @Valid UpdateYesterdayFinalReadingBySchemeRequest request
     ) {
         String masked = request != null ? request.getPhoneNumber() : null;
@@ -80,7 +86,8 @@ public class SingleTenantTelemetryController {
                     telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(
                             schemeId,
                             request.getPhoneNumber(),
-                            request.getReading()
+                            request.getReading(),
+                            date
                     )
             );
         } catch (ResponseStatusException e) {
