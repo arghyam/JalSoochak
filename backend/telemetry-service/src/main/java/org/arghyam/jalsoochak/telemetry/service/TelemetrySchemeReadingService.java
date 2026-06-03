@@ -28,7 +28,8 @@ public class TelemetrySchemeReadingService {
 
     public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
                                                                                             String phoneNumber,
-                                                                                            BigDecimal finalReading) {
+                                                                                            BigDecimal finalReading,
+                                                                                            LocalDate date) {
         String maskedPhone = maskPhone(phoneNumber);
         try {
             if (schemeId == null || schemeId < 1) {
@@ -51,12 +52,30 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found for schema");
             }
 
-            LocalDate targetDay = LocalDate.now().minusDays(1);
+            LocalDate targetDay = date != null ? date : LocalDate.now().minusDays(1);
+            if (!targetDay.isBefore(LocalDate.now())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "date must be in the past");
+            }
 
             boolean mapped = telemetryTenantRepository.isUserMappedToScheme(schemaName, updaterUserId, schemeId);
             log.info("[update-yesterday-final-reading] resolved userId={} mappedToScheme={}", updaterUserId, mapped);
             if (!mapped) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized for this scheme");
+            }
+
+            // Find the baseline reading to compare against before making any DB changes.
+            // We compare against the latest completed (confirmed) reading before targetDay.
+            Optional<TelemetryCompletedFlowReading> baselineOpt =
+                    telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDateForScheme(schemaName, schemeId, targetDay);
+            if (baselineOpt.isPresent()) {
+                TelemetryCompletedFlowReading baseline = baselineOpt.get();
+                BigDecimal minReading = baseline.confirmedReading();
+                if (minReading != null && finalReading.compareTo(minReading) <= 0) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_REQUEST,
+                            "reading must be greater than last confirmed reading (" + baseline.readingDate() + ")"
+                    );
+                }
             }
 
             // Update is scoped to the scheme/day (not strictly to the user's own submissions).
@@ -92,8 +111,7 @@ public class TelemetrySchemeReadingService {
             log.info("[update-yesterday-final-reading] targetDayRecord id={} date={} createdBy={}",
                     targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
 
-            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt =
-                    telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDateForScheme(schemaName, schemeId, targetDay);
+            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = baselineOpt;
             Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt =
                     telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(schemaName, schemeId, targetDay);
 
@@ -143,7 +161,7 @@ public class TelemetrySchemeReadingService {
                     .schemeId(schemeId)
                     .readingDate(targetDay.toString())
                     .finalReading(finalReading)
-                    .message("Yesterday final reading updated successfully.")
+                    .message("Final reading updated successfully.")
                     .build();
         } catch (ResponseStatusException e) {
             log.info("[update-yesterday-final-reading] rejected schemeId={} phone={} status={} reason={}",

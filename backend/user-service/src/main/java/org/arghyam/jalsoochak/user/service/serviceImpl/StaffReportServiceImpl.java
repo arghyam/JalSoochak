@@ -30,6 +30,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -43,6 +46,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 
@@ -123,10 +127,17 @@ public class StaffReportServiceImpl implements StaffReportService {
 
         List<TenantStaffResponseDTO> rows = definition.fetch(schema, normalized);
 
+        FileAttribute<Set<PosixFilePermission>> ownerOnly =
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"));
+        String tmpPrefix = "report-" + definition.type().toLowerCase(Locale.ROOT) + "-";
+        String tmpSuffix = "." + format.extension();
         Path tmp = null;
         try {
-            tmp = Files.createTempFile("report-" + definition.type().toLowerCase(Locale.ROOT) + "-",
-                    "." + format.extension());
+            try {
+                tmp = Files.createTempFile(tmpPrefix, tmpSuffix, ownerOnly);
+            } catch (UnsupportedOperationException e) {
+                tmp = Files.createTempFile(tmpPrefix, tmpSuffix);
+            }
             try (OutputStream out = Files.newOutputStream(tmp)) {
                 writer.write(definition.schema(), rows, out);
             }

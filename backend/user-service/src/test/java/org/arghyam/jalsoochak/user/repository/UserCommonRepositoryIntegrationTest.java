@@ -382,7 +382,7 @@ class UserCommonRepositoryIntegrationTest {
             repo.deactivateAdminUser(deactivatedId, deactivatedId);
 
             List<AdminUserRow> active = repo.listSuperUsers(AdminUserStatus.ACTIVE, 0, 10);
-            assertThat(active).allMatch(r -> r.status() == AdminUserStatus.ACTIVE);
+            assertThat(active).isNotEmpty().allMatch(r -> r.status() == AdminUserStatus.ACTIVE);
         }
 
         @Test
@@ -441,7 +441,7 @@ class UserCommonRepositoryIntegrationTest {
         void filterByStatus() {
             createActiveUser("sa3@example.com", "91XXXXXXXXX3", 1, 2);
             List<AdminUserRow> rows = repo.listStateAdminsByTenant(1, AdminUserStatus.ACTIVE, null, 0, 10);
-            assertThat(rows).allMatch(r -> r.status() == AdminUserStatus.ACTIVE);
+            assertThat(rows).isNotEmpty().allMatch(r -> r.status() == AdminUserStatus.ACTIVE);
         }
 
         @Test

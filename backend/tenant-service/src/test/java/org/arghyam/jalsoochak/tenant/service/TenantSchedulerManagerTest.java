@@ -54,7 +54,7 @@ class TenantSchedulerManagerTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        when(taskScheduler.schedule(any(Runnable.class), any(CronTrigger.class)))
+        lenient().when(taskScheduler.schedule(any(Runnable.class), any(CronTrigger.class)))
                 .thenReturn(future);
     }
 
@@ -233,6 +233,101 @@ class TenantSchedulerManagerTest {
 
         // The two original futures must still be alive — cancel must not have been called
         verify(future, never()).cancel(anyBoolean());
+    }
+
+    @Test
+    void loadAndScheduleAll_skipsTenant_whenTenantIdIsNull() {
+        TenantResponseDTO nullId = TenantResponseDTO.builder().id(null).stateCode("MP")
+                .status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(nullId));
+
+        manager.loadAndScheduleAll();
+
+        verify(taskScheduler, never()).schedule(any(Runnable.class), any(CronTrigger.class));
+    }
+
+    @Test
+    void loadAndScheduleAll_skipsTenant_whenStateCodeIsNull() {
+        TenantResponseDTO nullState = TenantResponseDTO.builder().id(1).stateCode(null)
+                .status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(nullState));
+
+        manager.loadAndScheduleAll();
+
+        verify(taskScheduler, never()).schedule(any(Runnable.class), any(CronTrigger.class));
+    }
+
+    @Test
+    void loadAndScheduleAll_skipsTenant_whenStateCodeIsBlank() {
+        TenantResponseDTO blankState = TenantResponseDTO.builder().id(1).stateCode("  ")
+                .status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(blankState));
+
+        manager.loadAndScheduleAll();
+
+        verify(taskScheduler, never()).schedule(any(Runnable.class), any(CronTrigger.class));
+    }
+
+    @Test
+    void loadAndScheduleAll_continuesForRemainingTenants_whenOneScheduleFails() {
+        TenantResponseDTO bad = TenantResponseDTO.builder().id(1).stateCode("MP")
+                .status(TenantStatusEnum.ACTIVE.name()).build();
+        TenantResponseDTO good = TenantResponseDTO.builder().id(2).stateCode("UP")
+                .status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(bad, good));
+
+        when(tenantConfigService.getNudgeConfig(1))
+                .thenThrow(new RuntimeException("Config unavailable for tenant 1"));
+        stubConfigs(2, 8, 0, 9, 0);
+
+        manager.loadAndScheduleAll();
+
+        // good tenant still scheduled
+        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(CronTrigger.class));
+    }
+
+    @Test
+    void rescheduleForTenant_throwsIllegalArgument_whenEscalationConfigHourInvalid() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP")
+                .status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        manager.loadAndScheduleAll();
+
+        // EscalationScheduleConfig.builder() validates at build() time so use a mock.
+        // validateScheduleConfig checks hour first and short-circuits, so only stub getHour().
+        EscalationScheduleConfig invalidEscalCfg = mock(EscalationScheduleConfig.class);
+        when(invalidEscalCfg.getHour()).thenReturn(25);
+
+        when(tenantConfigService.getNudgeConfig(1))
+                .thenReturn(NudgeScheduleConfig.builder().hour(8).minute(0).build());
+        when(tenantConfigService.getEscalationConfig(1)).thenReturn(invalidEscalCfg);
+
+        assertThatThrownBy(() -> manager.rescheduleForTenant(1, "MP"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid escalation schedule");
+    }
+
+    @Test
+    void loadAndScheduleAll_skipsSuspendedTenants() {
+        TenantResponseDTO suspended = TenantResponseDTO.builder().id(1).stateCode("MP")
+                .status(TenantStatusEnum.SUSPENDED.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(suspended));
+
+        manager.loadAndScheduleAll();
+
+        verify(taskScheduler, never()).schedule(any(Runnable.class), any(CronTrigger.class));
+    }
+
+    @Test
+    void loadAndScheduleAll_skipsArchivedTenants() {
+        TenantResponseDTO archived = TenantResponseDTO.builder().id(1).stateCode("MP")
+                .status(TenantStatusEnum.ARCHIVED.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(archived));
+
+        manager.loadAndScheduleAll();
+
+        verify(taskScheduler, never()).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────

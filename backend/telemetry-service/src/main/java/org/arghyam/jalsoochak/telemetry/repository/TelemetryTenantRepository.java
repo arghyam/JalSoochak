@@ -1240,8 +1240,6 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND reading_date = ?
-                  AND extracted_reading > 0
-                  AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY %s DESC, created_at DESC, id DESC
                 LIMIT 1
@@ -1329,8 +1327,6 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND reading_date < ?
-                  AND extracted_reading > 0
-                  AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY reading_date DESC, %s DESC, id DESC
                 LIMIT 1
@@ -1363,8 +1359,6 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND reading_date > ?
-                  AND extracted_reading > 0
-                  AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY reading_date ASC, %s ASC, id ASC
                 LIMIT 1

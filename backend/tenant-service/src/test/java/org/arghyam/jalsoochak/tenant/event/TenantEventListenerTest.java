@@ -1,9 +1,22 @@
 package org.arghyam.jalsoochak.tenant.event;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.Map;
+
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelNameDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
-import org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -11,20 +24,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.SetOperations;
-
-import java.util.List;
-import java.util.Map;
-
-
 import org.springframework.data.redis.core.HashOperations;
-
-
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
-
-import static org.assertj.core.api.Assertions.assertThat;
+import org.springframework.data.redis.core.SetOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 
 /**
@@ -348,6 +350,126 @@ class TenantEventListenerTest {
         stubRedisOps();
         TenantResponseDTO t = tenant(11, "tn", "Tamil Nadu", "UNKNOWN_STATUS");
         TenantCreatedEvent event = new TenantCreatedEvent(t, "tenant_tn");
+
+        listener.handleTenantCreated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleWaterNormUpdated_skipsKafka_whenTenantIdIsNull() {
+        WaterNormUpdatedEvent event = new WaterNormUpdatedEvent(null, "MP", 55);
+
+        listener.handleWaterNormUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleWaterNormUpdated_skipsKafka_whenStateCodeIsBlank() {
+        WaterNormUpdatedEvent event = new WaterNormUpdatedEvent(1, "  ", 55);
+
+        listener.handleWaterNormUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleLocationHierarchyUpdated_skipsKafka_whenTenantIdIsNull() {
+        TenantLocationHierarchyUpdatedEvent event =
+                new TenantLocationHierarchyUpdatedEvent(null, "MP", "LGD", List.of());
+
+        listener.handleLocationHierarchyUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleLocationHierarchyUpdated_skipsKafka_whenStateCodeIsBlank() {
+        TenantLocationHierarchyUpdatedEvent event =
+                new TenantLocationHierarchyUpdatedEvent(1, "  ", "LGD", List.of());
+
+        listener.handleLocationHierarchyUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleLocationHierarchyUpdated_skipsKafka_whenHierarchyTypeIsNull() {
+        TenantLocationHierarchyUpdatedEvent event =
+                new TenantLocationHierarchyUpdatedEvent(1, "MP", null, List.of());
+
+        listener.handleLocationHierarchyUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleLocationHierarchyUpdated_skipsKafka_whenHierarchyTypeIsBlank() {
+        TenantLocationHierarchyUpdatedEvent event =
+                new TenantLocationHierarchyUpdatedEvent(1, "MP", "  ", List.of());
+
+        listener.handleLocationHierarchyUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleLocationHierarchyUpdated_skipsKafka_whenLevelsIsNull() {
+        TenantLocationHierarchyUpdatedEvent event =
+                new TenantLocationHierarchyUpdatedEvent(1, "MP", "LGD", null);
+
+        listener.handleLocationHierarchyUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleLocationHierarchyUpdated_filtersLevelsWithNullLevel() {
+        LocationLevelNameDTO name = LocationLevelNameDTO.builder().languageId(1).title("Block").build();
+        org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO levelWithNull =
+                org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO.builder()
+                        .level(null).levelName(List.of(name)).build();
+        org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO validLevel =
+                org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO.builder()
+                        .level(1).levelName(List.of(name)).build();
+        TenantLocationHierarchyUpdatedEvent event =
+                new TenantLocationHierarchyUpdatedEvent(5, "RJ", "LGD", List.of(levelWithNull, validLevel));
+
+        listener.handleLocationHierarchyUpdated(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(kafkaProducer).publishJson(anyString(), captor.capture());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> levels = (List<Map<String, Object>>) captor.getValue().get("levels");
+        assertThat(levels).hasSize(1);
+        assertThat(levels.get(0).get("level")).isEqualTo(1);
+    }
+
+    @Test
+    void handleLocationHierarchyUpdated_usesEmptyString_whenLevelNamesIsEmpty() {
+        org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO level =
+                org.arghyam.jalsoochak.tenant.dto.internal.LocationLevelConfigDTO.builder()
+                        .level(1).levelName(List.of()).build();
+        TenantLocationHierarchyUpdatedEvent event =
+                new TenantLocationHierarchyUpdatedEvent(6, "BR", "LGD", List.of(level));
+
+        listener.handleLocationHierarchyUpdated(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(kafkaProducer).publishJson(anyString(), captor.capture());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> levels = (List<Map<String, Object>>) captor.getValue().get("levels");
+        assertThat(levels.get(0).get("name")).isEqualTo("");
+    }
+
+    @Test
+    void publishTenantEvent_skipsKafka_whenStatusIsNull() {
+        stubRedisOps();
+        TenantResponseDTO t = tenant(20, "od", "Odisha", null);
+        TenantCreatedEvent event = new TenantCreatedEvent(t, "tenant_od");
 
         listener.handleTenantCreated(event);
 
