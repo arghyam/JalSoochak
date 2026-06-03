@@ -74,17 +74,17 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Target reading date is missing");
             }
 
-            // Find the baseline reading to compare against before making any DB changes.
-            // We compare against the latest completed (confirmed) reading before targetDay.
-            Optional<TelemetryCompletedFlowReading> baselineOpt =
-                    telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDateForScheme(schemaName, schemeId, targetDay);
-            if (baselineOpt.isPresent()) {
-                TelemetryCompletedFlowReading baseline = baselineOpt.get();
-                BigDecimal minReading = baseline.confirmedReading();
+            // Validate against the reading immediately before the target record, even if both
+            // submissions happened on the same date.
+            Optional<TelemetryCompletedFlowReading> previousReadingOpt =
+                    telemetryTenantRepository.findPreviousFlowReadingForScheme(schemaName, targetDayRecord.id());
+            if (previousReadingOpt.isPresent()) {
+                TelemetryCompletedFlowReading previousReading = previousReadingOpt.get();
+                BigDecimal minReading = previousReading.confirmedReading();
                 if (minReading != null && finalReading.compareTo(minReading) <= 0) {
                     throw new ResponseStatusException(
                             HttpStatus.BAD_REQUEST,
-                            "reading must be greater than last confirmed reading (" + baseline.readingDate() + ")"
+                            "reading must be greater than last confirmed reading (" + previousReading.readingDate() + ")"
                     );
                 }
             }
@@ -92,7 +92,7 @@ public class TelemetrySchemeReadingService {
             log.info("[update-yesterday-final-reading] targetDayRecord id={} date={} createdBy={}",
                     targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
 
-            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = baselineOpt;
+            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = previousReadingOpt;
             Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt =
                     telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(schemaName, schemeId, targetDay);
 
