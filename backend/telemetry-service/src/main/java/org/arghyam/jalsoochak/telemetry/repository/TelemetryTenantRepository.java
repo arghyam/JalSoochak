@@ -1259,6 +1259,35 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingForScheme(String schemaName,
+                                                                                           Long schemeId) {
+        validateSchemaName(schemaName);
+        if (schemeId == null || schemeId < 1) {
+            return Optional.empty();
+        }
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, correlation_id, created_by, reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND deleted_at IS NULL
+                ORDER BY %s DESC, created_at DESC, id DESC
+                LIMIT 1
+                """, schemaName, timeColumn);
+        List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryCompletedFlowReading(
+                        toLong(rs.getObject("id")),
+                        rs.getString("correlation_id"),
+                        toLong(rs.getObject("created_by")),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                schemeId
+        );
+        return rows.stream().findFirst();
+    }
+
     public boolean isUserMappedToScheme(String schemaName, Long userId, Long schemeId) {
         validateSchemaName(schemaName);
         if (userId == null || userId < 1 || schemeId == null || schemeId < 1) {
