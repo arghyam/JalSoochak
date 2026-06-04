@@ -173,7 +173,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
-    void manualReadingRejectsWhenLowerThanPreviousAndMeterNotReplaced() {
+    void manualReadingAcceptsWhenLowerThanPreviousAndMeterNotReplaced() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -182,21 +182,19 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(localizationService.localizeMessage(anyString(), anyString())).thenAnswer(invocation -> invocation.getArgument(0));
-
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
-        doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
-                anyString(),
-                anyLong(),
-                anyLong(),
-                anyInt(),
-                anyString(),
-                anyInt()
-        );
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L,
+                        "bfm-1",
+                        1L,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO
+                )));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
@@ -205,20 +203,16 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .build());
 
         assertNotNull(resp);
-        assertEquals(false, resp.isSuccess());
-        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
         assertEquals(new BigDecimal("100"), resp.getMeterReading());
-        assertEquals(new BigDecimal("200"), resp.getLastConfirmedReading());
-        assertEquals(
-                "Reading rejected because it is below the last confirmed reading. Submitted: 100. Last confirmed: 200.",
-                resp.getMessage()
-        );
+        assertEquals("bfm-1", resp.getCorrelationId());
 
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("100"), 1L);
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
-        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
                 anyLong(),
                 anyLong(),
@@ -226,7 +220,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 anyString(),
                 ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
         );
-        verify(telemetryEventPublisher).publishAnomalyRecorded(
+        verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 ArgumentMatchers.eq(1),
                 ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
                 ArgumentMatchers.eq(1L),
