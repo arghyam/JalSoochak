@@ -215,46 +215,46 @@ public class BfmReadingService {
                     .divide(BigDecimal.valueOf(100.0d), 6, RoundingMode.HALF_UP);
         }
 
-        if (!isMeterReplaced && effectiveConfirmedReading != null && minAllowed != null
-                && effectiveConfirmedReading.compareTo(minAllowed) < 0) {
-            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.orElse(null);
-            BigDecimal previousConfirmed = previousSnapshot != null ? previousSnapshot.confirmedReading() : null;
-            LocalDateTime previousConfirmedAt = previousSnapshot != null ? previousSnapshot.createdAt() : null;
-            String reason = "Submitted reading is below allowed minimum (" + toPlain(minAllowed) + ").";
-            telemetryTenantRepository.createTenantAnomalyRecord(
-                    schemaName,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
-                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN
-            );
-            telemetryEventPublisher.publishAnomalyRecorded(
-                    tenantId,
-                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
-                    extractedReading,
-                    confidenceLevel,
-                    effectiveConfirmedReading,
-                    0,
-                    previousConfirmed,
-                    previousConfirmedAt,
-                    0,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN,
-                    null
-            );
-            return CreateReadingResponse.builder()
-                    .success(false)
-                    .message("Reading rejected because it is below the allowed minimum. Submitted: "
-                            + toPlain(effectiveConfirmedReading) + ". Minimum allowed: " + toPlain(minAllowed) + ".")
-                    .correlationId(correlationId)
-                    .meterReading(effectiveConfirmedReading)
-                    .qualityStatus("REJECTED")
-                    .lastConfirmedReading(previousConfirmed)
-                    .build();
-        }
+//        if (!isMeterReplaced && effectiveConfirmedReading != null && minAllowed != null
+//                && effectiveConfirmedReading.compareTo(minAllowed) < 0) {
+//            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.orElse(null);
+//            BigDecimal previousConfirmed = previousSnapshot != null ? previousSnapshot.confirmedReading() : null;
+//            LocalDateTime previousConfirmedAt = previousSnapshot != null ? previousSnapshot.createdAt() : null;
+//            String reason = "Submitted reading is below allowed minimum (" + toPlain(minAllowed) + ").";
+//            telemetryTenantRepository.createTenantAnomalyRecord(
+//                    schemaName,
+//                    operatorInRequest.id(),
+//                    request.getSchemeId(),
+//                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN
+//            );
+//            telemetryEventPublisher.publishAnomalyRecorded(
+//                    tenantId,
+//                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+//                    operatorInRequest.id(),
+//                    request.getSchemeId(),
+//                    extractedReading,
+//                    confidenceLevel,
+//                    effectiveConfirmedReading,
+//                    0,
+//                    previousConfirmed,
+//                    previousConfirmedAt,
+//                    0,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN,
+//                    null
+//            );
+//            return CreateReadingResponse.builder()
+//                    .success(false)
+//                    .message("Reading rejected because it is below the allowed minimum. Submitted: "
+//                            + toPlain(effectiveConfirmedReading) + ". Minimum allowed: " + toPlain(minAllowed) + ".")
+//                    .correlationId(correlationId)
+//                    .meterReading(effectiveConfirmedReading)
+//                    .qualityStatus("REJECTED")
+//                    .lastConfirmedReading(previousConfirmed)
+//                    .build();
+//        }
 
         if (latestSnapshotOpt.isPresent() && extractedReading != null
                 && extractedReading.compareTo(latestSnapshotOpt.get().confirmedReading()) == 0
