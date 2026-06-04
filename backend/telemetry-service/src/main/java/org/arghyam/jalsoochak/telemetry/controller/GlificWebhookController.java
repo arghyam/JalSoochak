@@ -20,6 +20,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingReque
 import org.arghyam.jalsoochak.telemetry.dto.requests.TriggerWelcomeMessageRequest;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
+import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -42,24 +43,26 @@ public class GlificWebhookController {
     private final GlificWebhookService glificWebhookService;
     private final GlificReadingsAsyncService glificReadingsAsyncService;
     private final WelcomeMessageService welcomeMessageService;
-    
+    private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
     public GlificWebhookController(GlificWebhookService glificWebhookService) {
-        this(glificWebhookService, null, null);
+        this(glificWebhookService, null, null, null);
     }
 
     public GlificWebhookController(GlificWebhookService glificWebhookService,
                                    GlificReadingsAsyncService glificReadingsAsyncService) {
-        this(glificWebhookService, glificReadingsAsyncService, null);
+        this(glificWebhookService, glificReadingsAsyncService, null, null);
     }
 
     @Autowired
     public GlificWebhookController(GlificWebhookService glificWebhookService,
                                    GlificReadingsAsyncService glificReadingsAsyncService,
-                                   WelcomeMessageService welcomeMessageService) {
+                                   WelcomeMessageService welcomeMessageService,
+                                   TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
         this.glificWebhookService = glificWebhookService;
         this.glificReadingsAsyncService = glificReadingsAsyncService;
         this.welcomeMessageService = welcomeMessageService;
+        this.telemetrySubmissionAuditService = telemetrySubmissionAuditService;
     }
 
     @PostMapping(
@@ -70,11 +73,21 @@ public class GlificWebhookController {
     public ResponseEntity<ReadingWebhookAckResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
         try {
             String jobId = UUID.randomUUID().toString();
+            String status = "ACCEPTED";
+            String message = "Reading request accepted for asynchronous processing.";
             if (glificReadingsAsyncService != null) {
                 glificReadingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
             } else {
-                glificWebhookService.processImage(glificWebhookRequest);
+                CreateReadingResponse response = glificWebhookService.processImage(glificWebhookRequest);
+                status = isSuccessful(response) ? "SUCCESS" : "FAILED";
+                message = response != null ? response.getMessage() : "Reading request processed.";
             }
+            logReadingSubmission(
+                    "/api/v1/telemetry/readings/glific",
+                    glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null,
+                    status,
+                    message
+            );
 
             return ResponseEntity.ok(
                     ReadingWebhookAckResponse.builder()
@@ -88,6 +101,7 @@ public class GlificWebhookController {
             String safeContactId = glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null;
             log.error("Error processing webhook: {}", e.getMessage(), e);
             log.debug("Error processing webhook for contactId {}: {}", safeContactId, e.getMessage());
+            logReadingSubmission("/api/v1/telemetry/readings/glific", safeContactId, "FAILED", e.getMessage());
 
             ReadingWebhookAckResponse errorResponse = ReadingWebhookAckResponse.builder()
                     .success(false)
@@ -493,10 +507,22 @@ public class GlificWebhookController {
     public ResponseEntity<CreateReadingResponse> manualReading(@RequestBody @Valid ManualReadingRequest request) {
         try {
             CreateReadingResponse response = glificWebhookService.manualReadingMessage(request);
+            logReadingSubmission(
+                    "/api/v1/telemetry/manual-reading",
+                    request != null ? request.getContactId() : null,
+                    isSuccessful(response) ? "SUCCESS" : "FAILED",
+                    response != null ? response.getMessage() : "Manual reading processed."
+            );
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error saving manual reading: {}", e.getMessage(), e);
             log.debug("Error saving manual reading for contactId {}: {}", request.getContactId(), e.getMessage());
+            logReadingSubmission(
+                    "/api/v1/telemetry/manual-reading",
+                    request != null ? request.getContactId() : null,
+                    "FAILED",
+                    e.getMessage()
+            );
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                     CreateReadingResponse.builder()
                             .success(false)
@@ -532,10 +558,22 @@ public class GlificWebhookController {
     public ResponseEntity<CreateReadingResponse> updatedPreviousReading(@RequestBody @Valid UpdatedPreviousReadingRequest request) {
         try {
             CreateReadingResponse response = glificWebhookService.updatePreviousReadingMessage(request);
+            logReadingSubmission(
+                    "/api/v1/telemetry/update-previous-reading",
+                    request != null ? request.getContactId() : null,
+                    isSuccessful(response) ? "SUCCESS" : "FAILED",
+                    response != null ? response.getMessage() : "Previous reading update processed."
+            );
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error updating previous day reading: {}", e.getMessage(), e);
             log.debug("Error updating previous day reading for contactId {}: {}", request.getContactId(), e.getMessage());
+            logReadingSubmission(
+                    "/api/v1/telemetry/update-previous-reading",
+                    request != null ? request.getContactId() : null,
+                    "FAILED",
+                    e.getMessage()
+            );
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                     CreateReadingResponse.builder()
                             .success(false)
@@ -547,4 +585,34 @@ public class GlificWebhookController {
         }
     }
 
+    private void logReadingSubmission(String api, String contactId, String status, String message) {
+        TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
+                telemetrySubmissionAuditService != null
+                        ? telemetrySubmissionAuditService.captureForContact(contactId)
+                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, java.time.LocalDate.now());
+
+        log.info(
+                "reading_submission api={} status={} phone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",
+                api,
+                status,
+                audit.maskedPhone(),
+                audit.schemeId(),
+                audit.dailyUniqueUserCount(),
+                audit.date(),
+                sanitizeLogMessage(message)
+        );
+    }
+
+    private boolean isSuccessful(CreateReadingResponse response) {
+        return response != null
+                && response.isSuccess()
+                && !"REJECTED".equalsIgnoreCase(response.getQualityStatus());
+    }
+
+    private String sanitizeLogMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "n/a";
+        }
+        return message.replace('\n', ' ').replace('\r', ' ').trim();
+    }
 }

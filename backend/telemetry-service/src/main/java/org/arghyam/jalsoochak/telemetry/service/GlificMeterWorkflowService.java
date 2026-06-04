@@ -1050,48 +1050,48 @@ public class GlificMeterWorkflowService {
                     ));
 
             BigDecimal effectiveConfirmedReading = manualReadingValue;
-            if (!isMeterReplaced
-                    && previousSnapshotOpt.isPresent()
-                    && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
-                TelemetryConfirmedReadingSnapshot previousSnapshot = previousSnapshotOpt.get();
-                String reason = "Submitted reading is less than previous confirmed reading.";
-                telemetryTenantRepository.createTenantAnomalyRecord(
-                        operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                        reason,
-                        AnomalyConstants.STATUS_OPEN
-                );
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                        null,
-                        manualReadingValue,
-                        0,
-                        previousSnapshot.confirmedReading(),
-                        previousSnapshot.createdAt(),
-                        0,
-                        reason,
-                        AnomalyConstants.STATUS_OPEN,
-                        correlationId
-                );
-                return CreateReadingResponse.builder()
-                        .success(false)
-                        .message(localizationService.localizeMessage(
-                                "Reading rejected because it is below the last confirmed reading. Submitted: " + toPlain(manualReadingValue)
-                                        + ". Last confirmed: " + toPlain(previousSnapshot.confirmedReading()) + ".",
-                                languageKey
-                        ))
-                        .qualityStatus("REJECTED")
-                        .correlationId(correlationId)
-                        .meterReading(manualReadingValue)
-                        .lastConfirmedReading(previousSnapshot.confirmedReading())
-                        .build();
-            }
+//            if (!isMeterReplaced
+//                    && previousSnapshotOpt.isPresent()
+//                    && manualReadingValue.compareTo(previousSnapshotOpt.get().confirmedReading()) < 0) {
+//                TelemetryConfirmedReadingSnapshot previousSnapshot = previousSnapshotOpt.get();
+//                String reason = "Submitted reading is less than previous confirmed reading.";
+//                telemetryTenantRepository.createTenantAnomalyRecord(
+//                        operatorWithSchema.schemaName(),
+//                        operatorWithSchema.operator().id(),
+//                        schemeId,
+//                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+//                        reason,
+//                        AnomalyConstants.STATUS_OPEN
+//                );
+//                telemetryEventPublisher.publishAnomalyRecorded(
+//                        tenantId,
+//                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+//                        operatorWithSchema.operator().id(),
+//                        schemeId,
+//                        pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+//                        null,
+//                        manualReadingValue,
+//                        0,
+//                        previousSnapshot.confirmedReading(),
+//                        previousSnapshot.createdAt(),
+//                        0,
+//                        reason,
+//                        AnomalyConstants.STATUS_OPEN,
+//                        correlationId
+//                );
+//                return CreateReadingResponse.builder()
+//                        .success(false)
+//                        .message(localizationService.localizeMessage(
+//                                "Reading rejected because it is below the last confirmed reading. Submitted: " + toPlain(manualReadingValue)
+//                                        + ". Last confirmed: " + toPlain(previousSnapshot.confirmedReading()) + ".",
+//                                languageKey
+//                        ))
+//                        .qualityStatus("REJECTED")
+//                        .correlationId(correlationId)
+//                        .meterReading(manualReadingValue)
+//                        .lastConfirmedReading(previousSnapshot.confirmedReading())
+//                        .build();
+//            }
 
             // Tenant-configured water supply threshold validation (relative to WATER_NORM).
             // Validate against the effective confirmed value after baseline clamping.
@@ -1115,52 +1115,52 @@ public class GlificMeterWorkflowService {
                     BigDecimal minAllowedReading = baselineReading.add(minAllowed);
                     BigDecimal maxAllowedReading = baselineReading.add(maxAllowed);
 
-                    if (effectiveConfirmedReading.compareTo(minAllowedReading) < 0) {
-                        telemetryTenantRepository.createTenantAnomalyRecord(
-                                operatorWithSchema.schemaName(),
-                                operatorWithSchema.operator().id(),
-                                schemeId,
-                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ").",
-                                AnomalyConstants.STATUS_OPEN
-                        );
-                        telemetryEventPublisher.publishAnomalyRecorded(
-                                tenantId,
-                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                                operatorWithSchema.operator().id(),
-                                schemeId,
-                                pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
-                                null,
-                                effectiveConfirmedReading,
-                                0,
-                                previousConfirmed,
-                                previousConfirmedAt,
-                                0,
-                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ").",
-                                AnomalyConstants.STATUS_OPEN,
-                                null
-                        );
-                        telemetryEventPublisher.publishOutageOrNonSubmissionReason(
-                                tenantId,
-                                schemeId,
-                                operatorWithSchema.operator().id(),
-                                today,
-                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ")."
-                        );
-                        return CreateReadingResponse.builder()
-                                .success(false)
-                                .message(localizationService.localizeMessage(
-                                        "Reading rejected because it is below the allowed minimum. Submitted: " + toPlain(effectiveConfirmedReading)
-                                                + ". Minimum allowed reading: " + toPlain(minAllowedReading) + ".",
-                                        languageKey
-                                ))
-                                .qualityStatus("REJECTED")
-                                .correlationId(correlationId)
-                                .meterReading(effectiveConfirmedReading)
-                                .lastConfirmedReading(previousConfirmed)
-                                .build();
-                    }
+//                    if (effectiveConfirmedReading.compareTo(minAllowedReading) < 0) {
+//                        telemetryTenantRepository.createTenantAnomalyRecord(
+//                                operatorWithSchema.schemaName(),
+//                                operatorWithSchema.operator().id(),
+//                                schemeId,
+//                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+//                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ").",
+//                                AnomalyConstants.STATUS_OPEN
+//                        );
+//                        telemetryEventPublisher.publishAnomalyRecorded(
+//                                tenantId,
+//                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+//                                operatorWithSchema.operator().id(),
+//                                schemeId,
+//                                pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading).orElse(null),
+//                                null,
+//                                effectiveConfirmedReading,
+//                                0,
+//                                previousConfirmed,
+//                                previousConfirmedAt,
+//                                0,
+//                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ").",
+//                                AnomalyConstants.STATUS_OPEN,
+//                                null
+//                        );
+//                        telemetryEventPublisher.publishOutageOrNonSubmissionReason(
+//                                tenantId,
+//                                schemeId,
+//                                operatorWithSchema.operator().id(),
+//                                today,
+//                                AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+//                                "Manual reading is below allowed minimum reading (" + toPlain(minAllowedReading) + ")."
+//                        );
+//                        return CreateReadingResponse.builder()
+//                                .success(false)
+//                                .message(localizationService.localizeMessage(
+//                                        "Reading rejected because it is below the allowed minimum. Submitted: " + toPlain(effectiveConfirmedReading)
+//                                                + ". Minimum allowed reading: " + toPlain(minAllowedReading) + ".",
+//                                        languageKey
+//                                ))
+//                                .qualityStatus("REJECTED")
+//                                .correlationId(correlationId)
+//                                .meterReading(effectiveConfirmedReading)
+//                                .lastConfirmedReading(previousConfirmed)
+//                                .build();
+//                    }
                     if (effectiveConfirmedReading.compareTo(maxAllowedReading) > 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
@@ -1507,20 +1507,20 @@ public class GlificMeterWorkflowService {
 
             if (dayBeforeTargetOpt.isPresent()) {
                 TelemetryCompletedFlowReading dayBeforeTarget = dayBeforeTargetOpt.get();
-                if (readingValue.compareTo(dayBeforeTarget.confirmedReading()) <= 0) {
-                    return CreateReadingResponse.builder()
-                            .success(false)
-                            .message(localizationService.localizeMessage(
-                                    "Reading must be greater than the reading on " + dayBeforeTarget.readingDate()
-                                            + " (" + toPlain(dayBeforeTarget.confirmedReading()) + "). Submitted reading: "
-                                            + toPlain(readingValue) + ".",
-                                    languageKey
-                            ))
-                            .qualityStatus("REJECTED")
-                            .correlationId(request.getContactId())
-                            .meterReading(readingValue)
-                            .build();
-                }
+//                if (readingValue.compareTo(dayBeforeTarget.confirmedReading()) <= 0) {
+//                    return CreateReadingResponse.builder()
+//                            .success(false)
+//                            .message(localizationService.localizeMessage(
+//                                    "Reading must be greater than the reading on " + dayBeforeTarget.readingDate()
+//                                            + " (" + toPlain(dayBeforeTarget.confirmedReading()) + "). Submitted reading: "
+//                                            + toPlain(readingValue) + ".",
+//                                    languageKey
+//                            ))
+//                            .qualityStatus("REJECTED")
+//                            .correlationId(request.getContactId())
+//                            .meterReading(readingValue)
+//                            .build();
+//                }
             }
 
             telemetryTenantRepository.updateReadingValues(

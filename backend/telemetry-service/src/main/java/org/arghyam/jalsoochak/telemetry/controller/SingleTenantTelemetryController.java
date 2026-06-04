@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySchemeReadingService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
+import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,22 +43,25 @@ public class SingleTenantTelemetryController {
     private final TelemetryApiKeyService telemetryApiKeyService;
     private final BfmReadingService bfmReadingService;
     private final TelemetrySchemeReadingService telemetrySchemeReadingService;
+    private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
     public SingleTenantTelemetryController(GlificWebhookService glificWebhookService,
                                            TelemetryApiKeyService telemetryApiKeyService,
                                            BfmReadingService bfmReadingService) {
-        this(glificWebhookService, telemetryApiKeyService, bfmReadingService, null);
+        this(glificWebhookService, telemetryApiKeyService, bfmReadingService, null, null);
     }
 
     @Autowired
     public SingleTenantTelemetryController(GlificWebhookService glificWebhookService,
                                            TelemetryApiKeyService telemetryApiKeyService,
                                            BfmReadingService bfmReadingService,
-                                           TelemetrySchemeReadingService telemetrySchemeReadingService) {
+                                           TelemetrySchemeReadingService telemetrySchemeReadingService,
+                                           TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
         this.glificWebhookService = glificWebhookService;
         this.telemetryApiKeyService = telemetryApiKeyService;
         this.bfmReadingService = bfmReadingService;
         this.telemetrySchemeReadingService = telemetrySchemeReadingService;
+        this.telemetrySubmissionAuditService = telemetrySubmissionAuditService;
     }
 
     @PatchMapping(
@@ -82,15 +86,28 @@ public class SingleTenantTelemetryController {
         }
         log.info("PATCH /api/v1/telemetry/schemes/{}/yesterday-final-reading phone={}", schemeId, masked);
         try {
-            return ResponseEntity.ok(
-                    telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(
-                            schemeId,
-                            request.getPhoneNumber(),
-                            request.getReading(),
-                            date
-                    )
+            UpdateYesterdayFinalReadingBySchemeResponse response = telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(
+                    schemeId,
+                    request.getPhoneNumber(),
+                    request.getReading(),
+                    date
             );
+            logReadingSubmission(
+                    "/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
+                    request != null ? request.getPhoneNumber() : null,
+                    schemeId,
+                    response != null && response.isSuccess() ? "SUCCESS" : "FAILED",
+                    response != null ? response.getMessage() : "Yesterday final reading processed."
+            );
+            return ResponseEntity.ok(response);
         } catch (ResponseStatusException e) {
+            logReadingSubmission(
+                    "/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
+                    request != null ? request.getPhoneNumber() : null,
+                    schemeId,
+                    "FAILED",
+                    e.getReason()
+            );
             return ResponseEntity.status(e.getStatusCode()).body(
                     UpdateYesterdayFinalReadingBySchemeResponse.builder()
                             .success(false)
@@ -100,6 +117,13 @@ public class SingleTenantTelemetryController {
                             .build()
             );
         } catch (Exception e) {
+            logReadingSubmission(
+                    "/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
+                    request != null ? request.getPhoneNumber() : null,
+                    schemeId,
+                    "FAILED",
+                    e.getMessage()
+            );
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                     UpdateYesterdayFinalReadingBySchemeResponse.builder()
                             .success(false)
@@ -120,17 +144,25 @@ public class SingleTenantTelemetryController {
             @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
             @RequestBody @Valid AssamReadingRequest request
     ) {
+        Integer tenantId = null;
         try {
             if (telemetryApiKeyService == null) {
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "API key service not configured");
             }
-            Integer tenantId = telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
+            tenantId = telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
 
             CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
             boolean rejected = response == null
                     || !response.isSuccess()
                     || "REJECTED".equalsIgnoreCase(response.getQualityStatus());
+            logReadingSubmission(
+                    "/api/v1/telemetry/readings",
+                    request,
+                    tenantId,
+                    rejected ? "FAILED" : "SUCCESS",
+                    response != null ? response.getMessage() : "Reading processed."
+            );
             if (rejected) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                         ReadingsApiResponse.builder()
@@ -146,6 +178,13 @@ public class SingleTenantTelemetryController {
                             .build()
             );
         } catch (ResponseStatusException e) {
+            logReadingSubmission(
+                    "/api/v1/telemetry/readings",
+                    request,
+                    tenantId,
+                    "FAILED",
+                    e.getReason()
+            );
             return ResponseEntity.status(e.getStatusCode()).body(
                     ReadingsApiResponse.builder()
                             .success(false)
@@ -159,6 +198,13 @@ public class SingleTenantTelemetryController {
             String safeContactId = request != null ? request.getPhoneNumber() : null;
             log.error("Error processing Assam reading: {}", e.getMessage(), e);
             log.debug("Error processing Assam reading for phoneNumber {}: {}", safeContactId, e.getMessage());
+            logReadingSubmission(
+                    "/api/v1/telemetry/readings",
+                    request,
+                    tenantId,
+                    "FAILED",
+                    e.getMessage()
+            );
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                     ReadingsApiResponse.builder()
                             .success(false)
@@ -317,5 +363,48 @@ public class SingleTenantTelemetryController {
                 .lastConfirmedReading(response.getLastConfirmedReading())
                 .message(response.getMessage())
                 .build();
+    }
+
+    private void logReadingSubmission(String api, String phoneNumber, Long schemeId, String status, String message) {
+        TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
+                telemetrySubmissionAuditService != null
+                        ? telemetrySubmissionAuditService.captureForPhoneAndScheme(phoneNumber, schemeId)
+                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", schemeId, 0, LocalDate.now());
+
+        log.info(
+                "reading_submission api={} status={} phone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",
+                api,
+                status,
+                audit.maskedPhone(),
+                audit.schemeId(),
+                audit.dailyUniqueUserCount(),
+                audit.date(),
+                sanitizeLogMessage(message)
+        );
+    }
+
+    private void logReadingSubmission(String api, AssamReadingRequest request, Integer tenantId, String status, String message) {
+        TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
+                telemetrySubmissionAuditService != null
+                        ? telemetrySubmissionAuditService.captureForAssamReading(request, tenantId)
+                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now());
+
+        log.info(
+                "reading_submission api={} status={} phone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",
+                api,
+                status,
+                audit.maskedPhone(),
+                audit.schemeId(),
+                audit.dailyUniqueUserCount(),
+                audit.date(),
+                sanitizeLogMessage(message)
+        );
+    }
+
+    private String sanitizeLogMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "n/a";
+        }
+        return message.replace('\n', ' ').replace('\r', ' ').trim();
     }
 }

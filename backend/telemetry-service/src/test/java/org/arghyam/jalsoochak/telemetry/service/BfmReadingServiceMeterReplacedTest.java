@@ -53,7 +53,7 @@ class BfmReadingServiceMeterReplacedTest {
     private BfmReadingService service;
 
     @Test
-    void createReadingRejectsWhenLowerThanPreviousAndMeterNotReplaced() {
+    void createReadingAcceptsWhenLowerThanPreviousAndMeterNotReplaced() {
         String schemaName = "tenant_test";
         TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
 
@@ -68,15 +68,28 @@ class BfmReadingServiceMeterReplacedTest {
         when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot(schemaName, 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
+        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.createFlowReading(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                any(LocalDateTime.class),
+                any(BigDecimal.class),
+                any(BigDecimal.class),
+                anyString(),
+                any(),
+                any()
+        )).thenReturn(99L);
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
         assertNotNull(resp);
-        assertEquals(false, resp.isSuccess());
-        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
         assertEquals(new BigDecimal("100"), resp.getMeterReading());
-        assertTrue(resp.getMessage().contains("below the last confirmed reading"));
+        assertTrue(resp.getMessage().contains("Reading captured successfully"));
 
-        verify(telemetryTenantRepository, never()).createFlowReading(
+        verify(telemetryTenantRepository).createFlowReading(
                 anyString(),
                 anyLong(),
                 anyLong(),
@@ -87,7 +100,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any()
         );
-        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
                 anyLong(),
                 anyLong(),
@@ -95,7 +108,7 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
         );
-        verify(telemetryEventPublisher).publishAnomalyRecorded(
+        verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
                 org.mockito.ArgumentMatchers.eq(1L),
@@ -114,7 +127,7 @@ class BfmReadingServiceMeterReplacedTest {
     }
 
     @Test
-    void createReadingRejectsWhenBelowWaterThreshold() {
+    void createReadingAcceptsWhenBelowWaterThreshold() {
         String schemaName = "tenant_test";
         TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
 
@@ -137,15 +150,28 @@ class BfmReadingServiceMeterReplacedTest {
                 .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":10,\"oversupplyThresholdPercent\":20}"));
         when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
                 .thenReturn(Optional.of("{\"value\":\"1000\"}"));
+        when(telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(schemaName, 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.createFlowReading(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                any(LocalDateTime.class),
+                any(BigDecimal.class),
+                any(BigDecimal.class),
+                anyString(),
+                any(),
+                any()
+        )).thenReturn(101L);
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
         assertNotNull(resp);
-        assertEquals(false, resp.isSuccess());
-        assertEquals("REJECTED", resp.getQualityStatus());
-        assertTrue(resp.getMessage().contains("below the allowed minimum"));
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
+        assertTrue(resp.getMessage().contains("Reading captured successfully"));
 
-        verify(telemetryTenantRepository, never()).createFlowReading(
+        verify(telemetryTenantRepository).createFlowReading(
                 anyString(),
                 anyLong(),
                 anyLong(),
