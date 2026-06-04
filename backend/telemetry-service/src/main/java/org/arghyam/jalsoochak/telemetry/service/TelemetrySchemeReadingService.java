@@ -14,9 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.Optional;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -52,66 +50,49 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found for schema");
             }
 
-            LocalDate targetDay = date != null ? date : LocalDate.now().minusDays(1);
-            if (!targetDay.isBefore(LocalDate.now())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "date must be in the past");
-            }
-
             boolean mapped = telemetryTenantRepository.isUserMappedToScheme(schemaName, updaterUserId, schemeId);
             log.info("[update-yesterday-final-reading] resolved userId={} mappedToScheme={}", updaterUserId, mapped);
             if (!mapped) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not authorized for this scheme");
             }
 
-            // Find the baseline reading to compare against before making any DB changes.
-            // We compare against the latest completed (confirmed) reading before targetDay.
-            Optional<TelemetryCompletedFlowReading> baselineOpt =
-                    telemetryTenantRepository.findLatestCompletedFlowReadingBeforeDateForScheme(schemaName, schemeId, targetDay);
-            if (baselineOpt.isPresent()) {
-                TelemetryCompletedFlowReading baseline = baselineOpt.get();
-                BigDecimal minReading = baseline.confirmedReading();
+            Optional<TelemetryCompletedFlowReading> targetReadingOpt = date != null
+                    ? telemetryTenantRepository.findLatestCompletedFlowReadingOnDate(schemaName, schemeId, date)
+                    : telemetryTenantRepository.findLatestCompletedFlowReadingForScheme(schemaName, schemeId);
+            if (targetReadingOpt.isEmpty()) {
+                throw new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        date != null
+                                ? "No submitted reading found for the provided date"
+                                : "No submitted reading found for this scheme"
+                );
+            }
+
+            TelemetryCompletedFlowReading targetDayRecord = targetReadingOpt.get();
+            LocalDate targetDay = targetDayRecord.readingDate();
+            if (targetDay == null) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Target reading date is missing");
+            }
+
+            // Validate against the reading immediately before the target record, even if both
+            // submissions happened on the same date.
+            Optional<TelemetryCompletedFlowReading> previousReadingOpt =
+                    telemetryTenantRepository.findPreviousFlowReadingForScheme(schemaName, targetDayRecord.id());
+            if (previousReadingOpt.isPresent()) {
+                TelemetryCompletedFlowReading previousReading = previousReadingOpt.get();
+                BigDecimal minReading = previousReading.confirmedReading();
                 if (minReading != null && finalReading.compareTo(minReading) <= 0) {
                     throw new ResponseStatusException(
                             HttpStatus.BAD_REQUEST,
-                            "reading must be greater than last confirmed reading (" + baseline.readingDate() + ")"
+                            "reading must be greater than last confirmed reading (" + previousReading.readingDate() + ")"
                     );
                 }
             }
 
-            // Update is scoped to the scheme/day (not strictly to the user's own submissions).
-            Optional<TelemetryCompletedFlowReading> targetDayRecordOpt =
-                    telemetryTenantRepository.findLatestCompletedFlowReadingOnDate(schemaName, schemeId, targetDay);
-            TelemetryCompletedFlowReading targetDayRecord;
-            boolean createdTargetDayRecord = false;
-            if (targetDayRecordOpt.isEmpty()) {
-                // No completed reading yesterday for this scheme; create one so we can still apply the correction.
-                String correlationId = "manual-prev-" + UUID.randomUUID();
-                LocalDateTime readingAt = LocalDateTime.of(targetDay, LocalTime.of(23, 59, 59));
-                Long readingId = telemetryTenantRepository.createFlowReading(
-                        schemaName,
-                        schemeId,
-                        updaterUserId,
-                        readingAt,
-                        BigDecimal.ZERO,
-                        finalReading,
-                        correlationId,
-                        "",
-                        null
-                );
-                if (readingId == null) {
-                    throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create yesterday reading record");
-                }
-                targetDayRecord = new TelemetryCompletedFlowReading(readingId, correlationId, updaterUserId, targetDay, finalReading);
-                createdTargetDayRecord = true;
-                log.info("[update-yesterday-final-reading] created targetDayRecord id={} date={} createdBy={}",
-                        targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
-            } else {
-                targetDayRecord = targetDayRecordOpt.get();
-            }
             log.info("[update-yesterday-final-reading] targetDayRecord id={} date={} createdBy={}",
                     targetDayRecord.id(), targetDayRecord.readingDate(), targetDayRecord.createdBy());
 
-            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = baselineOpt;
+            Optional<TelemetryCompletedFlowReading> dayBeforeTargetOpt = previousReadingOpt;
             Optional<TelemetryCompletedFlowReading> dayAfterTargetOpt =
                     telemetryTenantRepository.findEarliestCompletedFlowReadingAfterDateForScheme(schemaName, schemeId, targetDay);
 
@@ -125,8 +106,8 @@ public class TelemetrySchemeReadingService {
 
             // Always treat this as a "confirmed correction": keep extracted_reading untouched (or 0 for created rows).
             telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId);
-            log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={} createdRecord={}",
-                    targetDayRecord.id(), finalReading, createdTargetDayRecord);
+            log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={}",
+                    targetDayRecord.id(), finalReading);
 
             BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
                     .map(TelemetryCompletedFlowReading::confirmedReading)

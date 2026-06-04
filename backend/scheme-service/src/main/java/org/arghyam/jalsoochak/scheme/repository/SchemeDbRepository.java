@@ -420,7 +420,6 @@ public class SchemeDbRepository {
                     SELECT confirmed_reading
                     FROM %1$s.flow_reading_table
                     WHERE scheme_id = sm.id
-                      AND reading_date = CURRENT_DATE - 1
                       AND deleted_at IS NULL
                     ORDER BY %2$s DESC, created_at DESC, id DESC
                     LIMIT 1
