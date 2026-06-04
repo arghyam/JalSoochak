@@ -105,7 +105,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
     }
 
     @Test
-    void updatePreviousReadingRejectsWhenNotGreaterThanPreviousConfirmedReading() {
+    void updatePreviousReadingUpdatesWhenNotGreaterThanPreviousConfirmedReading() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -114,9 +114,6 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(localizationService.localizeMessage(anyString(), eq("english")))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
         LocalDate today = LocalDate.now();
@@ -135,14 +132,27 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
                 .build());
 
         assertNotNull(resp);
-        assertEquals(false, resp.isSuccess());
-        assertEquals("REJECTED", resp.getQualityStatus());
-        assertEquals(
-                "Reading must be greater than the reading on " + previousDate + " (1000). Submitted reading: 1000.",
-                resp.getMessage()
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
+        assertEquals(new BigDecimal("1000"), resp.getMeterReading());
+        assertEquals("corr-2", resp.getCorrelationId());
+        verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("1000"), 1L);
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
+                1,
+                10L,
+                1L,
+                targetDate,
+                BigDecimal.ZERO,
+                1
         );
-        verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryEventPublisher, never()).publishWaterQuantityRecorded(any(), anyLong(), anyLong(), any(), any(), any());
+        verify(telemetryEventPublisher).publishWaterQuantityRecorded(
+                1,
+                10L,
+                1L,
+                nextDate,
+                new BigDecimal("200"),
+                1
+        );
     }
 
     @Test

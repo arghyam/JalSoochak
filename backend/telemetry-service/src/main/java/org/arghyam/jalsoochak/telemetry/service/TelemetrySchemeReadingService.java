@@ -81,12 +81,12 @@ public class TelemetrySchemeReadingService {
             if (previousReadingOpt.isPresent()) {
                 TelemetryCompletedFlowReading previousReading = previousReadingOpt.get();
                 BigDecimal minReading = previousReading.confirmedReading();
-                if (minReading != null && finalReading.compareTo(minReading) <= 0) {
-                    throw new ResponseStatusException(
-                            HttpStatus.BAD_REQUEST,
-                            "reading must be greater than last confirmed reading (" + previousReading.readingDate() + ")"
-                    );
-                }
+//                if (minReading != null && finalReading.compareTo(minReading) <= 0) {
+//                    throw new ResponseStatusException(
+//                            HttpStatus.BAD_REQUEST,
+//                            "reading must be greater than last confirmed reading (" + previousReading.readingDate() + ")"
+//                    );
+//                }
             }
 
             log.info("[update-yesterday-final-reading] targetDayRecord id={} date={} createdBy={}",

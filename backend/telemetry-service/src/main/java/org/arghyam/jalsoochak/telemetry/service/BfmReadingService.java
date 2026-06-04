@@ -164,46 +164,46 @@ public class BfmReadingService {
                 ? latestSnapshotOpt
                 : latestSnapshotOpt;
 
-        if (!isMeterReplaced
-                && validationBaselineOpt.isPresent()
-                && confirmedReading != null
-                && confirmedReading.compareTo(validationBaselineOpt.get().confirmedReading()) < 0) {
-            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.get();
-            String reason = "Submitted reading is less than previous confirmed reading.";
-            telemetryTenantRepository.createTenantAnomalyRecord(
-                    schemaName,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
-                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN
-            );
-            telemetryEventPublisher.publishAnomalyRecorded(
-                    tenantId,
-                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
-                    extractedReading,
-                    confidenceLevel,
-                    confirmedReading,
-                    0,
-                    previousSnapshot.confirmedReading(),
-                    previousSnapshot.createdAt(),
-                    0,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN,
-                    correlationId
-            );
-            return CreateReadingResponse.builder()
-                    .success(false)
-                    .message("Reading rejected because it is below the last confirmed reading. Submitted: "
-                            + toPlain(confirmedReading) + ". Last confirmed: " + toPlain(previousSnapshot.confirmedReading()) + ".")
-                    .correlationId(correlationId)
-                    .meterReading(confirmedReading)
-                    .qualityStatus("REJECTED")
-                    .lastConfirmedReading(previousSnapshot.confirmedReading())
-                    .build();
-        }
+//        if (!isMeterReplaced
+//                && validationBaselineOpt.isPresent()
+//                && confirmedReading != null
+//                && confirmedReading.compareTo(validationBaselineOpt.get().confirmedReading()) < 0) {
+//            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.get();
+//            String reason = "Submitted reading is less than previous confirmed reading.";
+//            telemetryTenantRepository.createTenantAnomalyRecord(
+//                    schemaName,
+//                    operatorInRequest.id(),
+//                    request.getSchemeId(),
+//                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN
+//            );
+//            telemetryEventPublisher.publishAnomalyRecorded(
+//                    tenantId,
+//                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+//                    operatorInRequest.id(),
+//                    request.getSchemeId(),
+//                    extractedReading,
+//                    confidenceLevel,
+//                    confirmedReading,
+//                    0,
+//                    previousSnapshot.confirmedReading(),
+//                    previousSnapshot.createdAt(),
+//                    0,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN,
+//                    correlationId
+//            );
+//            return CreateReadingResponse.builder()
+//                    .success(false)
+//                    .message("Reading rejected because it is below the last confirmed reading. Submitted: "
+//                            + toPlain(confirmedReading) + ". Last confirmed: " + toPlain(previousSnapshot.confirmedReading()) + ".")
+//                    .correlationId(correlationId)
+//                    .meterReading(confirmedReading)
+//                    .qualityStatus("REJECTED")
+//                    .lastConfirmedReading(previousSnapshot.confirmedReading())
+//                    .build();
+//        }
 
         Optional<WaterSupplyThreshold> thresholdOpt = !isMeterReplaced ? loadWaterSupplyThreshold(tenantId) : Optional.empty();
         Optional<BigDecimal> waterNormOpt = !isMeterReplaced ? loadWaterNorm(tenantId) : Optional.empty();
