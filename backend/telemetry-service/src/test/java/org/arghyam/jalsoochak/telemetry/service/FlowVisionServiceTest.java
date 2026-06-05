@@ -23,7 +23,7 @@ class FlowVisionServiceTest {
     @Test
     void extractReadingReturnsResultOnSuccess() {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
-        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse(), HttpStatus.OK));
+        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("123.4", "black"), HttpStatus.OK));
 
         FlowVisionService service = new FlowVisionService(restTemplate, FLOW_VISION_URL);
 
@@ -32,6 +32,21 @@ class FlowVisionServiceTest {
         assertNotNull(result);
         assertEquals("corr-123", result.getCorrelationId());
         assertEquals("123.4", result.getAdjustedReading().toPlainString());
+        assertEquals(1, restTemplate.getCallCount());
+    }
+
+    @Test
+    void extractReadingTreatsRedLastDigitAsDecimal() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("004983", "red"), HttpStatus.OK));
+
+        FlowVisionService service = new FlowVisionService(restTemplate, FLOW_VISION_URL);
+
+        FlowVisionResult result = service.extractReading("https://image-url");
+
+        assertNotNull(result);
+        assertEquals("corr-123", result.getCorrelationId());
+        assertEquals("498.3", result.getAdjustedReading().toPlainString());
         assertEquals(1, restTemplate.getCallCount());
     }
 
@@ -49,13 +64,14 @@ class FlowVisionServiceTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> buildSuccessResponse() {
+    private static Map<String, Object> buildSuccessResponse(String meterReading, String lastDigitColor) {
         return Map.of(
                 "result", Map.of(
                         "status", "SUCCESS",
                         "correlationId", "corr-123",
                         "data", Map.of(
-                                "meterReading", "123.4",
+                                "meterReading", meterReading,
+                                "lastDigitColor", lastDigitColor,
                                 "qualityStatus", "GOOD",
                                 "qualityConfidence", "0.95"
                         )

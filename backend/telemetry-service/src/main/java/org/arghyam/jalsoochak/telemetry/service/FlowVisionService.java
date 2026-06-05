@@ -8,7 +8,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -76,12 +78,7 @@ public class FlowVisionService {
             Map<String, Object> dataMap =
                     (Map<String, Object>) resultMap.get("data");
 
-            BigDecimal adjustedReading = null;
-            Object meterReadingObj = dataMap.get("meterReading");
-
-            if (meterReadingObj != null) {
-                adjustedReading = new BigDecimal(meterReadingObj.toString());
-            }
+            BigDecimal adjustedReading = parseMeterReading(dataMap);
 
             String qualityStatus =
                     dataMap.getOrDefault("qualityStatus", "unknown").toString();
@@ -110,6 +107,30 @@ public class FlowVisionService {
             log.error("FlowVision OCR call failed for image {}", readingUrl, ex);
             return null;
         }
+    }
+
+    private BigDecimal parseMeterReading(Map<String, Object> dataMap) {
+        Object meterReadingObj = dataMap.get("meterReading");
+        if (meterReadingObj == null) {
+            return null;
+        }
+
+        String meterReading = meterReadingObj.toString().trim();
+        if (meterReading.isEmpty()) {
+            return null;
+        }
+
+        BigDecimal parsedReading = new BigDecimal(meterReading);
+        Object lastDigitColorObj = dataMap.get("lastDigitColor");
+        String lastDigitColor = lastDigitColorObj == null
+                ? ""
+                : lastDigitColorObj.toString().trim().toLowerCase(Locale.ROOT);
+
+        if (!"red".equals(lastDigitColor)) {
+            return parsedReading;
+        }
+
+        return parsedReading.movePointLeft(1).setScale(1, RoundingMode.UNNECESSARY);
     }
 
 }
