@@ -2980,7 +2980,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT s.scheme_id, s.scheme_name
+                    SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -3261,7 +3261,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT s.scheme_id, s.scheme_name
+                    SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
