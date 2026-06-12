@@ -41,10 +41,21 @@ public class PublicPumpOperatorController {
     @GetMapping("/pump-operators/{pumpOperatorId}")
     public ResponseEntity<ApiResponseDTO<PumpOperatorDetailsDTO>> getPumpOperatorDetails(
             @PathVariable long pumpOperatorId,
-            @RequestParam long schemeId,
+            @RequestParam(required = false) Long schemeId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam String tenantCode
     ) {
-        PumpOperatorDetailsDTO dto = publicPumpOperatorService.getPumpOperatorDetails(tenantCode, pumpOperatorId, schemeId);
+        if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+            throw new IllegalArgumentException("startDate must be on or before endDate");
+        }
+        PumpOperatorDetailsDTO dto = publicPumpOperatorService.getPumpOperatorDetails(
+                tenantCode,
+                pumpOperatorId,
+                schemeId,
+                startDate,
+                endDate
+        );
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operator retrieved", dto));
     }
 
@@ -81,14 +92,21 @@ public class PublicPumpOperatorController {
             @RequestParam String tenantCode,
             @RequestParam long schemeId,
             @RequestParam long pumpOperatorId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
+        if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+            throw new IllegalArgumentException("startDate must be on or before endDate");
+        }
         PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> rows =
                 publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
                         tenantCode,
                         schemeId,
                         pumpOperatorId,
+                        startDate,
+                        endDate,
                         page,
                         size
                 );

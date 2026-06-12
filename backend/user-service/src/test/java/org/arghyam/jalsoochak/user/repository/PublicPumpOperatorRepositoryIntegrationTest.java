@@ -103,7 +103,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @Test
         @DisplayName("throws InvalidDataAccessApiUsageException for invalid schema name")
         void throwsForInvalidSchemaName() {
-            assertThatThrownBy(() -> repo.findPumpOperatorById("bad schema!", 1L, 1L))
+            assertThatThrownBy(() -> repo.findPumpOperatorById("bad schema!", 1L, 1L, null, null))
                     .isInstanceOf(InvalidDataAccessApiUsageException.class)
                     .hasMessageContaining("Invalid schema name");
         }
@@ -118,7 +118,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @Test
         @DisplayName("returns null for non-existent pump operator")
         void returnsNullForMissing() {
-            assertThat(repo.findPumpOperatorById(SCHEMA, 999L, 1L)).isNull();
+            assertThat(repo.findPumpOperatorById(SCHEMA, 999L, 1L, null, null)).isNull();
         }
 
         @Test
@@ -128,7 +128,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             long schemeId = insertScheme("FPO-0");
             mapUserToScheme(poId, schemeId);
 
-            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId);
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, null, null);
             assertThat(dto).isNotNull();
             assertThat(dto.id()).isEqualTo(poId);
             assertThat(dto.lastSubmissionAt()).isNull();
@@ -142,7 +142,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             mapUserToScheme(poId, schemeId);
             insertReading(schemeId, poId, 150.0, LocalDate.now().minusDays(1));
 
-            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId);
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, null, null);
             assertThat(dto).isNotNull();
             assertThat(dto.schemeId()).isEqualTo((int) schemeId);
             assertThat(dto.lastSubmissionAt()).isNotNull();
@@ -152,7 +152,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @DisplayName("does not return non-pump-operator users")
         void ignoresNonPumpOperator() {
             long soId = insertUser("919876540003", 3, "Section Officer"); // SECTION_OFFICER
-            assertThat(repo.findPumpOperatorById(SCHEMA, soId, 1L)).isNull();
+            assertThat(repo.findPumpOperatorById(SCHEMA, soId, 1L, null, null)).isNull();
         }
 
         @Test
@@ -163,7 +163,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             long otherSchemeId = insertScheme("FPO-3");
             mapUserToScheme(poId, mappedSchemeId);
 
-            assertThat(repo.findPumpOperatorById(SCHEMA, poId, otherSchemeId)).isNull();
+            assertThat(repo.findPumpOperatorById(SCHEMA, poId, otherSchemeId, null, null)).isNull();
         }
     }
 
@@ -344,7 +344,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @Test
         @DisplayName("returns 0 for missing schema")
         void returnsZeroForMissingSchema() {
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 1L)).isZero();
+            assertThat(repo.countPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 1L, null, null)).isZero();
         }
 
         @Test
@@ -354,7 +354,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             long schemeId = insertScheme("CPC-1");
             mapUserToScheme(poId, schemeId);
 
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId)).isZero();
+            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null)).isZero();
         }
 
         @Test
@@ -367,7 +367,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(2));
             insertReading(schemeId, poId, 200.0, LocalDate.now().minusDays(1));
 
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId)).isEqualTo(1);
+            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null)).isEqualTo(1);
         }
     }
 
@@ -381,7 +381,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @DisplayName("returns empty list for missing schema")
         void returnsEmptyForMissingSchema() {
             List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 1L, 0, 10);
+                    repo.listPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 1L, null, null, 0, 10);
             assertThat(result).isEmpty();
         }
 
@@ -393,7 +393,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             mapUserToScheme(poId, schemeId);
 
             List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, 0, 10);
+                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 10);
             assertThat(result).isEmpty();
         }
 
@@ -408,7 +408,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             insertReading(schemeId, poId, 200.0, LocalDate.now().minusDays(2));
 
             List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, 0, 10);
+                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 10);
             assertThat(result).hasSize(2);
             assertThat(result.get(0).schemeId()).isEqualTo(schemeId);
             assertThat(result.get(0).confirmedReading()).isNotNull();
@@ -426,7 +426,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             }
 
             List<PumpOperatorSchemeComplianceRowDTO> page =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, 0, 3);
+                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 3);
             assertThat(page).hasSize(3);
         }
 
@@ -441,7 +441,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             insertReading(mappedSchemeId, poId, 100.0, LocalDate.now().minusDays(1));
 
             List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, otherSchemeId, poId, 0, 10);
+                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, otherSchemeId, poId, null, null, 0, 10);
             assertThat(result).isEmpty();
         }
     }

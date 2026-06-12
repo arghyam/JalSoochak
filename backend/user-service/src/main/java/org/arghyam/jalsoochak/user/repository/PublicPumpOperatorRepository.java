@@ -115,11 +115,25 @@ public class PublicPumpOperatorRepository {
         return tableAlias + ".confirmed_reading";
     }
 
-    public PumpOperatorDetailsDTO findPumpOperatorById(String schemaName, long pumpOperatorId, long schemeId) {
+    public PumpOperatorDetailsDTO findPumpOperatorById(
+            String schemaName,
+            long pumpOperatorId,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String schemeJoin;
+        String schemeFilterSql = "";
+        String schemeRequiredSql = "";
+        List<Object> params = new ArrayList<>();
         if (tableExists(schemaName, "user_scheme_mapping_table")) {
+            if (schemeId != null) {
+                schemeFilterSql = "\n  AND usm.scheme_id = ?";
+                schemeRequiredSql = "\n  AND sch.scheme_id IS NOT NULL";
+                params.add(schemeId);
+            }
             schemeJoin = String.format("""
                     LEFT JOIN LATERAL (
                         SELECT sm.id AS scheme_id,
@@ -133,11 +147,11 @@ public class PublicPumpOperatorRepository {
                         WHERE usm.deleted_at IS NULL
                           AND usm.user_id = u.id
                           AND usm.status = 1
-                          AND usm.scheme_id = ?
+                          %s
                         ORDER BY usm.id DESC
                         LIMIT 1
                     ) sch ON true
-                    """, schemaName, schemaName);
+                    """, schemaName, schemaName, schemeFilterSql);
         } else {
             schemeJoin = """
                     LEFT JOIN LATERAL (
@@ -178,19 +192,22 @@ public class PublicPumpOperatorRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = u.id
+                      AND fr.reading_date >= COALESCE(CAST(? AS date), fr.reading_date)
+                      AND fr.reading_date <= COALESCE(CAST(? AS date), fr.reading_date)
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
-                        -- Guard: if there are no readings, rs.first_submission_date is NULL.
-                        -- In that case we must not evaluate generate_series/date math with NULL bounds.
-                        SELECT rs.first_submission_date AS start_date
+                        SELECT
+                            GREATEST(rs.first_submission_date, COALESCE(CAST(? AS date), rs.first_submission_date)) AS start_date,
+                            LEAST(CURRENT_DATE, COALESCE(CAST(? AS date), CURRENT_DATE)) AS end_date
                         WHERE rs.first_submission_date IS NOT NULL
+                          AND GREATEST(rs.first_submission_date, COALESCE(CAST(? AS date), rs.first_submission_date))
+                              <= LEAST(CURRENT_DATE, COALESCE(CAST(? AS date), CURRENT_DATE))
                     ),
                     days AS (
-                        -- Generate all dates from first submission date to today (inclusive) using integer offsets.
                         SELECT (bounds.start_date + gs) AS d
                         FROM bounds
-                        JOIN generate_series(0, (CURRENT_DATE - bounds.start_date)) gs ON true
+                        JOIN generate_series(0, (bounds.end_date - bounds.start_date)) gs ON true
                     ),
                     reported AS (
                         SELECT DISTINCT fr.reading_date AS d
@@ -198,12 +215,12 @@ public class PublicPumpOperatorRepository {
                         JOIN bounds ON true
                         WHERE fr.deleted_at IS NULL
                           AND fr.created_by = u.id
-                          AND fr.reading_date BETWEEN bounds.start_date AND CURRENT_DATE
+                          AND fr.reading_date BETWEEN bounds.start_date AND bounds.end_date
                     )
                     SELECT
-                        (CURRENT_DATE - bounds.start_date + 1) AS total_days_since_first_submission,
+                        (bounds.end_date - bounds.start_date + 1) AS total_days_since_first_submission,
                         ROUND(
-                            (rs.submitted_days::numeric * 100.0) / NULLIF((CURRENT_DATE - bounds.start_date + 1), 0),
+                            (rs.submitted_days::numeric * 100.0) / NULLIF((bounds.end_date - bounds.start_date + 1), 0),
                             2
                         ) AS reporting_rate_percent,
                         (
@@ -216,11 +233,18 @@ public class PublicPumpOperatorRepository {
                 ) comp ON true
                 WHERE u.deleted_at IS NULL
                   AND u.id = ?
-                  AND sch.scheme_id IS NOT NULL
+                  %s
                   AND upper(COALESCE(ut.c_name, '')) = 'PUMP_OPERATOR'
                 LIMIT 1
-                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName);
+                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName, schemeRequiredSql);
         try {
+            params.add(startDate);
+            params.add(endDate);
+            params.add(startDate);
+            params.add(endDate);
+            params.add(startDate);
+            params.add(endDate);
+            params.add(pumpOperatorId);
             return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
                 Timestamp lastTs = (Timestamp) rs.getObject("last_submission_at");
                 LocalDateTime lastSubmissionAt = lastTs == null ? null : lastTs.toLocalDateTime();
@@ -276,7 +300,7 @@ public class PublicPumpOperatorRepository {
                         .reportingRatePercent((BigDecimal) rs.getObject("reporting_rate_percent"))
                         .missedSubmissionDays(missedDays)
                         .build();
-            }, schemeId, pumpOperatorId);
+            }, params.toArray());
         } catch (EmptyResultDataAccessException ex) {
             return null;
         }
@@ -819,6 +843,8 @@ public class PublicPumpOperatorRepository {
             String schemaName,
             long schemeId,
             long pumpOperatorId,
+            LocalDate startDate,
+            LocalDate endDate,
             int offset,
             int limit
     ) {
@@ -857,6 +883,15 @@ public class PublicPumpOperatorRepository {
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 ),
+                windowed_mapping AS (
+                    SELECT l.*,
+                           GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date)) AS effective_start_date,
+                           LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE)) AS effective_end_date
+                    FROM latest_mapping l
+                    WHERE l.onboarding_date IS NOT NULL
+                      AND GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date))
+                          <= LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE))
+                ),
                 readings AS (
                     SELECT fr.id AS reading_id,
                            fr.created_by,
@@ -864,11 +899,10 @@ public class PublicPumpOperatorRepository {
                            fr.%s AS reading_at,
                            %s AS confirmed_reading
                     FROM %s.flow_reading_table fr
-                    JOIN latest_mapping l
+                    JOIN windowed_mapping l
                       ON l.id = fr.created_by
                     WHERE fr.deleted_at IS NULL
-                      AND l.onboarding_date IS NOT NULL
-                      AND fr.reading_date BETWEEN l.onboarding_date AND CURRENT_DATE
+                      AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
                 ),
                 paged AS (
                     SELECT *
@@ -887,11 +921,10 @@ public class PublicPumpOperatorRepository {
                     FROM %s.flow_reading_table fr
                     JOIN page_ops po
                       ON po.created_by = fr.created_by
-                    JOIN latest_mapping l
+                    JOIN windowed_mapping l
                       ON l.id = fr.created_by
                     WHERE fr.deleted_at IS NULL
-                      AND l.onboarding_date IS NOT NULL
-                      AND fr.reading_date BETWEEN l.onboarding_date AND CURRENT_DATE
+                      AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
                     GROUP BY fr.created_by
                 )
                 SELECT l.id,
@@ -905,28 +938,28 @@ public class PublicPumpOperatorRepository {
                        l.scheme_mapping_status,
                        l.onboarding_date,
                        CASE
-                           WHEN l.onboarding_date IS NULL THEN NULL
-                           ELSE (CURRENT_DATE - l.onboarding_date + 1)
+                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
+                           ELSE (l.effective_end_date - l.effective_start_date + 1)
                        END AS total_active_days,
                        COALESCE(stats.submitted_days, 0) AS submitted_days,
                        CASE
-                           WHEN l.onboarding_date IS NULL THEN NULL
-                           ELSE GREATEST((CURRENT_DATE - l.onboarding_date + 1) - COALESCE(stats.submitted_days, 0), 0)
+                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
+                           ELSE GREATEST((l.effective_end_date - l.effective_start_date + 1) - COALESCE(stats.submitted_days, 0), 0)
                        END AS missed_submission_days,
                        CASE
-                           WHEN l.onboarding_date IS NULL THEN NULL
-                           ELSE GREATEST((CURRENT_DATE - l.onboarding_date + 1) - COALESCE(stats.submitted_days, 0), 0)
+                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
+                           ELSE GREATEST((l.effective_end_date - l.effective_start_date + 1) - COALESCE(stats.submitted_days, 0), 0)
                        END AS inactive_days,
                        CASE
-                           WHEN l.onboarding_date IS NULL THEN NULL
-                           ELSE GREATEST((CURRENT_DATE - l.onboarding_date + 1) - COALESCE(stats.submitted_days, 0), 0)
+                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
+                           ELSE GREATEST((l.effective_end_date - l.effective_start_date + 1) - COALESCE(stats.submitted_days, 0), 0)
                        END AS missing_submission_count,
                        CASE
-                           WHEN l.onboarding_date IS NULL THEN NULL
-                           WHEN (CURRENT_DATE - l.onboarding_date + 1) <= 0 THEN NULL
+                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
+                           WHEN (l.effective_end_date - l.effective_start_date + 1) <= 0 THEN NULL
                            ELSE ROUND(
                                (COALESCE(stats.submitted_days, 0)::numeric * 100.0)
-                               / (CURRENT_DATE - l.onboarding_date + 1),
+                               / (l.effective_end_date - l.effective_start_date + 1),
                                2
                            )
                        END AS reporting_rate_percent,
@@ -935,7 +968,7 @@ public class PublicPumpOperatorRepository {
                        paged.confirmed_reading,
                        stats.last_submission_at
                 FROM paged
-                JOIN latest_mapping l
+                JOIN windowed_mapping l
                   ON l.id = paged.created_by
                 LEFT JOIN stats
                   ON stats.created_by = l.id
@@ -994,7 +1027,7 @@ public class PublicPumpOperatorRepository {
                     lastSubmissionAt,
                     confirmed
             );
-        }, schemeId, pumpOperatorId, limit, offset);
+        }, schemeId, pumpOperatorId, startDate, endDate, startDate, endDate, limit, offset);
 
         if (rows.isEmpty()) {
             return List.of();
@@ -1029,7 +1062,13 @@ public class PublicPumpOperatorRepository {
         return results;
     }
 
-    public long countPumpOperatorsBySchemeWithCompliance(String schemaName, long schemeId, long pumpOperatorId) {
+    public long countPumpOperatorsBySchemeWithCompliance(
+            String schemaName,
+            long schemeId,
+            long pumpOperatorId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
         validateSchemaName(schemaName);
         if (!tableExists(schemaName, "user_scheme_mapping_table")) {
             return 0;
@@ -1053,16 +1092,33 @@ public class PublicPumpOperatorRepository {
                       AND u.id = ?
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
+                ),
+                windowed_mapping AS (
+                    SELECT l.*,
+                           GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date)) AS effective_start_date,
+                           LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE)) AS effective_end_date
+                    FROM latest_mapping l
+                    WHERE l.onboarding_date IS NOT NULL
+                      AND GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date))
+                          <= LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE))
                 )
                 SELECT COUNT(DISTINCT l.id)
-                FROM latest_mapping l
+                FROM windowed_mapping l
                 JOIN %s.flow_reading_table fr
                   ON fr.created_by = l.id
                 WHERE fr.deleted_at IS NULL
-                  AND l.onboarding_date IS NOT NULL
-                  AND fr.reading_date BETWEEN l.onboarding_date AND CURRENT_DATE
+                  AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
                 """, schemaName, schemaName, schemaName, schemaName);
-        Long total = jdbcTemplate.queryForObject(sql, Long.class, schemeId, pumpOperatorId);
+        Long total = jdbcTemplate.queryForObject(
+                sql,
+                Long.class,
+                schemeId,
+                pumpOperatorId,
+                startDate,
+                endDate,
+                startDate,
+                endDate
+        );
         return total == null ? 0 : total;
     }
 
