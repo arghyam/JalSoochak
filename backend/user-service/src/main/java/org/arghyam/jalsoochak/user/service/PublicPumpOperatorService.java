@@ -12,7 +12,7 @@ import java.util.List;
 
 public interface PublicPumpOperatorService {
 
-    PumpOperatorDetailsDTO getPumpOperatorDetails(String tenantCode, long pumpOperatorId);
+    PumpOperatorDetailsDTO getPumpOperatorDetails(String tenantCode, long pumpOperatorId, long schemeId);
 
     PumpOperatorReadingComplianceDTO getReadingCompliance(String tenantCode, long pumpOperatorId);
 
@@ -23,6 +23,7 @@ public interface PublicPumpOperatorService {
     PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
             String tenantCode,
             long schemeId,
+            long pumpOperatorId,
             int page,
             int size
     );

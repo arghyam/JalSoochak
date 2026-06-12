@@ -41,9 +41,10 @@ public class PublicPumpOperatorController {
     @GetMapping("/pump-operators/{pumpOperatorId}")
     public ResponseEntity<ApiResponseDTO<PumpOperatorDetailsDTO>> getPumpOperatorDetails(
             @PathVariable long pumpOperatorId,
+            @RequestParam long schemeId,
             @RequestParam String tenantCode
     ) {
-        PumpOperatorDetailsDTO dto = publicPumpOperatorService.getPumpOperatorDetails(tenantCode, pumpOperatorId);
+        PumpOperatorDetailsDTO dto = publicPumpOperatorService.getPumpOperatorDetails(tenantCode, pumpOperatorId, schemeId);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operator retrieved", dto));
     }
 
@@ -79,11 +80,18 @@ public class PublicPumpOperatorController {
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorSchemeComplianceRowDTO>>> listPumpOperatorsBySchemeWithCompliance(
             @RequestParam String tenantCode,
             @RequestParam long schemeId,
+            @RequestParam long pumpOperatorId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
         PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> rows =
-                publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(tenantCode, schemeId, page, size);
+                publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
+                        tenantCode,
+                        schemeId,
+                        pumpOperatorId,
+                        page,
+                        size
+                );
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operators retrieved", rows));
     }
 
