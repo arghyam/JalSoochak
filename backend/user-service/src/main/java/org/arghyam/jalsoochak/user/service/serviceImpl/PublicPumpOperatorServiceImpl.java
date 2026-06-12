@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -24,9 +25,21 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
     private final PublicPumpOperatorRepository publicPumpOperatorRepository;
 
     @Override
-    public PumpOperatorDetailsDTO getPumpOperatorDetails(String tenantCode, long pumpOperatorId, long schemeId) {
+    public PumpOperatorDetailsDTO getPumpOperatorDetails(
+            String tenantCode,
+            long pumpOperatorId,
+            long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        PumpOperatorDetailsDTO dto = publicPumpOperatorRepository.findPumpOperatorById(schemaName, pumpOperatorId, schemeId);
+        PumpOperatorDetailsDTO dto = publicPumpOperatorRepository.findPumpOperatorById(
+                schemaName,
+                pumpOperatorId,
+                schemeId,
+                startDate,
+                endDate
+        );
         if (dto == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Pump operator not found");
         }
@@ -73,6 +86,8 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
             String tenantCode,
             long schemeId,
             long pumpOperatorId,
+            LocalDate startDate,
+            LocalDate endDate,
             int page,
             int size
     ) {
@@ -84,10 +99,18 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
                 schemaName,
                 schemeId,
                 pumpOperatorId,
+                startDate,
+                endDate,
                 offset,
                 effectiveSize
         );
-        long total = publicPumpOperatorRepository.countPumpOperatorsBySchemeWithCompliance(schemaName, schemeId, pumpOperatorId);
+        long total = publicPumpOperatorRepository.countPumpOperatorsBySchemeWithCompliance(
+                schemaName,
+                schemeId,
+                pumpOperatorId,
+                startDate,
+                endDate
+        );
         return PageResponseDTO.of(rows, total, p, effectiveSize);
     }
 

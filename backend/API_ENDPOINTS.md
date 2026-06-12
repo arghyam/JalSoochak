@@ -66,11 +66,11 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/pumpoperator/pump-operators/{id}?schemeId={schemeId}` | Get pump operator by ID within a scheme |
+| GET | `/api/v1/pumpoperator/pump-operators/{id}?schemeId={schemeId}&startDate={yyyy-MM-dd}&endDate={yyyy-MM-dd}` | Get pump operator by ID within a scheme, optionally filtered by date range |
 | GET | `/api/v1/pumpoperator/pump-operators/{id}/reading-compliance` | Reading compliance for one operator |
 | GET | `/api/v1/pumpoperator/pump-operators/{id}/details-with-compliance` | Operator details + compliance |
 | GET | `/api/v1/pumpoperator/pump-operators/reading-compliance` | Reading compliance for all operators |
-| GET | `/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance?schemeId={schemeId}&pumpOperatorId={pumpOperatorId}` | Compliance for a pump operator within a scheme |
+| GET | `/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance?schemeId={schemeId}&pumpOperatorId={pumpOperatorId}&startDate={yyyy-MM-dd}&endDate={yyyy-MM-dd}` | Compliance for a pump operator within a scheme, optionally filtered by date range |
 | GET | `/api/v1/pumpoperator/pump-operators/by-scheme` | Operators grouped by scheme |
 | POST | `/api/v1/state-admin/pump-operators/upload` | Bulk upload pump operators (CSV) |
 | POST | `/api/v1/state-admin/user-scheme-mappings/upload` | Bulk upload user-scheme mappings (CSV/XLSX) |

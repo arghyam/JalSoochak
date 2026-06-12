@@ -62,7 +62,7 @@ class PublicPumpOperatorControllerTest {
         @DisplayName("returns 200 with pump operator details")
         void returns200() throws Exception {
             PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
-            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(5L))).thenReturn(dto);
+            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(5L), any(), any())).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
                             .param("tenantCode", "mp")
@@ -74,7 +74,7 @@ class PublicPumpOperatorControllerTest {
         @Test
         @DisplayName("returns 404 when operator not found")
         void returns404() throws Exception {
-            when(publicPumpOperatorService.getPumpOperatorDetails(anyString(), anyLong(), anyLong()))
+            when(publicPumpOperatorService.getPumpOperatorDetails(anyString(), anyLong(), anyLong(), any(), any()))
                     .thenThrow(new ResponseStatusException(NOT_FOUND, "not found"));
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/99")
@@ -87,6 +87,17 @@ class PublicPumpOperatorControllerTest {
         @DisplayName("returns 400 when schemeId is missing")
         void returns400WhenSchemeIdMissing() throws Exception {
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1").param("tenantCode", "mp"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 400 when startDate is after endDate")
+        void returns400WhenStartDateAfterEndDate() throws Exception {
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("startDate", "2024-06-02")
+                            .param("endDate", "2024-06-01"))
                     .andExpect(status().isBadRequest());
         }
     }
@@ -156,7 +167,7 @@ class PublicPumpOperatorControllerTest {
                     PageResponseDTO.<PumpOperatorSchemeComplianceRowDTO>builder()
                             .content(List.of()).totalElements(0L).totalPages(0).number(0).size(20).build();
             when(publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
-                    anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(page);
+                    anyString(), anyLong(), anyLong(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
                             .param("tenantCode", "mp")
@@ -171,6 +182,18 @@ class PublicPumpOperatorControllerTest {
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
                             .param("tenantCode", "mp")
                             .param("schemeId", "5"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 400 when startDate is after endDate")
+        void returns400WhenStartDateAfterEndDate() throws Exception {
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("pumpOperatorId", "9")
+                            .param("startDate", "2024-06-02")
+                            .param("endDate", "2024-06-01"))
                     .andExpect(status().isBadRequest());
         }
     }

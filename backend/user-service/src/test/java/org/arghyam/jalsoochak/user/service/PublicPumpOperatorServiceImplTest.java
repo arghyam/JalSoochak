@@ -47,17 +47,17 @@ class PublicPumpOperatorServiceImplTest {
         @DisplayName("returns DTO when operator found")
         void returnsDto() {
             PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
-            when(repository.findPumpOperatorById("tenant_mp", 1L, 5L)).thenReturn(dto);
+            when(repository.findPumpOperatorById("tenant_mp", 1L, 5L, null, null)).thenReturn(dto);
 
-            assertThat(service.getPumpOperatorDetails("mp", 1L, 5L)).isSameAs(dto);
+            assertThat(service.getPumpOperatorDetails("mp", 1L, 5L, null, null)).isSameAs(dto);
         }
 
         @Test
         @DisplayName("throws 404 when operator not found")
         void throwsWhenNotFound() {
-            when(repository.findPumpOperatorById("tenant_mp", 99L, 5L)).thenReturn(null);
+            when(repository.findPumpOperatorById("tenant_mp", 99L, 5L, null, null)).thenReturn(null);
 
-            assertThatThrownBy(() -> service.getPumpOperatorDetails("mp", 99L, 5L))
+            assertThatThrownBy(() -> service.getPumpOperatorDetails("mp", 99L, 5L, null, null))
                     .isInstanceOf(ResponseStatusException.class)
                     .hasMessageContaining("not found");
         }
@@ -161,11 +161,11 @@ class PublicPumpOperatorServiceImplTest {
             List<PumpOperatorSchemeComplianceRowDTO> rows = List.of(
                     PumpOperatorSchemeComplianceRowDTO.builder().build()
             );
-            when(repository.listPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, 0, 20)).thenReturn(rows);
-            when(repository.countPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L)).thenReturn(1L);
+            when(repository.listPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null, 0, 20)).thenReturn(rows);
+            when(repository.countPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null)).thenReturn(1L);
 
             PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
-                    service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, 9L, 0, 20);
+                    service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, 9L, null, null, 0, 20);
 
             assertThat(page.getContent()).hasSize(1);
         }
