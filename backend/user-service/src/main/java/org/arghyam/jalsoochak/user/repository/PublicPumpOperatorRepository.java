@@ -242,6 +242,8 @@ public class PublicPumpOperatorRepository {
             params.add(endDate);
             params.add(startDate);
             params.add(endDate);
+            params.add(startDate);
+            params.add(endDate);
             params.add(pumpOperatorId);
             return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
                 Timestamp lastTs = (Timestamp) rs.getObject("last_submission_at");
