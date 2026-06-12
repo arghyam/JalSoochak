@@ -66,7 +66,7 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/pumpoperator/pump-operators/{id}?schemeId={schemeId}&startDate={yyyy-MM-dd}&endDate={yyyy-MM-dd}` | Get pump operator by ID within a scheme, optionally filtered by date range |
+| GET | `/api/v1/pumpoperator/pump-operators/{id}?tenantCode={tenantCode}&schemeId={schemeId?}&startDate={yyyy-MM-dd}&endDate={yyyy-MM-dd}` | Get pump operator by ID, optionally scoped by scheme and date range |
 | GET | `/api/v1/pumpoperator/pump-operators/{id}/reading-compliance` | Reading compliance for one operator |
 | GET | `/api/v1/pumpoperator/pump-operators/{id}/details-with-compliance` | Operator details + compliance |
 | GET | `/api/v1/pumpoperator/pump-operators/reading-compliance` | Reading compliance for all operators |

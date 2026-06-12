@@ -41,7 +41,7 @@ public class PublicPumpOperatorController {
     @GetMapping("/pump-operators/{pumpOperatorId}")
     public ResponseEntity<ApiResponseDTO<PumpOperatorDetailsDTO>> getPumpOperatorDetails(
             @PathVariable long pumpOperatorId,
-            @RequestParam long schemeId,
+            @RequestParam(required = false) Long schemeId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam String tenantCode

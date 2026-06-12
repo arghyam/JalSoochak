@@ -16,7 +16,7 @@ public interface PublicPumpOperatorService {
     PumpOperatorDetailsDTO getPumpOperatorDetails(
             String tenantCode,
             long pumpOperatorId,
-            long schemeId,
+            Long schemeId,
             LocalDate startDate,
             LocalDate endDate
     );

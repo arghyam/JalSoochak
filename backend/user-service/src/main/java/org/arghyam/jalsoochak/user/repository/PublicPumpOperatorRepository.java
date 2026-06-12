@@ -118,14 +118,22 @@ public class PublicPumpOperatorRepository {
     public PumpOperatorDetailsDTO findPumpOperatorById(
             String schemaName,
             long pumpOperatorId,
-            long schemeId,
+            Long schemeId,
             LocalDate startDate,
             LocalDate endDate
     ) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String schemeJoin;
+        String schemeFilterSql = "";
+        String schemeRequiredSql = "";
+        List<Object> params = new ArrayList<>();
         if (tableExists(schemaName, "user_scheme_mapping_table")) {
+            if (schemeId != null) {
+                schemeFilterSql = "\n  AND usm.scheme_id = ?";
+                schemeRequiredSql = "\n  AND sch.scheme_id IS NOT NULL";
+                params.add(schemeId);
+            }
             schemeJoin = String.format("""
                     LEFT JOIN LATERAL (
                         SELECT sm.id AS scheme_id,
@@ -139,11 +147,11 @@ public class PublicPumpOperatorRepository {
                         WHERE usm.deleted_at IS NULL
                           AND usm.user_id = u.id
                           AND usm.status = 1
-                          AND usm.scheme_id = ?
+                          %s
                         ORDER BY usm.id DESC
                         LIMIT 1
                     ) sch ON true
-                    """, schemaName, schemaName);
+                    """, schemaName, schemaName, schemeFilterSql);
         } else {
             schemeJoin = """
                     LEFT JOIN LATERAL (
@@ -184,17 +192,17 @@ public class PublicPumpOperatorRepository {
                     FROM %s.flow_reading_table fr
                     WHERE fr.deleted_at IS NULL
                       AND fr.created_by = u.id
-                      AND (? IS NULL OR fr.reading_date >= ?)
-                      AND (? IS NULL OR fr.reading_date <= ?)
+                      AND fr.reading_date >= COALESCE(CAST(? AS date), fr.reading_date)
+                      AND fr.reading_date <= COALESCE(CAST(? AS date), fr.reading_date)
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
                         SELECT
-                            GREATEST(rs.first_submission_date, COALESCE(?, rs.first_submission_date)) AS start_date,
-                            LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE)) AS end_date
+                            GREATEST(rs.first_submission_date, COALESCE(CAST(? AS date), rs.first_submission_date)) AS start_date,
+                            LEAST(CURRENT_DATE, COALESCE(CAST(? AS date), CURRENT_DATE)) AS end_date
                         WHERE rs.first_submission_date IS NOT NULL
-                          AND GREATEST(rs.first_submission_date, COALESCE(?, rs.first_submission_date))
-                              <= LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE))
+                          AND GREATEST(rs.first_submission_date, COALESCE(CAST(? AS date), rs.first_submission_date))
+                              <= LEAST(CURRENT_DATE, COALESCE(CAST(? AS date), CURRENT_DATE))
                     ),
                     days AS (
                         SELECT (bounds.start_date + gs) AS d
@@ -225,11 +233,16 @@ public class PublicPumpOperatorRepository {
                 ) comp ON true
                 WHERE u.deleted_at IS NULL
                   AND u.id = ?
-                  AND sch.scheme_id IS NOT NULL
+                  %s
                   AND upper(COALESCE(ut.c_name, '')) = 'PUMP_OPERATOR'
                 LIMIT 1
-                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName);
+                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName, schemeRequiredSql);
         try {
+            params.add(startDate);
+            params.add(endDate);
+            params.add(startDate);
+            params.add(endDate);
+            params.add(pumpOperatorId);
             return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
                 Timestamp lastTs = (Timestamp) rs.getObject("last_submission_at");
                 LocalDateTime lastSubmissionAt = lastTs == null ? null : lastTs.toLocalDateTime();
@@ -285,7 +298,7 @@ public class PublicPumpOperatorRepository {
                         .reportingRatePercent((BigDecimal) rs.getObject("reporting_rate_percent"))
                         .missedSubmissionDays(missedDays)
                         .build();
-            }, schemeId, startDate, startDate, endDate, endDate, startDate, endDate, startDate, endDate, pumpOperatorId);
+            }, params.toArray());
         } catch (EmptyResultDataAccessException ex) {
             return null;
         }

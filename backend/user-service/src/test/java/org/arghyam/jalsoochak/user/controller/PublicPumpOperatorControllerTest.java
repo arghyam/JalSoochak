@@ -72,22 +72,27 @@ class PublicPumpOperatorControllerTest {
         }
 
         @Test
+        @DisplayName("returns 200 when schemeId is omitted")
+        void returns200WithoutSchemeId() throws Exception {
+            PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
+            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(null), any(), any())).thenReturn(dto);
+
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value(1));
+        }
+
+        @Test
         @DisplayName("returns 404 when operator not found")
         void returns404() throws Exception {
-            when(publicPumpOperatorService.getPumpOperatorDetails(anyString(), anyLong(), anyLong(), any(), any()))
+            when(publicPumpOperatorService.getPumpOperatorDetails(anyString(), anyLong(), any(), any(), any()))
                     .thenThrow(new ResponseStatusException(NOT_FOUND, "not found"));
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/99")
                             .param("tenantCode", "mp")
                             .param("schemeId", "5"))
                     .andExpect(status().isNotFound());
-        }
-
-        @Test
-        @DisplayName("returns 400 when schemeId is missing")
-        void returns400WhenSchemeIdMissing() throws Exception {
-            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1").param("tenantCode", "mp"))
-                    .andExpect(status().isBadRequest());
         }
 
         @Test

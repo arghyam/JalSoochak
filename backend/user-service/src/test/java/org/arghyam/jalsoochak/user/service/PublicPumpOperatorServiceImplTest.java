@@ -53,6 +53,15 @@ class PublicPumpOperatorServiceImplTest {
         }
 
         @Test
+        @DisplayName("returns DTO when schemeId is omitted")
+        void returnsDtoWithoutSchemeId() {
+            PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
+            when(repository.findPumpOperatorById("tenant_mp", 1L, null, null, null)).thenReturn(dto);
+
+            assertThat(service.getPumpOperatorDetails("mp", 1L, null, null, null)).isSameAs(dto);
+        }
+
+        @Test
         @DisplayName("throws 404 when operator not found")
         void throwsWhenNotFound() {
             when(repository.findPumpOperatorById("tenant_mp", 99L, 5L, null, null)).thenReturn(null);
