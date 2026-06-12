@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +41,8 @@ import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UnauthorizedAccessException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
+import org.arghyam.jalsoochak.user.enums.ResourceType;
+import org.arghyam.jalsoochak.user.repository.DataVersionRepository;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
@@ -105,6 +108,9 @@ class UserManagementServiceImplTest {
     @Mock
     private PiiEncryptionService pii;
 
+    @Mock
+    private DataVersionRepository dataVersionRepository;
+
     private UserManagementServiceImpl userManagementService;
 
     @BeforeEach
@@ -113,7 +119,8 @@ class UserManagementServiceImplTest {
         userManagementService = new UserManagementServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
                 userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, appProperties,
-                inviteProperties, frontendProperties, tokenService, new ObjectMapper(), pii, metadataDecryptionHelper
+                inviteProperties, frontendProperties, tokenService, new ObjectMapper(), pii, metadataDecryptionHelper,
+                dataVersionRepository
         );
     }
 
@@ -874,6 +881,7 @@ class UserManagementServiceImplTest {
 
             assertNotNull(result);
             verify(userTenantRepository, org.mockito.Mockito.never()).updateUserProfile(any(), any(), any(), any());
+            verify(dataVersionRepository, never()).bump(anyString(), any());
             verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(refreshedUser);
         }
 
@@ -901,6 +909,7 @@ class UserManagementServiceImplTest {
             userManagementService.updateMe("kc-sa", req);
 
             verify(userTenantRepository).updateUserProfile(eq("tenant_mp"), any(), anyString(), any());
+            verify(dataVersionRepository).bump("tenant_mp", ResourceType.STAFF_USERS);
             verify(userAnalyticsEventPublisher).publishUserUpdatedAfterCommit(refreshedUser);
         }
     }

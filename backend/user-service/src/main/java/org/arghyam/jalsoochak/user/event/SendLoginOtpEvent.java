@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.user.event;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
+import lombok.ToString;
 import lombok.Value;
 
 /**
@@ -21,6 +22,7 @@ public class SendLoginOtpEvent {
     String eventType;
 
     /** Decrypted phone number with country code (e.g. {@code "919876543210"}). PII — do not log. */
+    @ToString.Exclude
     @JsonProperty("officerPhoneNumber")
     String officerPhoneNumber;
 

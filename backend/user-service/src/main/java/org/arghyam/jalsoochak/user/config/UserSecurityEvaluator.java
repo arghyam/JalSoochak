@@ -64,7 +64,7 @@ public class UserSecurityEvaluator {
             String callerUuid = SecurityUtils.getKeycloakId(authentication);
             Optional<AdminUserRow> caller = userCommonRepository.findAdminUserByUuid(callerUuid);
             if (caller.isEmpty() || caller.get().status() != AdminUserStatus.ACTIVE) {
-                log.warn("Request to user {} denied: caller '{}' is missing or inactive", userId, callerUuid);
+                log.warn("Request to user {} denied: caller '{}' is missing or inactive", userId, maskId(callerUuid));
                 return false;
             }
 
@@ -103,6 +103,86 @@ public class UserSecurityEvaluator {
             return false;
         } catch (Exception e) {
             log.error("Unexpected error evaluating access to user {}: {}", userId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Returns {@code true} if the caller may operate on data scoped to the tenant
+     * identified by {@code tenantCode}. Use this for endpoints that take a
+     * {@code tenantCode} parameter rather than a target user ID — e.g. staff reports,
+     * future scheme reports, bulk operations.
+     *
+     * <p>For SUPER_USER and SUPER_STATE_ADMIN: always returns {@code true}.
+     * For STATE_ADMIN: returns {@code true} only if the JWT's {@code tenant_state_code}
+     * claim matches {@code tenantCode} (case-insensitive) AND the tenant is in a
+     * lifecycle state that permits system-user access.
+     *
+     * <p>Returns {@code false} (→ 403) when:
+     * <ul>
+     *   <li>{@code tenantCode} is null or blank</li>
+     *   <li>The caller is not found in the database or is not active</li>
+     *   <li>The caller is STATE_ADMIN but has no {@code tenant_state_code} claim</li>
+     *   <li>The caller's tenant does not match {@code tenantCode}</li>
+     *   <li>The caller's tenant lifecycle state does not permit access</li>
+     *   <li>Any unexpected exception occurs during evaluation</li>
+     * </ul>
+     *
+     * <p>NOTE: Must never throw — Spring would wrap any {@code RuntimeException} in a
+     * {@code SpelEvaluationException}, bypassing domain {@code @ExceptionHandler}s
+     * and surfacing as 500 instead of 403.
+     */
+    private static String maskId(String id) {
+        if (id == null || id.length() <= 8) return "****";
+        return id.substring(0, 4) + "****" + id.substring(id.length() - 4);
+    }
+
+    public boolean canAccessTenant(String tenantCode, Authentication authentication) {
+        if (tenantCode == null || tenantCode.isBlank()) {
+            log.warn("Tenant access denied: tenantCode is null or blank");
+            return false;
+        }
+        try {
+            String callerUuid = SecurityUtils.getKeycloakId(authentication);
+            Optional<AdminUserRow> caller = userCommonRepository.findAdminUserByUuid(callerUuid);
+            if (caller.isEmpty() || caller.get().status() != AdminUserStatus.ACTIVE) {
+                log.warn("Request to tenant '{}' denied: caller '{}' is missing or inactive", tenantCode, maskId(callerUuid));
+                return false;
+            }
+
+            Optional<String> callerRole = SecurityUtils.extractRole(authentication);
+
+            if (callerRole.map(r -> r.equals("SUPER_USER") || r.equals("SUPER_STATE_ADMIN")).orElse(false)) {
+                return true;
+            }
+
+            if (callerRole.map("STATE_ADMIN"::equals).orElse(false)) {
+                String callerTenantCode = SecurityUtils.extractTenantCode(authentication);
+                if (callerTenantCode == null || callerTenantCode.isBlank()) {
+                    log.warn("STATE_ADMIN request to tenant '{}' denied: tenant_state_code claim absent from JWT", tenantCode);
+                    return false;
+                }
+                if (!callerTenantCode.equalsIgnoreCase(tenantCode)) {
+                    log.warn("STATE_ADMIN with tenant_state_code='{}' denied access to tenant '{}'",
+                            callerTenantCode, tenantCode);
+                    return false;
+                }
+                Integer callerTenantId = caller.get().tenantId();
+                Optional<Integer> tenantStatusOpt = userCommonRepository.findTenantStatusByTenantId(callerTenantId);
+                if (tenantStatusOpt.isEmpty()
+                        || !TenantAccessValidator.isAccessibleToSystemUser(tenantStatusOpt.get(), TenantAccessRole.STATE_ADMIN)) {
+                    log.warn("STATE_ADMIN with tenant_state_code='{}' denied: tenant status does not permit access",
+                            callerTenantCode);
+                    return false;
+                }
+                return true;
+            }
+
+            log.warn("Request to tenant '{}' denied: caller has neither SUPER_USER, SUPER_STATE_ADMIN nor STATE_ADMIN role",
+                    tenantCode);
+            return false;
+        } catch (Exception e) {
+            log.error("Unexpected error evaluating tenant access for '{}': {}", tenantCode, e.getMessage(), e);
             return false;
         }
     }

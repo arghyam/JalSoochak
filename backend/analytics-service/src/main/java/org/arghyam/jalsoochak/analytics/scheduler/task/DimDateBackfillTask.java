@@ -28,9 +28,11 @@ public class DimDateBackfillTask implements AnalyticsScheduledTask {
             cron = "${analytics.scheduler.dim-date-backfill.cron:0 10 0 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
+        log.info("Scheduler START '{}'", taskName());
         LocalDate targetDate = LocalDate.now(IST_ZONE).minusDays(1);
         log.info("Running scheduled task '{}' for targetDate={}", taskName(), targetDate);
         dateDimensionService.ensureDateExists(targetDate);
         log.info("Completed scheduled task '{}' for targetDate={}", taskName(), targetDate);
+        log.info("Scheduler END '{}'", taskName());
     }
 }

@@ -15,6 +15,7 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -403,6 +404,32 @@ public class TenantCommonRepository {
         List<ConfigDTO> results = jdbcTemplate.query(sql, CONFIG_ROW_MAPPER,
                 tenantId, keyName, value, currentUserId, currentUserId, currentUserId);
         return results.stream().findFirst();
+    }
+
+    /**
+     * Upserts the API key hash for a tenant.
+     * Overwrites any previously stored hash, immediately invalidating the old token.
+     */
+    public void upsertApiKeyHash(Integer tenantId, String apiKeyHash, Integer updatedBy) {
+        String sql = """
+                UPDATE common_schema.tenant_master_table
+                SET api_key_hash = ?, updated_at = NOW(), updated_by = ?
+                WHERE id = ?
+                """;
+        int rows = jdbcTemplate.update(sql, apiKeyHash, updatedBy, tenantId);
+        if (rows == 0) {
+            throw new EmptyResultDataAccessException("Tenant with tenantId " + tenantId + " does not exist", 1);
+        }
+    }
+
+    /**
+     * Finds a tenant by its hashed API key.
+     * Used to resolve the tenant identity from an incoming API key on authenticated requests.
+     */
+    public Optional<TenantResponseDTO> findByApiKeyHash(String apiKeyHash) {
+        String sql = "SELECT * FROM common_schema.tenant_master_table WHERE api_key_hash = ? AND deleted_at IS NULL";
+        List<TenantResponseDTO> results = jdbcTemplate.query(sql, TENANT_ROW_MAPPER, apiKeyHash);
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
 
     /**

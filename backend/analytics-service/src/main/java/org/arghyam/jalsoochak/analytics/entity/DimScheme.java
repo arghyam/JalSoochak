@@ -86,7 +86,11 @@ public class DimScheme {
     @Column(name = "level_6_dept_id", nullable = false)
     private Integer level6DeptId;
 
-    private Integer status;
+    @Column(name = "operating_status")
+    private Integer operatingStatus;
+
+    @Column(name = "work_status")
+    private Integer workStatus;
 
     @Column(name = "fhtc_count")
     private Integer achievedFhtcCount;

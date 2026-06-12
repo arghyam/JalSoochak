@@ -19,5 +19,6 @@ public interface FactService {
 
     void ingestTenantEscalation(TenantEscalationEvent event);
 
+    //a
     void ingestAnomalyRecorded(AnomalyEvent event);
 }

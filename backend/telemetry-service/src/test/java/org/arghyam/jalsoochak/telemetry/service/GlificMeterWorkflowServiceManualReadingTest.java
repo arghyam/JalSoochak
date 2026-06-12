@@ -173,7 +173,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
-    void manualReadingRejectsLowerReadingWhenMeterNotReplaced() {
+    void manualReadingAcceptsWhenLowerThanPreviousAndMeterNotReplaced() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -182,14 +182,19 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
-        when(telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme("tenant_test", 10L))
-                .thenReturn(List.of(99L));
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L,
+                        "bfm-1",
+                        1L,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO
+                )));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
@@ -198,14 +203,16 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .build());
 
         assertNotNull(resp);
-        assertEquals(false, resp.isSuccess());
-        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
+        assertEquals(new BigDecimal("100"), resp.getMeterReading());
+        assertEquals("bfm-1", resp.getCorrelationId());
 
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("100"), 1L);
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
-        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
                 anyLong(),
                 anyLong(),
@@ -213,10 +220,10 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 anyString(),
                 ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
         );
-        verify(telemetryEventPublisher).publishAnomalyRecorded(
+        verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 ArgumentMatchers.eq(1),
                 ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
-                ArgumentMatchers.eq(99L),
+                ArgumentMatchers.eq(1L),
                 ArgumentMatchers.eq(10L),
                 any(),
                 any(),
@@ -232,7 +239,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
-    void manualReadingRejectsWhenImpliedQuantityBelowTenantThreshold() {
+    void manualReadingAcceptsWhenImpliedQuantityBelowTenantThreshold() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
                 new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
@@ -257,6 +264,14 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":50.0,\"oversupplyThresholdPercent\":0.0}"));
         when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
                 .thenReturn(Optional.of("{\"value\":\"100\"}"));
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        55L,
+                        "bfm-threshold",
+                        1L,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO
+                )));
 
         CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
                 .contactId("919999999999")
@@ -265,10 +280,12 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .build());
 
         assertNotNull(resp);
-        assertEquals(false, resp.isSuccess());
-        assertEquals("REJECTED", resp.getQualityStatus());
+        assertEquals(true, resp.isSuccess());
+        assertEquals("CONFIRMED", resp.getQualityStatus());
+        assertEquals(new BigDecimal("40"), resp.getMeterReading());
+        assertEquals("bfm-threshold", resp.getCorrelationId());
 
-        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
                 anyLong(),
                 anyLong(),
@@ -276,15 +293,16 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 anyString(),
                 ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
         );
-        verify(telemetryEventPublisher).publishOutageOrNonSubmissionReason(
+        verify(telemetryEventPublisher, never()).publishOutageOrNonSubmissionReason(
                 ArgumentMatchers.eq(1),
                 ArgumentMatchers.eq(10L),
                 ArgumentMatchers.eq(1L),
                 any(),
-                ArgumentMatchers.eq(AnomalyConstants.TYPE_LOW_WATER_SUPPLY)
+                ArgumentMatchers.eq(AnomalyConstants.TYPE_LOW_WATER_SUPPLY),
+                ArgumentMatchers.anyString()
         );
 
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("40"), 1L);
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
 
@@ -514,7 +532,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 org.mockito.ArgumentMatchers.isNull()
         );
-        verify(telemetryEventPublisher, times(2)).publishAnomalyRecorded(
+        verify(telemetryEventPublisher, times(1)).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_MANUAL_OVERRIDE),
                 ArgumentMatchers.anyLong(),

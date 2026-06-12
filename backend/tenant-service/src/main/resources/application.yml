@@ -2,7 +2,7 @@ server:
   port: 8081
 
 app:
-  deployment-mode: ${APP_DEPLOYMENT_MODE:MULTI_TENANT}
+  single-tenant-mode: ${SINGLE_TENANT_MODE:false}
 
 spring:
   config:

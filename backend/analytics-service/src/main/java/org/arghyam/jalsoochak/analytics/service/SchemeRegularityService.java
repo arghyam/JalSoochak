@@ -4,6 +4,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResp
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
@@ -14,6 +16,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResp
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserOutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SubmissionStatusSummaryResponse;
@@ -94,6 +98,11 @@ public interface SchemeRegularityService {
             LocalDate startDate, LocalDate endDate);
 
     NationalDashboardBoundaryResponse getNationalDashboardBoundariesForApi();
+
+    NationalDashboardLevel2BoundaryResponse getNationalDashboardLevel2BoundariesForApi();
+
+    NationalDashboardLevel2MetricsResponse getNationalDashboardLevel2MetricsForApi(
+            LocalDate startDate, LocalDate endDate);
 
     AverageWaterSupplyResponse getAverageWaterSupplyPerCurrentRegionByLgd(
             Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate);
@@ -182,4 +191,43 @@ public interface SchemeRegularityService {
 
     SchemeRegularityListResponse getSchemeRegionReportByDepartment(
             Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count);
+
+    CriticalSchemesResponse getCriticalSchemesByLgd(
+            Integer tenantId, Integer lgdId, boolean list, Integer page, Integer limit);
+
+    CriticalSchemesResponse getCriticalSchemesByDepartment(
+            Integer tenantId, Integer departmentId, boolean list, Integer page, Integer limit);
+
+    CriticalSchemesResponse getCriticalSchemesByUser(
+            Integer tenantId, Integer userId, boolean list, Integer page, Integer limit);
+
+    CriticalSchemesResponse getCriticalSchemesByUserUuid(
+            Integer tenantId, UUID userUuid, boolean list, Integer page, Integer limit);
+
+    ContinuousSchemesResponse getContinuousSchemesByLgd(
+            Integer tenantId,
+            Integer lgdId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit);
+
+    ContinuousSchemesResponse getContinuousSchemesByDepartment(
+            Integer tenantId,
+            Integer departmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit);
+
+    ContinuousSchemesResponse getContinuousSchemesByUser(
+            Integer tenantId,
+            Integer userId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit);
 }

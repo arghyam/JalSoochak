@@ -36,6 +36,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
+import org.arghyam.jalsoochak.tenant.dto.response.GenerateApiTokenResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationHierarchyEditConstraintsResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationHierarchyResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.LocationResponseDTO;
@@ -43,6 +44,7 @@ import org.arghyam.jalsoochak.tenant.dto.response.TenantConfigResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantConfigStatusResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantSummaryResponseDTO;
+import org.arghyam.jalsoochak.tenant.service.ApiKeyService;
 import org.arghyam.jalsoochak.tenant.enums.ConfigStatusEnum;
 import org.arghyam.jalsoochak.tenant.enums.RegionTypeEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
@@ -95,6 +97,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     private final TenantSchedulerManager schedulerManager;
     private final ObjectStorageService objectStorageService;
     private final SystemManagementService systemManagementService;
+    private final ApiKeyService apiKeyService;
 
     // TODO: Re-enable "image/svg+xml" only after implementing SVG sanitization and
     // serving from an isolated origin.
@@ -286,6 +289,9 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                         "Tenant with tenantId " + tenantId + " does not exist"));
 
         Integer currentUserId = resolveCurrentUserId();
+
+        validateMapLgdLevelCascade(tenantId, tenant.getStateCode(), request.getConfigs());
+        validateDeptMapLevelCascade(tenantId, tenant.getStateCode(), request.getConfigs());
 
         Map<TenantConfigKeyEnum, ConfigValueDTO> results = new HashMap<>();
 
@@ -877,6 +883,91 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         return systemManagementService.getSystemSupportedChannels();
     }
 
+    private static final List<TenantConfigKeyEnum> MAP_LGD_LEVELS = List.of(
+            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_1,
+            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_2,
+            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_3,
+            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_4,
+            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_5,
+            TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_6);
+
+    private static final List<TenantConfigKeyEnum> DEPT_MAP_LEVELS = List.of(
+            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1,
+            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2,
+            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_3,
+            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_4,
+            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_5,
+            TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_6);
+
+    /** Returns the active level sublist for a hierarchy; absent hierarchy means 0 active levels. */
+    private List<TenantConfigKeyEnum> computeActiveLevels(LocationConfigDTO hierarchy,
+                                                           List<TenantConfigKeyEnum> allLevels) {
+        int count = (hierarchy == null || hierarchy.getLocationHierarchy() == null)
+                ? 0
+                : Math.min(hierarchy.getLocationHierarchy().size(), allLevels.size());
+        return allLevels.subList(0, count);
+    }
+
+    /**
+     * Enforces the cascade rule for a set of boolean level config keys: if level N resolves to
+     * FALSE (from DB or request), all subsequent levels must also resolve to FALSE.
+     * Absent keys default to TRUE (the system default).
+     * Used by validateMapLgdLevelCascade and validateDeptMapLevelCascade.
+     */
+    private void validateLevelCascade(Integer tenantId, String schemaName, RegionTypeEnum regionType,
+                                      List<TenantConfigKeyEnum> levelKeys,
+                                      Map<TenantConfigKeyEnum, JsonNode> configs) {
+        LocationConfigDTO hierarchy = tenantSchemaRepository.getLocationHierarchy(schemaName, regionType);
+        List<TenantConfigKeyEnum> active = computeActiveLevels(hierarchy, levelKeys);
+
+        Map<TenantConfigKeyEnum, String> effective = new HashMap<>();
+        for (TenantConfigKeyEnum level : active) {
+            tenantCommonRepository.findConfigByTenantAndKey(tenantId, level.name())
+                    .ifPresent(cfg -> {
+                        try {
+                            SimpleConfigValueDTO dto = objectMapper.readValue(cfg.getConfigValue(), SimpleConfigValueDTO.class);
+                            effective.put(level, dto.getValue());
+                        } catch (JsonProcessingException e) {
+                            log.warn("Could not parse persisted value for {}: {}", level, e.getMessage());
+                        }
+                    });
+        }
+        for (TenantConfigKeyEnum level : active) {
+            JsonNode node = configs.get(level);
+            if (node != null) {
+                String val = node.isTextual() ? node.asText() : node.path("value").asText();
+                if (!"TRUE".equalsIgnoreCase(val) && !"FALSE".equalsIgnoreCase(val)) {
+                    throw new InvalidConfigValueException(level + " must be TRUE or FALSE, got: " + val);
+                }
+                effective.put(level, val.toUpperCase());
+            }
+        }
+
+        boolean parentFalse = false;
+        TenantConfigKeyEnum falseParent = null;
+        for (TenantConfigKeyEnum level : active) {
+            String val = effective.getOrDefault(level, "TRUE");
+            boolean isTrue = "TRUE".equalsIgnoreCase(val);
+            if (parentFalse && isTrue) {
+                throw new InvalidConfigValueException(
+                        level + " cannot be TRUE because " + falseParent + " is FALSE. " +
+                        "All levels below a FALSE level must also be FALSE.");
+            }
+            if (!isTrue && !parentFalse) {
+                parentFalse = true;
+                falseParent = level;
+            }
+        }
+    }
+
+    private void validateMapLgdLevelCascade(Integer tenantId, String stateCode, Map<TenantConfigKeyEnum, JsonNode> configs) {
+        validateLevelCascade(tenantId, "tenant_" + stateCode.toLowerCase(), RegionTypeEnum.LGD, MAP_LGD_LEVELS, configs);
+    }
+
+    private void validateDeptMapLevelCascade(Integer tenantId, String stateCode, Map<TenantConfigKeyEnum, JsonNode> configs) {
+        validateLevelCascade(tenantId, "tenant_" + stateCode.toLowerCase(), RegionTypeEnum.DEPARTMENT, DEPT_MAP_LEVELS, configs);
+    }
+
     private Integer resolveCurrentUserId() {
         String uuid = SecurityUtils.getCurrentUserUuid();
         log.debug("[TenantManagementService] Resolving user id for uuid={}", uuid);
@@ -885,13 +976,30 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     }
 
     private void setDefaultConfigs(TenantResponseDTO tenant, String schemaName, Integer currentUserId) {
-        tenantSchemaRepository.setLocationHierarchy(
-                schemaName, RegionTypeEnum.LGD, tenantDefaults.getLgdLocationHierarchy(), currentUserId);
+        List<LocationLevelConfigDTO> lgdHierarchy = tenantDefaults.getLgdLocationHierarchy();
+        tenantSchemaRepository.setLocationHierarchy(schemaName, RegionTypeEnum.LGD, lgdHierarchy, currentUserId);
 
-        tenantSchemaRepository.setLocationHierarchy(
-                schemaName, RegionTypeEnum.DEPARTMENT, tenantDefaults.getDeptLocationHierarchy(), currentUserId);
+        List<LocationLevelConfigDTO> deptHierarchy = tenantDefaults.getDeptLocationHierarchy();
+        tenantSchemaRepository.setLocationHierarchy(schemaName, RegionTypeEnum.DEPARTMENT, deptHierarchy, currentUserId);
 
         try {
+            String trueValue = objectMapper.writeValueAsString(new SimpleConfigValueDTO("TRUE"));
+
+            int lgdLevelCount = lgdHierarchy == null ? 0 : Math.min(lgdHierarchy.size(), MAP_LGD_LEVELS.size());
+            for (int i = 0; i < lgdLevelCount; i++) {
+                TenantConfigKeyEnum levelKey = MAP_LGD_LEVELS.get(i);
+                tenantCommonRepository.upsertConfig(tenant.getId(), levelKey.name(), trueValue, currentUserId)
+                        .orElseThrow(() -> new ConfigurationException(
+                                "Failed to seed " + levelKey.name() + " for tenant [id=" + tenant.getId() + "]"));
+            }
+
+            int deptLevelCount = deptHierarchy == null ? 0 : Math.min(deptHierarchy.size(), DEPT_MAP_LEVELS.size());
+            for (int i = 0; i < deptLevelCount; i++) {
+                TenantConfigKeyEnum levelKey = DEPT_MAP_LEVELS.get(i);
+                tenantCommonRepository.upsertConfig(tenant.getId(), levelKey.name(), trueValue, currentUserId)
+                        .orElseThrow(() -> new ConfigurationException(
+                                "Failed to seed " + levelKey.name() + " for tenant [id=" + tenant.getId() + "]"));
+            }
             ReasonListConfigDTO reasons = ReasonListConfigDTO.builder()
                     .reasons(tenantDefaults.getMeterChangeReasons())
                     .build();
@@ -923,5 +1031,19 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         }
 
         log.info("Default configs seeded for tenant [id={}]", tenant.getId());
+    }
+
+    @Override
+    @Transactional
+    public GenerateApiTokenResponseDTO generateApiToken(String stateCode) {
+        TenantResponseDTO tenant = tenantCommonRepository.findByStateCode(stateCode)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for state code: " + stateCode));
+
+        Integer currentUserId = resolveCurrentUserId();
+        ApiKeyService.GeneratedApiToken generated = apiKeyService.generate();
+        tenantCommonRepository.upsertApiKeyHash(tenant.getId(), generated.hash(), currentUserId);
+
+        log.info("API token (re)generated for tenant [stateCode={}]", stateCode);
+        return GenerateApiTokenResponseDTO.builder().token(generated.rawToken()).build();
     }
 }

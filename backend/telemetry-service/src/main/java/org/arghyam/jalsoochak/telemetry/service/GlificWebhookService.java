@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.dto.requests.ClosingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IssueReportRequest;
@@ -38,6 +39,10 @@ public class GlificWebhookService {
 
     public CreateReadingResponse processImage(GlificWebhookRequest glificWebhookRequest) {
         return imageWorkflowService.processImage(glificWebhookRequest);
+    }
+
+    public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+        return imageWorkflowService.processAssamReading(request, preferredTenantId);
     }
 
     public IntroResponse introMessage(IntroRequest introRequest) {

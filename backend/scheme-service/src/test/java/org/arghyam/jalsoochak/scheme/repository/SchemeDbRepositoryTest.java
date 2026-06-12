@@ -58,7 +58,7 @@ class SchemeDbRepositoryTest {
                     when(rs.getObject("longitude")).thenReturn(77.6d);
                     when(rs.getObject("channel")).thenReturn(1);
                     when(rs.getObject("work_status")).thenReturn(1);
-                    when(rs.getObject("operating_status")).thenReturn(2);
+                    when(rs.getObject("operating_status")).thenReturn(0);
                     return List.of(mapper.mapRow(rs, 0));
                 });
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(4L);
@@ -179,6 +179,15 @@ class SchemeDbRepositoryTest {
     }
 
     @Test
+    void updateSchemeStatusesById_updatesProvidedStatuses() {
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        boolean updated = repository.updateSchemeStatusesById("tenant_ka", 11, 2, null, 9);
+
+        assertThat(updated).isTrue();
+    }
+
+    @Test
     void guardsRejectInvalidSchema() {
         assertThatThrownBy(() -> repository.findAllSchemes("tenant-ka"))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -200,7 +209,7 @@ class SchemeDbRepositoryTest {
                     when(rs.getObject("latitude")).thenReturn(11.1d);
                     when(rs.getObject("longitude")).thenReturn(22.2d);
                     when(rs.getObject("work_status")).thenReturn(1);
-                    when(rs.getObject("operating_status")).thenReturn(2);
+                    when(rs.getObject("operating_status")).thenReturn(0);
                     handler.processRow(rs);
                     return null;
                 }).when(jdbcTemplate).query(anyString(), any(RowCallbackHandler.class), any(Object[].class));

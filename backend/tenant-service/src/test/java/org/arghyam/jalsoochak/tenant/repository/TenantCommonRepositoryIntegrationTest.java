@@ -19,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -258,6 +259,7 @@ class TenantCommonRepositoryIntegrationTest {
         @Test
         @DisplayName("excludes soft-deleted tenants")
         void findAll_excludesSoftDeleted() {
+            insertTenant("KL", "Kerala", TenantStatusEnum.ACTIVE);
             TenantResponseDTO t = insertTenant("OR", "Odisha", TenantStatusEnum.ACTIVE);
             jdbcTemplate.update(
                     "UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?",
@@ -266,6 +268,7 @@ class TenantCommonRepositoryIntegrationTest {
             List<TenantResponseDTO> result = repository.findAll();
 
             assertThat(result).extracting(TenantResponseDTO::getStateCode)
+                    .isNotEmpty()
                     .doesNotContain("OR");
         }
     }
@@ -340,6 +343,7 @@ class TenantCommonRepositoryIntegrationTest {
         @Test
         @DisplayName("excludes soft-deleted tenants")
         void findAll_paginated_excludesSoftDeleted() {
+            insertTenant("KL", "Kerala", TenantStatusEnum.ACTIVE);
             TenantResponseDTO t = insertTenant("SK", "Sikkim", TenantStatusEnum.ACTIVE);
             jdbcTemplate.update(
                     "UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?",
@@ -347,7 +351,9 @@ class TenantCommonRepositoryIntegrationTest {
 
             List<TenantResponseDTO> result = repository.findAll(10, 0, null, null);
 
-            assertThat(result).extracting(TenantResponseDTO::getStateCode).doesNotContain("SK");
+            assertThat(result).extracting(TenantResponseDTO::getStateCode)
+                    .isNotEmpty()
+                    .doesNotContain("SK");
         }
 
         @Test
@@ -865,6 +871,51 @@ class TenantCommonRepositoryIntegrationTest {
                     t.getId());
 
             assertThat(repository.countNonDeletedTenants()).isZero();
+        }
+    }
+
+    @Nested
+    @DisplayName("upsertApiKeyHash / findByApiKeyHash")
+    class ApiKeyHashTests {
+
+        @Test
+        @DisplayName("stores hash and retrieves tenant by hash")
+        void upsertAndFind_roundTrip() {
+            TenantResponseDTO tenant = insertTenant("AK", "API Key Tenant", TenantStatusEnum.ACTIVE);
+            String hash = "a".repeat(64);
+
+            repository.upsertApiKeyHash(tenant.getId(), hash, null);
+
+            java.util.Optional<TenantResponseDTO> found = repository.findByApiKeyHash(hash);
+            assertThat(found).isPresent();
+            assertThat(found.get().getId()).isEqualTo(tenant.getId());
+        }
+
+        @Test
+        @DisplayName("overwriting hash invalidates old token lookup")
+        void upsertApiKeyHash_overwritesPreviousHash() {
+            TenantResponseDTO tenant = insertTenant("AK2", "API Key Tenant 2", TenantStatusEnum.ACTIVE);
+            String oldHash = "b".repeat(64);
+            String newHash = "c".repeat(64);
+
+            repository.upsertApiKeyHash(tenant.getId(), oldHash, null);
+            repository.upsertApiKeyHash(tenant.getId(), newHash, null);
+
+            assertThat(repository.findByApiKeyHash(oldHash)).isEmpty();
+            assertThat(repository.findByApiKeyHash(newHash)).isPresent();
+        }
+
+        @Test
+        @DisplayName("returns empty for unknown hash")
+        void findByApiKeyHash_unknownHash_returnsEmpty() {
+            assertThat(repository.findByApiKeyHash("d".repeat(64))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("throws when tenant does not exist")
+        void upsertApiKeyHash_nonExistentTenant_throws() {
+            assertThatThrownBy(() -> repository.upsertApiKeyHash(99999, "e".repeat(64), null))
+                    .isInstanceOf(EmptyResultDataAccessException.class);
         }
     }
 }

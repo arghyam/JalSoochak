@@ -256,6 +256,46 @@ public class TenantStaffRepository {
         return new StaffPage(items, total == null ? 0 : total);
     }
 
+    /**
+     * Returns the full filtered staff list with no pagination — used by the
+     * staff-report export. Reuses the same WHERE builder as
+     * {@link #listStaffPage} so the dataset matches what STATE_ADMIN sees in
+     * the UI for identical filters. Schemes are attached the same way.
+     *
+     * <p>Output is ordered by {@code u.id ASC} so identical filters yield
+     * deterministic, byte-identical exports — important for the report cache.
+     * Re-sorting by other columns is a viewer concern (Excel / CSV reader).
+     */
+    public List<TenantStaffResponseDTO> listAllStaffForExport(
+            String schemaName,
+            List<String> roles,
+            Integer status,
+            String name
+    ) {
+        validateSchemaName(schemaName);
+        SqlAndArgs where = buildWhere(roles, status, name);
+
+        String sql = String.format("""
+                SELECT u.id,
+                       u.uuid,
+                       u.title,
+                       u.email,
+                       u.phone_number,
+                       u.status,
+                       ut.c_name AS role
+                FROM %s.user_table u
+                LEFT JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type
+                WHERE u.deleted_at IS NULL
+                  %s
+                ORDER BY u.id ASC
+                """, schemaName, where.sql());
+
+        List<TenantStaffResponseDTO> rows = jdbcTemplate.query(sql, staffRowMapper(), where.args().toArray());
+        attachSchemes(schemaName, rows);
+        return rows;
+    }
+
     private record SqlAndArgs(String sql, List<Object> args) {}
 
     /**
@@ -359,34 +399,38 @@ public class TenantStaffRepository {
             return;
         }
 
-        String placeholders = String.join(", ", userIds.stream().map(v -> "?").toList());
-        String sql = String.format("""
-                SELECT usm.user_id,
-                       sm.id AS scheme_id,
-                       sm.scheme_name,
-                       sm.work_status,
-                       sm.operating_status
-                FROM %s.user_scheme_mapping_table usm
-                JOIN %s.scheme_master_table sm
-                  ON sm.id = usm.scheme_id
-                 AND sm.deleted_at IS NULL
-                WHERE usm.deleted_at IS NULL
-                  AND usm.status = 1
-                  AND usm.user_id IN (%s)
-                ORDER BY usm.user_id ASC, sm.id ASC
-                """, schemaName, schemaName, placeholders);
-
         Map<Long, List<SchemeSummaryDTO>> byUser = new HashMap<>();
-        jdbcTemplate.query(sql, rs -> {
-            long userId = rs.getLong("user_id");
-            SchemeSummaryDTO scheme = SchemeSummaryDTO.builder()
-                    .schemeId(rs.getLong("scheme_id"))
-                    .schemeName(rs.getString("scheme_name"))
-                    .workStatus(workStatusLabel(getNullableInt(rs.getObject("work_status"))))
-                    .operatingStatus(operatingStatusLabel(getNullableInt(rs.getObject("operating_status"))))
-                    .build();
-            byUser.computeIfAbsent(userId, k -> new ArrayList<>()).add(scheme);
-        }, userIds.toArray());
+        int chunkSize = 500;
+        for (int start = 0; start < userIds.size(); start += chunkSize) {
+            List<Long> chunk = userIds.subList(start, Math.min(start + chunkSize, userIds.size()));
+            String placeholders = String.join(", ", chunk.stream().map(v -> "?").toList());
+            String sql = String.format("""
+                    SELECT usm.user_id,
+                           sm.id AS scheme_id,
+                           sm.scheme_name,
+                           sm.work_status,
+                           sm.operating_status
+                    FROM %s.user_scheme_mapping_table usm
+                    JOIN %s.scheme_master_table sm
+                      ON sm.id = usm.scheme_id
+                     AND sm.deleted_at IS NULL
+                    WHERE usm.deleted_at IS NULL
+                      AND usm.status = 1
+                      AND usm.user_id IN (%s)
+                    ORDER BY usm.user_id ASC, sm.id ASC
+                    """, schemaName, schemaName, placeholders);
+
+            jdbcTemplate.query(sql, rs -> {
+                long userId = rs.getLong("user_id");
+                SchemeSummaryDTO scheme = SchemeSummaryDTO.builder()
+                        .schemeId(rs.getLong("scheme_id"))
+                        .schemeName(rs.getString("scheme_name"))
+                        .workStatus(workStatusLabel(getNullableInt(rs.getObject("work_status"))))
+                        .operatingStatus(operatingStatusLabel(getNullableInt(rs.getObject("operating_status"))))
+                        .build();
+                byUser.computeIfAbsent(userId, k -> new ArrayList<>()).add(scheme);
+            }, chunk.toArray());
+        }
 
         for (int i = 0; i < rows.size(); i++) {
             TenantStaffResponseDTO row = rows.get(i);

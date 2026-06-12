@@ -2,7 +2,7 @@ server:
   port: 8082
 
 app:
-  deployment-mode: ${APP_DEPLOYMENT_MODE:MULTI_TENANT}
+  single-tenant-mode: ${SINGLE_TENANT_MODE:false}
 
 spring:
   config:
@@ -97,12 +97,32 @@ pii:
   encryption-key: ${PII_ENCRYPTION_KEY}
   hmac-key: ${PII_HMAC_KEY}
 
+# ──────────────────────────────────────────────────────────────
+# Object Storage (S3-compatible — AWS S3 / MinIO / R2 / DO Spaces / …)
+# Used by the staff-report cache to persist generated CSV/XLSX files
+# and serve them via short-lived presigned URLs.
+# ──────────────────────────────────────────────────────────────
+storage:
+  enabled:       ${STORAGE_ENABLED:false}      # true to activate S3-compatible storage
+  provider:      ${STORAGE_PROVIDER:s3}
+  endpoint:      ${STORAGE_ENDPOINT:}          # blank = real AWS S3; set to MinIO/R2/etc. URL for custom providers
+  presigned-base-url: ${STORAGE_PRESIGNED_BASE_URL:}  # public-facing base URL for presigned URLs (e.g. https://minio.example.com); leave blank to use storage.endpoint
+  region:        ${STORAGE_REGION:ap-south-1}
+  access-key:    ${STORAGE_ACCESS_KEY:}
+  secret-key:    ${STORAGE_SECRET_KEY:}
+  bucket:        ${STORAGE_BUCKET:user-service-assets}
+  reports-bucket: ${STORAGE_REPORTS_BUCKET:jalsoochak-reports}   # shared across all resource types 
+  presigned-ttl-seconds: ${STORAGE_PRESIGNED_TTL_SECONDS:3600}
+
 otp:
   expiry-minutes: ${OTP_EXPIRY_MINUTES:10}
   max-attempts: ${OTP_MAX_ATTEMPTS:3}
   cooldown-seconds: ${OTP_COOLDOWN_SECONDS:60}
   otp-length: ${OTP_LENGTH:6}
   delivery-channel: ${OTP_DELIVERY_CHANNEL:WHATSAPP}
+  cheat:
+    enabled: ${OTP_CHEAT_ENABLED:false}
+    value: ${OTP_CHEAT_VALUE:}
 
 eureka:
   client:

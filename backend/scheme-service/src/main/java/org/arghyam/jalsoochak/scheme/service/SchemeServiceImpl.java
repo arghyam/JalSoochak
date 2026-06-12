@@ -12,12 +12,16 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
+import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
@@ -36,9 +40,19 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.InputStream;
+import java.io.OutputStreamWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -47,6 +61,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @Slf4j
@@ -119,18 +135,23 @@ public class SchemeServiceImpl implements SchemeService {
     private static final Map<String, Integer> OPERATING_STATUS_MAP = Map.of(
             "1", 1,
             "operative", 1,
+            "0", 0,
+            "non-operative", 0,
             "2", 2,
-            "non-operative", 2,
-            "3", 3,
-            "partially operative", 3
+            "partially operative", 2
     );
 
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("csv", "xlsx");
     private static final DataFormatter DATA_FORMATTER = new DataFormatter();
+    private static final String REPORT_FORMAT_CSV = "csv";
+    private static final DateTimeFormatter REPORT_FILENAME_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm");
+    private final ConcurrentHashMap<String, Object> reportGenerationLocks = new ConcurrentHashMap<>();
 
     private final SchemeDbRepository schemeDbRepository;
     private final SchemeUploadChunkProcessor chunkProcessor;
     private final KafkaProducer kafkaProducer;
+    private final MinioService minioService;
+    private final PiiEncryptionService piiEncryptionService;
 
     @Override
     public PageResponseDTO<SchemeDTO> listSchemes(
@@ -213,6 +234,51 @@ public class SchemeServiceImpl implements SchemeService {
     }
 
     @Override
+    public PageResponseDTO<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String tenantCode,
+                                                                                                int page,
+                                                                                                int limit,
+                                                                                                String schemeName) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        String phoneNumberClaim = null;
+        if (auth instanceof JwtAuthenticationToken jwtAuth) {
+            var jwt = jwtAuth.getToken();
+            phoneNumberClaim = firstNonBlank(
+                    jwt.getClaimAsString("phone_number"),
+                    firstNonBlank(jwt.getClaimAsString("phoneNumber"),
+                            firstNonBlank(jwt.getClaimAsString("phone"), jwt.getClaimAsString("mobile")))
+            );
+        }
+
+        int userId = resolveCurrentUserId(schemaName);
+        String resolvedPhoneNumber = phoneNumberClaim;
+        if (resolvedPhoneNumber == null || resolvedPhoneNumber.isBlank()) {
+            String encrypted = schemeDbRepository.findUserPhoneNumberById(schemaName, userId);
+            resolvedPhoneNumber = piiEncryptionService != null ? piiEncryptionService.safeDecrypt(encrypted) : null;
+        }
+        int size = clampLimit(limit);
+        int p = Math.max(0, page);
+        int offset = p * size;
+
+        List<SchemeYesterdayFinalReadingDTO> rows =
+                schemeDbRepository.listSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName, offset, size);
+        if (resolvedPhoneNumber != null && !resolvedPhoneNumber.isBlank()) {
+            for (SchemeYesterdayFinalReadingDTO row : rows) {
+                row.setPhoneNumber(resolvedPhoneNumber);
+            }
+        }
+        long total = schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName);
+        return PageResponseDTO.of(rows, total, p, size);
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) {
+            return a;
+        }
+        return b;
+    }
+
+    @Override
     public SchemeCountsDTO getSchemeCounts(String tenantCode) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
@@ -241,6 +307,61 @@ public class SchemeServiceImpl implements SchemeService {
                 .workStatusCounts(schemeDbRepository.countSchemesByWorkStatus(schemaName))
                 .operatingStatusCounts(schemeDbRepository.countSchemesByOperatingStatus(schemaName))
                 .build();
+    }
+
+    @Override
+    public SchemeStatusesResponseDTO getSchemeStatuses(Integer tenantId, int schemeId) {
+        if (tenantId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenantId is required");
+        }
+        if (schemeId < 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "schemeId must be a positive integer");
+        }
+        String schemaName = schemeDbRepository.findSchemaNameByTenantId(tenantId);
+        if (schemaName == null || schemaName.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+        SchemeStatusesResponseDTO statuses = schemeDbRepository.findSchemeStatusesById(schemaName, schemeId);
+        if (statuses == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
+        }
+        return statuses;
+    }
+
+    @Override
+    public void updateSchemeStatuses(String tenantCode, int schemeId, SchemeStatusUpdateRequestDTO request) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        if (schemeId < 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "schemeId must be a positive integer");
+        }
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
+        }
+
+        Integer workStatusCode = parseWorkStatus(request.getWorkStatus());
+        Integer operatingStatusCode = parseOperatingStatus(request.getOperatingStatus());
+        if (workStatusCode == null && operatingStatusCode == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "At least one of workStatus or operatingStatus must be provided"
+            );
+        }
+
+        int updatedBy = resolveCurrentUserId(schemaName);
+        Integer tenantId = schemeDbRepository.findTenantIdByUserId(schemaName, updatedBy);
+        boolean updated = schemeDbRepository.updateSchemeStatusesById(
+                schemaName,
+                schemeId,
+                workStatusCode,
+                operatingStatusCode,
+                updatedBy
+        );
+        if (!updated) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
+        }
+        List<SchemeDbRepository.SchemeAnalyticsRow> rows =
+                schemeDbRepository.findSchemeAnalyticsRowsBySchemeIds(schemaName, List.of(schemeId));
+        publishSchemeDimensionEventsFromRows(tenantId, rows);
     }
 
     @Override
@@ -291,6 +412,275 @@ public class SchemeServiceImpl implements SchemeService {
                 .totalRows(totalRows)
                 .uploadedRows(processed.uploadedRows())
                 .build();
+    }
+
+    @Override
+    public ReportLinkResponseDTO downloadSchemesReport() {
+        String schemaName = requireTenantSchema();
+        int actorUserId = resolveCurrentUserId(schemaName);
+        String reportType = "SCHEME";
+        String paramsJson = "{}";
+        String paramsHash = sha256Hex(paramsJson);
+        long dataVersion = schemeDbRepository.currentDataVersion(schemaName, reportType);
+        String lockKey = schemaName + "|" + reportType + "|" + dataVersion + "|" + paramsHash;
+
+        String cached = findCachedReportLink(schemaName, reportType, paramsHash, dataVersion);
+        if (cached != null) {
+            return ReportLinkResponseDTO.builder().link(cached).build();
+        }
+
+        Object lock = reportGenerationLocks.computeIfAbsent(lockKey, key -> new Object());
+        synchronized (lock) {
+            String secondCheck = findCachedReportLink(schemaName, reportType, paramsHash, dataVersion);
+            if (secondCheck != null) {
+                return ReportLinkResponseDTO.builder().link(secondCheck).build();
+            }
+            try {
+                return generateAndUploadSchemesReport(schemaName, actorUserId, reportType, dataVersion, paramsJson, paramsHash);
+            } finally {
+                reportGenerationLocks.remove(lockKey, lock);
+            }
+        }
+    }
+
+    @Override
+    public ReportLinkResponseDTO downloadSchemeMappingsReport() {
+        String schemaName = requireTenantSchema();
+        int actorUserId = resolveCurrentUserId(schemaName);
+        String reportType = "SCHEME_MAPPING";
+        String paramsJson = "{}";
+        String paramsHash = sha256Hex(paramsJson);
+        long dataVersion = schemeDbRepository.currentDataVersion(schemaName, reportType);
+        String lockKey = schemaName + "|" + reportType + "|" + dataVersion + "|" + paramsHash;
+
+        String cached = findCachedReportLink(schemaName, reportType, paramsHash, dataVersion);
+        if (cached != null) {
+            return ReportLinkResponseDTO.builder().link(cached).build();
+        }
+
+        Object lock = reportGenerationLocks.computeIfAbsent(lockKey, key -> new Object());
+        synchronized (lock) {
+            String secondCheck = findCachedReportLink(schemaName, reportType, paramsHash, dataVersion);
+            if (secondCheck != null) {
+                return ReportLinkResponseDTO.builder().link(secondCheck).build();
+            }
+            try {
+                return generateAndUploadSchemeMappingsReport(schemaName, actorUserId, reportType, dataVersion, paramsJson, paramsHash);
+            } finally {
+                reportGenerationLocks.remove(lockKey, lock);
+            }
+        }
+    }
+
+    private void saveReportRecord(
+            String schemaName,
+            int actorUserId,
+            String reportType,
+            String format,
+            String paramsJson,
+            String paramsHash,
+            long dataVersion,
+            String objectKey,
+            long fileSizeBytes,
+            int rowCount
+    ) {
+        schemeDbRepository.insertReportRecord(
+                schemaName,
+                UUID.randomUUID().toString(),
+                reportType,
+                format,
+                paramsHash,
+                paramsJson,
+                dataVersion,
+                minioService.getBucket(),
+                objectKey,
+                rowCount,
+                fileSizeBytes,
+                actorUserId
+        );
+    }
+
+    private String findCachedReportLink(String schemaName, String reportType, String paramsHash, long dataVersion) {
+        String tenantCode = tenantCodeFromSchema(schemaName);
+        String filenamePrefix = "SCHEME".equals(reportType) ? "scheme_report" : "scheme_mapping_report";
+        String filename = buildDownloadFilename(filenamePrefix, tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
+        return schemeDbRepository.findReportObjectKey(schemaName, reportType, REPORT_FORMAT_CSV, paramsHash, dataVersion)
+                .map(key -> minioService.getObjectUrl(key, filename))
+                .orElse(null);
+    }
+
+    private ReportLinkResponseDTO generateAndUploadSchemesReport(
+            String schemaName,
+            int actorUserId,
+            String reportType,
+            long dataVersion,
+            String paramsJson,
+            String paramsHash
+    ) {
+        Path tempFile = null;
+        try {
+            tempFile = Files.createTempFile("scheme-report-", ".csv");
+            AtomicInteger rowCount = new AtomicInteger(0);
+
+            try (BufferedWriter writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8);
+                 var csv = CSVFormat.DEFAULT.builder()
+                         .setHeader(
+                                 "id", "uuid", "state_scheme_id", "centre_scheme_id", "scheme_name",
+                                 "fhtc_count", "planned_fhtc", "house_hold_count", "latitude",
+                                 "longitude", "channel", "work_status", "operating_status")
+                         .build().print(writer)) {
+                schemeDbRepository.streamAllSchemes(schemaName, row -> {
+                    try {
+                        csv.printRecord(
+                                row.getId(),
+                                row.getUuid(),
+                                row.getStateSchemeId(),
+                                row.getCentreSchemeId(),
+                                row.getSchemeName(),
+                                row.getFhtcCount(),
+                                row.getPlannedFhtc(),
+                                row.getHouseHoldCount(),
+                                row.getLatitude(),
+                                row.getLongitude(),
+                                row.getChannel(),
+                                row.getWorkStatus(),
+                                row.getOperatingStatus()
+                        );
+                        rowCount.incrementAndGet();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+                csv.flush();
+            }
+
+            String objectKey = buildObjectKey(schemaName, "scheme", "csv");
+            long fileSize = Files.size(tempFile);
+            String link;
+            try (InputStream input = Files.newInputStream(tempFile)) {
+                minioService.upload(input, fileSize, objectKey, "text/csv");
+            }
+            String tenantCode = tenantCodeFromSchema(schemaName);
+            String filename = buildDownloadFilename("scheme_report", tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
+            link = minioService.getObjectUrl(objectKey, filename);
+            saveReportRecord(schemaName, actorUserId, reportType, REPORT_FORMAT_CSV, paramsJson, paramsHash, dataVersion, objectKey, fileSize, rowCount.get());
+            return ReportLinkResponseDTO.builder().link(link).build();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to generate scheme report", e);
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException ignored) {
+                    // best-effort cleanup
+                }
+            }
+        }
+    }
+
+    private ReportLinkResponseDTO generateAndUploadSchemeMappingsReport(
+            String schemaName,
+            int actorUserId,
+            String reportType,
+            long dataVersion,
+            String paramsJson,
+            String paramsHash
+    ) {
+        Path tempFile = null;
+        try {
+            tempFile = Files.createTempFile("scheme-mapping-report-", ".csv");
+            AtomicInteger rowCount = new AtomicInteger(0);
+
+            try (BufferedWriter writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8);
+                 var csv = CSVFormat.DEFAULT.builder()
+                         .setHeader("id", "scheme_id", "state_scheme_id", "scheme_name", "village_lgd_code", "village_name", "sub_division_name")
+                         .build().print(writer)) {
+                schemeDbRepository.streamAllSchemeMappings(schemaName, row -> {
+                    try {
+                        csv.printRecord(
+                                row.id(),
+                                row.schemeId(),
+                                row.stateSchemeId(),
+                                row.schemeName(),
+                                row.villageLgdCode(),
+                                row.villageName(),
+                                row.subDivisionName()
+                        );
+                        rowCount.incrementAndGet();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+                csv.flush();
+            }
+
+            String objectKey = buildObjectKey(schemaName, "scheme_mapping", "csv");
+            long fileSize = Files.size(tempFile);
+            String link;
+            try (InputStream input = Files.newInputStream(tempFile)) {
+                minioService.upload(input, fileSize, objectKey, "text/csv");
+            }
+            String tenantCode = tenantCodeFromSchema(schemaName);
+            String filename = buildDownloadFilename("scheme_mapping_report", tenantCode, OffsetDateTime.now(ZoneOffset.UTC));
+            link = minioService.getObjectUrl(objectKey, filename);
+            saveReportRecord(schemaName, actorUserId, reportType, REPORT_FORMAT_CSV, paramsJson, paramsHash, dataVersion, objectKey, fileSize, rowCount.get());
+            return ReportLinkResponseDTO.builder().link(link).build();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to generate scheme-mapping report", e);
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException ignored) {
+                    // best-effort cleanup
+                }
+            }
+        }
+    }
+
+    private String buildObjectKey(String schemaName, String reportType, String format) {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        String tenantCode = tenantCodeFromSchema(schemaName).toLowerCase(Locale.ROOT);
+        return String.format("%s/reports/%s/%04d/%02d/%s.%s",
+                tenantCode,
+                reportType,
+                now.getYear(),
+                now.getMonthValue(),
+                UUID.randomUUID(),
+                format);
+    }
+
+    private String tenantCodeFromSchema(String schemaName) {
+        if (schemaName == null) {
+            return "NA";
+        }
+        String prefix = "tenant_";
+        if (schemaName.startsWith(prefix) && schemaName.length() > prefix.length()) {
+            return schemaName.substring(prefix.length()).toUpperCase(Locale.ROOT);
+        }
+        return schemaName.toUpperCase(Locale.ROOT);
+    }
+
+    private String buildDownloadFilename(String prefix, String tenantCode, OffsetDateTime generatedAt) {
+        OffsetDateTime stamp = generatedAt != null ? generatedAt : OffsetDateTime.now(ZoneOffset.UTC);
+        return String.format("%s_%s_%s.csv",
+                prefix,
+                tenantCode,
+                REPORT_FILENAME_TIMESTAMP.format(stamp.atZoneSameInstant(ZoneOffset.UTC)));
+    }
+
+    private String sha256Hex(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm unavailable", e);
+        }
     }
 
     private void validateFile(MultipartFile file) {
@@ -463,7 +853,7 @@ public class SchemeServiceImpl implements SchemeService {
                 parseDouble(values.get("longitude"), rowNumber, "longitude", errors);
                 parseEnum(values.get("work_status"), rowNumber, "work_status", WORK_STATUS_MAP, "Ongoing, Completed, Not Started, Handed Over or 1/2/3/4", errors);
                 if (!normalize(values.get("operating_status")).isBlank()) {
-                    parseEnum(values.get("operating_status"), rowNumber, "operating_status", OPERATING_STATUS_MAP, "Operative, Non-Operative, Partially Operative or 1/2/3", errors);
+                    parseEnum(values.get("operating_status"), rowNumber, "operating_status", OPERATING_STATUS_MAP, "Operative, Non-Operative, Partially Operative or 0/1/2", errors);
                 }
 
                 if (errors.size() == before && !stateSchemeId.isBlank()) {
@@ -958,6 +1348,8 @@ public class SchemeServiceImpl implements SchemeService {
             payload.put("level5DeptId", deptLevelFallback);
             payload.put("level6DeptId", deptLevelFallback);
             payload.put("status", row.operatingStatus());
+            payload.put("operating_status", row.operatingStatus());
+            payload.put("work_status", row.workStatus());
             kafkaProducer.publishJson(SCHEME_TOPIC, payload);
         }
     }
@@ -1005,6 +1397,13 @@ public class SchemeServiceImpl implements SchemeService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token missing user identity");
         }
         Integer userId = schemeDbRepository.findUserIdByEmail(schemaName, email);
+        if (userId == null) {
+            // Many Keycloak setups use a preferred_username that isn't the DB email. The JWT subject is stable.
+            String userUuid = jwt.getSubject();
+            if (userUuid != null && !userUuid.isBlank()) {
+                userId = schemeDbRepository.findUserIdByUuid(schemaName, userUuid);
+            }
+        }
         if (userId == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found for token");
         }
@@ -1062,13 +1461,13 @@ public class SchemeServiceImpl implements SchemeService {
         }
         try {
             int n = Integer.parseInt(v);
-            if (n >= 1 && n <= 3) {
+            if (n >= 0 && n <= 2) {
                 return n;
             }
         } catch (NumberFormatException ignored) {
         }
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Invalid operatingStatus. Expected one of: Operative, Non-Operative, Partially Operative or 1/2/3");
+                "Invalid operatingStatus. Expected one of: Operative, Non-Operative, Partially Operative or 0/1/2");
     }
 
     private void requireField(Map<String, String> values, int rowNumber, String field, List<SchemeUploadErrorDTO> errors) {

@@ -64,8 +64,9 @@ public class TelemetryEventPublisher {
                                                    Long schemeId,
                                                    Long userId,
                                                    LocalDate date,
-                                                   int anomalyType) {
-        ReasonPayload payload = mapReason(anomalyType);
+                                                   int anomalyType,
+                                                   String selectedReason) {
+        ReasonPayload payload = mapReason(anomalyType, selectedReason);
         if (payload == null) {
             return;
         }
@@ -225,15 +226,16 @@ public class TelemetryEventPublisher {
         }
     }
 
-    private static ReasonPayload mapReason(int anomalyType) {
+    private static ReasonPayload mapReason(int anomalyType, String selectedReason) {
+        String reason = (selectedReason == null || selectedReason.isBlank()) ? null : selectedReason.trim();
         if (anomalyType == AnomalyConstants.TYPE_NO_WATER_SUPPLY) {
-            return new ReasonPayload("No Water Supply", null);
+            return new ReasonPayload(reason != null ? reason : "No Water Supply", null);
         }
         if (anomalyType == AnomalyConstants.TYPE_LOW_WATER_SUPPLY) {
-            return new ReasonPayload("Low Water Supply", null);
+            return new ReasonPayload(reason != null ? reason : "Low Water Supply", null);
         }
         if (anomalyType == AnomalyConstants.TYPE_NO_SUBMISSION) {
-            return new ReasonPayload(null, "No Submission");
+            return new ReasonPayload(null, reason != null ? reason : "No Submission");
         }
         return null;
     }

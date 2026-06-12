@@ -21,16 +21,14 @@ import reactor.core.publisher.Mono;
  * <p>Endpoint: {@code POST {baseUrl}/Accounts/{authKey}/SMSes/}</p>
  * <p>Auth: HTTP Basic Auth using authKey:authToken, Base64-encoded.</p>
  * <p>The message text follows the DLT-approved template:
- * "Your OTP for Jalsoochak login is {otp}. This service is operated by Arghyam.
- * Do not share this OTP. Valid for {expiryMinutes} minutes."</p>
+ * "Your OTP for Jalsoochak login is {otp}. Do not share this OTP. Valid for {expiryMinutes} minutes."</p>
  */
 @Service
 @Slf4j
 public class SmsCountryService {
 
     private static final String MESSAGE_TEMPLATE =
-            "Your OTP for Jalsoochak login is %s. This service is operated by Arghyam. " +
-            "Do not share this OTP. Valid for %d minutes.";
+            "Your OTP for Jalsoochak login is %s. Do not share this OTP. Valid for %d minutes.";
 
     private final WebClient webClient;
 
@@ -55,7 +53,7 @@ public class SmsCountryService {
     @Value("${smscountry.dlt-header-id:}")
     private String dltHeaderId;
 
-    @Value("${notifications.dry-run:false}")
+    @Value("${notifications.sms.dry-run:false}")
     private boolean dryRun;
 
     public SmsCountryService(WebClient.Builder webClientBuilder) {

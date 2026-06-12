@@ -30,19 +30,69 @@ public final class SwaggerExamples {
                 "parentLgdLevel": 1,
                 "parentDepartmentLevel": null,
                 "childBoundaryCount": 2,
-                "boundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}",
                 "averageSchemeRegularity": 0.75,
                 "readingSubmissionRate": 0.84,
-                "averagePerformanceScore": 0.62,
                 "childRegions": [
                   {
-                    "childLgdId": 110,
-                    "childLgdCName": "Child Region",
-                    "childLgdTitle": "Child Region Title",
-                    "childBoundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[0.5,0],[0.5,0.5],[0,0.5],[0,0]]]}",
-                    "averageSchemeRegularity": 0.78,
-                    "readingSubmissionRate": 0.86,
-                    "averagePerformanceScore": 0.64
+                    "lgdId": 110,
+                    "departmentId": null,
+                    "parentLgdId": 101,
+                    "parentDepartmentId": null,
+                    "lgdLevel": 2,
+                    "schemeCount": 2,
+                    "title": "Child Region Title",
+                    "lgdCode": "C110"
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String TENANT_BOUNDARIES_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "tenantId": 10,
+                "stateCode": "MP",
+                "parentLgdLevel": 1,
+                "parentDepartmentLevel": null,
+                "childBoundaryCount": 2,
+                "childRegionCount": 1,
+                "parentBoundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}",
+                "childRegions": [
+                  {
+                    "lgdId": 110,
+                    "departmentId": null,
+                    "parentLgdId": 101,
+                    "parentDepartmentId": null,
+                    "lgdLevel": 2,
+                    "title": "Child Region Title",
+                    "lgdCode": "C110",
+                    "boundaryGeoJson": "{\\"type\\":\\"Polygon\\",\\"coordinates\\":[[[0,0],[0.5,0],[0.5,0.5],[0,0.5],[0,0]]]}"
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String TENANT_PERFORMANCE_SCORE_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "tenantId": 10,
+                "stateCode": "MP",
+                "parentLgdLevel": 1,
+                "parentDepartmentLevel": null,
+                "averagePerformanceScore": 0.623,
+                "childRegions": [
+                  {
+                    "lgdId": 110,
+                    "departmentId": null,
+                    "parentLgdId": 101,
+                    "parentDepartmentId": null,
+                    "lgdLevel": 2,
+                    "lgdCode": "C110",
+                    "averagePerformanceScore": 0.641
                   }
                 ]
               }
@@ -166,6 +216,190 @@ public final class SwaggerExamples {
               "data": {
                 "active_schemes_count": 5,
                 "inactive_schemes_count": 1
+              }
+            }
+            """;
+
+    public static final String CRITICAL_SCHEMES_COUNT_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "criticalSchemeCount": 3,
+                "list": false,
+                "page": null,
+                "limit": null,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A",
+                    "lastSuppliedDate": "2026-04-01"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B",
+                    "lastSuppliedDate": null
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String CRITICAL_SCHEMES_LIST_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "criticalSchemeCount": 3,
+                "list": true,
+                "page": 1,
+                "limit": 2,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A",
+                    "stateSchemeId": 5001,
+                    "centreSchemeId": 6001,
+                    "lastSuppliedDate": "2026-04-01"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B",
+                    "stateSchemeId": 5002,
+                    "centreSchemeId": 6002,
+                    "lastSuppliedDate": null
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String CRITICAL_SCHEMES_USER_COUNT_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "criticalSchemeCount": 2,
+                "list": false,
+                "page": null,
+                "limit": null,
+                "schemes": null
+              }
+            }
+            """;
+
+    public static final String CRITICAL_SCHEMES_USER_LIST_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "criticalSchemeCount": 2,
+                "list": true,
+                "page": 1,
+                "limit": 2,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A",
+                    "stateSchemeId": 5001,
+                    "centreSchemeId": 6001,
+                    "lastSuppliedDate": "2026-04-01"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B",
+                    "stateSchemeId": 5002,
+                    "centreSchemeId": 6002,
+                    "lastSuppliedDate": null
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String CONTINUOUS_SCHEMES_COUNT_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "continuousSchemeCount": 5,
+                "list": false,
+                "page": null,
+                "limit": null,
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B"
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String CONTINUOUS_SCHEMES_LIST_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "continuousSchemeCount": 2,
+                "list": true,
+                "page": 1,
+                "limit": 2,
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B"
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String CONTINUOUS_SCHEMES_USER_COUNT_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "continuousSchemeCount": 5,
+                "list": false,
+                "page": null,
+                "limit": null,
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "schemes": null
+              }
+            }
+            """;
+
+    public static final String CONTINUOUS_SCHEMES_USER_LIST_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "continuousSchemeCount": 2,
+                "list": true,
+                "page": 1,
+                "limit": 2,
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "schemes": [
+                  {
+                    "schemeId": 101,
+                    "schemeName": "Scheme A"
+                  },
+                  {
+                    "schemeId": 102,
+                    "schemeName": "Scheme B"
+                  }
+                ]
               }
             }
             """;
@@ -532,11 +766,74 @@ public final class SwaggerExamples {
             }
             """;
 
+    public static final String NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "nationalBoundary": {
+                  "type": "Polygon",
+                  "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                },
+                "lgdLevel2Boundaries": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001429,
+                    "tenantStatus": 1,
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "title": "District-1",
+                    "boundary": {
+                      "type": "Polygon",
+                      "coordinates": [[[78.1, 22.9], [78.2, 22.9], [78.2, 23.0], [78.1, 22.9]]]
+                    }
+                  }
+                ]
+              }
+            }
+            """;
+
+    public static final String NATIONAL_DASHBOARD_LEVEL2_METRICS_SUCCESS = """
+            {
+              "success": true,
+              "data": {
+                "startDate": "2026-01-01",
+                "endDate": "2026-01-31",
+                "daysInRange": 31,
+                "overallOutageReasonDistribution": {
+                  "power_failure": 12,
+                  "no_electricity": 4
+                },
+                "districts": [
+                  {
+                    "tenantId": 10,
+                    "lgdId": 23001429,
+                    "tenantStatus": 1,
+                    "stateCode": "MP",
+                    "stateTitle": "Madhya Pradesh",
+                    "districtTitle": "District-1",
+                    "schemeCount": 12,
+                    "totalHouseholdCount": 1000,
+                    "totalAchievedFhtcCount": 900,
+                    "totalPlannedFhtcCount": 950,
+                    "totalWaterSuppliedLiters": 500000,
+                    "avgWaterSupplyPerScheme": 12800.0,
+                    "supplyDaysInEfficientRange": 275,
+                    "totalSupplyDays": 275,
+                    "averageRegularity": 0.74,
+                    "totalSubmissionDays": 310,
+                    "readingSubmissionRate": 0.83
+                  }
+                ]
+              }
+            }
+            """;
+
     public static final String SCHEME_REGULARITY_PERIODIC_NATIONAL_SUCCESS = """
             {
               "success": true,
               "data": {
                 "schemeCount": 0,
+                "totalAchievedFhtcCount": 900,
                 "scale": "day",
                 "startDate": "2026-01-01",
                 "endDate": "2026-01-31",
@@ -546,6 +843,8 @@ public final class SwaggerExamples {
                     "periodStartDate": "2026-01-01",
                     "periodEndDate": "2026-01-01",
                     "schemeCount": 10,
+                    "totalSupplyDays": 275,
+                    "totalWaterQuantity": 500000,
                     "averageRegularity": 0.74
                   }
                 ]

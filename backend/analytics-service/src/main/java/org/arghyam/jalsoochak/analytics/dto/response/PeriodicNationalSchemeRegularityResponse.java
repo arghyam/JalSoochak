@@ -17,6 +17,7 @@ import java.util.List;
 public class PeriodicNationalSchemeRegularityResponse {
 
     private Integer schemeCount;
+    private Long totalAchievedFhtcCount;
     private String scale;
     private LocalDate startDate;
     private LocalDate endDate;
@@ -31,6 +32,7 @@ public class PeriodicNationalSchemeRegularityResponse {
     public static class PeriodicNationalSchemeRegularityPeriodMetric {
         private LocalDate periodStartDate;
         private LocalDate periodEndDate;
+        private Integer schemeCount;
         private Integer totalSupplyDays;
         private Long totalWaterQuantity;
         private BigDecimal averageRegularity;

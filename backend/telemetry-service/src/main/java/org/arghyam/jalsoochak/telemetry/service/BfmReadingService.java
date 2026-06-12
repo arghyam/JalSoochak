@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -21,6 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -37,6 +39,7 @@ public class BfmReadingService {
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
+    private final GlificOperatorContextService glificOperatorContextService;
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
                                                String schemaName,
@@ -58,8 +61,6 @@ public class BfmReadingService {
         if (!belongsToScheme) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
-        List<Long> analyticsUserIds = resolveAnalyticsUserIds(schemaName, request.getSchemeId(), operatorInRequest.id());
-
         FlowVisionResult ocrResult = null;
         BigDecimal finalReading = request.getReadingValue();
         BigDecimal confidenceLevel = null;
@@ -73,38 +74,28 @@ public class BfmReadingService {
             try {
                 ocrResult = flowVisionService.extractReading(request.getReadingUrl());
                 if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
-                    int retries = telemetryTenantRepository.countAnomaliesByTypeForToday(
-                            schemaName,
+                    String anomalyCorrelationId = buildImageAnomalyCorrelationId(
+                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
                             operatorInRequest.id(),
                             request.getSchemeId(),
-                            AnomalyConstants.TYPE_UNREADABLE_IMAGE
-                    ) + 1;
-                    telemetryTenantRepository.createTenantAnomalyRecord(
+                            request.getReadingUrl()
+                    );
+                    recordImageAnomalyOncePerDay(
                             schemaName,
+                            tenantId,
                             operatorInRequest.id(),
                             request.getSchemeId(),
                             AnomalyConstants.TYPE_UNREADABLE_IMAGE,
                             "Unreadable image. OCR could not extract a valid meter reading.",
-                            AnomalyConstants.STATUS_OPEN
+                            1,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0,
+                            anomalyCorrelationId
                     );
-                    for (Long recipientUserId : analyticsUserIds) {
-                        telemetryEventPublisher.publishAnomalyRecorded(
-                                tenantId,
-                                AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                                recipientUserId,
-                                request.getSchemeId(),
-                                null,
-                                null,
-                                null,
-                                retries,
-                                null,
-                                null,
-                                0,
-                                "Unreadable image. OCR could not extract a valid meter reading.",
-                                AnomalyConstants.STATUS_OPEN,
-                                null
-                        );
-                    }
                     return CreateReadingResponse.builder()
                             .success(false)
                             .message("Could not read meter value from image. Please retry with a clearer photo.")
@@ -116,38 +107,28 @@ public class BfmReadingService {
                 confidenceLevel = ocrResult.getQualityConfidence();
             } catch (Exception ex) {
                 log.error("FlowVision OCR failed for URL: {}", request.getReadingUrl(), ex);
-                int retries = telemetryTenantRepository.countAnomaliesByTypeForToday(
-                        schemaName,
+                String anomalyCorrelationId = buildImageAnomalyCorrelationId(
+                        AnomalyConstants.TYPE_UNREADABLE_IMAGE,
                         operatorInRequest.id(),
                         request.getSchemeId(),
-                        AnomalyConstants.TYPE_UNREADABLE_IMAGE
-                ) + 1;
-                telemetryTenantRepository.createTenantAnomalyRecord(
+                        request.getReadingUrl()
+                );
+                recordImageAnomalyOncePerDay(
                         schemaName,
+                        tenantId,
                         operatorInRequest.id(),
                         request.getSchemeId(),
                         AnomalyConstants.TYPE_UNREADABLE_IMAGE,
                         "Unreadable image. OCR failed during extraction.",
-                        AnomalyConstants.STATUS_OPEN
+                        1,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        anomalyCorrelationId
                 );
-                for (Long recipientUserId : analyticsUserIds) {
-                    telemetryEventPublisher.publishAnomalyRecorded(
-                            tenantId,
-                            AnomalyConstants.TYPE_UNREADABLE_IMAGE,
-                            recipientUserId,
-                            request.getSchemeId(),
-                            null,
-                            null,
-                            null,
-                            retries,
-                            null,
-                            null,
-                            0,
-                            "Unreadable image. OCR failed during extraction.",
-                            AnomalyConstants.STATUS_OPEN,
-                            null
-                    );
-                }
                 return CreateReadingResponse.builder()
                         .success(false)
                         .message("OCR failed. Please try again with a clearer image.")
@@ -172,6 +153,7 @@ public class BfmReadingService {
                 .map(FlowVisionResult::getAdjustedReading)
                 .orElse(finalReading);
         BigDecimal confirmedReading = request.getReadingValue() != null ? request.getReadingValue() : finalReading;
+        BigDecimal effectiveConfirmedReading = confirmedReading;
 
         Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt = telemetryTenantRepository
                 .findLatestConfirmedReadingSnapshot(schemaName, request.getSchemeId(), null);
@@ -182,54 +164,46 @@ public class BfmReadingService {
                 ? latestSnapshotOpt
                 : latestSnapshotOpt;
 
-        if (!isMeterReplaced
-                && validationBaselineOpt.isPresent()
-                && confirmedReading != null
-                && confirmedReading.compareTo(validationBaselineOpt.get().confirmedReading()) < 0) {
-            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.get();
-            String reason = "Submitted reading is less than previous confirmed reading.";
-            telemetryTenantRepository.createTenantAnomalyRecord(
-                    schemaName,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
-                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN
-            );
-            List<Long> recipientUserIds = resolveSdoUserIds(schemaName, request.getSchemeId());
-            if (recipientUserIds.isEmpty()) {
-                log.warn("No SDO mapped for schemeId={} in schema={}; falling back to analytics recipients for anomaly type={}",
-                        request.getSchemeId(), schemaName, AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS);
-                recipientUserIds = analyticsUserIds;
-            }
-            for (Long recipientUserId : recipientUserIds) {
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
-                        recipientUserId,
-                        request.getSchemeId(),
-                        extractedReading,
-                        confidenceLevel,
-                        confirmedReading,
-                        0,
-                        previousSnapshot.confirmedReading(),
-                        previousSnapshot.createdAt(),
-                        0,
-                        reason,
-                        AnomalyConstants.STATUS_OPEN,
-                        correlationId
-                );
-            }
-            return CreateReadingResponse.builder()
-                    .success(false)
-                    .message("Reading cannot be less than previous confirmed reading. Submitted reading: "
-                            + toPlain(confirmedReading) + ". Previous reading: " + toPlain(previousSnapshot.confirmedReading()) + ".")
-                    .correlationId(correlationId)
-                    .meterReading(confirmedReading)
-                    .qualityStatus("REJECTED")
-                    .lastConfirmedReading(previousSnapshot.confirmedReading())
-                    .build();
-        }
+//        if (!isMeterReplaced
+//                && validationBaselineOpt.isPresent()
+//                && confirmedReading != null
+//                && confirmedReading.compareTo(validationBaselineOpt.get().confirmedReading()) < 0) {
+//            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.get();
+//            String reason = "Submitted reading is less than previous confirmed reading.";
+//            telemetryTenantRepository.createTenantAnomalyRecord(
+//                    schemaName,
+//                    operatorInRequest.id(),
+//                    request.getSchemeId(),
+//                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN
+//            );
+//            telemetryEventPublisher.publishAnomalyRecorded(
+//                    tenantId,
+//                    AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS,
+//                    operatorInRequest.id(),
+//                    request.getSchemeId(),
+//                    extractedReading,
+//                    confidenceLevel,
+//                    confirmedReading,
+//                    0,
+//                    previousSnapshot.confirmedReading(),
+//                    previousSnapshot.createdAt(),
+//                    0,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN,
+//                    correlationId
+//            );
+//            return CreateReadingResponse.builder()
+//                    .success(false)
+//                    .message("Reading rejected because it is below the last confirmed reading. Submitted: "
+//                            + toPlain(confirmedReading) + ". Last confirmed: " + toPlain(previousSnapshot.confirmedReading()) + ".")
+//                    .correlationId(correlationId)
+//                    .meterReading(confirmedReading)
+//                    .qualityStatus("REJECTED")
+//                    .lastConfirmedReading(previousSnapshot.confirmedReading())
+//                    .build();
+//        }
 
         Optional<WaterSupplyThreshold> thresholdOpt = !isMeterReplaced ? loadWaterSupplyThreshold(tenantId) : Optional.empty();
         Optional<BigDecimal> waterNormOpt = !isMeterReplaced ? loadWaterNorm(tenantId) : Optional.empty();
@@ -241,79 +215,68 @@ public class BfmReadingService {
                     .divide(BigDecimal.valueOf(100.0d), 6, RoundingMode.HALF_UP);
         }
 
-        if (!isMeterReplaced && confirmedReading != null && minAllowed != null
-                && confirmedReading.compareTo(minAllowed) < 0) {
-            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.orElse(null);
-            BigDecimal previousConfirmed = previousSnapshot != null ? previousSnapshot.confirmedReading() : null;
-            LocalDateTime previousConfirmedAt = previousSnapshot != null ? previousSnapshot.createdAt() : null;
-            String reason = "Submitted reading is below allowed minimum (" + toPlain(minAllowed) + ").";
-            telemetryTenantRepository.createTenantAnomalyRecord(
-                    schemaName,
-                    operatorInRequest.id(),
-                    request.getSchemeId(),
-                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN
-            );
-            for (Long recipientUserId : analyticsUserIds) {
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
-                        recipientUserId,
-                        request.getSchemeId(),
-                        extractedReading,
-                        confidenceLevel,
-                        confirmedReading,
-                        0,
-                        previousConfirmed,
-                        previousConfirmedAt,
-                        0,
-                        reason,
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
-            }
-            return CreateReadingResponse.builder()
-                    .success(false)
-                    .message("Reading rejected because it is below the allowed minimum. Submitted: "
-                            + toPlain(confirmedReading) + ". Minimum allowed: " + toPlain(minAllowed) + ".")
-                    .correlationId(correlationId)
-                    .meterReading(confirmedReading)
-                    .qualityStatus("REJECTED")
-                    .lastConfirmedReading(previousConfirmed)
-                    .build();
-        }
+//        if (!isMeterReplaced && effectiveConfirmedReading != null && minAllowed != null
+//                && effectiveConfirmedReading.compareTo(minAllowed) < 0) {
+//            TelemetryConfirmedReadingSnapshot previousSnapshot = validationBaselineOpt.orElse(null);
+//            BigDecimal previousConfirmed = previousSnapshot != null ? previousSnapshot.confirmedReading() : null;
+//            LocalDateTime previousConfirmedAt = previousSnapshot != null ? previousSnapshot.createdAt() : null;
+//            String reason = "Submitted reading is below allowed minimum (" + toPlain(minAllowed) + ").";
+//            telemetryTenantRepository.createTenantAnomalyRecord(
+//                    schemaName,
+//                    operatorInRequest.id(),
+//                    request.getSchemeId(),
+//                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN
+//            );
+//            telemetryEventPublisher.publishAnomalyRecorded(
+//                    tenantId,
+//                    AnomalyConstants.TYPE_LOW_WATER_SUPPLY,
+//                    operatorInRequest.id(),
+//                    request.getSchemeId(),
+//                    extractedReading,
+//                    confidenceLevel,
+//                    effectiveConfirmedReading,
+//                    0,
+//                    previousConfirmed,
+//                    previousConfirmedAt,
+//                    0,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN,
+//                    null
+//            );
+//            return CreateReadingResponse.builder()
+//                    .success(false)
+//                    .message("Reading rejected because it is below the allowed minimum. Submitted: "
+//                            + toPlain(effectiveConfirmedReading) + ". Minimum allowed: " + toPlain(minAllowed) + ".")
+//                    .correlationId(correlationId)
+//                    .meterReading(effectiveConfirmedReading)
+//                    .qualityStatus("REJECTED")
+//                    .lastConfirmedReading(previousConfirmed)
+//                    .build();
+//        }
 
         if (latestSnapshotOpt.isPresent() && extractedReading != null
                 && extractedReading.compareTo(latestSnapshotOpt.get().confirmedReading()) == 0
                 && request.getReadingUrl() != null && !request.getReadingUrl().isBlank()) {
             TelemetryConfirmedReadingSnapshot previousSnapshot = latestSnapshotOpt.get();
-            telemetryTenantRepository.createTenantAnomalyRecord(
+            String anomalyCorrelationId = UUID.randomUUID().toString();
+            recordImageAnomaly(
                     schemaName,
+                    tenantId,
                     operatorInRequest.id(),
                     request.getSchemeId(),
                     AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
                     "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
-                    AnomalyConstants.STATUS_OPEN
+                    0,
+                    extractedReading,
+                    confidenceLevel,
+                    effectiveConfirmedReading,
+                    previousSnapshot.confirmedReading(),
+                    previousSnapshot.createdAt(),
+                    0,
+                    anomalyCorrelationId
             );
-            for (Long recipientUserId : analyticsUserIds) {
-                telemetryEventPublisher.publishAnomalyRecorded(
-                        tenantId,
-                        AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
-                        recipientUserId,
-                        request.getSchemeId(),
-                        extractedReading,
-                        confidenceLevel,
-                        confirmedReading,
-                        0,
-                        previousSnapshot.confirmedReading(),
-                        previousSnapshot.createdAt(),
-                        0,
-                        "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
-                        AnomalyConstants.STATUS_OPEN,
-                        null
-                );
-            }
             return CreateReadingResponse.builder()
                     .success(false)
                     .message("Duplicate image submission detected. The extracted reading matches the previous reading.")
@@ -339,7 +302,7 @@ public class BfmReadingService {
                     readingId,
                     readingAt,
                     extractedReading,
-                    confirmedReading,
+                    effectiveConfirmedReading,
                     correlationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
@@ -352,7 +315,7 @@ public class BfmReadingService {
                     operatorInRequest.id(),
                     readingAt,
                     extractedReading,
-                    confirmedReading,
+                    effectiveConfirmedReading,
                     correlationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason()
@@ -373,7 +336,7 @@ public class BfmReadingService {
                 request.getSchemeId(),
                 operatorInRequest.id(),
                 extractedReading,
-                confirmedReading,
+                effectiveConfirmedReading,
                 confidenceLevel,
                 request.getReadingUrl(),
                 readingAt,
@@ -390,6 +353,10 @@ public class BfmReadingService {
                 finalMessage = "Reading captured successfully. Extracted reading: " + readingText;
             } else {
                 finalMessage = "Reading captured successfully";
+            }
+            if (lastConfirmedReading != null) {
+                finalMessage = finalMessage + " Your last confirmed reading was "
+                        + lastConfirmedReading.stripTrailingZeros().toPlainString() + ".";
             }
         } else if (!hasPositiveReading) {
             finalMessage = "Invalid reading value";
@@ -441,6 +408,53 @@ public class BfmReadingService {
                 .message("Reading updated successfully")
                 .correlationId(reading.correlationId())
                 .meterReading(confirmedReading)
+                .qualityStatus("CONFIRMED")
+                .build();
+    }
+
+    @Transactional
+    public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber must be provided");
+        }
+
+        var operatorWithSchema = glificOperatorContextService.resolveOperatorWithSchema(phoneNumber);
+        String schemaName = operatorWithSchema.schemaName();
+        TelemetryOperator operator = operatorWithSchema.operator();
+
+        TelemetryLatestFlowReadingRecord latestReading = telemetryTenantRepository
+                .findLatestFlowReadingByOperator(schemaName, operator.id())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No reading found for operator"));
+
+        telemetryTenantRepository.updateConfirmedReading(
+                schemaName,
+                latestReading.id(),
+                BigDecimal.ZERO,
+                operator.id()
+        );
+
+        LocalDateTime readingAt = latestReading.readingAt() != null ? latestReading.readingAt() : LocalDateTime.now();
+        LocalDate readingDate = latestReading.readingDate() != null ? latestReading.readingDate() : readingAt.toLocalDate();
+        telemetryEventPublisher.publishMeterReadingRecorded(
+                operator.tenantId(),
+                latestReading.schemeId(),
+                operator.id(),
+                latestReading.extractedReading(),
+                BigDecimal.ZERO,
+                null,
+                latestReading.imageUrl(),
+                readingAt,
+                null,
+                readingDate,
+                1,
+                0
+        );
+
+        return CreateReadingResponse.builder()
+                .success(true)
+                .message("Latest confirmed reading reset to 0")
+                .correlationId(latestReading.correlationId())
+                .meterReading(BigDecimal.ZERO)
                 .qualityStatus("CONFIRMED")
                 .build();
     }
@@ -515,28 +529,132 @@ public class BfmReadingService {
         }
     }
 
-    private List<Long> resolveAnalyticsUserIds(String schemaName, Long schemeId, Long fallbackUserId) {
-        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
-        if (subDivisionalOfficerIds != null && !subDivisionalOfficerIds.isEmpty()) {
-            return subDivisionalOfficerIds;
-        }
-        List<Long> sectionOfficerIds = telemetryTenantRepository.findSectionOfficerUserIdsForScheme(schemaName, schemeId);
-        if (sectionOfficerIds != null && !sectionOfficerIds.isEmpty()) {
-            return sectionOfficerIds;
-        }
-        return List.of(fallbackUserId);
-    }
-
-    private List<Long> resolveSdoUserIds(String schemaName, Long schemeId) {
-        List<Long> subDivisionalOfficerIds = telemetryTenantRepository.findSubDivisionalOfficerUserIdsForScheme(schemaName, schemeId);
-        return subDivisionalOfficerIds == null ? List.of() : subDivisionalOfficerIds;
-    }
-
     private static String toPlain(BigDecimal value) {
         if (value == null) {
             return "";
         }
         return value.stripTrailingZeros().toPlainString();
+    }
+
+    private String buildImageAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, String readingUrl) {
+        String normalizedUrl = readingUrl == null ? "" : readingUrl.trim();
+        String key = anomalyType + ":" + userId + ":" + schemeId + ":" + normalizedUrl;
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
+    }
+
+    private void recordImageAnomalyOncePerDay(String schemaName,
+                                              Integer tenantId,
+                                              Long userId,
+                                              Long schemeId,
+                                              int anomalyType,
+                                              String reason,
+                                              int retries,
+                                              BigDecimal aiReading,
+                                              BigDecimal aiConfidencePercentage,
+                                              BigDecimal overriddenReading,
+                                              BigDecimal previousReading,
+                                              LocalDateTime previousReadingDate,
+                                              Integer consecutiveDaysMissed,
+                                              String correlationId) {
+        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
+                schemaName,
+                userId,
+                schemeId,
+                anomalyType
+        );
+        if (existingCount > 0) {
+            telemetryTenantRepository.touchLatestAnomalyByTypeForToday(
+                    schemaName,
+                    userId,
+                    schemeId,
+                    anomalyType
+            );
+            int effectiveRetries = Math.max(retries, existingCount + 1);
+            telemetryEventPublisher.publishAnomalyRecorded(
+                    tenantId,
+                    anomalyType,
+                    userId,
+                    schemeId,
+                    aiReading,
+                    aiConfidencePercentage,
+                    overriddenReading,
+                    effectiveRetries,
+                    previousReading,
+                    previousReadingDate,
+                    consecutiveDaysMissed,
+                    reason,
+                    AnomalyConstants.STATUS_OPEN,
+                    correlationId
+            );
+            log.info("Skipping duplicate image anomaly publish for userId={} schemeId={} anomalyType={} correlationId={}",
+                    userId, schemeId, anomalyType, correlationId);
+            return;
+        }
+
+        telemetryTenantRepository.createTenantAnomalyRecord(
+                schemaName,
+                userId,
+                schemeId,
+                anomalyType,
+                reason,
+                AnomalyConstants.STATUS_OPEN
+        );
+        telemetryEventPublisher.publishAnomalyRecorded(
+                tenantId,
+                anomalyType,
+                userId,
+                schemeId,
+                aiReading,
+                aiConfidencePercentage,
+                overriddenReading,
+                retries,
+                previousReading,
+                previousReadingDate,
+                consecutiveDaysMissed,
+                reason,
+                AnomalyConstants.STATUS_OPEN,
+                correlationId
+        );
+    }
+
+    private void recordImageAnomaly(String schemaName,
+                                    Integer tenantId,
+                                    Long userId,
+                                    Long schemeId,
+                                    int anomalyType,
+                                    String reason,
+                                    int retries,
+                                    BigDecimal aiReading,
+                                    BigDecimal aiConfidencePercentage,
+                                    BigDecimal overriddenReading,
+                                    BigDecimal previousReading,
+                                    LocalDateTime previousReadingDate,
+                                    Integer consecutiveDaysMissed,
+                                    String correlationId) {
+        telemetryTenantRepository.createTenantAnomalyRecord(
+                schemaName,
+                userId,
+                schemeId,
+                anomalyType,
+                reason,
+                AnomalyConstants.STATUS_OPEN
+        );
+        telemetryEventPublisher.publishAnomalyRecorded(
+                tenantId,
+                anomalyType,
+                userId,
+                schemeId,
+                aiReading,
+                aiConfidencePercentage,
+                overriddenReading,
+                retries,
+                previousReading,
+                previousReadingDate,
+                consecutiveDaysMissed,
+                reason,
+                AnomalyConstants.STATUS_OPEN,
+                correlationId
+        );
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {

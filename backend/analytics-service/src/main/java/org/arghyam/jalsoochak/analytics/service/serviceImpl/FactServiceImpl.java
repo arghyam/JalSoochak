@@ -108,6 +108,7 @@ public class FactServiceImpl implements FactService {
         LocalDate date = parseDate(event.getDate());
         ensureDateExists(date);
         LocalDateTime now = LocalDateTime.now();
+        int normalizedWaterQuantity = Math.max(0, event.getWaterQuantity() != null ? event.getWaterQuantity() : 0);
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
                         event.getTenantId(),
@@ -116,7 +117,7 @@ public class FactServiceImpl implements FactService {
                 )
                 .map(existing -> {
                     existing.setUserId(event.getUserId());
-                    existing.setWaterQuantity(event.getWaterQuantity());
+                    existing.setWaterQuantity(normalizedWaterQuantity);
                     existing.setSubmissionStatus(event.getSubmissionStatus());
                     existing.setOutageReason(event.getOutageReason());
                     existing.setNonSubmissionReason(event.getNonSubmissionReason());
@@ -127,7 +128,7 @@ public class FactServiceImpl implements FactService {
                         .tenantId(event.getTenantId())
                         .schemeId(event.getSchemeId())
                         .userId(event.getUserId())
-                        .waterQuantity(event.getWaterQuantity())
+                        .waterQuantity(normalizedWaterQuantity)
                         .submissionStatus(event.getSubmissionStatus())
                         .outageReason(event.getOutageReason())
                         .nonSubmissionReason(event.getNonSubmissionReason())
@@ -271,7 +272,7 @@ public class FactServiceImpl implements FactService {
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(0);
 
-        int waterQuantity = currentReading - (previousReading != null ? previousReading : 0);
+        int waterQuantity = Math.max(0, currentReading - (previousReading != null ? previousReading : 0));
         LocalDateTime now = LocalDateTime.now();
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
@@ -440,6 +441,12 @@ public class FactServiceImpl implements FactService {
             log.warn("Water anomaly missing correlationId, derived correlationId={} (uuid={})", correlationId, uuid);
         }
 
+        if (anomalyRepository.existsByUuid(uuid)) {
+            anomalyRepository.touchByUuid(uuid, now);
+            log.info("Touched anomaly_table row for duplicate anomaly uuid={}", uuid);
+            return;
+        }
+
         Anomaly anomaly = Anomaly.builder()
                 .uuid(uuid)
                 .type(intCodeToVarchar(event.getType()))
@@ -465,7 +472,9 @@ public class FactServiceImpl implements FactService {
             log.info("Ingested anomaly_table row for scheme={} tenant={} uuid={}",
                     event.getSchemeId(), event.getTenantId(), event.getUuid());
         } catch (DataIntegrityViolationException e) {
-            log.debug("Skipping duplicate anomaly uuid={} (unique constraint)", event.getUuid());
+            anomalyRepository.touchByUuid(uuid, now);
+            log.debug("Touched duplicate anomaly uuid={} (unique constraint)", event.getUuid());
+            return;
         }
 
         if (isWaterAnomaly(event.getType())) {

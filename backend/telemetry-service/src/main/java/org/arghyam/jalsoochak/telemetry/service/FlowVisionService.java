@@ -2,12 +2,15 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -15,13 +18,15 @@ import java.util.UUID;
 @Slf4j
 public class FlowVisionService {
 
-    private static final String FLOWVISION_URL =
-            "https://jalsoochak.beehyv.com/flowvision/v1/extract-reading";
-
     private final RestTemplate restTemplate;
+    private final String flowVisionUrl;
 
-    public FlowVisionService(RestTemplate restTemplate) {
+    public FlowVisionService(
+            RestTemplate restTemplate,
+            @Value("${flowvision.url}") String flowVisionUrl
+    ) {
         this.restTemplate = restTemplate;
+        this.flowVisionUrl = flowVisionUrl;
     }
 
     public FlowVisionResult extractReading(String readingUrl) {
@@ -38,7 +43,7 @@ public class FlowVisionService {
                     new HttpEntity<>(payload, headers);
 
             ResponseEntity<Map> responseEntity = restTemplate.exchange(
-                    FLOWVISION_URL,
+                    flowVisionUrl,
                     HttpMethod.POST,
                     requestEntity,
                     Map.class
@@ -51,7 +56,6 @@ public class FlowVisionService {
             }
 
             Map<String, Object> responseBody = responseEntity.getBody();
-            log.info("Raw FlowVision response: {}", responseBody);
 
             if (responseBody == null || !responseBody.containsKey("result")) {
                 log.error("FlowVision response missing 'result'");
@@ -74,12 +78,7 @@ public class FlowVisionService {
             Map<String, Object> dataMap =
                     (Map<String, Object>) resultMap.get("data");
 
-            BigDecimal adjustedReading = null;
-            Object meterReadingObj = dataMap.get("meterReading");
-
-            if (meterReadingObj != null) {
-                adjustedReading = new BigDecimal(meterReadingObj.toString());
-            }
+            BigDecimal adjustedReading = parseMeterReading(dataMap);
 
             String qualityStatus =
                     dataMap.getOrDefault("qualityStatus", "unknown").toString();
@@ -108,6 +107,30 @@ public class FlowVisionService {
             log.error("FlowVision OCR call failed for image {}", readingUrl, ex);
             return null;
         }
+    }
+
+    private BigDecimal parseMeterReading(Map<String, Object> dataMap) {
+        Object meterReadingObj = dataMap.get("meterReading");
+        if (meterReadingObj == null) {
+            return null;
+        }
+
+        String meterReading = meterReadingObj.toString().trim();
+        if (meterReading.isEmpty()) {
+            return null;
+        }
+
+        BigDecimal parsedReading = new BigDecimal(meterReading);
+        Object lastDigitColorObj = dataMap.get("lastDigitColor");
+        String lastDigitColor = lastDigitColorObj == null
+                ? ""
+                : lastDigitColorObj.toString().trim().toLowerCase(Locale.ROOT);
+
+        if (!"red".equals(lastDigitColor)) {
+            return parsedReading;
+        }
+
+        return parsedReading.movePointLeft(1).setScale(1, RoundingMode.UNNECESSARY);
     }
 
 }

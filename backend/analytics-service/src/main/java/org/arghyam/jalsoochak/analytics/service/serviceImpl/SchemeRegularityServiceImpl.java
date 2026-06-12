@@ -4,6 +4,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResp
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2BoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicOutageReasonSchemeCountResponse;
@@ -14,6 +16,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.RegionWiseWaterQuantityResp
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserNonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.UserOutageReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SubmissionStatusSummaryResponse;
@@ -29,8 +33,10 @@ import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -41,6 +47,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -61,6 +68,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private static final String READING_SUBMISSION_RATE_CACHE_PREFIX = ":reading_submission_rate";
     private static final String NATIONAL_DASHBOARD_CACHE_PREFIX = ":national:dashboard";
     private static final String NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY = ":national:dashboard:boundaries:v1";
+    private static final String NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_CACHE_KEY = ":national:dashboard:boundaries:level2:v1";
+    private static final String NATIONAL_DASHBOARD_LEVEL2_METRICS_CACHE_PREFIX = ":national:dashboard:metrics:level2";
     private static final String REGION_WISE_WATER_QUANTITY_CACHE_PREFIX = ":water_quantity:region_wise";
     private static final String PERIODIC_WATER_QUANTITY_CACHE_PREFIX = ":water_quantity:periodic";
     private static final String PERIODIC_SCHEME_REGULARITY_CACHE_PREFIX = ":scheme_regularity:periodic";
@@ -74,6 +83,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private static final int DEFAULT_TOP_SCHEME_COUNT = 10;
     private static final int DEFAULT_PAGE_COUNT = 10;
     private static final String DEBUG_LOG_PATH = "/home/beehyv/Desktop/Codes/jalSoochak/JalSoochak_New/.cursor/debug.log";
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+
+    @Value("${analytics.scheduler.scheme-status.critical-after-days:15}")
+    private int criticalAfterDays;
 
     private final SchemeRegularityRepository schemeRegularityRepository;
     private final DimTenantRepository dimTenantRepository;
@@ -99,7 +112,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":tenant:" + tenantId
                 + ":lgd:" + parentLgdId
                 + ":start:" + startDate
-                + ":end:" + endDate;
+                + ":end:" + endDate
+                + ":v2";
         AverageSchemeRegularityResponse cached = readFromCache(cacheKey, AverageSchemeRegularityResponse.class);
         if (cached != null) {
             return cached;
@@ -242,7 +256,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":tenant:" + tenantId
                 + ":department:" + parentDepartmentId
                 + ":start:" + startDate
-                + ":end:" + endDate;
+                + ":end:" + endDate
+                + ":v2";
         AverageSchemeRegularityResponse cached = readFromCache(cacheKey, AverageSchemeRegularityResponse.class);
         if (cached != null) {
             return cached;
@@ -291,7 +306,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":lgd:" + parentLgdId
                 + ":scope:child"
                 + ":start:" + startDate
-                + ":end:" + endDate;
+                + ":end:" + endDate
+                + ":v2";
         AverageSchemeRegularityResponse cached = readFromCache(cacheKey, AverageSchemeRegularityResponse.class);
         if (cached != null) {
             return cached;
@@ -366,7 +382,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":department:" + parentDepartmentId
                 + ":scope:child"
                 + ":start:" + startDate
-                + ":end:" + endDate;
+                + ":end:" + endDate
+                + ":v2";
         AverageSchemeRegularityResponse cached = readFromCache(cacheKey, AverageSchemeRegularityResponse.class);
         if (cached != null) {
             return cached;
@@ -656,7 +673,24 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
-        return schemeRegularityRepository.getChildAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate);
+        String cacheKey = ":performance_score:child:lgd:"
+                + parentLgdId
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v1";
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> cached = readFromCache(
+                cacheKey,
+                new TypeReference<>() {
+                });
+        if (cached != null) {
+            return cached;
+        }
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> response =
+                schemeRegularityRepository.getChildAveragePerformanceScoreByLgd(parentLgdId, startDate, endDate);
+        writeToCache(cacheKey, response);
+        return response;
     }
 
     @Override
@@ -664,8 +698,25 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
-        return schemeRegularityRepository.getChildAveragePerformanceScoreByDepartment(
-                parentDepartmentId, startDate, endDate);
+        String cacheKey = ":performance_score:child:department:"
+                + parentDepartmentId
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v1";
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> cached = readFromCache(
+                cacheKey,
+                new TypeReference<>() {
+                });
+        if (cached != null) {
+            return cached;
+        }
+
+        List<SchemeRegularityRepository.ChildRegionPerformanceScore> response =
+                schemeRegularityRepository.getChildAveragePerformanceScoreByDepartment(
+                        parentDepartmentId, startDate, endDate);
+        writeToCache(cacheKey, response);
+        return response;
     }
 
     @Override
@@ -822,11 +873,135 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         return buildAndCacheNationalDashboardBoundaries();
     }
 
+    @Override
+    public NationalDashboardLevel2BoundaryResponse getNationalDashboardLevel2BoundariesForApi() {
+        NationalDashboardLevel2BoundaryResponse cached =
+                readFromCache(NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_CACHE_KEY, NationalDashboardLevel2BoundaryResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+        return buildAndCacheNationalDashboardLevel2Boundaries();
+    }
+
+    @Override
+    public NationalDashboardLevel2MetricsResponse getNationalDashboardLevel2MetricsForApi(
+            LocalDate startDate, LocalDate endDate) {
+        validateDateRange(startDate, endDate);
+
+        String cacheKey = NATIONAL_DASHBOARD_LEVEL2_METRICS_CACHE_PREFIX
+                + ":start:" + startDate
+                + ":end:" + endDate
+                + ":v1";
+        NationalDashboardLevel2MetricsResponse cached =
+                readFromCache(cacheKey, NationalDashboardLevel2MetricsResponse.class);
+        if (cached != null) {
+            return cached;
+        }
+
+        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+
+        List<SchemeRegularityRepository.Level2WaterSupplyMetrics> quantityRows =
+                schemeRegularityRepository.getLgdLevel2WiseWaterSupplyMetricsForNation(startDate, endDate);
+        List<SchemeRegularityRepository.Level2SupplyDaysInEfficientRange> efficientRangeRows =
+                schemeRegularityRepository.getLgdLevel2WiseSupplyDaysInEfficientRangeForNation(startDate, endDate);
+        List<SchemeRegularityRepository.Level2RegularityMetrics> regularityRows =
+                schemeRegularityRepository.getLgdLevel2WiseRegularityMetricsForNation(startDate, endDate);
+        List<SchemeRegularityRepository.Level2ReadingSubmissionMetrics> submissionRows =
+                schemeRegularityRepository.getLgdLevel2WiseReadingSubmissionMetricsForNation(startDate, endDate);
+
+        List<SchemeRegularityRepository.OutageReasonSchemeCount> outageRows =
+                schemeRegularityRepository.getOverallOutageReasonSchemeCount(startDate, endDate);
+        Map<String, Integer> overallOutageReasonDistribution = buildReasonCountMap(outageRows);
+
+        record Key(Integer tenantId, Integer lgdId) {}
+
+        Map<Key, Long> supplyDaysInEfficientRangeByKey = efficientRangeRows.stream()
+                .filter(r -> r.tenantId() != null && r.lgdId() != null)
+                .collect(Collectors.toMap(
+                        r -> new Key(r.tenantId(), r.lgdId()),
+                        r -> r.supplyDaysInEfficientRange() != null ? r.supplyDaysInEfficientRange() : 0L,
+                        (a, b) -> a,
+                        LinkedHashMap::new));
+
+        Map<Key, SchemeRegularityRepository.Level2RegularityMetrics> regularityByKey = regularityRows.stream()
+                .filter(r -> r.tenantId() != null && r.lgdId() != null)
+                .collect(Collectors.toMap(
+                        r -> new Key(r.tenantId(), r.lgdId()),
+                        Function.identity(),
+                        (a, b) -> a,
+                        LinkedHashMap::new));
+
+        Map<Key, SchemeRegularityRepository.Level2ReadingSubmissionMetrics> submissionByKey = submissionRows.stream()
+                .filter(r -> r.tenantId() != null && r.lgdId() != null)
+                .collect(Collectors.toMap(
+                        r -> new Key(r.tenantId(), r.lgdId()),
+                        Function.identity(),
+                        (a, b) -> a,
+                        LinkedHashMap::new));
+
+        List<NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow> districts = quantityRows.stream()
+                .filter(r -> r.tenantId() != null && r.lgdId() != null)
+                .map(row -> {
+                    Key key = new Key(row.tenantId(), row.lgdId());
+                    SchemeRegularityRepository.Level2RegularityMetrics reg = regularityByKey.get(key);
+                    SchemeRegularityRepository.Level2ReadingSubmissionMetrics sub = submissionByKey.get(key);
+
+                    Integer schemeCount = row.schemeCount();
+                    Integer totalSupplyDays = reg != null ? reg.totalSupplyDays() : 0;
+                    Integer totalSubmissionDays = sub != null ? sub.totalSubmissionDays() : 0;
+
+                    BigDecimal averageRegularity = BigDecimal.ZERO;
+                    if (schemeCount != null && schemeCount > 0 && daysInRange > 0) {
+                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
+                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
+                    }
+
+                    BigDecimal readingSubmissionRate = BigDecimal.ZERO;
+                    if (schemeCount != null && schemeCount > 0 && daysInRange > 0) {
+                        readingSubmissionRate = BigDecimal.valueOf(totalSubmissionDays)
+                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
+                    }
+
+                    return NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow.builder()
+                            .tenantId(row.tenantId())
+                            .lgdId(row.lgdId())
+                            .tenantStatus(row.tenantStatus())
+                            .stateCode(row.stateCode())
+                            .stateTitle(row.stateTitle())
+                            .districtTitle(row.districtTitle())
+                            .schemeCount(schemeCount)
+                            .totalHouseholdCount(row.totalHouseholdCount())
+                            .totalAchievedFhtcCount(row.totalAchievedFhtcCount())
+                            .totalPlannedFhtcCount(row.totalPlannedFhtcCount())
+                            .totalWaterSuppliedLiters(row.totalWaterSuppliedLiters())
+                            .avgWaterSupplyPerScheme(row.avgWaterSupplyPerScheme())
+                            .supplyDaysInEfficientRange(
+                                    supplyDaysInEfficientRangeByKey.getOrDefault(key, 0L))
+                            .totalSupplyDays(totalSupplyDays)
+                            .averageRegularity(averageRegularity)
+                            .totalSubmissionDays(totalSubmissionDays)
+                            .readingSubmissionRate(readingSubmissionRate)
+                            .build();
+                })
+                .toList();
+
+        NationalDashboardLevel2MetricsResponse response = NationalDashboardLevel2MetricsResponse.builder()
+                .startDate(startDate)
+                .endDate(endDate)
+                .daysInRange(daysInRange)
+                .overallOutageReasonDistribution(overallOutageReasonDistribution)
+                .districts(districts)
+                .build();
+
+        writeToCache(cacheKey, response);
+        return response;
+    }
+
     private String buildNationalDashboardCacheKey(LocalDate startDate, LocalDate endDate) {
         return NATIONAL_DASHBOARD_CACHE_PREFIX
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v4";
+                + ":v5";
     }
 
     private NationalDashboardResponse buildAndCacheNationalDashboard(
@@ -954,6 +1129,30 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .stateWiseBoundaries(stateWiseBoundaries)
                 .build();
         writeToCache(NATIONAL_DASHBOARD_BOUNDARY_CACHE_KEY, response);
+        return response;
+    }
+
+    private NationalDashboardLevel2BoundaryResponse buildAndCacheNationalDashboardLevel2Boundaries() {
+        JsonNode nationalBoundary = parseBoundaryGeoJson(schemeRegularityRepository.getNationalBoundaryGeoJson());
+
+        List<NationalDashboardLevel2BoundaryResponse.LgdLevel2Boundary> lgdLevel2Boundaries =
+                schemeRegularityRepository.getNationalDashboardLevel2LgdBoundaries().stream()
+                        .map(row -> NationalDashboardLevel2BoundaryResponse.LgdLevel2Boundary.builder()
+                                .tenantId(row.tenantId())
+                                .lgdId(row.lgdId())
+                                .tenantStatus(row.tenantStatus())
+                                .stateCode(row.stateCode())
+                                .stateTitle(row.stateTitle())
+                                .title(row.title())
+                                .boundary(parseBoundaryGeoJson(row.boundaryGeoJson()))
+                                .build())
+                        .toList();
+
+        NationalDashboardLevel2BoundaryResponse response = NationalDashboardLevel2BoundaryResponse.builder()
+                .nationalBoundary(nationalBoundary)
+                .lgdLevel2Boundaries(lgdLevel2Boundaries)
+                .build();
+        writeToCache(NATIONAL_DASHBOARD_LEVEL2_BOUNDARY_CACHE_KEY, response);
         return response;
     }
 
@@ -1168,7 +1367,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":parent_lgd:" + parentLgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v5";
+                + ":v6";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1221,7 +1420,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":parent_department:" + parentDepartmentId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v3";
+                + ":v4";
         RegionWiseWaterQuantityResponse cached = readFromCache(cacheKey, RegionWiseWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
@@ -1411,7 +1610,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":scale:" + scale.name().toLowerCase()
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v2";
     }
 
     @Override
@@ -1918,6 +2117,340 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     }
 
     @Override
+    public CriticalSchemesResponse getCriticalSchemesByLgd(
+            Integer tenantId, Integer lgdId, boolean list, Integer page, Integer limit) {
+        validateTenantInput(tenantId);
+        validateLgdInput(lgdId);
+
+        int sanitizedDays = Math.max(0, criticalAfterDays);
+        LocalDate cutoffDate = LocalDate.now(IST_ZONE).minusDays(sanitizedDays);
+
+        long criticalCount = schemeRegularityRepository.getCriticalSchemeCountByLgd(tenantId, lgdId, cutoffDate);
+        if (!list) {
+            return CriticalSchemesResponse.builder()
+                    .criticalSchemeCount(criticalCount)
+                    .list(false)
+                    .page(null)
+                    .limit(null)
+                    .schemes(null)
+                    .build();
+        }
+
+        int effectivePage = page == null ? 1 : page;
+        int effectiveLimit = limit == null ? DEFAULT_PAGE_COUNT : limit;
+        if (effectivePage < 1) {
+            throw new IllegalArgumentException("page must be >= 1");
+        }
+        if (effectiveLimit < 1) {
+            throw new IllegalArgumentException("limit must be >= 1");
+        }
+        int offset = (effectivePage - 1) * effectiveLimit;
+        List<SchemeRegularityRepository.CriticalSchemeRow> rows =
+                schemeRegularityRepository.getCriticalSchemesByLgd(tenantId, lgdId, cutoffDate, effectiveLimit, offset);
+
+        return CriticalSchemesResponse.builder()
+                .criticalSchemeCount(criticalCount)
+                .list(true)
+                .page(effectivePage)
+                .limit(effectiveLimit)
+                .schemes(rows.stream()
+                        .map(r -> CriticalSchemesResponse.CriticalSchemeListItem.builder()
+                                .schemeId(r.schemeId())
+                                .schemeName(r.schemeName())
+                                .stateSchemeId(r.stateSchemeId())
+                                .centreSchemeId(r.centreSchemeId())
+                                .lastSuppliedDate(r.lastSuppliedDate())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    @Override
+    public CriticalSchemesResponse getCriticalSchemesByDepartment(
+            Integer tenantId, Integer departmentId, boolean list, Integer page, Integer limit) {
+        validateTenantInput(tenantId);
+        validateDepartmentInput(departmentId);
+
+        int sanitizedDays = Math.max(0, criticalAfterDays);
+        LocalDate cutoffDate = LocalDate.now(IST_ZONE).minusDays(sanitizedDays);
+
+        long criticalCount =
+                schemeRegularityRepository.getCriticalSchemeCountByDepartment(tenantId, departmentId, cutoffDate);
+        if (!list) {
+            return CriticalSchemesResponse.builder()
+                    .criticalSchemeCount(criticalCount)
+                    .list(false)
+                    .page(null)
+                    .limit(null)
+                    .schemes(null)
+                    .build();
+        }
+
+        int effectivePage = page == null ? 1 : page;
+        int effectiveLimit = limit == null ? DEFAULT_PAGE_COUNT : limit;
+        if (effectivePage < 1) {
+            throw new IllegalArgumentException("page must be >= 1");
+        }
+        if (effectiveLimit < 1) {
+            throw new IllegalArgumentException("limit must be >= 1");
+        }
+        int offset = (effectivePage - 1) * effectiveLimit;
+        List<SchemeRegularityRepository.CriticalSchemeRow> rows =
+                schemeRegularityRepository.getCriticalSchemesByDepartment(tenantId, departmentId, cutoffDate, effectiveLimit, offset);
+
+        return CriticalSchemesResponse.builder()
+                .criticalSchemeCount(criticalCount)
+                .list(true)
+                .page(effectivePage)
+                .limit(effectiveLimit)
+                .schemes(rows.stream()
+                        .map(r -> CriticalSchemesResponse.CriticalSchemeListItem.builder()
+                                .schemeId(r.schemeId())
+                                .schemeName(r.schemeName())
+                                .stateSchemeId(r.stateSchemeId())
+                                .centreSchemeId(r.centreSchemeId())
+                                .lastSuppliedDate(r.lastSuppliedDate())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    @Override
+    public CriticalSchemesResponse getCriticalSchemesByUser(
+            Integer tenantId, Integer userId, boolean list, Integer page, Integer limit) {
+        validateTenantInput(tenantId);
+        validateUserInput(userId);
+
+        int sanitizedDays = Math.max(0, criticalAfterDays);
+        LocalDate cutoffDate = LocalDate.now(IST_ZONE).minusDays(sanitizedDays);
+
+        long criticalCount = schemeRegularityRepository.getCriticalSchemeCountByUserSchemes(tenantId, userId, cutoffDate);
+        if (!list) {
+            return CriticalSchemesResponse.builder()
+                    .criticalSchemeCount(criticalCount)
+                    .list(false)
+                    .page(null)
+                    .limit(null)
+                    .schemes(null)
+                    .build();
+        }
+
+        int effectivePage = page == null ? 1 : page;
+        int effectiveLimit = limit == null ? DEFAULT_PAGE_COUNT : limit;
+        if (effectivePage < 1) {
+            throw new IllegalArgumentException("page must be >= 1");
+        }
+        if (effectiveLimit < 1) {
+            throw new IllegalArgumentException("limit must be >= 1");
+        }
+        int offset = (effectivePage - 1) * effectiveLimit;
+        List<SchemeRegularityRepository.CriticalSchemeRow> rows =
+                schemeRegularityRepository.getCriticalSchemesByUserSchemes(tenantId, userId, cutoffDate, effectiveLimit, offset);
+
+        return CriticalSchemesResponse.builder()
+                .criticalSchemeCount(criticalCount)
+                .list(true)
+                .page(effectivePage)
+                .limit(effectiveLimit)
+                .schemes(rows.stream()
+                        .map(r -> CriticalSchemesResponse.CriticalSchemeListItem.builder()
+                                .schemeId(r.schemeId())
+                                .schemeName(r.schemeName())
+                                .stateSchemeId(r.stateSchemeId())
+                                .centreSchemeId(r.centreSchemeId())
+                                .lastSuppliedDate(r.lastSuppliedDate())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    @Override
+    public CriticalSchemesResponse getCriticalSchemesByUserUuid(
+            Integer tenantId, UUID userUuid, boolean list, Integer page, Integer limit) {
+        return getCriticalSchemesByUser(tenantId, resolveUserIdByUuid(userUuid), list, page, limit);
+    }
+
+    @Override
+    public ContinuousSchemesResponse getContinuousSchemesByLgd(
+            Integer tenantId,
+            Integer lgdId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit
+    ) {
+        validateTenantInput(tenantId);
+        validateLgdInput(lgdId);
+        validateDateRange(startDate, endDate);
+
+        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        long continuousCount = schemeRegularityRepository.getContinuousSchemeCountByLgd(
+                tenantId, lgdId, startDate, endDate, daysInRange);
+        if (!list) {
+            return ContinuousSchemesResponse.builder()
+                    .continuousSchemeCount(continuousCount)
+                    .list(false)
+                    .page(null)
+                    .limit(null)
+                    .startDate(startDate)
+                    .endDate(endDate)
+                    .daysInRange(daysInRange)
+                    .schemes(null)
+                    .build();
+        }
+
+        int effectivePage = page == null ? 1 : page;
+        int effectiveLimit = limit == null ? DEFAULT_PAGE_COUNT : limit;
+        if (effectivePage < 1) {
+            throw new IllegalArgumentException("page must be >= 1");
+        }
+        if (effectiveLimit < 1) {
+            throw new IllegalArgumentException("limit must be >= 1");
+        }
+        int offset = (effectivePage - 1) * effectiveLimit;
+        List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
+                schemeRegularityRepository.getContinuousSchemesByLgd(
+                        tenantId, lgdId, startDate, endDate, daysInRange, effectiveLimit, offset);
+
+        return ContinuousSchemesResponse.builder()
+                .continuousSchemeCount(continuousCount)
+                .list(true)
+                .page(effectivePage)
+                .limit(effectiveLimit)
+                .startDate(startDate)
+                .endDate(endDate)
+                .daysInRange(daysInRange)
+                .schemes(rows.stream()
+                        .map(r -> ContinuousSchemesResponse.ContinuousSchemeListItem.builder()
+                                .schemeId(r.schemeId())
+                                .schemeName(r.schemeName())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    @Override
+    public ContinuousSchemesResponse getContinuousSchemesByDepartment(
+            Integer tenantId,
+            Integer departmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit
+    ) {
+        validateTenantInput(tenantId);
+        validateDepartmentInput(departmentId);
+        validateDateRange(startDate, endDate);
+
+        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        long continuousCount = schemeRegularityRepository.getContinuousSchemeCountByDepartment(
+                tenantId, departmentId, startDate, endDate, daysInRange);
+        if (!list) {
+            return ContinuousSchemesResponse.builder()
+                    .continuousSchemeCount(continuousCount)
+                    .list(false)
+                    .page(null)
+                    .limit(null)
+                    .startDate(startDate)
+                    .endDate(endDate)
+                    .daysInRange(daysInRange)
+                    .schemes(null)
+                    .build();
+        }
+
+        int effectivePage = page == null ? 1 : page;
+        int effectiveLimit = limit == null ? DEFAULT_PAGE_COUNT : limit;
+        if (effectivePage < 1) {
+            throw new IllegalArgumentException("page must be >= 1");
+        }
+        if (effectiveLimit < 1) {
+            throw new IllegalArgumentException("limit must be >= 1");
+        }
+        int offset = (effectivePage - 1) * effectiveLimit;
+        List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
+                schemeRegularityRepository.getContinuousSchemesByDepartment(
+                        tenantId, departmentId, startDate, endDate, daysInRange, effectiveLimit, offset);
+
+        return ContinuousSchemesResponse.builder()
+                .continuousSchemeCount(continuousCount)
+                .list(true)
+                .page(effectivePage)
+                .limit(effectiveLimit)
+                .startDate(startDate)
+                .endDate(endDate)
+                .daysInRange(daysInRange)
+                .schemes(rows.stream()
+                        .map(r -> ContinuousSchemesResponse.ContinuousSchemeListItem.builder()
+                                .schemeId(r.schemeId())
+                                .schemeName(r.schemeName())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    @Override
+    public ContinuousSchemesResponse getContinuousSchemesByUser(
+            Integer tenantId,
+            Integer userId,
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean list,
+            Integer page,
+            Integer limit
+    ) {
+        validateTenantInput(tenantId);
+        validateUserInput(userId);
+        validateDateRange(startDate, endDate);
+
+        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        long continuousCount = schemeRegularityRepository.getContinuousSchemeCountByUserSchemes(
+                tenantId, userId, startDate, endDate, daysInRange);
+        if (!list) {
+            return ContinuousSchemesResponse.builder()
+                    .continuousSchemeCount(continuousCount)
+                    .list(false)
+                    .page(null)
+                    .limit(null)
+                    .startDate(startDate)
+                    .endDate(endDate)
+                    .daysInRange(daysInRange)
+                    .schemes(null)
+                    .build();
+        }
+
+        int effectivePage = page == null ? 1 : page;
+        int effectiveLimit = limit == null ? DEFAULT_PAGE_COUNT : limit;
+        if (effectivePage < 1) {
+            throw new IllegalArgumentException("page must be >= 1");
+        }
+        if (effectiveLimit < 1) {
+            throw new IllegalArgumentException("limit must be >= 1");
+        }
+        int offset = (effectivePage - 1) * effectiveLimit;
+        List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
+                schemeRegularityRepository.getContinuousSchemesByUserSchemes(
+                        tenantId, userId, startDate, endDate, daysInRange, effectiveLimit, offset);
+
+        return ContinuousSchemesResponse.builder()
+                .continuousSchemeCount(continuousCount)
+                .list(true)
+                .page(effectivePage)
+                .limit(effectiveLimit)
+                .startDate(startDate)
+                .endDate(endDate)
+                .daysInRange(daysInRange)
+                .schemes(rows.stream()
+                        .map(r -> ContinuousSchemesResponse.ContinuousSchemeListItem.builder()
+                                .schemeId(r.schemeId())
+                                .schemeName(r.schemeName())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    @Override
     public SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByLgd(
             Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer limit) {
         validateTenantInput(tenantId);
@@ -1976,8 +2509,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .map(metric -> SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(metric.schemeId())
                                 .schemeName(metric.schemeName())
-                                .statusCode(metric.status())
-                                .status(resolveSchemeStatus(metric.status()))
+                                .statusCode(metric.operatingStatus())
+                                .status(resolveSchemeStatus(metric.operatingStatus()))
                                 .submissionDays(metric.submissionDays())
                                 .reportingRate(calculateReportingRate(metric.submissionDays(), daysInRange))
                                 .totalWaterSupplied(metric.totalWaterSupplied())
@@ -2047,8 +2580,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .map(metric -> SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(metric.schemeId())
                                 .schemeName(metric.schemeName())
-                                .statusCode(metric.status())
-                                .status(resolveSchemeStatus(metric.status()))
+                                .statusCode(metric.operatingStatus())
+                                .status(resolveSchemeStatus(metric.operatingStatus()))
                                 .submissionDays(metric.submissionDays())
                                 .reportingRate(calculateReportingRate(metric.submissionDays(), daysInRange))
                                 .totalWaterSupplied(metric.totalWaterSupplied())
@@ -2110,18 +2643,20 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         String parentLgdTitle = schemeRegularityRepository.getParentLgdTitleByLgd(tenantId, parentLgdId);
 
         int activeCount = (int) schemes.stream()
-                .filter(s -> s.status() != null && s.status() == SchemeStatus.ACTIVE.getCode())
+                .filter(s -> s.operatingStatus() != null && s.operatingStatus() > 0)
                 .count();
         int inactiveCount = (int) schemes.stream()
-                .filter(s -> s.status() != null && s.status() == SchemeStatus.INACTIVE.getCode())
+                .filter(s -> s.operatingStatus() != null && s.operatingStatus() == 0)
                 .count();
 
         List<SchemeRegularityListResponse.SchemeMetrics> allSchemeMetrics = schemes.stream()
                 .map(metric -> SchemeRegularityListResponse.SchemeMetrics.builder()
                         .schemeId(metric.schemeId())
                         .schemeName(metric.schemeName())
-                        .statusCode(metric.status())
-                        .status(resolveSchemeStatus(metric.status()))
+                        .stateSchemeId(metric.stateSchemeId())
+                        .centreSchemeId(metric.centreSchemeId())
+                        .statusCode(metric.operatingStatus())
+                        .status(resolveSchemeStatus(metric.operatingStatus()))
                         .supplyDays(metric.supplyDays())
                         .averageRegularity(calculateReportingRate(metric.supplyDays(), daysInRange))
                         .submissionDays(metric.submissionDays())
@@ -2168,18 +2703,20 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 schemeRegularityRepository.getParentDepartmentTitleByDepartment(tenantId, parentDepartmentId);
 
         int activeCount = (int) schemes.stream()
-                .filter(s -> s.status() != null && s.status() == SchemeStatus.ACTIVE.getCode())
+                .filter(s -> s.operatingStatus() != null && s.operatingStatus() > 0)
                 .count();
         int inactiveCount = (int) schemes.stream()
-                .filter(s -> s.status() != null && s.status() == SchemeStatus.INACTIVE.getCode())
+                .filter(s -> s.operatingStatus() != null && s.operatingStatus() == 0)
                 .count();
 
         List<SchemeRegularityListResponse.SchemeMetrics> allSchemeMetrics = schemes.stream()
                 .map(metric -> SchemeRegularityListResponse.SchemeMetrics.builder()
                         .schemeId(metric.schemeId())
                         .schemeName(metric.schemeName())
-                        .statusCode(metric.status())
-                        .status(resolveSchemeStatus(metric.status()))
+                        .stateSchemeId(metric.stateSchemeId())
+                        .centreSchemeId(metric.centreSchemeId())
+                        .statusCode(metric.operatingStatus())
+                        .status(resolveSchemeStatus(metric.operatingStatus()))
                         .supplyDays(metric.supplyDays())
                         .averageRegularity(calculateReportingRate(metric.supplyDays(), daysInRange))
                         .submissionDays(metric.submissionDays())
@@ -2291,17 +2828,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         if (statusCode == null) {
             return "unknown";
         }
-        for (SchemeStatus value : SchemeStatus.values()) {
-            if (value.getCode() == statusCode) {
-                return value.name().toLowerCase();
-            }
-        }
-        return "unknown";
+        return statusCode > 0 ? "active" : "inactive";
     }
 
     private void validateScaleInput(PeriodScale scale) {
         if (scale == null) {
-            throw new IllegalArgumentException("scale is required and must be one of: day, week, month");
+            throw new IllegalArgumentException("scale is required and must be one of: day, week, month, quarter, year");
         }
     }
 
@@ -2389,6 +2921,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             PeriodScale scale,
             List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> metrics) {
         int schemeCount = metrics.isEmpty() ? 0 : metrics.getFirst().schemeCount();
+        long totalAchievedFhtcCount = metrics.isEmpty() || metrics.getFirst().totalAchievedFhtcCount() == null
+                ? 0L
+                : metrics.getFirst().totalAchievedFhtcCount();
         List<PeriodicNationalSchemeRegularityResponse.PeriodicNationalSchemeRegularityPeriodMetric> periodicMetrics =
                 metrics.stream()
                         .map(metric -> {
@@ -2412,6 +2947,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                     .builder()
                                     .periodStartDate(cappedPeriodStart)
                                     .periodEndDate(cappedPeriodEnd)
+                                    .schemeCount(metric.schemeCount())
                                     .totalSupplyDays(metric.totalSupplyDays())
                                     .totalWaterQuantity(metric.totalWaterQuantity())
                                     .averageRegularity(averageRegularity)
@@ -2421,6 +2957,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         return PeriodicNationalSchemeRegularityResponse.builder()
                 .schemeCount(schemeCount)
+                .totalAchievedFhtcCount(totalAchievedFhtcCount)
                 .scale(scale.name().toLowerCase())
                 .startDate(startDate)
                 .endDate(endDate)
@@ -2588,6 +3125,19 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 return null;
             }
             return objectMapper.readValue(payload, responseClass);
+        } catch (Exception e) {
+            log.warn("Failed to read scheme regularity cache [{}]: {}", cacheKey, e.getMessage());
+            return null;
+        }
+    }
+
+    private <T> T readFromCache(String cacheKey, TypeReference<T> typeReference) {
+        try {
+            String payload = redisTemplate.opsForValue().get(cacheKey);
+            if (payload == null || payload.isBlank()) {
+                return null;
+            }
+            return objectMapper.readValue(payload, typeReference);
         } catch (Exception e) {
             log.warn("Failed to read scheme regularity cache [{}]: {}", cacheKey, e.getMessage());
             return null;

@@ -171,7 +171,6 @@ class SmsCountryServiceTest {
         wireMockServer.verify(postRequestedFor(urlEqualTo(SMS_PATH))
                 .withRequestBody(containing(
                         "Your OTP for Jalsoochak login is 654321. " +
-                        "This service is operated by Arghyam. " +
                         "Do not share this OTP. Valid for 10 minutes.")));
     }
 }

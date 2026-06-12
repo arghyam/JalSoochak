@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +30,7 @@ import java.time.LocalDate;
 @RequestMapping("/api/v1/analytics")
 @RequiredArgsConstructor
 @Tag(name = "Analytics - Regularity & Reading Submission", description = "Scheme regularity and reading submission rate metrics")
+@Slf4j
 public class AnalyticsRegularityAndReadingController {
 
     private final SchemeRegularityService schemeRegularityService;
@@ -107,6 +109,9 @@ public class AnalyticsRegularityAndReadingController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /scheme-regularity/average (tenantId={}, parentLgdId={}, parentDepartmentId={}, scope={}, startDate={}, endDate={})",
+                    tenantId, parentLgdId, parentDepartmentId, scope, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.<AverageSchemeRegularityResponse>builder()
                             .success(false)
@@ -152,8 +157,16 @@ public class AnalyticsRegularityAndReadingController {
             @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @Parameter(description = "Time aggregation scale", required = true, schema = @Schema(type = "string", allowableValues = {
-                    "day", "week", "month" })) @RequestParam(name = "scale") String scale,
+            @Parameter(
+                    description = """
+                            Time aggregation scale.
+                            - day: per-day buckets
+                            - week: rolling 7-day buckets anchored to start_date (not ISO-week aligned)
+                            - month/quarter/year: calendar-aligned buckets (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31)
+                            """,
+                    required = true,
+                    schema = @Schema(type = "string", allowableValues = {"day", "week", "month", "quarter", "year"}))
+            @RequestParam(name = "scale") String scale,
             @RequestParam(name = "lgd_id", required = false) Integer lgdId,
             @RequestParam(name = "department_id", required = false) Integer departmentId) {
         try {
@@ -180,6 +193,9 @@ public class AnalyticsRegularityAndReadingController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /scheme-regularity/periodic (tenantId={}, startDate={}, endDate={}, scale={}, lgdId={}, departmentId={})",
+                    tenantId, startDate, endDate, scale, lgdId, departmentId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.<PeriodicSchemeRegularityResponse>builder()
                             .success(false)
@@ -262,6 +278,9 @@ public class AnalyticsRegularityAndReadingController {
                     .data(null)
                     .build());
         } catch (Exception e) {
+            log.error(
+                    "Failed /reading-submission-rate (tenantId={}, parentLgdId={}, parentDepartmentId={}, scope={}, startDate={}, endDate={})",
+                    tenantId, parentLgdId, parentDepartmentId, scope, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.<ReadingSubmissionRateResponse>builder()
                             .success(false)

@@ -18,7 +18,7 @@ public final class AnalyticsControllerHelper {
 
     public static String buildSchemeRegionReportCsv(SchemeRegularityListResponse response) {
         StringBuilder csvBuilder = new StringBuilder();
-        csvBuilder.append("scheme_id,scheme_name,status_code,status,supply_days,average_regularity,submission_days,submission_rate")
+        csvBuilder.append("scheme_id,scheme_name,state_scheme_id,centre_scheme_id,status_code,status,supply_days,average_regularity,submission_days,submission_rate")
                 .append('\n');
         if (response.getSchemes() == null || response.getSchemes().isEmpty()) {
             return csvBuilder.toString();
@@ -26,6 +26,8 @@ public final class AnalyticsControllerHelper {
         for (SchemeRegularityListResponse.SchemeMetrics scheme : response.getSchemes()) {
             csvBuilder.append(toCsvField(scheme.getSchemeId())).append(',')
                     .append(toCsvField(scheme.getSchemeName())).append(',')
+                    .append(toCsvField(scheme.getStateSchemeId())).append(',')
+                    .append(toCsvField(scheme.getCentreSchemeId())).append(',')
                     .append(toCsvField(scheme.getStatusCode())).append(',')
                     .append(toCsvField(scheme.getStatus())).append(',')
                     .append(toCsvField(scheme.getSupplyDays())).append(',')

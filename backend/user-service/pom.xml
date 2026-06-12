@@ -23,6 +23,8 @@
         <spring-kafka.version>3.1.4</spring-kafka.version>
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.32</lombok.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
+        <aws-sdk.version>2.34.0</aws-sdk.version>
     </properties>
 
     <dependencyManagement>
@@ -31,6 +33,13 @@
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
                 <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -144,6 +153,22 @@
             <artifactId>poi-ooxml</artifactId>
             <version>5.3.0</version>
         </dependency>
+
+        <!-- AWS SDK v2 S3 (provider-agnostic object storage — works with AWS S3,
+             MinIO, Cloudflare R2, DigitalOcean Spaces, etc.). Includes the
+             S3Presigner used for generating short-lived report download URLs. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+
+        <!-- Testcontainers MinIO module — drives the S3-compatible code path in
+             end-to-end report tests against a real S3 API. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>minio</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -163,6 +188,22 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <!-- Spring Boot entry point -->
+                        <exclude>org/arghyam/jalsoochak/user/UserServiceApplication.class</exclude>
+                        <!-- Pure config/infrastructure beans — no business logic -->
+                        <exclude>org/arghyam/jalsoochak/user/config/DataSourceConfig.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/WebConfig.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/OpenApiConfig.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/CommonApiResponses.class</exclude>
+                        <exclude>org/arghyam/jalsoochak/user/config/RequiresUserAccess.class</exclude>
+                        <!-- @ConfigurationProperties — setters/getters only, no logic -->
+                        <exclude>org/arghyam/jalsoochak/user/config/properties/**</exclude>
+                        <!-- DTOs — pure data containers, Lombok-generated equals/hashCode/builder -->
+                        <exclude>org/arghyam/jalsoochak/user/dto/**</exclude>
+                    </excludes>
+                </configuration>
                 <executions>
                     <execution>
                         <id>prepare-agent</id>

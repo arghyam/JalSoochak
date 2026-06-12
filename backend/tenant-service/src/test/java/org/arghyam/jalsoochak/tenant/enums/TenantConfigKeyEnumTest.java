@@ -29,7 +29,18 @@ class TenantConfigKeyEnumTest {
                     TenantConfigKeyEnum.DATE_FORMAT_SCREEN,
                     TenantConfigKeyEnum.DATE_FORMAT_TABLE,
                     TenantConfigKeyEnum.SUPPORTED_LANGUAGES,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS
+                    TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_1,
+                    TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_2,
+                    TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_3,
+                    TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_4,
+                    TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_5,
+                    TenantConfigKeyEnum.DISPLAY_MAP_LGD_LEVEL_6,
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_1,
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_2,
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_3,
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_4,
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_5,
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_6
             );
         }
 
@@ -79,7 +90,6 @@ class TenantConfigKeyEnumTest {
                     TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME,
                     TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES,
                     TenantConfigKeyEnum.DATA_CONSOLIDATION_TIME,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAPS,
                     TenantConfigKeyEnum.AVERAGE_MEMBERS_PER_HOUSEHOLD,
                     TenantConfigKeyEnum.SUPPLY_OUTAGE_REASONS
             );

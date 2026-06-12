@@ -141,11 +141,45 @@ public enum TenantConfigKeyEnum implements ConfigKey {
     EMAIL_TEMPLATE_JSON(ConfigType.GENERIC, SimpleConfigValueDTO.class, false, false, false),
 
     /**
-     * Display Department Maps flag.
-     * YES or NO. Controls whether department dashboards show maps.
-     * Used for states where map boundaries data is unavailable.
+     * Display map for department level 1.
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, all lower levels (2–6) must also be FALSE.
      */
-    DISPLAY_DEPARTMENT_MAPS(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, true),
+    DISPLAY_DEPARTMENT_MAP_LEVEL_1(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for department level 2.
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, all lower levels (3–6) must also be FALSE.
+     */
+    DISPLAY_DEPARTMENT_MAP_LEVEL_2(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for department level 3.
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, all lower levels (4–6) must also be FALSE.
+     */
+    DISPLAY_DEPARTMENT_MAP_LEVEL_3(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for department level 4.
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, all lower levels (5–6) must also be FALSE.
+     */
+    DISPLAY_DEPARTMENT_MAP_LEVEL_4(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for department level 5.
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, level 6 must also be FALSE.
+     */
+    DISPLAY_DEPARTMENT_MAP_LEVEL_5(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for department level 6.
+     * TRUE or FALSE. Default: TRUE.
+     */
+    DISPLAY_DEPARTMENT_MAP_LEVEL_6(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
 
     /**
      * Average Members Per Household.
@@ -161,7 +195,48 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Natural Calamity, Others.
      * State Admin can add, update, and delete reasons (except 'Others').
      */
-    SUPPLY_OUTAGE_REASONS(ConfigType.GENERIC, ReasonListConfigDTO.class, false, false, true);
+    SUPPLY_OUTAGE_REASONS(ConfigType.GENERIC, ReasonListConfigDTO.class, false, false, true),
+
+    /**
+     * Display map for LGD level 1 (e.g. State).
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, all lower levels (2–6) must also be FALSE.
+     */
+    DISPLAY_MAP_LGD_LEVEL_1(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for LGD level 2 (e.g. District).
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, all lower levels (3–6) must also be FALSE.
+     */
+    DISPLAY_MAP_LGD_LEVEL_2(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for LGD level 3 (e.g. Block).
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, all lower levels (4–6) must also be FALSE.
+     */
+    DISPLAY_MAP_LGD_LEVEL_3(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for LGD level 4 (e.g. Panchayat).
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, all lower levels (5–6) must also be FALSE.
+     */
+    DISPLAY_MAP_LGD_LEVEL_4(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for LGD level 5 (e.g. Village).
+     * TRUE or FALSE. Default: TRUE.
+     * If set to FALSE, level 6 must also be FALSE.
+     */
+    DISPLAY_MAP_LGD_LEVEL_5(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Display map for LGD level 6.
+     * TRUE or FALSE. Default: TRUE.
+     */
+    DISPLAY_MAP_LGD_LEVEL_6(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false);
 
     private final ConfigType type;
     private final Class<? extends ConfigValueDTO> dtoClass;

@@ -82,7 +82,7 @@ class StaffAuthServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        OtpProperties otpProps = new OtpProperties(10, 5, 60, 6, "WHATSAPP");
+        OtpProperties otpProps = new OtpProperties(10, 5, 60, 6, "WHATSAPP", null);
         service = new StaffAuthServiceImpl(userCommonRepository, userTenantRepository,
                 otpProps, otpService, staffKeycloakService, keycloakClient, eventPublisher,
                 userAnalyticsEventPublisher, transactionTemplate);

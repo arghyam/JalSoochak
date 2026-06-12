@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.tenant.service;
 
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.event.EscalationEvent;
+import org.arghyam.jalsoochak.tenant.event.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.tenant.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.tenant.repository.NudgeRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -259,6 +260,181 @@ class EscalationSchedulerServiceTest {
         // No cross-contamination between tenants
         assertThat(events).noneMatch(e -> TENANT_ID == e.getTenantId() && schemaB.equals(e.getTenantSchema()));
         assertThat(events).noneMatch(e -> tenantIdB == e.getTenantId() && SCHEMA.equals(e.getTenantSchema()));
+    }
+
+    // ── validation guard tests ──────────────────────────────────────────────────
+    // EscalationScheduleConfig.builder() validates at build() time, so we use mocks
+    // to simulate configs with invalid values that bypass the builder.
+
+    @Test
+    void processEscalationsForTenant_throwsIllegalArgument_whenLevel1DaysNegative() {
+        EscalationScheduleConfig cfg = mock(EscalationScheduleConfig.class);
+        when(cfg.getLevel1Days()).thenReturn(-1);
+        when(cfg.getLevel2Days()).thenReturn(7);
+        when(cfg.getLevel1OfficerType()).thenReturn("SECTION_OFFICER");
+        when(cfg.getLevel2OfficerType()).thenReturn("DISTRICT_OFFICER");
+        when(tenantConfigService.getEscalationConfig(TENANT_ID)).thenReturn(cfg);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid escalation thresholds");
+    }
+
+    @Test
+    void processEscalationsForTenant_throwsIllegalArgument_whenLevel2DaysLessThanLevel1Days() {
+        EscalationScheduleConfig cfg = mock(EscalationScheduleConfig.class);
+        when(cfg.getLevel1Days()).thenReturn(7);
+        when(cfg.getLevel2Days()).thenReturn(3);
+        when(cfg.getLevel1OfficerType()).thenReturn("SECTION_OFFICER");
+        when(cfg.getLevel2OfficerType()).thenReturn("DISTRICT_OFFICER");
+        when(tenantConfigService.getEscalationConfig(TENANT_ID)).thenReturn(cfg);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid escalation thresholds");
+    }
+
+    @Test
+    void processEscalationsForTenant_throwsIllegalArgument_whenLevel1OfficerTypeIsBlank() {
+        EscalationScheduleConfig cfg = mock(EscalationScheduleConfig.class);
+        when(cfg.getLevel1Days()).thenReturn(3);
+        when(cfg.getLevel2Days()).thenReturn(7);
+        when(cfg.getLevel1OfficerType()).thenReturn("  ");
+        when(cfg.getLevel2OfficerType()).thenReturn("DISTRICT_OFFICER");
+        when(tenantConfigService.getEscalationConfig(TENANT_ID)).thenReturn(cfg);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Officer types must be configured");
+    }
+
+    @Test
+    void processEscalationsForTenant_throwsIllegalArgument_whenLevel2OfficerTypeIsNull() {
+        EscalationScheduleConfig cfg = mock(EscalationScheduleConfig.class);
+        when(cfg.getLevel1Days()).thenReturn(3);
+        when(cfg.getLevel2Days()).thenReturn(7);
+        when(cfg.getLevel1OfficerType()).thenReturn("SECTION_OFFICER");
+        when(cfg.getLevel2OfficerType()).thenReturn(null);
+        when(tenantConfigService.getEscalationConfig(TENANT_ID)).thenReturn(cfg);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Officer types must be configured");
+    }
+
+    @Test
+    void processEscalationsForTenant_skipsOperator_whenOfficerPhoneIsBlank() {
+        Map<String, Object> row = operatorRow("Op X", "911001001001", 1, 4);
+        stubStream(SCHEMA, 3, row);
+
+        Map<String, Object> soRow = new HashMap<>();
+        soRow.put("name", "SO Blank");
+        soRow.put("phone_number", "   ");
+        soRow.put("language_id", 0);
+        when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
+
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    @Test
+    void processEscalationsForTenant_usesUserId_asOperatorIdentifier_whenPresent() {
+        Map<String, Object> row = new HashMap<>(operatorRow("Op Y", "911002002002", 1, 4));
+        row.put("user_id", 999);
+        stubStream(SCHEMA, 3, row);
+
+        Map<String, Object> soRow = officerRow("SO Y", "919002002002", 0);
+        when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
+
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+
+        ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        EscalationEvent event = captor.getValue();
+        assertThat(event.getOperators()).hasSize(1);
+        assertThat(event.getOperators().get(0).getUserId()).isEqualTo(999);
+    }
+
+    @Test
+    void processEscalationsForTenant_usesRandomUuid_asOperatorIdentifier_whenBothUserIdAndPhoneAreNull() {
+        Map<String, Object> row = new HashMap<>();
+        row.put("name", "Op NoId");
+        row.put("phone_number", null);
+        row.put("scheme_id", 1);
+        row.put("scheme_name", "Scheme-1");
+        row.put("language_id", 0);
+        row.put("last_reading_date", java.time.LocalDate.now().minusDays(4).toString());
+        row.put("days_since_last_upload", 4);
+        stubStream(SCHEMA, 3, row);
+
+        Map<String, Object> soRow = officerRow("SO Z", "919003003003", 0);
+        when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
+
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+
+        ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        EscalationEvent event = captor.getValue();
+        assertThat(event.getOperators()).hasSize(1);
+        OperatorEscalationDetail detail = event.getOperators().get(0);
+        assertThat(detail.getPhoneNumber()).isNull();
+        assertThat(detail.getUserId()).isNull();
+        // correlationId must be a valid UUID (derived from the random UUID branch)
+        assertThat(detail.getCorrelationId()).isNotNull();
+    }
+
+    @Test
+    void processEscalationsForTenant_includesOfficerIdAndWhatsappConnectionId_whenPresent() {
+        stubStream(SCHEMA, 3, operatorRow("Op Z", "911003003003", 1, 4));
+
+        Map<String, Object> soRow = new HashMap<>();
+        soRow.put("name", "SO Full");
+        soRow.put("phone_number", "919004004004");
+        soRow.put("language_id", 1);
+        soRow.put("user_id", 42L);
+        soRow.put("whatsapp_connection_id", 99L);
+        when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
+
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+
+        ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        assertThat(captor.getValue().getOfficerId()).isEqualTo(42L);
+        assertThat(captor.getValue().getOfficerWhatsappConnectionId()).isEqualTo(99L);
+    }
+
+    @Test
+    void processEscalationsForTenant_includesLastConfirmedReading_whenPresent() {
+        Map<String, Object> row = new HashMap<>(operatorRow("Op Confirmed", "911005005005", 1, 4));
+        row.put("last_confirmed_reading", 12.5);
+        stubStream(SCHEMA, 3, row);
+
+        Map<String, Object> soRow = officerRow("SO Confirmed", "919005005005", 0);
+        when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of(1, soRow));
+
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+
+        ArgumentCaptor<EscalationEvent> captor = ArgumentCaptor.forClass(EscalationEvent.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        assertThat(captor.getValue().getOperators().get(0).getLastConfirmedReading()).isEqualTo(12.5);
+    }
+
+    @Test
+    void processEscalationsForTenant_level2Officer_usesSoNameFromLevel1Map_whenSoRowIsNull() {
+        stubStream(SCHEMA, 3, operatorRow("Op L2NoSO", "911006006006", 1, 8));
+
+        when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "SECTION_OFFICER")).thenReturn(Map.of());
+        Map<String, Object> doRow = officerRow("DO NoSO", "919006006006", 0);
+        when(nudgeRepository.findAllOfficersByUserType(SCHEMA, "DISTRICT_OFFICER")).thenReturn(Map.of(1, doRow));
+
+        escalationSchedulerService.processEscalationsForTenant(SCHEMA, TENANT_ID);
+
+        verify(kafkaProducer).publishJson(eq("common-topic"), any(EscalationEvent.class));
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────

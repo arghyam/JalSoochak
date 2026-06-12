@@ -118,8 +118,22 @@ Set the following environment variables before running the Telemetry services:
 | GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings |
 | GET | `/api/v1/scheme/schemes/counts` | Scheme counts |
 | GET | `/api/v1/scheme/schemes/counts/by-status` | Scheme counts by status |
+| PATCH | `/api/v1/scheme/schemes/{schemeId}/status?tenantCode={tenantCode}` | Update scheme work/operating status (one or both) |
 | POST | `/api/v1/scheme/schemes/upload` | Bulk upload schemes (CSV) |
 | POST | `/api/v1/scheme/schemes/mappings/upload` | Bulk upload scheme mappings (CSV) |
+
+### Scheme Status Integer Mapping
+
+`work_status`
+- `1` = `Ongoing`
+- `2` = `Completed`
+- `3` = `Not Started`
+- `4` = `Handed Over`
+
+`operating_status`
+- `1` = `Operative`
+- `2` = `Non-Operative`
+- `3` = `Partially Operative`
 
 ---
 
@@ -230,7 +244,7 @@ The tables below list every endpoint that changed across all services. If your f
 
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
-| POST | `/api/v1/telemetry/readings`                      | Receive the generic Glific webhook payload for image-based meter readings |
+| POST | `/api/v1/telemetry/readings/glific`               | Receive the generic Glific webhook payload for image-based meter readings |
 | POST | `/api/v1/telemetry/intro`                         | Send the flow intro message for a contact |
 | POST | `/api/v1/telemetry/closing`                       | Send the flow closing message for a contact |
 | POST | `/api/v1/telemetry/language/selection`            | Return the language selection prompt/options for a contact |

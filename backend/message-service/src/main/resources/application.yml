@@ -215,6 +215,10 @@ management:
       exposure:
         include: "*"
 
+pii:
+  encryption-key: ${PII_ENCRYPTION_KEY}
+  hmac-key: ${PII_HMAC_KEY}
+
 # ──────────────────────────────────────────────────────────────
 # Escalation Report Configuration
 # ──────────────────────────────────────────────────────────────
@@ -230,13 +234,18 @@ app:
   base-url: ${APP_BASE_URL:http://localhost:8085}
 
 # ──────────────────────────────────────────────────────────────
-# Notification Guard
-# Set NOTIFICATIONS_DRY_RUN=true in dev/test to suppress all
-# outbound Glific API calls while keeping the Kafka pipeline live.
+# Notification Guards (per channel)
+# Set NOTIFICATIONS_WHATSAPP_DRY_RUN=true to suppress outbound Glific
+# (WhatsApp) API calls while keeping the Kafka pipeline live.
+# Set NOTIFICATIONS_SMS_DRY_RUN=true to suppress SMSCountry OTP
+# delivery (note: login OTPs will not reach users when enabled).
 # ──────────────────────────────────────────────────────────────
 
 notifications:
-  dry-run: ${NOTIFICATIONS_DRY_RUN:false}
+  whatsapp:
+    dry-run: ${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}
+  sms:
+    dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
 
 # ──────────────────────────────────────────────────────────────
 # Glific GraphQL API (WhatsApp HSM)
@@ -254,7 +263,7 @@ glific:
     login-otp-id: ${GLIFIC_LOGIN_OTP_TEMPLATE_ID:}
   flow:
     nudge-id: ${GLIFIC_NUDGE_FLOW_ID:}
-    welcome-id: ${GLIFIC_WELCOME_FLOW_ID:37684}
+    welcome-id: ${GLIFIC_WELCOME_FLOW_ID:38949}
   media:
     escalation-caption: ${GLIFIC_ESCALATION_CAPTION:Escalations}
     escalation-thumbnail: ${GLIFIC_ESCALATION_THUMBNAIL:}
