@@ -115,6 +115,173 @@ public class PublicPumpOperatorRepository {
         return tableAlias + ".confirmed_reading";
     }
 
+    public PumpOperatorDetailsDTO findPumpOperatorById(String schemaName, long pumpOperatorId, long schemeId) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String schemeJoin;
+        if (tableExists(schemaName, "user_scheme_mapping_table")) {
+            schemeJoin = String.format("""
+                    LEFT JOIN LATERAL (
+                        SELECT sm.id AS scheme_id,
+                               sm.scheme_name,
+                               sm.latitude,
+                               sm.longitude
+                        FROM %s.user_scheme_mapping_table usm
+                        JOIN %s.scheme_master_table sm
+                          ON sm.id = usm.scheme_id
+                         AND sm.deleted_at IS NULL
+                        WHERE usm.deleted_at IS NULL
+                          AND usm.user_id = u.id
+                          AND usm.status = 1
+                          AND usm.scheme_id = ?
+                        ORDER BY usm.id DESC
+                        LIMIT 1
+                    ) sch ON true
+                    """, schemaName, schemaName);
+        } else {
+            schemeJoin = """
+                    LEFT JOIN LATERAL (
+                        SELECT NULL::integer AS scheme_id,
+                               NULL::text AS scheme_name,
+                               NULL::double precision AS latitude,
+                               NULL::double precision AS longitude
+                    ) sch ON true
+                    """;
+        }
+        String sql = String.format("""
+                SELECT u.id,
+                       u.uuid,
+                       u.title,
+                       u.email,
+                       u.phone_number,
+                       u.status,
+                       ut.c_name AS role,
+                       sch.scheme_id,
+                       sch.scheme_name,
+                       sch.latitude AS scheme_latitude,
+                       sch.longitude AS scheme_longitude,
+                       rs.last_submission_at,
+                       rs.first_submission_date,
+                       comp.total_days_since_first_submission,
+                       rs.submitted_days,
+                       comp.reporting_rate_percent,
+                       comp.missed_submission_days
+                FROM %s.user_table u
+                LEFT JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type
+                %s
+                LEFT JOIN LATERAL (
+                    SELECT
+                        MAX(fr.%s) AS last_submission_at,
+                        MIN(fr.reading_date) AS first_submission_date,
+                        COUNT(DISTINCT fr.reading_date) AS submitted_days
+                    FROM %s.flow_reading_table fr
+                    WHERE fr.deleted_at IS NULL
+                      AND fr.created_by = u.id
+                ) rs ON true
+                LEFT JOIN LATERAL (
+                    WITH bounds AS (
+                        -- Guard: if there are no readings, rs.first_submission_date is NULL.
+                        -- In that case we must not evaluate generate_series/date math with NULL bounds.
+                        SELECT rs.first_submission_date AS start_date
+                        WHERE rs.first_submission_date IS NOT NULL
+                    ),
+                    days AS (
+                        -- Generate all dates from first submission date to today (inclusive) using integer offsets.
+                        SELECT (bounds.start_date + gs) AS d
+                        FROM bounds
+                        JOIN generate_series(0, (CURRENT_DATE - bounds.start_date)) gs ON true
+                    ),
+                    reported AS (
+                        SELECT DISTINCT fr.reading_date AS d
+                        FROM %s.flow_reading_table fr
+                        JOIN bounds ON true
+                        WHERE fr.deleted_at IS NULL
+                          AND fr.created_by = u.id
+                          AND fr.reading_date BETWEEN bounds.start_date AND CURRENT_DATE
+                    )
+                    SELECT
+                        (CURRENT_DATE - bounds.start_date + 1) AS total_days_since_first_submission,
+                        ROUND(
+                            (rs.submitted_days::numeric * 100.0) / NULLIF((CURRENT_DATE - bounds.start_date + 1), 0),
+                            2
+                        ) AS reporting_rate_percent,
+                        (
+                            SELECT array_agg(days.d ORDER BY days.d)
+                            FROM days
+                            LEFT JOIN reported ON reported.d = days.d
+                            WHERE reported.d IS NULL
+                        ) AS missed_submission_days
+                    FROM bounds
+                ) comp ON true
+                WHERE u.deleted_at IS NULL
+                  AND u.id = ?
+                  AND sch.scheme_id IS NOT NULL
+                  AND upper(COALESCE(ut.c_name, '')) = 'PUMP_OPERATOR'
+                LIMIT 1
+                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName);
+        try {
+            return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
+                Timestamp lastTs = (Timestamp) rs.getObject("last_submission_at");
+                LocalDateTime lastSubmissionAt = lastTs == null ? null : lastTs.toLocalDateTime();
+
+                java.sql.Date firstD = (java.sql.Date) rs.getObject("first_submission_date");
+                LocalDate firstSubmissionDate = firstD == null ? null : firstD.toLocalDate();
+
+                Number totalDaysN = (Number) rs.getObject("total_days_since_first_submission");
+                Integer totalDays = totalDaysN == null ? null : totalDaysN.intValue();
+                Number submittedDaysN = (Number) rs.getObject("submitted_days");
+                Integer submittedDays = submittedDaysN == null ? null : submittedDaysN.intValue();
+
+                List<LocalDate> missedDays = null;
+                Array missedArr = (Array) rs.getObject("missed_submission_days");
+                if (missedArr != null) {
+                    Object raw = missedArr.getArray();
+                    if (raw instanceof java.sql.Date[] sqlDates) {
+                        missedDays = new ArrayList<>(sqlDates.length);
+                        for (java.sql.Date d : sqlDates) {
+                            missedDays.add(d == null ? null : d.toLocalDate());
+                        }
+                    } else if (raw instanceof Object[] objs) {
+                        missedDays = new ArrayList<>(objs.length);
+                        for (Object o : objs) {
+                            if (o == null) {
+                                missedDays.add(null);
+                            } else if (o instanceof java.sql.Date d) {
+                                missedDays.add(d.toLocalDate());
+                            } else if (o instanceof LocalDate d) {
+                                missedDays.add(d);
+                            } else {
+                                missedDays.add(LocalDate.parse(o.toString()));
+                            }
+                        }
+                    }
+                }
+
+                return PumpOperatorDetailsDTO.builder()
+                        .id(rs.getLong("id"))
+                        .uuid(rs.getString("uuid"))
+                        .name(pii.safeDecrypt(rs.getString("title")))
+                        .email(rs.getString("email"))
+                        .phoneNumber(pii.safeDecrypt(rs.getString("phone_number")))
+                        .status(mapStatus(getNullableInt(rs, "status")))
+                        .schemeId(getNullableInt(rs, "scheme_id"))
+                        .schemeName(rs.getString("scheme_name"))
+                        .schemeLatitude(getNullableDouble(rs, "scheme_latitude"))
+                        .schemeLongitude(getNullableDouble(rs, "scheme_longitude"))
+                        .lastSubmissionAt(lastSubmissionAt)
+                        .firstSubmissionDate(firstSubmissionDate)
+                        .totalDaysSinceFirstSubmission(totalDays)
+                        .submittedDays(submittedDays)
+                        .reportingRatePercent((BigDecimal) rs.getObject("reporting_rate_percent"))
+                        .missedSubmissionDays(missedDays)
+                        .build();
+            }, schemeId, pumpOperatorId);
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
     public PumpOperatorDetailsDTO findPumpOperatorById(String schemaName, long pumpOperatorId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
@@ -180,13 +347,10 @@ public class PublicPumpOperatorRepository {
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
-                        -- Guard: if there are no readings, rs.first_submission_date is NULL.
-                        -- In that case we must not evaluate generate_series/date math with NULL bounds.
                         SELECT rs.first_submission_date AS start_date
                         WHERE rs.first_submission_date IS NOT NULL
                     ),
                     days AS (
-                        -- Generate all dates from first submission date to today (inclusive) using integer offsets.
                         SELECT (bounds.start_date + gs) AS d
                         FROM bounds
                         JOIN generate_series(0, (CURRENT_DATE - bounds.start_date)) gs ON true
@@ -654,6 +818,7 @@ public class PublicPumpOperatorRepository {
     public List<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
             String schemaName,
             long schemeId,
+            long pumpOperatorId,
             int offset,
             int limit
     ) {
@@ -688,6 +853,7 @@ public class PublicPumpOperatorRepository {
                       ON ut.id = u.user_type
                     WHERE usm.deleted_at IS NULL
                       AND sm.id = ?
+                      AND u.id = ?
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 ),
@@ -828,7 +994,7 @@ public class PublicPumpOperatorRepository {
                     lastSubmissionAt,
                     confirmed
             );
-        }, schemeId, limit, offset);
+        }, schemeId, pumpOperatorId, limit, offset);
 
         if (rows.isEmpty()) {
             return List.of();
@@ -863,7 +1029,7 @@ public class PublicPumpOperatorRepository {
         return results;
     }
 
-    public long countPumpOperatorsBySchemeWithCompliance(String schemaName, long schemeId) {
+    public long countPumpOperatorsBySchemeWithCompliance(String schemaName, long schemeId, long pumpOperatorId) {
         validateSchemaName(schemaName);
         if (!tableExists(schemaName, "user_scheme_mapping_table")) {
             return 0;
@@ -884,6 +1050,7 @@ public class PublicPumpOperatorRepository {
                       ON ut.id = u.user_type
                     WHERE usm.deleted_at IS NULL
                       AND sm.id = ?
+                      AND u.id = ?
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 )
@@ -895,7 +1062,7 @@ public class PublicPumpOperatorRepository {
                   AND l.onboarding_date IS NOT NULL
                   AND fr.reading_date BETWEEN l.onboarding_date AND CURRENT_DATE
                 """, schemaName, schemaName, schemaName, schemaName);
-        Long total = jdbcTemplate.queryForObject(sql, Long.class, schemeId);
+        Long total = jdbcTemplate.queryForObject(sql, Long.class, schemeId, pumpOperatorId);
         return total == null ? 0 : total;
     }
 
