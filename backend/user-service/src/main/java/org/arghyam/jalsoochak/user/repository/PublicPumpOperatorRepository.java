@@ -197,12 +197,18 @@ public class PublicPumpOperatorRepository {
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
+                        WITH requested AS (
+                            SELECT
+                                CAST(? AS date) AS requested_start_date,
+                                CAST(? AS date) AS requested_end_date
+                        )
                         SELECT
-                            GREATEST(rs.first_submission_date, COALESCE(CAST(? AS date), rs.first_submission_date)) AS start_date,
-                            LEAST(CURRENT_DATE, COALESCE(CAST(? AS date), CURRENT_DATE)) AS end_date
-                        WHERE rs.first_submission_date IS NOT NULL
-                          AND GREATEST(rs.first_submission_date, COALESCE(CAST(? AS date), rs.first_submission_date))
-                              <= LEAST(CURRENT_DATE, COALESCE(CAST(? AS date), CURRENT_DATE))
+                            COALESCE(requested.requested_start_date, rs.first_submission_date) AS start_date,
+                            LEAST(CURRENT_DATE, COALESCE(requested.requested_end_date, CURRENT_DATE)) AS end_date
+                        FROM requested
+                        WHERE COALESCE(requested.requested_start_date, rs.first_submission_date) IS NOT NULL
+                          AND COALESCE(requested.requested_start_date, rs.first_submission_date)
+                              <= LEAST(CURRENT_DATE, COALESCE(requested.requested_end_date, CURRENT_DATE))
                     ),
                     days AS (
                         SELECT (bounds.start_date + gs) AS d
