@@ -17,6 +17,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.List;
 
 import org.springframework.dao.InvalidDataAccessApiUsageException;
@@ -153,6 +155,33 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         void ignoresNonPumpOperator() {
             long soId = insertUser("919876540003", 3, "Section Officer"); // SECTION_OFFICER
             assertThat(repo.findPumpOperatorById(SCHEMA, soId, 1L, null, null)).isNull();
+        }
+
+        @Test
+        @DisplayName("returns missed submission days for requested range even when no readings exist in range")
+        void returnsMissedDaysForRequestedRangeWithoutReadingsInRange() {
+            long poId = insertPumpOperator("919876540017", "PO Historic Reading");
+            long schemeId = insertScheme("FPO-4");
+            mapUserToScheme(poId, schemeId);
+            insertReading(schemeId, poId, 150.0, LocalDate.of(2026, 3, 17));
+
+            LocalDate startDate = LocalDate.of(2026, 6, 1);
+            LocalDate endDate = LocalDate.of(2026, 6, 15);
+
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, startDate, endDate);
+
+            List<LocalDate> expectedMissedDays = IntStream.rangeClosed(0, 14)
+                    .mapToObj(startDate::plusDays)
+                    .collect(Collectors.toList());
+
+            assertThat(dto).isNotNull();
+            assertThat(dto.lastSubmissionAt()).isNull();
+            assertThat(dto.firstSubmissionDate()).isNull();
+            assertThat(dto.submittedDays()).isEqualTo(0);
+            assertThat(dto.totalDaysSinceFirstSubmission()).isEqualTo(15);
+            assertThat(dto.reportingRatePercent()).isNotNull();
+            assertThat(dto.reportingRatePercent()).isEqualByComparingTo("0.00");
+            assertThat(dto.missedSubmissionDays()).containsExactlyElementsOf(expectedMissedDays);
         }
 
         @Test
