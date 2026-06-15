@@ -2,7 +2,7 @@
 
 ## Overview
 
-**JalSoochak** ("water informer") is a **Digital Public Good (DPG)** for monitoring rural drinking-water supply, built around WhatsApp-driven field data collection and public analytics dashboards under India's **Jal Jeevan Mission (JJM)**.
+**JalSoochak** ("Water Informer") is a **Digital Public Good (DPG)** for monitoring rural drinking-water supply, built around WhatsApp-driven field data collection and public analytics dashboards under India's **Jal Jeevan Mission (JJM)**.
 
 It is a **multi-tenant** platform for state-level water-supply monitoring, featuring:
 
