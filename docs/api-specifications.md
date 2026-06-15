@@ -39,9 +39,11 @@ Tokens are obtained via `/api/v1/auth/login` (email + password) or `/api/v1/auth
 | Method | Endpoint | Required Role | Description |
 |--------|----------|--------------|-------------|
 | `POST` | `/api/v1/tenants` | `SUPER_USER` | Create a new tenant and provision its PostgreSQL schema |
-| `GET` | `/api/v1/tenants` | `SUPER_USER` | List all tenants |
-| `GET` | `/api/v1/tenants/{tenantId}` | `SUPER_USER`, `STATE_ADMIN` | Get tenant details |
-| `PUT` | `/api/v1/tenants/{tenantId}/status` | `SUPER_USER` | Update tenant status |
+| `GET` | `/api/v1/tenants` | Authenticated | List all tenants |
+| `GET` | `/api/v1/tenants/summary` | Authenticated | Lightweight tenant summary list |
+| `PUT` | `/api/v1/tenants/{tenantId}` | `SUPER_USER` | Update tenant details / status |
+| `POST` | `/api/v1/tenants/{tenantId}/deactivate` | `SUPER_USER` | Deactivate a tenant |
+| `POST` | `/api/v1/tenants/api-token` | `SUPER_USER` | Issue an API token (key hash stored on `tenant_master_table`) |
 | `PUT` | `/api/v1/tenants/{tenantId}/logo` | `STATE_ADMIN` | Upload tenant logo |
 
 ### Tenant Configuration
@@ -101,7 +103,9 @@ Tokens are obtained via `/api/v1/auth/login` (email + password) or `/api/v1/auth
 | `POST` | `/api/v1/users/invitations/resend` | `STATE_ADMIN` | Resend invitation email |
 | `GET` | `/api/v1/tenant/user/staff` | `STATE_ADMIN` | List all staff in the tenant |
 | `PUT` | `/api/v1/tenant/user/staff/{id}/role` | `STATE_ADMIN` | Update a staff member's role |
-| `DELETE` | `/api/v1/tenant/user/staff/{id}` | `STATE_ADMIN` | Deactivate a staff member |
+| `POST` | `/api/v1/tenant/user/staff/{id}/deactivate` | `STATE_ADMIN` | Deactivate a staff member |
+| `POST` | `/api/v1/tenant/user/staff/{id}/activate` | `STATE_ADMIN` | Reactivate a staff member |
+| `GET` | `/api/v1/tenant/user/staff/counts/by-role` | `STATE_ADMIN` | Staff counts grouped by role |
 
 ### Bulk Upload
 
@@ -114,20 +118,25 @@ Tokens are obtained via `/api/v1/auth/login` (email + password) or `/api/v1/auth
 
 ## 4. Telemetry Service APIs (`:8989`)
 
-### Glific Webhook
+### Glific Flow Webhooks (WhatsApp)
+
+Glific calls a dedicated public webhook at each step of the WhatsApp submission flow, all under `/api/v1/telemetry` (secured by Glific signature, not JWT). Representative endpoints:
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| `POST` | `/api/v1/observations` | Public (Glific-signed) | Receive meter reading from WhatsApp flow |
+| `POST` | `/api/v1/telemetry/intro` | Public (Glific) | Flow entry / contact resolution |
+| `POST` | `/api/v1/telemetry/take-meter-reading` | Public (Glific) | Receive meter photo → FlowVision AI |
+| `POST` | `/api/v1/telemetry/manual-reading` | Public (Glific) | Operator enters/corrects the reading |
+| `POST` | `/api/v1/telemetry/meter-change` | Public (Glific) | Record a meter replacement |
+| `POST` | `/api/v1/telemetry/issue-report` | Public (Glific) | Report a supply outage / issue |
 
-### Staff / Manual Entry
+> The full set of webhook paths (`/language/selection`, `/channel/selection`, `/scheme/selected`, `/closing`, …) maps 1:1 to the configured Glific flow steps. See `GlificWebhookController`.
 
-| Method | Endpoint | Required Role | Description |
-|--------|----------|--------------|-------------|
-| `GET` | `/api/v1/telemetry` | `STATE_ADMIN`, `SECTION_OFFICER`, `DISTRICT_OFFICER` | List meter readings with filters |
-| `POST` | `/api/v1/telemetry/manual` | `STATE_ADMIN`, `SECTION_OFFICER` | Submit a reading manually |
-| `POST` | `/api/v1/telemetry/issue` | `OPERATOR` | Report a supply outage |
-| `POST` | `/api/v1/telemetry/meter-change` | `STATE_ADMIN` | Record a meter replacement |
+### Staff Query
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/v1/telemetry` | Authenticated (JWT) | List meter readings with filters |
 
 **Query parameters for `GET /api/v1/telemetry`:**
 
@@ -142,7 +151,7 @@ Tokens are obtained via `/api/v1/auth/login` (email + password) or `/api/v1/auth
 
 ---
 
-## 5. Scheme Service APIs (`:8287`)
+## 5. Scheme Service APIs (`:8086`)
 
 ### Scheme Queries
 

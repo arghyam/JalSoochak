@@ -29,7 +29,7 @@ Key characteristics:
        │          │          │          │          │
 ┌──────▼───┐ ┌───▼─────┐ ┌──▼──────┐ ┌─▼───────┐ ┌▼──────────┐
 │tenant-svc│ │user-svc │ │telemetry│ │ scheme  │ │ analytics │
-│  :8081   │ │  :8082  │ │  :8989  │ │  :8287  │ │   :8087   │
+│  :8081   │ │  :8082  │ │  :8989  │ │  :8086  │ │   :8087   │
 └──────┬───┘ └───┬─────┘ └────┬────┘ └──┬──────┘ └──┬────────┘
        │         │            │          │            │
 ┌──────▼─────────▼────────────▼──────────▼────────────▼───────┐
@@ -69,7 +69,7 @@ Supporting Infrastructure:
 | **tenant-service** | 8081 | Tenant onboarding, schema provisioning, configuration, nudge/escalation schedulers, Flyway migrations |
 | **user-service** | 8082 | Authentication (email + WhatsApp OTP), user lifecycle, PII encryption, staff invitations |
 | **telemetry-service** | 8989 | Meter reading ingestion via Glific webhook; FlowVision AI integration; reading validation |
-| **scheme-service** | 8287 | Water supply scheme management; LGD and departmental hierarchy |
+| **scheme-service** | 8086 | Water supply scheme management; LGD and departmental hierarchy |
 | **message-service** | 8085 | Notification delivery (WhatsApp via Glific, email via SendGrid, SMS); escalation PDF generation |
 | **analytics-service** | 8087 | Data warehouse consumer; star schema population; BI query APIs |
 | **anomaly-service** | 8083 | Anomaly detection on submitted readings |
@@ -204,7 +204,7 @@ Pump Operator (WhatsApp)
         │  sends meter photo
         ▼
    Glific Platform
-        │  POST /api/v1/observations (signed webhook)
+        │  POST /api/v1/telemetry/* (Glific flow webhooks)
         ▼
   telemetry-service
         │  calls FlowVision AI → extracted reading + confidence

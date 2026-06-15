@@ -1,6 +1,6 @@
 # Scheme Service
 
-**Port:** `8287` | **Module:** `backend/scheme-service`
+**Port:** `8086` | **Module:** `backend/scheme-service`
 
 ## Overview
 
@@ -196,7 +196,7 @@ Events are logged; no active processing is performed by this service.
 
 ```yaml
 server:
-  port: 8287
+  port: 8086
 
 spring:
   application:

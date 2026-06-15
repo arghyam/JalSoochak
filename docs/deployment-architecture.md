@@ -41,7 +41,7 @@ Public-facing entry points are limited to three:
 
 * **API Gateway** — terminates HTTPS, validates JWTs, routes to internal services
 * **React Frontend** — served as static assets via a CDN or Nginx
-* **Glific Webhook endpoint** — `/api/v1/observations` on `telemetry-service` (rate-limited at ingress)
+* **Glific flow webhooks** — `/api/v1/telemetry/*` on `telemetry-service` (called by Glific at each step of the WhatsApp flow; rate-limited at ingress)
 
 All internal services and databases run within a **private network** and are not directly reachable from outside the cluster.
 

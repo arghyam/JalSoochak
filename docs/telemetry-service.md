@@ -19,8 +19,9 @@ It integrates with **FlowVision** (an AI service) to extract numeric readings fr
 ```
 telemetry-service
 ├── controller/
-│   ├── ApiController               – Glific webhook endpoint: POST /api/v1/observations
-│   └── TelemetryController         – Staff query and manual entry: GET/POST /api/v1/telemetry
+│   ├── GlificWebhookController     – Glific WhatsApp flow step webhooks: POST /api/v1/telemetry/*
+│   ├── SingleTenantTelemetryController – Flow handlers for reading / issue-report / meter-change submission
+│   └── ApiController               – Staff reading query (GET /api/v1/telemetry) and Kafka publish
 ├── service/
 │   ├── TelemetryService            – Orchestrates the reading ingestion lifecycle
 │   ├── FlowVisionService           – Calls FlowVision AI API to extract reading from image
@@ -35,7 +36,7 @@ telemetry-service
 │   ├── KafkaProducer               – Publishes MeterReadingEvent to telemetry-service-topic
 │   └── KafkaConsumer               – Consumes from common-topic
 └── config/
-    ├── SecurityConfig              – POST /api/v1/observations is public; others require JWT
+    ├── SecurityConfig              – Glific flow webhooks under /api/v1/telemetry are public; others require JWT
     └── WebClientConfig             – WebClient bean for FlowVision HTTP calls
 ```
 
@@ -43,38 +44,34 @@ telemetry-service
 
 ## REST API
 
-### Glific Webhook (WhatsApp Flow)
+### Glific Flow Webhooks (WhatsApp)
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/api/v1/observations` | Public (Glific-signed) | Receive a meter reading submission from the WhatsApp flow |
+The WhatsApp submission journey is a multi-step Glific flow. Glific calls a dedicated webhook on `telemetry-service` at **each step** of the conversation, all under the `/api/v1/telemetry` base path (these endpoints are public — secured by Glific signature, not JWT). Representative steps:
 
-This is the primary ingestion endpoint. Glific calls it with a JSON payload containing the meter image URL and operator inputs.
+| Method | Endpoint | Step in the flow |
+|--------|----------|------------------|
+| `POST` | `/api/v1/telemetry/intro` | Flow entry — greet operator, resolve contact |
+| `POST` | `/api/v1/telemetry/language/selection` | Present / record preferred language |
+| `POST` | `/api/v1/telemetry/channel/selection` | Present / record submission channel |
+| `POST` | `/api/v1/telemetry/schemes` · `/scheme/selected` | List operator's schemes and capture the chosen one |
+| `POST` | `/api/v1/telemetry/take-meter-reading` | Receive the meter photo → call FlowVision AI |
+| `POST` | `/api/v1/telemetry/manual-reading` | Operator enters / corrects the reading manually |
+| `POST` | `/api/v1/telemetry/update-previous-reading` | Adjust the previous baseline reading |
+| `POST` | `/api/v1/telemetry/meter-change` · `/meter/meter-change/submit` | Record a meter replacement |
+| `POST` | `/api/v1/telemetry/issue-report` · `/issue-report/submit` | Report a supply outage / operational issue |
+| `POST` | `/api/v1/telemetry/closing` | Confirm submission and close the flow |
 
-**Example Glific Payload:**
-```json
-{
-  "contact": {
-    "phone": "91XXXXXXXXXX",
-    "id": "<glific-contact-id>"
-  },
-  "results": {
-    "image_url": "https://storage.example.com/media/meter.jpg",
-    "manual_reading": "1250",
-    "scheme_id": "101",
-    "flow_type": "READING_SUBMISSION"
-  }
-}
-```
+{% hint style="info" %}
+The exact set of webhook endpoints maps 1:1 to the steps configured in the Glific flow. See `GlificWebhookController` and `SingleTenantTelemetryController` for the authoritative list.
+{% endhint %}
 
-**Processing Steps:**
-1. Validate the Glific webhook signature
-2. Resolve the operator from the phone number hash
-3. Call FlowVision AI with the image URL → receive `extractedReading` and `confidence`
-4. If confidence ≥ threshold: show operator the extracted value for confirmation
-5. If confidence < threshold: prompt operator to enter the value manually
-6. Persist the `FlowReading` record
-7. Publish `MeterReadingEvent` to Kafka
+**Processing Steps (reading submission):**
+1. Resolve the operator from the Glific contact / phone number hash
+2. On `take-meter-reading`, call FlowVision AI with the image URL → receive `extractedReading` and `confidence`
+3. If confidence ≥ threshold: show operator the extracted value for confirmation
+4. If confidence < threshold: route to `manual-reading` so the operator enters the value
+5. Validate the reading and persist the `FlowReading` record
+6. Publish `MeterReadingEvent` to Kafka
 
 **Response to Glific** (rendered in the operator's WhatsApp chat):
 ```json
@@ -87,14 +84,15 @@ This is the primary ingestion endpoint. Glific calls it with a JSON payload cont
 }
 ```
 
-### Staff / Manual Entry
+### Staff Query
 
-| Method | Endpoint | Required Role | Description |
-|--------|----------|--------------|-------------|
-| `GET` | `/api/v1/telemetry` | `STATE_ADMIN`, `SECTION_OFFICER`, `DISTRICT_OFFICER` | List meter readings with filters |
-| `POST` | `/api/v1/telemetry/manual` | `STATE_ADMIN`, `SECTION_OFFICER` | Submit a reading manually via the web dashboard |
-| `POST` | `/api/v1/telemetry/issue` | `OPERATOR` | Report a supply outage or operational issue |
-| `POST` | `/api/v1/telemetry/meter-change` | `STATE_ADMIN` | Record a meter replacement event |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/v1/telemetry` | Authenticated (JWT) | List meter readings with filters (used by dashboards) |
+
+{% hint style="info" %}
+Manual reading entry, meter replacement, and issue reporting are driven through the Glific flow webhooks listed above (`/api/v1/telemetry/manual-reading`, `/meter-change`, `/issue-report`) rather than separate staff REST endpoints.
+{% endhint %}
 
 **Query Parameters for `GET /api/v1/telemetry`:**
 
@@ -262,5 +260,5 @@ eureka:
 | Spring WebFlux | `WebClient` for non-blocking FlowVision HTTP calls |
 | Spring Data JPA | Reading persistence |
 | Spring Kafka | `MeterReadingEvent` publishing |
-| Spring Security + OAuth2 Resource Server | JWT auth (`/api/v1/observations` is public) |
+| Spring Security + OAuth2 Resource Server | JWT auth (Glific flow webhooks under `/api/v1/telemetry` are public) |
 | springdoc-openapi | Auto-generated Swagger UI at `/swagger-ui/index.html` |

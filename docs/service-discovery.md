@@ -2,6 +2,10 @@
 
 **Port:** `8761` | **Module:** `backend/service-discovery`
 
+{% hint style="warning" %}
+**Known configuration mismatch:** the committed `service-discovery/application.yml` sets `server.port: 8762`, while every client service defaults its Eureka `defaultZone` to `:8761`. In deployments this is reconciled via the `EUREKA_URL` env var; for clean local startup, align the two (set the server back to `8761` or point clients at `8762`). This page uses `8761` to match the client defaults. See [Future Work](future-work.md#2-configuration-consistency).
+{% endhint %}
+
 ## Overview
 
 The Service Discovery module is a **Netflix Eureka Server** — the service registry for the JalSoochak V2 backend. All microservices register themselves with Eureka on startup and discover each other by logical name rather than hardcoded hostnames or port numbers.
@@ -24,7 +28,7 @@ All JalSoochak V2 backend services register with this Eureka instance on startup
 | tenant-service | 8081 | `TENANT-SERVICE` |
 | user-service | 8082 | `USER-SERVICE` |
 | telemetry-service | 8989 | `TELEMETRY-SERVICE` |
-| scheme-service | 8287 | `SCHEME-SERVICE` |
+| scheme-service | 8086 | `SCHEME-SERVICE` |
 | message-service | 8085 | `MESSAGE-SERVICE` |
 | analytics-service | 8087 | `ANALYTICS-SERVICE` |
 | anomaly-service | 8083 | `ANOMALY-SERVICE` |

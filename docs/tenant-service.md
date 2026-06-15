@@ -52,10 +52,13 @@ tenant-service
 | Method | Endpoint | Required Role | Description |
 |--------|----------|--------------|-------------|
 | `POST` | `/api/v1/tenants` | `SUPER_USER` | Create a new tenant and provision its PostgreSQL schema |
-| `GET` | `/api/v1/tenants` | `SUPER_USER` | List all tenants |
-| `GET` | `/api/v1/tenants/{tenantId}` | `SUPER_USER`, `STATE_ADMIN` | Get tenant details |
-| `PUT` | `/api/v1/tenants/{tenantId}/status` | `SUPER_USER` | Update tenant status |
+| `GET` | `/api/v1/tenants` | Authenticated | List all tenants |
+| `GET` | `/api/v1/tenants/summary` | Authenticated | Lightweight tenant summary list |
+| `PUT` | `/api/v1/tenants/{tenantId}` | `SUPER_USER` | Update tenant details and status |
+| `POST` | `/api/v1/tenants/{tenantId}/deactivate` | `SUPER_USER` | Deactivate a tenant |
+| `POST` | `/api/v1/tenants/api-token` | `SUPER_USER` | Issue a tenant API token (key hash stored on `tenant_master_table`) |
 | `PUT` | `/api/v1/tenants/{tenantId}/logo` | `STATE_ADMIN` | Upload tenant logo to object storage |
+| `GET` | `/api/v1/tenants/{tenantId}/logo` | Authenticated | Fetch tenant logo |
 
 ### Tenant Status Lifecycle
 
@@ -187,9 +190,10 @@ All SQL queries in `NudgeRepository` and `EscalationRepository` use schema names
 |-----------|-------------|
 | `V1` | Create `common_schema` with all shared tables |
 | `V2` | Register the `create_tenant_schema()` PL/pgSQL function |
-| `V3–V10` | Seed user types and language master data |
-| `V11–V20` | Schema enhancements: indexes and constraints |
-| `V21–V28` | PII hash columns; token table backfill |
+| `V3–V12` | Seed master data; flow-reading columns (AI confidence, coordinates, meter-change/issue reasons) |
+| `V13–V22` | Channels, admin/user token tables, WhatsApp connection id, language master, list/composite indexes |
+| `V23–V27` | PII phone-number hash, OTP table, admin-token index changes, PII title hash, schema PII backfill fix |
+| `V28–V30` | Tenant API key hash + user-token backfill, `is_active` on tenant scheme, per-tenant reports & data versions |
 
 {% hint style="warning" %}
 Never run Flyway migrations manually or from another service. All migrations must go through `tenant-service` to maintain version consistency.

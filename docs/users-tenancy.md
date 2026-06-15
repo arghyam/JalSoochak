@@ -52,7 +52,7 @@ New tenants are provisioned by a Super User via the API — a dedicated schema i
 7. State Admin: Configure tenant settings
       → languages, water_norm, escalation thresholds, cron expressions set
 
-8. Super User: PUT /api/v1/tenants/{id}/status → ACTIVE
+8. Super User: PUT /api/v1/tenants/{id} (status → ACTIVE)
       → Nudge/escalation schedulers activate for this tenant
 ```
 

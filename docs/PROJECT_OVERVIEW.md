@@ -40,7 +40,7 @@ JalSoochak V2 is a **microservices system** built on Spring Boot 3.2.5 / Java 21
        │          │          │          │          │
 ┌──────▼───┐ ┌───▼─────┐ ┌──▼──────┐ ┌─▼───────┐ ┌▼──────────┐
 │tenant-svc│ │user-svc │ │telemetry│ │ scheme  │ │ analytics │
-│  :8081   │ │  :8082  │ │  :8989  │ │  :8287  │ │   :8087   │
+│  :8081   │ │  :8082  │ │  :8989  │ │  :8086  │ │   :8087   │
 └──────┬───┘ └───┬─────┘ └────┬────┘ └──┬──────┘ └──┬────────┘
        │         │            │          │            │
 ┌──────▼─────────▼────────────▼──────────▼────────────▼───────┐
@@ -130,7 +130,7 @@ Infrastructure:
 | [Tenant Service](tenant-service.md) | 8081 | Tenant onboarding, configuration, database migrations, nudge/escalation schedulers |
 | [User Service](user-service.md) | 8082 | Authentication (email + WhatsApp OTP), user lifecycle, PII encryption |
 | [Telemetry Service](telemetry-service.md) | 8989 | Meter reading ingestion via Glific, web dashboard, and IoT; FlowVision AI integration |
-| [Scheme Service](scheme-service.md) | 8287 | Water supply scheme management; LGD and department hierarchy mappings |
+| [Scheme Service](scheme-service.md) | 8086 | Water supply scheme management; LGD and department hierarchy mappings |
 | [Message Service](message-service.md) | 8085 | Notification routing (WhatsApp, Email, SMS, Webhook); escalation PDF generation |
 | [Analytics Service](analytics-service.md) | 8087 | Data warehouse consumer; national, state, and scheme-level BI queries |
 | Anomaly Service | 8083 | Anomaly detection (documented separately) |
@@ -409,7 +409,7 @@ This is the primary data collection workflow used by field pump operators:
 1.  Operator opens the JalSoochak WhatsApp flow via Glific
 2.  Flow prompts: "Take a photo of the flow meter"
 3.  Operator submits meter photo
-4.  Glific forwards the image URL to POST /api/v1/observations (telemetry-service)
+4.  Glific calls the telemetry-service flow webhooks under POST /api/v1/telemetry/* (e.g. /take-meter-reading, /manual-reading)
 5.  telemetry-service calls FlowVision AI → extracts numeric reading + confidence score
       ├─ Confidence ≥ 85%: reading auto-accepted
       │   Operator is shown: "Extracted reading: 1250 — is this correct?"
