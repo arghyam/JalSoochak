@@ -100,6 +100,9 @@ public class GlificLocalizationService {
         if (normalized.contains("no channel options configured")) {
             return localizeMessage("Channel options are not configured for this tenant.", languageKey);
         }
+        if (normalized.contains("selected channel is no longer available")) {
+            return localizeMessage("Selected channel is no longer available. Please make sure you have a channel selected.", languageKey);
+        }
         if (normalized.contains("item selection is required")) {
             return localizeMessage("Item selection is required. Please choose one of the listed options.", languageKey);
         }
@@ -176,6 +179,9 @@ public class GlificLocalizationService {
         }
         if (normalized.contains("channel options are not configured")) {
             return "इस टेनेंट के लिए चैनल विकल्प कॉन्फ़िगर नहीं हैं।";
+        }
+        if (normalized.contains("selected channel is no longer available")) {
+            return "चयनित चैनल अब उपलब्ध नहीं है। कृपया सुनिश्चित करें कि आपने एक चैनल चुना है।";
         }
         if (normalized.contains("item selection is required")) {
             return "विकल्प चयन आवश्यक है। कृपया सूची में से एक विकल्प चुनें।";

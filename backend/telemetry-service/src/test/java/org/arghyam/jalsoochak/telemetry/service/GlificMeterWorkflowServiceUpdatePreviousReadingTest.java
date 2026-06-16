@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -43,6 +44,9 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
 
     @Mock
     private TelemetryTenantRepository telemetryTenantRepository;
+
+    @Mock
+    private UserChannelPreferenceRepository userChannelPreferenceRepository;
 
     @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
