@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -44,6 +45,9 @@ class GlificMeterWorkflowServiceIssueReportTest {
     private TelemetryTenantRepository telemetryTenantRepository;
 
     @Mock
+    private UserChannelPreferenceRepository userChannelPreferenceRepository;
+
+    @Mock
     private TelemetryEventPublisher telemetryEventPublisher;
 
     @Spy
@@ -62,8 +66,11 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(userChannelPreferenceRepository.findChannelValue(1, "919999999999")).thenReturn(Optional.of("Bfm"));
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findConfigValue(1, "TENANT_SUPPORTED_CHANNELS"))
+                .thenReturn(Optional.of("{\"channels\":[\"Bfm\",\"Iot\"]}"));
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
@@ -128,8 +135,11 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(userChannelPreferenceRepository.findChannelValue(1, "919999999999")).thenReturn(Optional.of("Bfm"));
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findConfigValue(1, "TENANT_SUPPORTED_CHANNELS"))
+                .thenReturn(Optional.of("{\"channels\":[\"Bfm\",\"Iot\"]}"));
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
@@ -172,8 +182,11 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(userChannelPreferenceRepository.findChannelValue(1, "919999999999")).thenReturn(Optional.of("Bfm"));
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findConfigValue(1, "TENANT_SUPPORTED_CHANNELS"))
+                .thenReturn(Optional.of("{\"channels\":[\"Bfm\",\"Iot\"]}"));
         when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
         when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english")).thenReturn(Optional.empty());
         when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english")).thenReturn(Optional.empty());
@@ -226,6 +239,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(userChannelPreferenceRepository.findChannelValue(1, "919999999999")).thenReturn(Optional.of("Bfm"));
 
         List<GlificMessageTemplatesService.TemplateOption> templateReasons = List.of(
                 new GlificMessageTemplatesService.TemplateOption("REASON_1", 1, java.util.Map.of("en", "Meter Replaced")),
@@ -235,6 +249,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
         );
 
         when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(templateReasons);
+        when(tenantConfigRepository.findConfigValue(1, "TENANT_SUPPORTED_CHANNELS"))
+                .thenReturn(Optional.of("{\"channels\":[\"Bfm\",\"Iot\"]}"));
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
@@ -267,6 +283,9 @@ class GlificMeterWorkflowServiceIssueReportTest {
         when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(userChannelPreferenceRepository.findChannelValue(1, "919999999999")).thenReturn(Optional.of("Bfm"));
+        when(tenantConfigRepository.findConfigValue(1, "TENANT_SUPPORTED_CHANNELS"))
+                .thenReturn(Optional.of("{\"channels\":[\"Bfm\",\"Iot\"]}"));
 
         IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
                 .contactId("919999999999")
@@ -293,6 +312,40 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyInt()
         );
+    }
+
+    @Test
+    void issueReportSubmitFailsWhenSelectedChannelWasDeleted() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.resolveLanguageKeyForContact("919999999999")).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(
+                org.mockito.ArgumentMatchers.any(Exception.class),
+                eq("Issue report could not be saved."),
+                eq("english")
+        )).thenReturn("Selected channel is no longer available. Please make sure you have a channel selected.");
+        when(userChannelPreferenceRepository.findChannelValue(1, "919999999999")).thenReturn(Optional.of("Legacy"));
+        when(tenantConfigRepository.findConfigValue(1, "TENANT_SUPPORTED_CHANNELS"))
+                .thenReturn(Optional.of("{\"channels\":[\"Bfm\",\"Iot\"]}"));
+
+        IntroResponse resp = service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("1")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(false, resp.isSuccess());
+        assertEquals(
+                "Selected channel is no longer available. Please make sure you have a channel selected.",
+                resp.getMessage()
+        );
+        verify(telemetryTenantRepository, never()).findFirstSchemeForUser("tenant_test", 1L);
     }
 
     @Test
