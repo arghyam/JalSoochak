@@ -117,10 +117,10 @@ public interface SchemeRegularityService {
             Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate);
 
     PeriodicWaterQuantityResponse getPeriodicWaterQuantityByLgdId(
-            Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
 
     PeriodicWaterQuantityResponse getPeriodicWaterQuantityByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
 
     PeriodicSchemeRegularityResponse getPeriodicSchemeRegularityByLgdId(
             Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale);
