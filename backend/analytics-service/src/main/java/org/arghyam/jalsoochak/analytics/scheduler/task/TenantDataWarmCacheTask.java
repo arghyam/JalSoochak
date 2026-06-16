@@ -19,7 +19,7 @@ import java.util.List;
  * for a tenant's level-1 LGD can be served from cache.
  *
  * <p>Date window is anchored to "yesterday" in the configured scheduler zone to ensure the warmed
- * keys remain stable across the 7PM→7PM warm-cache cycle.</p>
+ * keys remain stable across the daily (midnight) warm-cache cycle.</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -40,7 +40,7 @@ public class TenantDataWarmCacheTask implements AnalyticsScheduledTask {
 
     @Override
     @Scheduled(
-            cron = "${analytics.scheduler.common.cron:0 0 19 * * *}",
+            cron = "${analytics.scheduler.common.cron:0 0 0 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
         log.info("Scheduler START '{}'", taskName());

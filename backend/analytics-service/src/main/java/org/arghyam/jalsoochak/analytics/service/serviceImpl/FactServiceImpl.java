@@ -193,6 +193,10 @@ public class FactServiceImpl implements FactService {
         String monthName = date.getMonth().getDisplayName(TextStyle.FULL, Locale.ENGLISH);
         int week = date.get(WeekFields.ISO.weekOfWeekBasedYear());
         boolean isWeekend = date.getDayOfWeek().getValue() >= 6;
+        // Weeks run Sunday -> Saturday. DayOfWeek: Mon=1..Sun=7, so value % 7 gives
+        // days since the preceding Sunday (Sun->0, Mon->1, ... Sat->6).
+        LocalDate weekStart = date.minusDays(date.getDayOfWeek().getValue() % 7);
+        LocalDate weekEnd = weekStart.plusDays(6);
 
         DimDate dimDate = DimDate.builder()
                 .dateKey(Integer.parseInt(date.format(DateTimeFormatter.BASIC_ISO_DATE)))
@@ -203,6 +207,8 @@ public class FactServiceImpl implements FactService {
                 .quarter(quarter)
                 .year(date.getYear())
                 .week(week)
+                .weekStartDate(weekStart)
+                .weekEndDate(weekEnd)
                 .isWeekend(isWeekend)
                 .fiscalYear(date.getYear())
                 .build();
