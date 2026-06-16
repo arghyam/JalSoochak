@@ -7,7 +7,7 @@
 -- (period bucket, region node, dist_type, dist_key).
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS analytics_schema.agg_region_distribution (
+CREATE TABLE analytics_schema.agg_region_distribution (
     id              BIGSERIAL   PRIMARY KEY,
     period_scale    VARCHAR(8)  NOT NULL,   -- DAY | WEEK | MONTH
     period_start    DATE        NOT NULL,

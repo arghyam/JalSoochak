@@ -257,17 +257,17 @@ class DimensionServiceImplTest {
 
         service.updateWaterNorm(event);
 
-        ArgumentCaptor<DimTenantWaterNorm> normCaptor = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
-        verify(dimTenantWaterNormRepository, times(2)).save(normCaptor.capture());
-        List<DimTenantWaterNorm> saved = normCaptor.getAllValues();
-
-        // First save closes the previously-open row at today.
-        DimTenantWaterNorm closed = saved.get(0);
+        // Close is flushed first (saveAndFlush) so the unique open-row index never sees two open rows.
+        ArgumentCaptor<DimTenantWaterNorm> closedCaptor = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
+        verify(dimTenantWaterNormRepository, times(1)).saveAndFlush(closedCaptor.capture());
+        DimTenantWaterNorm closed = closedCaptor.getValue();
         assertThat(closed.getId()).isEqualTo(5L);
         assertThat(closed.getEffectiveTo()).isEqualTo(LocalDate.now());
 
-        // Second save opens the new current row, carrying non-changed norm fields forward.
-        DimTenantWaterNorm opened = saved.get(1);
+        // New current row opened via save, carrying non-changed norm fields forward.
+        ArgumentCaptor<DimTenantWaterNorm> openedCaptor = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
+        verify(dimTenantWaterNormRepository, times(1)).save(openedCaptor.capture());
+        DimTenantWaterNorm opened = openedCaptor.getValue();
         assertThat(opened.getId()).isNull();
         assertThat(opened.getEffectiveFrom()).isEqualTo(LocalDate.now());
         assertThat(opened.getEffectiveTo()).isNull();
@@ -294,6 +294,7 @@ class DimensionServiceImplTest {
 
         verify(dimTenantRepository, times(1)).save(any(DimTenant.class));
         verify(dimTenantWaterNormRepository, never()).save(any());
+        verify(dimTenantWaterNormRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -336,6 +337,34 @@ class DimensionServiceImplTest {
         verify(dimTenantRepository, times(1)).save(captor.capture());
         assertThat(captor.getValue().getUnderSupplyRangePercentage()).isEqualTo(20);
         assertThat(captor.getValue().getOverSupplyRangePercentage()).isEqualTo(30);
+    }
+
+    @Test
+    void updateWaterSupplyThreshold_recordsNormHistory() {
+        WaterSupplyThresholdUpdatedEvent event =
+                new WaterSupplyThresholdUpdatedEvent("WATER_SUPPLY_THRESHOLD_UPDATED", 1, "MP", 25, 35);
+        DimTenant existing = DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build();
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(existing));
+        DimTenantWaterNorm open = DimTenantWaterNorm.builder()
+                .id(7L).tenantId(1).effectiveFrom(LocalDate.of(2026, 1, 1)).effectiveTo(null)
+                .requiredLpcd(55).personCountPerHousehold(5)
+                .overSupplyRangePercentage(10).underSupplyRangePercentage(10)
+                .build();
+        when(dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(1)).thenReturn(Optional.of(open));
+
+        service.updateWaterSupplyThreshold(event);
+
+        // Close the old norm row and open a new one with the updated thresholds,
+        // carrying lpcd/persons forward.
+        verify(dimTenantWaterNormRepository, times(1)).saveAndFlush(any());
+        ArgumentCaptor<DimTenantWaterNorm> cap = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
+        verify(dimTenantWaterNormRepository, times(1)).save(cap.capture());
+        DimTenantWaterNorm opened = cap.getValue();
+        assertThat(opened.getEffectiveTo()).isNull();
+        assertThat(opened.getUnderSupplyRangePercentage()).isEqualTo(25);
+        assertThat(opened.getOverSupplyRangePercentage()).isEqualTo(35);
+        assertThat(opened.getRequiredLpcd()).isEqualTo(55);
+        assertThat(opened.getPersonCountPerHousehold()).isEqualTo(5);
     }
 
     @Test

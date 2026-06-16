@@ -8,7 +8,7 @@
 -- over arbitrary ranges.
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS analytics_schema.agg_scheme_daily (
+CREATE TABLE analytics_schema.agg_scheme_daily (
     scheme_id                  INT       NOT NULL,
     reading_date               DATE      NOT NULL,
     tenant_id                  INT       NOT NULL,

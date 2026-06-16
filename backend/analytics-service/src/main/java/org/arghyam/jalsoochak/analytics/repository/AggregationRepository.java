@@ -225,7 +225,7 @@ public class AggregationRepository {
                        CASE WHEN s.scheme_count > 0
                             THEN ROUND(COALESCE(a.total_water_supplied_liters, 0)::numeric / s.scheme_count, 2)
                             ELSE 0 END,
-                       s.snap_required_lpcd, s.snap_persons_per_hh, s.snap_over_pct, s.snap_under_pct,
+                       a.snap_required_lpcd, a.snap_persons_per_hh, a.snap_over_pct, a.snap_under_pct,
                        CURRENT_TIMESTAMP, ?
                 FROM (
                     SELECT %1$s AS region_id, ds.tenant_id,
@@ -234,13 +234,8 @@ public class AggregationRepository {
                            SUM(CASE WHEN operating_status > 0 THEN 0 ELSE 1 END) AS inactive_scheme_count,
                            SUM(COALESCE(house_hold_count, 0))::bigint AS total_household_count,
                            SUM(COALESCE(fhtc_count, 0))::bigint AS total_achieved_fhtc,
-                           SUM(COALESCE(planned_fhtc, 0))::bigint AS total_planned_fhtc,
-                           MAX(t.required_lpcd) AS snap_required_lpcd,
-                           MAX(t.person_count_per_household) AS snap_persons_per_hh,
-                           MAX(t.over_supply_range_percentage) AS snap_over_pct,
-                           MAX(t.under_supply_range_percentage) AS snap_under_pct
+                           SUM(COALESCE(planned_fhtc, 0))::bigint AS total_planned_fhtc
                     FROM analytics_schema.dim_scheme_table ds
-                    LEFT JOIN analytics_schema.dim_tenant_table t ON t.tenant_id = ds.tenant_id
                     WHERE %1$s IS NOT NULL
                     GROUP BY %1$s, ds.tenant_id
                 ) s
@@ -254,7 +249,11 @@ public class AggregationRepository {
                            SUM(confirmed_reading_total) AS total_confirmed_reading,
                            SUM(in_efficient_range) AS supply_days_in_efficient_range,
                            SUM(compliant_count) AS compliant_submission_count,
-                           SUM(anomalous_count) AS anomalous_submission_count
+                           SUM(anomalous_count) AS anomalous_submission_count,
+                           MAX(snap_required_lpcd) AS snap_required_lpcd,
+                           MAX(snap_persons_per_hh) AS snap_persons_per_hh,
+                           MAX(snap_over_pct) AS snap_over_pct,
+                           MAX(snap_under_pct) AS snap_under_pct
                     FROM analytics_schema.agg_scheme_daily
                     WHERE reading_date BETWEEN ? AND ?
                     GROUP BY %1$s, tenant_id

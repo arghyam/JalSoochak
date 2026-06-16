@@ -247,53 +247,55 @@ public class DimensionServiceImpl implements DimensionService {
         dimTenantRepository.save(tenant);
 
         // 2) Maintain the SCD-2 history so historical aggregates stay reproducible.
-        applyWaterNormHistory(event.getTenantId(), newLpcd, tenant);
+        applyWaterNormChange(event.getTenantId(), tenant, newLpcd, null, null);
 
         log.info("Updated water norm required_lpcd={} [tenantId={}]",
                 newLpcd, event.getTenantId());
     }
 
     /**
-     * Close the current open norm row and open a new one when the value actually
-     * changes (half-open intervals). Non-changed norm fields are carried forward
-     * from the existing open row; the event only carries required_lpcd.
+     * Record a water-norm change in the SCD-2 history: when any norm field actually
+     * changes, close the open row and open a new one (half-open intervals). Any
+     * {@code null} override is carried forward from the current open row (or the
+     * tenant copy when no open row exists yet), so both LPCD and supply-threshold
+     * changes are tracked. The close is flushed before the insert so the
+     * "one open row per tenant" partial unique index never sees two open rows.
      */
-    private void applyWaterNormHistory(Integer tenantId, Integer newLpcd, DimTenant tenant) {
+    private void applyWaterNormChange(Integer tenantId, DimTenant tenant,
+                                      Integer newLpcd, Integer newOverPct, Integer newUnderPct) {
         LocalDate today = LocalDate.now();
-        Optional<DimTenantWaterNorm> openOpt =
-                dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(tenantId);
+        DimTenantWaterNorm open =
+                dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(tenantId).orElse(null);
 
-        if (openOpt.isPresent()) {
-            DimTenantWaterNorm open = openOpt.get();
-            if (Objects.equals(open.getRequiredLpcd(), newLpcd)) {
+        Integer lpcd = newLpcd != null ? newLpcd
+                : (open != null ? open.getRequiredLpcd() : tenant.getRequiredLpcd());
+        Integer persons = open != null ? open.getPersonCountPerHousehold() : 5;
+        Integer overPct = newOverPct != null ? newOverPct
+                : (open != null ? open.getOverSupplyRangePercentage() : tenant.getOverSupplyRangePercentage());
+        Integer underPct = newUnderPct != null ? newUnderPct
+                : (open != null ? open.getUnderSupplyRangePercentage() : tenant.getUnderSupplyRangePercentage());
+
+        if (open != null) {
+            if (Objects.equals(open.getRequiredLpcd(), lpcd)
+                    && Objects.equals(open.getPersonCountPerHousehold(), persons)
+                    && Objects.equals(open.getOverSupplyRangePercentage(), overPct)
+                    && Objects.equals(open.getUnderSupplyRangePercentage(), underPct)) {
                 return; // no real change — keep the timeline stable
             }
             open.setEffectiveTo(today);
-            dimTenantWaterNormRepository.save(open);
-
-            dimTenantWaterNormRepository.save(DimTenantWaterNorm.builder()
-                    .tenantId(tenantId)
-                    .effectiveFrom(today)
-                    .effectiveTo(null)
-                    .requiredLpcd(newLpcd)
-                    .personCountPerHousehold(open.getPersonCountPerHousehold())
-                    .overSupplyRangePercentage(open.getOverSupplyRangePercentage())
-                    .underSupplyRangePercentage(open.getUnderSupplyRangePercentage())
-                    .createdAt(LocalDateTime.now())
-                    .build());
-        } else {
-            // No history yet (e.g. tenant created after the seed migration) — open the first row.
-            dimTenantWaterNormRepository.save(DimTenantWaterNorm.builder()
-                    .tenantId(tenantId)
-                    .effectiveFrom(today)
-                    .effectiveTo(null)
-                    .requiredLpcd(newLpcd)
-                    .personCountPerHousehold(5)
-                    .overSupplyRangePercentage(tenant.getOverSupplyRangePercentage())
-                    .underSupplyRangePercentage(tenant.getUnderSupplyRangePercentage())
-                    .createdAt(LocalDateTime.now())
-                    .build());
+            dimTenantWaterNormRepository.saveAndFlush(open);
         }
+
+        dimTenantWaterNormRepository.save(DimTenantWaterNorm.builder()
+                .tenantId(tenantId)
+                .effectiveFrom(today)
+                .effectiveTo(null)
+                .requiredLpcd(lpcd)
+                .personCountPerHousehold(persons)
+                .overSupplyRangePercentage(overPct)
+                .underSupplyRangePercentage(underPct)
+                .createdAt(LocalDateTime.now())
+                .build());
     }
 
     @Override
@@ -338,6 +340,11 @@ public class DimensionServiceImpl implements DimensionService {
         tenant.setOverSupplyRangePercentage(event.getOverSupplyThresholdPercent());
         tenant.setUpdatedAt(LocalDateTime.now());
         dimTenantRepository.save(tenant);
+
+        // Track threshold changes in the SCD-2 history too (they feed the efficient-range calc).
+        applyWaterNormChange(event.getTenantId(), tenant, null,
+                event.getOverSupplyThresholdPercent(), event.getUnderSupplyThresholdPercent());
+
         log.info("Updated dim_tenant_table supply thresholds [tenantId={}, under={}, over={}]",
                 event.getTenantId(), event.getUnderSupplyThresholdPercent(), event.getOverSupplyThresholdPercent());
     }

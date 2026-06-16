@@ -6,7 +6,7 @@
 -- inherently daily and are NOT stored at hour grain.
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS analytics_schema.agg_submission_activity_hourly (
+CREATE TABLE analytics_schema.agg_submission_activity_hourly (
     id                     BIGSERIAL  PRIMARY KEY,
     hour_start             TIMESTAMP  NOT NULL,   -- truncated to the hour
     tenant_id              INT        NOT NULL,

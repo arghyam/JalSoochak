@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 /**
  * Orchestrates population of the pre-aggregation tables. Computes the calendar
@@ -19,6 +20,9 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 @Slf4j
 public class AggregationService {
+
+    /** Match the scheduler zone so the final/provisional boundary is consistent regardless of JVM TZ. */
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final AggregationRepository aggregationRepository;
 
@@ -32,7 +36,7 @@ public class AggregationService {
         if (from == null || to == null || from.isAfter(to)) {
             throw new IllegalArgumentException("Invalid aggregation window: " + from + " .. " + to);
         }
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(IST_ZONE);
 
         int base = aggregationRepository.upsertSchemeDaily(from, to);
         log.info("[aggregation] agg_scheme_daily upserted rows={} window={}..{}", base, from, to);

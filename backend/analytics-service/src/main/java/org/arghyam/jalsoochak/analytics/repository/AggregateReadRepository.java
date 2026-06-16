@@ -266,8 +266,11 @@ public class AggregateReadRepository {
      */
     public Optional<List<SchemeWaterSupplyRow>> getSchemeWaterSupply(int tenantId, LocalDate start, LocalDate end) {
         Boolean hasRows = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (SELECT 1 FROM analytics_schema.agg_scheme_daily WHERE tenant_id = ?)
-                """, Boolean.class, tenantId);
+                SELECT EXISTS (
+                    SELECT 1 FROM analytics_schema.agg_scheme_daily
+                    WHERE tenant_id = ? AND reading_date BETWEEN ? AND ?
+                )
+                """, Boolean.class, tenantId, start, end);
         if (hasRows == null || !hasRows) {
             return Optional.empty();
         }
@@ -325,9 +328,9 @@ public class AggregateReadRepository {
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
                     SELECT 1 FROM analytics_schema.agg_scheme_daily
-                    WHERE tenant_id = ? AND %s = ?
+                    WHERE tenant_id = ? AND %s = ? AND reading_date BETWEEN ? AND ?
                 )
-                """).formatted(parentCol), Boolean.class, tenantId, parentRegionId);
+                """).formatted(parentCol), Boolean.class, tenantId, parentRegionId, start, end);
         if (hasRows == null || !hasRows) {
             return Optional.empty();
         }
@@ -387,9 +390,9 @@ public class AggregateReadRepository {
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
                     SELECT 1 FROM analytics_schema.agg_scheme_daily
-                    WHERE tenant_id = ? AND %s = ?
+                    WHERE tenant_id = ? AND %s = ? AND reading_date BETWEEN ? AND ?
                 )
-                """).formatted(parentCol), Boolean.class, tenantId, parentRegionId);
+                """).formatted(parentCol), Boolean.class, tenantId, parentRegionId, start, end);
         if (hasRows == null || !hasRows) {
             return Optional.empty();
         }
