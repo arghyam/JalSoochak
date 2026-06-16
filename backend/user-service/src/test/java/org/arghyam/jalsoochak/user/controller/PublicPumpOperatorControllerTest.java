@@ -61,14 +61,20 @@ class PublicPumpOperatorControllerTest {
         @Test
         @DisplayName("returns 200 with pump operator details")
         void returns200() throws Exception {
-            PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
+            PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder()
+                    .id(1L)
+                    .stateSchemeId("STATE-5")
+                    .centerSchemeId("CENTER-5")
+                    .build();
             when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(5L), any(), any())).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
                             .param("tenantCode", "mp")
                             .param("schemeId", "5"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.id").value(1));
+                    .andExpect(jsonPath("$.data.id").value(1))
+                    .andExpect(jsonPath("$.data.stateSchemeId").value("STATE-5"))
+                    .andExpect(jsonPath("$.data.centerSchemeId").value("CENTER-5"));
         }
 
         @Test

@@ -18,6 +18,8 @@ public record PumpOperatorDetailsDTO(
         String phoneNumber,
         TenantUserStatus status,
         Integer schemeId,
+        String stateSchemeId,
+        String centerSchemeId,
         String schemeName,
         Double schemeLatitude,
         Double schemeLongitude,
