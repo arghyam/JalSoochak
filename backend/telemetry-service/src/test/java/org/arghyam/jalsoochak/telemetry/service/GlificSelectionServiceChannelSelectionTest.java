@@ -85,7 +85,6 @@ class GlificSelectionServiceChannelSelectionTest {
         );
         assertEquals("three", response.getCorrelationId());
         assertEquals("bfmOrElectricNotpresentandcorrelationIsThree", response.getIsBfmOrIsElectric());
-        assertEquals(List.of("PDU", "IOT", "ELM"), response.getTenantSupportedChannels());
         assertNull(response.getSelected());
     }
 }

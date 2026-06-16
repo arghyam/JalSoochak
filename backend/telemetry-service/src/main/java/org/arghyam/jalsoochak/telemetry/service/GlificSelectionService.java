@@ -242,7 +242,6 @@ public class GlificSelectionService {
                     .message(message.toString())
                     .correlationId(correlationWord)
                     .isBfmOrIsElectric(isBfmOrIsElectricValue)
-                    .tenantSupportedChannels(channelOptions)
                     .build();
         } catch (Exception e) {
             log.error("Error building channel selection message: {}", e.getMessage(), e);

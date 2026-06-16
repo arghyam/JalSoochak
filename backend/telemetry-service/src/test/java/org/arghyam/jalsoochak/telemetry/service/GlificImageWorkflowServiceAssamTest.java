@@ -1,17 +1,22 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
+import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -47,8 +52,94 @@ class GlificImageWorkflowServiceAssamTest {
     @Mock
     private GlificLocalizationService localizationService;
 
+    @Mock
+    private TenantConfigRepository tenantConfigRepository;
+
+    @Mock
+    private UserChannelPreferenceRepository userChannelPreferenceRepository;
+
+    @Spy
+    private ObjectMapper objectMapper = new ObjectMapper();
+
     @InjectMocks
     private GlificImageWorkflowService service;
+
+    @Test
+    void processImageRequiresSelectedChannelThatStillExists() throws Exception {
+        GlificWebhookRequest request = GlificWebhookRequest.builder()
+                .contactId("919876543210")
+                .mediaId("media-1")
+                .mediaUrl("https://example.com/meter.jpg")
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(glificMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
+        when(glificMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
+        when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(userChannelPreferenceRepository.findChannelValue(22, "919876543210")).thenReturn(Optional.of("PDU"));
+        when(tenantConfigRepository.findConfigValue(22, "TENANT_SUPPORTED_CHANNELS"))
+                .thenReturn(Optional.of("{\"channels\":[\"PDU\",\"IOT\"]}"));
+        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
+
+        CreateReadingResponse response = service.processImage(request);
+
+        assertNotNull(response);
+        assertEquals(true, response.isSuccess());
+        verify(bfmReadingService).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void processImageFailsWhenSelectedChannelMissingOrRemoved() throws Exception {
+        GlificWebhookRequest request = GlificWebhookRequest.builder()
+                .contactId("919876543210")
+                .mediaId("media-1")
+                .mediaUrl("https://example.com/meter.jpg")
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(glificMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
+        when(glificMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
+        when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(userChannelPreferenceRepository.findChannelValue(22, "919876543210")).thenReturn(Optional.of("BFM"));
+        when(tenantConfigRepository.findConfigValue(22, "TENANT_SUPPORTED_CHANNELS"))
+                .thenReturn(Optional.of("{\"channels\":[\"PDU\",\"IOT\"]}"));
+        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(
+                any(IllegalStateException.class),
+                anyString(),
+                anyString()
+        )).thenReturn("Selected channel is no longer available. Please make sure you have a channel selected.");
+
+        CreateReadingResponse response = service.processImage(request);
+
+        assertNotNull(response);
+        assertEquals(false, response.isSuccess());
+        assertEquals("Selected channel is no longer available. Please make sure you have a channel selected.", response.getMessage());
+        verify(bfmReadingService, never()).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
+    }
 
     @Test
     void processAssamReadingSkipsLocationUpdateWhenGeolocationMissing() {
