@@ -542,8 +542,6 @@ public class GlificMeterWorkflowService {
             String languageKey = localizationService.normalizeLanguageKey(
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
-            ensureCurrentChannelSelectionExists(tenantId, request.getContactId(), languageKey);
-
             String rawIssueReason = request.getIssueReason().trim();
 
             List<GlificMessageTemplatesService.TemplateOption> templateReasons =
@@ -1712,71 +1710,6 @@ public class GlificMeterWorkflowService {
             case "REASON_4" -> "noWaterSupply";
             default -> selectedKey;
         };
-    }
-
-    private void ensureCurrentChannelSelectionExists(Integer tenantId, String contactId, String languageKey) {
-        String message = "Selected channel is no longer available. Please make sure you have a channel selected.";
-        String selectedChannel = userChannelPreferenceRepository.findChannelValue(tenantId, contactId)
-                .map(String::trim)
-                .filter(value -> !value.isBlank())
-                .orElseThrow(() -> new IllegalStateException(message));
-
-        List<String> currentChannelOptions = resolveCurrentChannelOptions(tenantId, languageKey);
-        boolean stillAvailable = currentChannelOptions.stream()
-                .map(String::trim)
-                .anyMatch(option -> option.equalsIgnoreCase(selectedChannel));
-        if (!stillAvailable) {
-            throw new IllegalStateException(message);
-        }
-    }
-
-    private List<String> resolveCurrentChannelOptions(Integer tenantId, String languageKey) {
-        List<String> configuredChannels = tenantConfigRepository.findConfigValue(tenantId, "TENANT_SUPPORTED_CHANNELS")
-                .map(this::parseSupportedChannels)
-                .orElse(List.of());
-        if (!configuredChannels.isEmpty()) {
-            return configuredChannels;
-        }
-
-        List<GlificMessageTemplatesService.TemplateOption> templateOptions =
-                templatesService.resolveScreenOptions(tenantId, "CHANNEL_SELECTION");
-        if (!templateOptions.isEmpty()) {
-            return templateOptions.stream()
-                    .map(option -> option.labelForLanguageKey(languageKey))
-                    .filter(value -> value != null && !value.isBlank())
-                    .toList();
-        }
-
-        return tenantConfigRepository.findChannelOptions(tenantId, languageKey);
-    }
-
-    private List<String> parseSupportedChannels(String rawConfig) {
-        try {
-            JsonNode node = objectMapper.readTree(rawConfig);
-            JsonNode channelsNode = node.has("channels") ? node.get("channels") : node;
-            if (channelsNode == null) {
-                return List.of();
-            }
-            if (channelsNode.isArray()) {
-                java.util.ArrayList<String> values = new java.util.ArrayList<>();
-                for (JsonNode child : channelsNode) {
-                    if (child != null && child.isTextual()) {
-                        String value = child.asText().trim();
-                        if (!value.isBlank()) {
-                            values.add(value);
-                        }
-                    }
-                }
-                return values;
-            }
-            if (channelsNode.isTextual()) {
-                String value = channelsNode.asText().trim();
-                return value.isBlank() ? List.of() : List.of(value);
-            }
-            return List.of();
-        } catch (Exception e) {
-            return List.of();
-        }
     }
 
     private String resolveIssueSelectionKey(String rawIssueReason,

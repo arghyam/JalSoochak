@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
@@ -9,6 +11,8 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -27,17 +31,26 @@ public class GlificImageWorkflowService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final GlificOperatorContextService operatorContextService;
     private final GlificLocalizationService localizationService;
+    private final TenantConfigRepository tenantConfigRepository;
+    private final UserChannelPreferenceRepository userChannelPreferenceRepository;
+    private final ObjectMapper objectMapper;
 
     public GlificImageWorkflowService(GlificMediaService glificMediaService,
                                       BfmReadingService bfmReadingService,
                                       TelemetryTenantRepository telemetryTenantRepository,
                                       GlificOperatorContextService operatorContextService,
-                                      GlificLocalizationService localizationService) {
+                                      GlificLocalizationService localizationService,
+                                      TenantConfigRepository tenantConfigRepository,
+                                      UserChannelPreferenceRepository userChannelPreferenceRepository,
+                                      ObjectMapper objectMapper) {
         this.glificMediaService = glificMediaService;
         this.bfmReadingService = bfmReadingService;
         this.telemetryTenantRepository = telemetryTenantRepository;
         this.operatorContextService = operatorContextService;
         this.localizationService = localizationService;
+        this.tenantConfigRepository = tenantConfigRepository;
+        this.userChannelPreferenceRepository = userChannelPreferenceRepository;
+        this.objectMapper = objectMapper;
     }
 
     public CreateReadingResponse processImage(GlificWebhookRequest glificWebhookRequest) {
@@ -53,9 +66,11 @@ public class GlificImageWorkflowService {
             String imageStorageUrl = glificMediaService.uploadImage(contactId, imageBytes);
 
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
+            Integer tenantId = operatorWithSchema.operator().tenantId();
             String languageKey = localizationService.normalizeLanguageKey(
-                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, operatorWithSchema.operator().tenantId())
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
+            ensureSelectedChannelExists(tenantId, contactId);
 
             Long schemeId = telemetryTenantRepository
                     .findLatestPendingSchemeSelectionForDate(
@@ -216,5 +231,57 @@ public class GlificImageWorkflowService {
         if (longitude == null || longitude.compareTo(BigDecimal.valueOf(-180)) < 0 || longitude.compareTo(BigDecimal.valueOf(180)) > 0) {
             throw new IllegalStateException("geolocation longitude must be between -180 and 180");
         }
+    }
+
+    private void ensureSelectedChannelExists(Integer tenantId, String contactId) {
+        String message = "Selected channel is no longer available. Please make sure you have a channel selected.";
+        if (tenantId == null) {
+            throw new IllegalStateException(message);
+        }
+
+        String selectedChannel = userChannelPreferenceRepository.findChannelValue(tenantId, contactId)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .orElseThrow(() -> new IllegalStateException(message));
+
+        List<String> supportedChannels = tenantConfigRepository.findConfigValue(tenantId, "TENANT_SUPPORTED_CHANNELS")
+                .map(rawConfig -> parseSupportedChannels(tenantId, rawConfig))
+                .orElse(List.of());
+
+        boolean stillAvailable = supportedChannels.stream()
+                .map(String::trim)
+                .anyMatch(option -> option.equalsIgnoreCase(selectedChannel));
+        if (!stillAvailable) {
+            throw new IllegalStateException(message);
+        }
+    }
+
+    private List<String> parseSupportedChannels(Integer tenantId, String rawConfig) {
+        try {
+            JsonNode node = objectMapper.readTree(rawConfig);
+            JsonNode channelsNode = node.has("channels") ? node.get("channels") : node;
+            if (channelsNode == null) {
+                return List.of();
+            }
+            if (channelsNode.isArray()) {
+                java.util.ArrayList<String> values = new java.util.ArrayList<>();
+                for (JsonNode child : channelsNode) {
+                    if (child != null && child.isTextual()) {
+                        String value = child.asText().trim();
+                        if (!value.isBlank()) {
+                            values.add(value);
+                        }
+                    }
+                }
+                return values;
+            }
+            if (channelsNode.isTextual()) {
+                String value = channelsNode.asText().trim();
+                return value.isBlank() ? List.of() : List.of(value);
+            }
+        } catch (Exception e) {
+            log.warn("Invalid TENANT_SUPPORTED_CHANNELS JSON for tenantId {}: {}", tenantId, e.getMessage());
+        }
+        return List.of();
     }
 }
