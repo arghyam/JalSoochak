@@ -5,6 +5,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -21,5 +23,7 @@ public class IntroResponse {
     private Boolean isBfm;
     private Boolean isElectrical;
     private String isBfmOrIsElectric;
+    @JsonProperty("tenant_supported_channel")
+    private List<String> tenantSupportedChannels;
     private Boolean notOthers;
 }
