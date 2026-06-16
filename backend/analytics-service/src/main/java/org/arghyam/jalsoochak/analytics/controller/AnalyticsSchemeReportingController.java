@@ -49,6 +49,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -592,7 +593,9 @@ public class AnalyticsSchemeReportingController {
             @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
             @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
             @RequestParam(name = "page_number", required = false, defaultValue = "1") Integer pageNumber,
-            @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit) {
+            @RequestParam(name = "limit", required = false, defaultValue = "10") Integer limit,
+            @RequestParam(name = "sort_by", required = false, defaultValue = "reportingRate") String sortBy,
+            @RequestParam(name = "sort_dir", required = false, defaultValue = "desc") String sortDir) {
         try {
             if (parentLgdId != null && parentDepartmentId != null) {
                 throw new IllegalArgumentException("Provide either parent_lgd_id or parent_department_id, not both");
@@ -602,8 +605,10 @@ public class AnalyticsSchemeReportingController {
             }
 
             SchemeStatusAndTopReportingResponse data = (parentLgdId != null)
-                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(tenantId, parentLgdId, startDate, endDate, pageNumber, limit)
-                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(tenantId, parentDepartmentId, startDate, endDate, pageNumber, limit);
+                    ? schemeRegularityService.getSchemeStatusAndTopReportingByLgd(
+                            tenantId, parentLgdId, startDate, endDate, pageNumber, limit, sortBy, sortDir)
+                    : schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(
+                            tenantId, parentDepartmentId, startDate, endDate, pageNumber, limit, sortBy, sortDir);
 
             return ResponseEntity.ok(ApiResponse.<SchemeStatusAndTopReportingResponse>builder()
                     .success(true)
@@ -620,6 +625,45 @@ public class AnalyticsSchemeReportingController {
                     .data(null)
                     .build());
         }
+    }
+
+    @GetMapping("/schemes/dashboard/download")
+    @Operation(summary = "Download schemes dashboard as CSV")
+    public ResponseEntity<StreamingResponseBody> downloadSchemeStatusAndTopReportingRate(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(name = "parent_lgd_id", required = false) Integer parentLgdId,
+            @RequestParam(name = "parent_department_id", required = false) Integer parentDepartmentId,
+            @RequestParam(name = "sort_by", required = false, defaultValue = "reportingRate") String sortBy,
+            @RequestParam(name = "sort_dir", required = false, defaultValue = "desc") String sortDir) {
+        if (parentLgdId != null && parentDepartmentId != null) {
+            throw new IllegalArgumentException("Provide either parent_lgd_id or parent_department_id, not both");
+        }
+        if (parentLgdId == null && parentDepartmentId == null) {
+            throw new IllegalArgumentException("Provide either parent_lgd_id or parent_department_id");
+        }
+
+        String filename = AnalyticsControllerHelper.buildSchemeDashboardFilename(
+                parentLgdId != null ? "lgd" : "department",
+                parentLgdId != null ? parentLgdId : parentDepartmentId,
+                startDate,
+                endDate);
+
+        StreamingResponseBody body = outputStream -> {
+            if (parentLgdId != null) {
+                schemeRegularityService.writeSchemeStatusAndTopReportingCsvByLgd(
+                        tenantId, parentLgdId, startDate, endDate, outputStream, sortBy, sortDir);
+            } else {
+                schemeRegularityService.writeSchemeStatusAndTopReportingCsvByDepartment(
+                        tenantId, parentDepartmentId, startDate, endDate, outputStream, sortBy, sortDir);
+            }
+        };
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .body(body);
     }
 
     @GetMapping("/schemes/region-report")
@@ -1081,4 +1125,3 @@ public class AnalyticsSchemeReportingController {
         }
     }
 }
-

@@ -137,6 +137,8 @@ public class PublicPumpOperatorRepository {
             schemeJoin = String.format("""
                     LEFT JOIN LATERAL (
                         SELECT sm.id AS scheme_id,
+                               sm.state_scheme_id,
+                               sm.centre_scheme_id,
                                sm.scheme_name,
                                sm.latitude,
                                sm.longitude
@@ -156,6 +158,8 @@ public class PublicPumpOperatorRepository {
             schemeJoin = """
                     LEFT JOIN LATERAL (
                         SELECT NULL::integer AS scheme_id,
+                               NULL::text AS state_scheme_id,
+                               NULL::text AS centre_scheme_id,
                                NULL::text AS scheme_name,
                                NULL::double precision AS latitude,
                                NULL::double precision AS longitude
@@ -169,8 +173,11 @@ public class PublicPumpOperatorRepository {
                        u.email,
                        u.phone_number,
                        u.status,
+                       u.created_at::date AS onboarding_date,
                        ut.c_name AS role,
                        sch.scheme_id,
+                       sch.state_scheme_id,
+                       sch.centre_scheme_id,
                        sch.scheme_name,
                        sch.latitude AS scheme_latitude,
                        sch.longitude AS scheme_longitude,
@@ -203,11 +210,17 @@ public class PublicPumpOperatorRepository {
                                 CAST(? AS date) AS requested_end_date
                         )
                         SELECT
-                            COALESCE(requested.requested_start_date, rs.first_submission_date) AS start_date,
+                            GREATEST(
+                                u.created_at::date,
+                                COALESCE(requested.requested_start_date, u.created_at::date)
+                            ) AS start_date,
                             LEAST(CURRENT_DATE, COALESCE(requested.requested_end_date, CURRENT_DATE)) AS end_date
                         FROM requested
-                        WHERE COALESCE(requested.requested_start_date, rs.first_submission_date) IS NOT NULL
-                          AND COALESCE(requested.requested_start_date, rs.first_submission_date)
+                        WHERE u.created_at IS NOT NULL
+                          AND GREATEST(
+                                u.created_at::date,
+                                COALESCE(requested.requested_start_date, u.created_at::date)
+                              )
                               <= LEAST(CURRENT_DATE, COALESCE(requested.requested_end_date, CURRENT_DATE))
                     ),
                     days AS (
@@ -294,6 +307,8 @@ public class PublicPumpOperatorRepository {
                         .phoneNumber(pii.safeDecrypt(rs.getString("phone_number")))
                         .status(mapStatus(getNullableInt(rs, "status")))
                         .schemeId(getNullableInt(rs, "scheme_id"))
+                        .stateSchemeId(rs.getString("state_scheme_id"))
+                        .centerSchemeId(rs.getString("centre_scheme_id"))
                         .schemeName(rs.getString("scheme_name"))
                         .schemeLatitude(getNullableDouble(rs, "scheme_latitude"))
                         .schemeLongitude(getNullableDouble(rs, "scheme_longitude"))
@@ -318,6 +333,8 @@ public class PublicPumpOperatorRepository {
             schemeJoin = String.format("""
                     LEFT JOIN LATERAL (
                         SELECT sm.id AS scheme_id,
+                               sm.state_scheme_id,
+                               sm.centre_scheme_id,
                                sm.scheme_name,
                                sm.latitude,
                                sm.longitude
@@ -336,6 +353,8 @@ public class PublicPumpOperatorRepository {
             schemeJoin = """
                     LEFT JOIN LATERAL (
                         SELECT NULL::integer AS scheme_id,
+                               NULL::text AS state_scheme_id,
+                               NULL::text AS centre_scheme_id,
                                NULL::text AS scheme_name,
                                NULL::double precision AS latitude,
                                NULL::double precision AS longitude
@@ -351,6 +370,8 @@ public class PublicPumpOperatorRepository {
                        u.status,
                        ut.c_name AS role,
                        sch.scheme_id,
+                       sch.state_scheme_id,
+                       sch.centre_scheme_id,
                        sch.scheme_name,
                        sch.latitude AS scheme_latitude,
                        sch.longitude AS scheme_longitude,
@@ -456,6 +477,8 @@ public class PublicPumpOperatorRepository {
                         .phoneNumber(pii.safeDecrypt(rs.getString("phone_number")))
                         .status(mapStatus(getNullableInt(rs, "status")))
                         .schemeId(getNullableInt(rs, "scheme_id"))
+                        .stateSchemeId(rs.getString("state_scheme_id"))
+                        .centerSchemeId(rs.getString("centre_scheme_id"))
                         .schemeName(rs.getString("scheme_name"))
                         .schemeLatitude(getNullableDouble(rs, "scheme_latitude"))
                         .schemeLongitude(getNullableDouble(rs, "scheme_longitude"))

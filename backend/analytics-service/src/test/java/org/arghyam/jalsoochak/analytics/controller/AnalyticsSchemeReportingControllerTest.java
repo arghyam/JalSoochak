@@ -565,7 +565,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemesDashboard_withParentLgdId_returnsParentLgdCName() throws Exception {
-        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 1, 5))
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 1, 5, "reportingRate", "desc"))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentLgdId(101)
                         .parentLgdCName("Parent")
@@ -625,7 +625,7 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getSchemesDashboard_withParentDepartmentId_returnsParentDepartmentCName() throws Exception {
-        when(schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(TENANT_ID, 201, START, END, 1, 5))
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByDepartment(TENANT_ID, 201, START, END, 1, 5, "reportingRate", "desc"))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentDepartmentId(201)
                         .parentDepartmentCName("Parent Dept")
@@ -682,6 +682,45 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("end_date", END.toString())
                         .param("parent_lgd_id", "101"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getSchemesDashboard_withExplicitSort_routesSortArguments() throws Exception {
+        when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 1, 5, "schemeName", "asc"))
+                .thenReturn(SchemeStatusAndTopReportingResponse.builder()
+                        .parentLgdId(101)
+                        .activeSchemeCount(0)
+                        .inactiveSchemeCount(0)
+                        .totalCount(0L)
+                        .topSchemeCount(0)
+                        .topSchemes(List.of())
+                        .build());
+
+        mockMvc.perform(get(BASE + "/schemes/dashboard")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101")
+                        .param("page_number", "1")
+                        .param("limit", "5")
+                        .param("sort_by", "schemeName")
+                        .param("sort_dir", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void downloadSchemesDashboard_withParentLgdId_returnsCsvAttachment() throws Exception {
+        mockMvc.perform(get(BASE + "/schemes/dashboard/download")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("parent_lgd_id", "101")
+                        .param("sort_by", "totalWaterSupplied")
+                        .param("sort_dir", "desc"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", containsString("attachment; filename=\"scheme-dashboard_lgd_101_")))
+                .andExpect(content().contentTypeCompatibleWith("text/csv"));
     }
 
     @Test
@@ -1424,7 +1463,7 @@ class AnalyticsSchemeReportingControllerTest {
     @Test
     void getSchemesDashboard_whenServiceThrowsIllegalArg_returnsBadRequest() throws Exception {
         when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(
-                any(), any(), any(), any(), any(), any()))
+                any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalArgumentException("invalid"));
 
         mockMvc.perform(get(BASE + "/schemes/dashboard")
@@ -1439,7 +1478,7 @@ class AnalyticsSchemeReportingControllerTest {
     @Test
     void getSchemesDashboard_whenServiceThrows_returnsInternalServerError() throws Exception {
         when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(
-                any(), any(), any(), any(), any(), any()))
+                any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("unexpected"));
 
         mockMvc.perform(get(BASE + "/schemes/dashboard")
@@ -1564,4 +1603,3 @@ class AnalyticsSchemeReportingControllerTest {
         return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("USER_TYPE_SECTION_OFFICER")));
     }
 }
-

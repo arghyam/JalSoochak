@@ -4,14 +4,20 @@ import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 @Repository
 @RequiredArgsConstructor
@@ -19,6 +25,62 @@ public class SchemeRegularityRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private static final int NOT_SUBMITTED_STATUS = SubmissionStatus.NOT_SUBMITTED.getCode();
+    private static final int EXPORT_FETCH_SIZE = 1_000;
+
+    private String resolveDashboardSortDirection(String sortDir) {
+        if (sortDir == null || sortDir.isBlank()) {
+            return "DESC";
+        }
+        return switch (sortDir.trim().toLowerCase(Locale.ROOT)) {
+            case "asc" -> "ASC";
+            case "desc" -> "DESC";
+            default -> throw new IllegalArgumentException("Unsupported sort_dir: " + sortDir);
+        };
+    }
+
+    private String resolveDashboardOrderBy(String sortBy, String sortDir, boolean lgdScope, long daysInRange) {
+        String direction = resolveDashboardSortDirection(sortDir);
+        String normalizedSort = sortBy == null ? "reportingrate" : sortBy.replace("_", "").trim().toLowerCase(Locale.ROOT);
+        String expression = switch (normalizedSort) {
+            case "schemename" -> "LOWER(COALESCE(ss.scheme_name, ''))";
+            case "lgd", "location" -> lgdScope
+                    ? "LOWER(COALESCE(pl.lgd_c_name, pl.title, ''))"
+                    : "LOWER(COALESCE(pd.department_c_name, pd.title, ''))";
+            case "reportingrate" -> "(COALESCE(sd.submission_days, 0)::numeric / " + daysInRange + ")";
+            case "totalwatersupplied" -> "COALESCE(sd.total_water_supplied, 0)";
+            default -> throw new IllegalArgumentException("Unsupported sort_by: " + sortBy);
+        };
+        return expression + " " + direction + ", ss.scheme_id ASC";
+    }
+
+    private SchemeSubmissionMetrics mapSchemeSubmissionMetrics(ResultSet rs) throws SQLException {
+        return new SchemeSubmissionMetrics(
+                rs.getInt("scheme_id"),
+                rs.getString("scheme_name"),
+                (Integer) rs.getObject("operating_status"),
+                rs.getInt("submission_days"),
+                rs.getLong("total_water_supplied"),
+                (Integer) rs.getObject("immediate_parent_lgd_id"),
+                rs.getString("immediate_parent_lgd_c_name"),
+                rs.getString("immediate_parent_lgd_title"),
+                (Integer) rs.getObject("immediate_parent_lgd_level"),
+                (Integer) rs.getObject("immediate_parent_department_id"),
+                rs.getString("immediate_parent_department_c_name"),
+                rs.getString("immediate_parent_department_title"),
+                (Integer) rs.getObject("immediate_parent_department_level"),
+                (Integer) rs.getObject("level_1_lgd_id"),
+                (Integer) rs.getObject("level_2_lgd_id"),
+                (Integer) rs.getObject("level_3_lgd_id"),
+                (Integer) rs.getObject("level_4_lgd_id"),
+                (Integer) rs.getObject("level_5_lgd_id"),
+                (Integer) rs.getObject("level_6_lgd_id"),
+                (Integer) rs.getObject("level_1_dept_id"),
+                (Integer) rs.getObject("level_2_dept_id"),
+                (Integer) rs.getObject("level_3_dept_id"),
+                (Integer) rs.getObject("level_4_dept_id"),
+                (Integer) rs.getObject("level_5_dept_id"),
+                (Integer) rs.getObject("level_6_dept_id"));
+    }
 
     public SchemeRegularityMetrics getSchemeRegularityMetrics(Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
         Integer lgdLevel = getLgdLevel(parentLgdId);
@@ -3471,12 +3533,16 @@ public class SchemeRegularityRepository {
             LocalDate startDate,
             LocalDate endDate,
             Integer limit,
-            Integer offset) {
+            Integer offset,
+            String sortBy,
+            String sortDir) {
         Integer lgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
         if (lgdLevel == null) {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, true, daysInRange);
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
@@ -3554,49 +3620,129 @@ public class SchemeRegularityRepository {
                 LEFT JOIN analytics_schema.dim_lgd_location_table pl
                     ON pl.lgd_id = ss.immediate_parent_lgd_id
                    AND pl.tenant_id = ?
-                ORDER BY
-                    (COALESCE(sd.submission_days, 0)::numeric / ?) DESC,
-                    ss.scheme_id ASC
+                ORDER BY %2$s
                 LIMIT ?
                 OFFSET ?
-                """, schemeLgdColumn);
+                """, schemeLgdColumn, orderByClause);
 
         return jdbcTemplate.query(
                 sql,
-                (rs, rowNum) -> new SchemeSubmissionMetrics(
-                        rs.getInt("scheme_id"),
-                        rs.getString("scheme_name"),
-                        (Integer) rs.getObject("operating_status"),
-                        rs.getInt("submission_days"),
-                        rs.getLong("total_water_supplied"),
-                        (Integer) rs.getObject("immediate_parent_lgd_id"),
-                        rs.getString("immediate_parent_lgd_c_name"),
-                        rs.getString("immediate_parent_lgd_title"),
-                        (Integer) rs.getObject("immediate_parent_lgd_level"),
-                        (Integer) rs.getObject("immediate_parent_department_id"),
-                        rs.getString("immediate_parent_department_c_name"),
-                        rs.getString("immediate_parent_department_title"),
-                        (Integer) rs.getObject("immediate_parent_department_level"),
-                        (Integer) rs.getObject("level_1_lgd_id"),
-                        (Integer) rs.getObject("level_2_lgd_id"),
-                        (Integer) rs.getObject("level_3_lgd_id"),
-                        (Integer) rs.getObject("level_4_lgd_id"),
-                        (Integer) rs.getObject("level_5_lgd_id"),
-                        (Integer) rs.getObject("level_6_lgd_id"),
-                        (Integer) rs.getObject("level_1_dept_id"),
-                        (Integer) rs.getObject("level_2_dept_id"),
-                        (Integer) rs.getObject("level_3_dept_id"),
-                        (Integer) rs.getObject("level_4_dept_id"),
-                        (Integer) rs.getObject("level_5_dept_id"),
-                        (Integer) rs.getObject("level_6_dept_id")),
+                (rs, rowNum) -> mapSchemeSubmissionMetrics(rs),
                 parentLgdId,
                 tenantId,
                 startDate,
                 endDate,
                 tenantId,
-                ChronoUnit.DAYS.between(startDate, endDate) + 1,
                 limit,
                 offset);
+    }
+
+    public void streamSchemeSubmissionMetricsByLgd(
+            Integer tenantId,
+            Integer parentLgdId,
+            LocalDate startDate,
+            LocalDate endDate,
+            String sortBy,
+            String sortDir,
+            Consumer<SchemeSubmissionMetrics> consumer) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, parentLgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, true, daysInRange);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.scheme_name,
+                        s.operating_status,
+                        s.level_1_lgd_id,
+                        s.level_2_lgd_id,
+                        s.level_3_lgd_id,
+                        s.level_4_lgd_id,
+                        s.level_5_lgd_id,
+                        s.level_6_lgd_id,
+                        s.level_1_dept_id,
+                        s.level_2_dept_id,
+                        s.level_3_dept_id,
+                        s.level_4_dept_id,
+                        s.level_5_dept_id,
+                        s.level_6_dept_id,
+                        CASE
+                            WHEN s.level_6_lgd_id IS NOT NULL THEN s.level_5_lgd_id
+                            WHEN s.level_5_lgd_id IS NOT NULL THEN s.level_4_lgd_id
+                            WHEN s.level_4_lgd_id IS NOT NULL THEN s.level_3_lgd_id
+                            WHEN s.level_3_lgd_id IS NOT NULL THEN s.level_2_lgd_id
+                            WHEN s.level_2_lgd_id IS NOT NULL THEN s.level_1_lgd_id
+                            WHEN s.level_1_lgd_id IS NOT NULL THEN s.parent_lgd_location_id
+                            ELSE NULL
+                        END AS immediate_parent_lgd_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_submission_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
+                            AS total_water_supplied
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                        ON ss.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading >= 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    ss.scheme_id,
+                    ss.scheme_name,
+                    ss.operating_status AS operating_status,
+                    COALESCE(sd.submission_days, 0)::int AS submission_days,
+                    COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
+                    ss.immediate_parent_lgd_id,
+                    pl.lgd_c_name AS immediate_parent_lgd_c_name,
+                    pl.title AS immediate_parent_lgd_title,
+                    pl.lgd_level AS immediate_parent_lgd_level,
+                    NULL::int AS immediate_parent_department_id,
+                    NULL::varchar AS immediate_parent_department_c_name,
+                    NULL::varchar AS immediate_parent_department_title,
+                    NULL::int AS immediate_parent_department_level,
+                    ss.level_1_lgd_id,
+                    ss.level_2_lgd_id,
+                    ss.level_3_lgd_id,
+                    ss.level_4_lgd_id,
+                    ss.level_5_lgd_id,
+                    ss.level_6_lgd_id,
+                    ss.level_1_dept_id,
+                    ss.level_2_dept_id,
+                    ss.level_3_dept_id,
+                    ss.level_4_dept_id,
+                    ss.level_5_dept_id,
+                    ss.level_6_dept_id
+                FROM schemes_in_scope ss
+                LEFT JOIN scheme_submission_days sd
+                    ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN analytics_schema.dim_lgd_location_table pl
+                    ON pl.lgd_id = ss.immediate_parent_lgd_id
+                   AND pl.tenant_id = ?
+                ORDER BY %2$s
+                """, schemeLgdColumn, orderByClause);
+
+        jdbcTemplate.query(con -> {
+            PreparedStatement ps = con.prepareStatement(sql);
+            ps.setFetchSize(EXPORT_FETCH_SIZE);
+            int i = 1;
+            ps.setInt(i++, parentLgdId);
+            ps.setInt(i++, tenantId);
+            ps.setObject(i++, startDate);
+            ps.setObject(i++, endDate);
+            ps.setInt(i++, tenantId);
+            return ps;
+        }, (RowCallbackHandler) rs -> consumer.accept(mapSchemeSubmissionMetrics(rs)));
     }
 
     public List<SchemeSubmissionMetrics> getTopSchemeSubmissionMetricsByDepartment(
@@ -3729,13 +3875,17 @@ public class SchemeRegularityRepository {
             LocalDate startDate,
             LocalDate endDate,
             Integer limit,
-            Integer offset) {
+            Integer offset,
+            String sortBy,
+            String sortDir) {
         Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (departmentLevel == null) {
             throw new IllegalArgumentException(
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, false, daysInRange);
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
@@ -3813,49 +3963,130 @@ public class SchemeRegularityRepository {
                 LEFT JOIN analytics_schema.dim_department_location_table pd
                     ON pd.department_id = ss.immediate_parent_department_id
                    AND pd.tenant_id = ?
-                ORDER BY
-                    (COALESCE(sd.submission_days, 0)::numeric / ?) DESC,
-                    ss.scheme_id ASC
+                ORDER BY %2$s
                 LIMIT ?
                 OFFSET ?
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn, orderByClause);
 
         return jdbcTemplate.query(
                 sql,
-                (rs, rowNum) -> new SchemeSubmissionMetrics(
-                        rs.getInt("scheme_id"),
-                        rs.getString("scheme_name"),
-                        (Integer) rs.getObject("operating_status"),
-                        rs.getInt("submission_days"),
-                        rs.getLong("total_water_supplied"),
-                        (Integer) rs.getObject("immediate_parent_lgd_id"),
-                        rs.getString("immediate_parent_lgd_c_name"),
-                        rs.getString("immediate_parent_lgd_title"),
-                        (Integer) rs.getObject("immediate_parent_lgd_level"),
-                        (Integer) rs.getObject("immediate_parent_department_id"),
-                        rs.getString("immediate_parent_department_c_name"),
-                        rs.getString("immediate_parent_department_title"),
-                        (Integer) rs.getObject("immediate_parent_department_level"),
-                        (Integer) rs.getObject("level_1_lgd_id"),
-                        (Integer) rs.getObject("level_2_lgd_id"),
-                        (Integer) rs.getObject("level_3_lgd_id"),
-                        (Integer) rs.getObject("level_4_lgd_id"),
-                        (Integer) rs.getObject("level_5_lgd_id"),
-                        (Integer) rs.getObject("level_6_lgd_id"),
-                        (Integer) rs.getObject("level_1_dept_id"),
-                        (Integer) rs.getObject("level_2_dept_id"),
-                        (Integer) rs.getObject("level_3_dept_id"),
-                        (Integer) rs.getObject("level_4_dept_id"),
-                        (Integer) rs.getObject("level_5_dept_id"),
-                        (Integer) rs.getObject("level_6_dept_id")),
+                (rs, rowNum) -> mapSchemeSubmissionMetrics(rs),
                 parentDepartmentId,
                 tenantId,
                 startDate,
                 endDate,
                 tenantId,
-                ChronoUnit.DAYS.between(startDate, endDate) + 1,
                 limit,
                 offset);
+    }
+
+    public void streamSchemeSubmissionMetricsByDepartment(
+            Integer tenantId,
+            Integer parentDepartmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            String sortBy,
+            String sortDir,
+            Consumer<SchemeSubmissionMetrics> consumer) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, false, daysInRange);
+
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT
+                        s.scheme_id,
+                        s.scheme_name,
+                        s.operating_status,
+                        s.level_1_lgd_id,
+                        s.level_2_lgd_id,
+                        s.level_3_lgd_id,
+                        s.level_4_lgd_id,
+                        s.level_5_lgd_id,
+                        s.level_6_lgd_id,
+                        s.level_1_dept_id,
+                        s.level_2_dept_id,
+                        s.level_3_dept_id,
+                        s.level_4_dept_id,
+                        s.level_5_dept_id,
+                        s.level_6_dept_id,
+                        CASE
+                            WHEN s.level_6_dept_id IS NOT NULL THEN s.level_5_dept_id
+                            WHEN s.level_5_dept_id IS NOT NULL THEN s.level_4_dept_id
+                            WHEN s.level_4_dept_id IS NOT NULL THEN s.level_3_dept_id
+                            WHEN s.level_3_dept_id IS NOT NULL THEN s.level_2_dept_id
+                            WHEN s.level_2_dept_id IS NOT NULL THEN s.level_1_dept_id
+                            WHEN s.level_1_dept_id IS NOT NULL THEN s.parent_department_location_id
+                            ELSE NULL
+                        END AS immediate_parent_department_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.%1$s = ?
+                      AND s.tenant_id = ?
+                ),
+                scheme_submission_days AS (
+                    SELECT
+                        m.scheme_id,
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
+                            AS total_water_supplied
+                    FROM analytics_schema.fact_meter_reading_table m
+                    JOIN schemes_in_scope ss
+                        ON ss.scheme_id = m.scheme_id
+                    WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.confirmed_reading >= 0
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    ss.scheme_id,
+                    ss.scheme_name,
+                    ss.operating_status AS operating_status,
+                    COALESCE(sd.submission_days, 0)::int AS submission_days,
+                    COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
+                    NULL::int AS immediate_parent_lgd_id,
+                    NULL::varchar AS immediate_parent_lgd_c_name,
+                    NULL::varchar AS immediate_parent_lgd_title,
+                    NULL::int AS immediate_parent_lgd_level,
+                    ss.immediate_parent_department_id,
+                    pd.department_c_name AS immediate_parent_department_c_name,
+                    pd.title AS immediate_parent_department_title,
+                    pd.department_level AS immediate_parent_department_level,
+                    ss.level_1_lgd_id,
+                    ss.level_2_lgd_id,
+                    ss.level_3_lgd_id,
+                    ss.level_4_lgd_id,
+                    ss.level_5_lgd_id,
+                    ss.level_6_lgd_id,
+                    ss.level_1_dept_id,
+                    ss.level_2_dept_id,
+                    ss.level_3_dept_id,
+                    ss.level_4_dept_id,
+                    ss.level_5_dept_id,
+                    ss.level_6_dept_id
+                FROM schemes_in_scope ss
+                LEFT JOIN scheme_submission_days sd
+                    ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN analytics_schema.dim_department_location_table pd
+                    ON pd.department_id = ss.immediate_parent_department_id
+                   AND pd.tenant_id = ?
+                ORDER BY %2$s
+                """, schemeDepartmentColumn, orderByClause);
+
+        jdbcTemplate.query(con -> {
+            PreparedStatement ps = con.prepareStatement(sql);
+            ps.setFetchSize(EXPORT_FETCH_SIZE);
+            int i = 1;
+            ps.setInt(i++, parentDepartmentId);
+            ps.setInt(i++, tenantId);
+            ps.setObject(i++, startDate);
+            ps.setObject(i++, endDate);
+            ps.setInt(i++, tenantId);
+            return ps;
+        }, (RowCallbackHandler) rs -> consumer.accept(mapSchemeSubmissionMetrics(rs)));
     }
 
     public List<SchemeRegularityListMetrics> getSchemeRegionReportByLgd(
