@@ -13,11 +13,13 @@ import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
+import org.arghyam.jalsoochak.analytics.entity.DimTenantWaterNorm;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.repository.DimDepartmentLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimTenantWaterNormRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
 import lombok.RequiredArgsConstructor;
@@ -28,9 +30,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -44,6 +49,7 @@ public class DimensionServiceImpl implements DimensionService {
     private final DimSchemeRepository dimSchemeRepository;
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final DimDepartmentLocationRepository dimDepartmentLocationRepository;
+    private final DimTenantWaterNormRepository dimTenantWaterNormRepository;
     private final JdbcTemplate jdbcTemplate;
 
     @Override
@@ -233,11 +239,61 @@ public class DimensionServiceImpl implements DimensionService {
         DimTenant tenant = dimTenantRepository.findById(event.getTenantId())
                 .orElseThrow(() -> new IllegalStateException(
                         "No dim_tenant_table row for tenantId=" + event.getTenantId()));
-        tenant.setRequiredLpcd(event.getWaterNorm());
+        Integer newLpcd = event.getWaterNorm();
+
+        // 1) Keep dim_tenant_table as the "current" convenience copy.
+        tenant.setRequiredLpcd(newLpcd);
         tenant.setUpdatedAt(LocalDateTime.now());
         dimTenantRepository.save(tenant);
-        log.info("Updated dim_tenant_table.required_lpcd={} [tenantId={}]",
-                event.getWaterNorm(), event.getTenantId());
+
+        // 2) Maintain the SCD-2 history so historical aggregates stay reproducible.
+        applyWaterNormHistory(event.getTenantId(), newLpcd, tenant);
+
+        log.info("Updated water norm required_lpcd={} [tenantId={}]",
+                newLpcd, event.getTenantId());
+    }
+
+    /**
+     * Close the current open norm row and open a new one when the value actually
+     * changes (half-open intervals). Non-changed norm fields are carried forward
+     * from the existing open row; the event only carries required_lpcd.
+     */
+    private void applyWaterNormHistory(Integer tenantId, Integer newLpcd, DimTenant tenant) {
+        LocalDate today = LocalDate.now();
+        Optional<DimTenantWaterNorm> openOpt =
+                dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(tenantId);
+
+        if (openOpt.isPresent()) {
+            DimTenantWaterNorm open = openOpt.get();
+            if (Objects.equals(open.getRequiredLpcd(), newLpcd)) {
+                return; // no real change — keep the timeline stable
+            }
+            open.setEffectiveTo(today);
+            dimTenantWaterNormRepository.save(open);
+
+            dimTenantWaterNormRepository.save(DimTenantWaterNorm.builder()
+                    .tenantId(tenantId)
+                    .effectiveFrom(today)
+                    .effectiveTo(null)
+                    .requiredLpcd(newLpcd)
+                    .personCountPerHousehold(open.getPersonCountPerHousehold())
+                    .overSupplyRangePercentage(open.getOverSupplyRangePercentage())
+                    .underSupplyRangePercentage(open.getUnderSupplyRangePercentage())
+                    .createdAt(LocalDateTime.now())
+                    .build());
+        } else {
+            // No history yet (e.g. tenant created after the seed migration) — open the first row.
+            dimTenantWaterNormRepository.save(DimTenantWaterNorm.builder()
+                    .tenantId(tenantId)
+                    .effectiveFrom(today)
+                    .effectiveTo(null)
+                    .requiredLpcd(newLpcd)
+                    .personCountPerHousehold(5)
+                    .overSupplyRangePercentage(tenant.getOverSupplyRangePercentage())
+                    .underSupplyRangePercentage(tenant.getUnderSupplyRangePercentage())
+                    .createdAt(LocalDateTime.now())
+                    .build());
+        }
     }
 
     @Override
