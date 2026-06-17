@@ -920,7 +920,8 @@ public class PublicPumpOperatorRepository {
                           <= LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE))
                 ),
                 readings AS (
-                    SELECT fr.id AS reading_id,
+                    SELECT DISTINCT ON (fr.id)
+                           fr.id AS reading_id,
                            fr.created_by,
                            fr.reading_date,
                            fr.%s AS reading_at,
@@ -929,7 +930,9 @@ public class PublicPumpOperatorRepository {
                     JOIN windowed_mapping l
                       ON l.id = fr.created_by
                     WHERE fr.deleted_at IS NULL
+                      AND fr.scheme_id = ?
                       AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
+                    ORDER BY fr.id, fr.reading_date DESC
                 ),
                 paged AS (
                     SELECT *
@@ -951,6 +954,7 @@ public class PublicPumpOperatorRepository {
                     JOIN windowed_mapping l
                       ON l.id = fr.created_by
                     WHERE fr.deleted_at IS NULL
+                      AND fr.scheme_id = ?
                       AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
                     GROUP BY fr.created_by
                 )
@@ -1054,7 +1058,7 @@ public class PublicPumpOperatorRepository {
                     lastSubmissionAt,
                     confirmed
             );
-        }, schemeId, pumpOperatorId, pumpOperatorId, startDate, endDate, startDate, endDate, limit, offset);
+        }, schemeId, pumpOperatorId, pumpOperatorId, startDate, endDate, startDate, endDate, schemeId, limit, offset, schemeId);
 
         if (rows.isEmpty()) {
             return List.of();
@@ -1134,6 +1138,7 @@ public class PublicPumpOperatorRepository {
                 JOIN %s.flow_reading_table fr
                   ON fr.created_by = l.id
                 WHERE fr.deleted_at IS NULL
+                  AND fr.scheme_id = ?
                   AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
                 """, schemaName, schemaName, schemaName, schemaName);
         Long total = jdbcTemplate.queryForObject(
@@ -1145,7 +1150,8 @@ public class PublicPumpOperatorRepository {
                 startDate,
                 endDate,
                 startDate,
-                endDate
+                endDate,
+                schemeId
         );
         return total == null ? 0 : total;
     }
