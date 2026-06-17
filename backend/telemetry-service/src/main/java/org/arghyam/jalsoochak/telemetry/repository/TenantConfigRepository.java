@@ -90,6 +90,9 @@ public class TenantConfigRepository {
         if (tenantId == null || configKey == null || configKey.isBlank()) {
             return Optional.empty();
         }
+        if ("TENANT_SUPPORTED_CHANNELS".equals(configKey)) {
+            return queryTenantConfigValue(tenantId, configKey);
+        }
         return Optional.ofNullable(getTenantConfigMap(tenantId).get(configKey));
     }
 
@@ -206,6 +209,7 @@ public class TenantConfigRepository {
                 SELECT config_key, config_value
                 FROM common_schema.tenant_config_master_table
                 WHERE tenant_id = ?
+                  AND deleted_at IS NULL
                 """;
         List<Map.Entry<String, String>> rows = jdbcTemplate.query(
                 sql,
@@ -220,6 +224,19 @@ public class TenantConfigRepository {
             configMap.putIfAbsent(row.getKey(), row.getValue());
         }
         return Collections.unmodifiableMap(configMap);
+    }
+
+    private Optional<String> queryTenantConfigValue(Integer tenantId, String configKey) {
+        String sql = """
+                SELECT config_value
+                FROM common_schema.tenant_config_master_table
+                WHERE tenant_id = ?
+                  AND config_key = ?
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """;
+        List<String> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getString("config_value"), tenantId, configKey);
+        return rows.stream().findFirst();
     }
 
     private List<String> findIndexedConfigValues(Integer tenantId, String prefix, String languageSuffix) {
