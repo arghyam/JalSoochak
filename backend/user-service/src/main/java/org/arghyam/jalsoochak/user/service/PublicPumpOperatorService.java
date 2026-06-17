@@ -30,7 +30,7 @@ public interface PublicPumpOperatorService {
     PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
             String tenantCode,
             long schemeId,
-            long pumpOperatorId,
+            Long pumpOperatorId,
             LocalDate startDate,
             LocalDate endDate,
             int page,

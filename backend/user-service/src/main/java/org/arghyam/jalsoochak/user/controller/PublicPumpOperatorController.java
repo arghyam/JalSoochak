@@ -91,7 +91,7 @@ public class PublicPumpOperatorController {
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorSchemeComplianceRowDTO>>> listPumpOperatorsBySchemeWithCompliance(
             @RequestParam String tenantCode,
             @RequestParam long schemeId,
-            @RequestParam long pumpOperatorId,
+            @RequestParam(required = false) Long pumpOperatorId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(defaultValue = "0") int page,
