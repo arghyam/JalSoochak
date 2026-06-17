@@ -60,17 +60,17 @@ public class GlificImageWorkflowService {
             String mediaUrl = glificWebhookRequest.getMediaUrl();
             boolean isMeterReplaced = Boolean.TRUE.equals(glificWebhookRequest.getIsMeterReplaced());
 
-            byte[] imageBytes = glificMediaService.downloadImage(mediaId, mediaUrl);
-            log.debug("Downloaded image for contactId {} (bytes={})", contactId, imageBytes.length);
-
-            String imageStorageUrl = glificMediaService.uploadImage(contactId, imageBytes);
-
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
             Integer tenantId = operatorWithSchema.operator().tenantId();
             String languageKey = localizationService.normalizeLanguageKey(
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
             ensureSelectedChannelExists(tenantId, contactId);
+
+            byte[] imageBytes = glificMediaService.downloadImage(mediaId, mediaUrl);
+            log.debug("Downloaded image for contactId {} (bytes={})", contactId, imageBytes.length);
+
+            String imageStorageUrl = glificMediaService.uploadImage(contactId, imageBytes);
 
             Long schemeId = telemetryTenantRepository
                     .findLatestPendingSchemeSelectionForDate(
@@ -115,6 +115,17 @@ public class GlificImageWorkflowService {
                     .correlationId(glificWebhookRequest.getContactId())
                     .build();
         }
+    }
+
+    public void validateSelectedChannelForGlificReading(GlificWebhookRequest glificWebhookRequest) {
+        if (glificWebhookRequest == null || glificWebhookRequest.getContactId() == null
+                || glificWebhookRequest.getContactId().isBlank()) {
+            throw new IllegalStateException("contactId is required");
+        }
+        String contactId = glificWebhookRequest.getContactId();
+        TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
+        Integer tenantId = operatorWithSchema.operator().tenantId();
+        ensureSelectedChannelExists(tenantId, contactId);
     }
 
     public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {

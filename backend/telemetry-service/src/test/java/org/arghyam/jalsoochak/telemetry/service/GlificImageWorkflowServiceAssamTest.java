@@ -77,14 +77,14 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(glificMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
-        when(glificMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(userChannelPreferenceRepository.findChannelValue(22, "919876543210")).thenReturn(Optional.of("PDU"));
         when(tenantConfigRepository.findConfigValue(22, "TENANT_SUPPORTED_CHANNELS"))
                 .thenReturn(Optional.of("{\"channels\":[\"PDU\",\"IOT\"]}"));
+        when(glificMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
+        when(glificMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
@@ -118,8 +118,6 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(glificMediaService.downloadImage("media-1", "https://example.com/meter.jpg")).thenReturn(new byte[]{1, 2, 3});
-        when(glificMediaService.uploadImage("919876543210", new byte[]{1, 2, 3})).thenReturn("https://cdn.example.com/meter.jpg");
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
@@ -138,6 +136,8 @@ class GlificImageWorkflowServiceAssamTest {
         assertNotNull(response);
         assertEquals(false, response.isSuccess());
         assertEquals("Selected channel is no longer available. Please make sure you have a channel selected.", response.getMessage());
+        verify(glificMediaService, never()).downloadImage(anyString(), anyString());
+        verify(glificMediaService, never()).uploadImage(anyString(), any());
         verify(bfmReadingService, never()).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
     }
 

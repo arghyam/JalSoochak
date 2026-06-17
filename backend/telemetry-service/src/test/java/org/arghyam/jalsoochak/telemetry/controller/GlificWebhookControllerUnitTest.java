@@ -23,7 +23,7 @@ class GlificWebhookControllerUnitTest {
     @Test
     void readingsReturnsImmediateAckAndJobId() {
         StubGlificReadingsAsyncService asyncService = new StubGlificReadingsAsyncService();
-        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookService service = new StubGlificWebhookService(false, false, false);
         GlificWebhookController controller = new GlificWebhookController(service, asyncService);
 
         ResponseEntity<ReadingWebhookAckResponse> response = controller.receive(
@@ -43,8 +43,30 @@ class GlificWebhookControllerUnitTest {
     }
 
     @Test
+    void readingsReturnsBadRequestWhenSelectedChannelIsMissingOrRemoved() {
+        StubGlificReadingsAsyncService asyncService = new StubGlificReadingsAsyncService();
+        GlificWebhookService service = new StubGlificWebhookService(false, false, true);
+        GlificWebhookController controller = new GlificWebhookController(service, asyncService);
+
+        ResponseEntity<ReadingWebhookAckResponse> response = controller.receive(
+                GlificWebhookRequest.builder()
+                        .contactId("919999999999")
+                        .mediaId("media-123")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(false, response.getBody().isSuccess());
+        assertEquals("error", response.getBody().getStatus());
+        assertEquals("Selected channel is no longer available. Please make sure you have a channel selected.",
+                response.getBody().getMessage());
+        assertEquals(false, asyncService.wasCalled);
+    }
+
+    @Test
     void languageSelectionReturnsOkWhenServiceSucceeds() {
-        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookService service = new StubGlificWebhookService(false, false, false);
         GlificWebhookController controller = new GlificWebhookController(service);
 
         ResponseEntity<IntroResponse> response = controller.languageSelection(
@@ -59,7 +81,7 @@ class GlificWebhookControllerUnitTest {
 
     @Test
     void languageSelectionReturns500WhenServiceThrows() {
-        GlificWebhookService service = new StubGlificWebhookService(true, false);
+        GlificWebhookService service = new StubGlificWebhookService(true, false, false);
         GlificWebhookController controller = new GlificWebhookController(service);
 
         ResponseEntity<IntroResponse> response = controller.languageSelection(
@@ -73,7 +95,7 @@ class GlificWebhookControllerUnitTest {
 
     @Test
     void selectedChannelReturns500WhenServiceThrows() {
-        GlificWebhookService service = new StubGlificWebhookService(false, true);
+        GlificWebhookService service = new StubGlificWebhookService(false, true, false);
         GlificWebhookController controller = new GlificWebhookController(service);
 
         ResponseEntity<IntroResponse> response = controller.selectedChannel(
@@ -87,7 +109,7 @@ class GlificWebhookControllerUnitTest {
 
     @Test
     void locationReturnsOkWhenServiceSucceeds() {
-        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookService service = new StubGlificWebhookService(false, false, false);
         GlificWebhookController controller = new GlificWebhookController(service);
 
         ResponseEntity<CreateReadingResponse> response = controller.location(
@@ -107,11 +129,22 @@ class GlificWebhookControllerUnitTest {
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean throwLanguageSelection;
         private final boolean throwSelectedChannel;
+        private final boolean throwGlificReadingChannelValidation;
 
-        private StubGlificWebhookService(boolean throwLanguageSelection, boolean throwSelectedChannel) {
+        private StubGlificWebhookService(boolean throwLanguageSelection, boolean throwSelectedChannel,
+                                         boolean throwGlificReadingChannelValidation) {
             super(null, null, null, null);
             this.throwLanguageSelection = throwLanguageSelection;
             this.throwSelectedChannel = throwSelectedChannel;
+            this.throwGlificReadingChannelValidation = throwGlificReadingChannelValidation;
+        }
+
+        @Override
+        public void validateSelectedChannelForGlificReading(GlificWebhookRequest request) {
+            if (throwGlificReadingChannelValidation) {
+                throw new IllegalStateException(
+                        "Selected channel is no longer available. Please make sure you have a channel selected.");
+            }
         }
 
         @Override

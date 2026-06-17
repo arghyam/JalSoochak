@@ -72,6 +72,7 @@ public class GlificWebhookController {
     )
     public ResponseEntity<ReadingWebhookAckResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
         try {
+            glificWebhookService.validateSelectedChannelForGlificReading(glificWebhookRequest);
             String jobId = UUID.randomUUID().toString();
             String status = "ACCEPTED";
             String message = "Reading request accepted for asynchronous processing.";
@@ -97,6 +98,19 @@ public class GlificWebhookController {
                             .message("Reading request accepted for asynchronous processing.")
                             .build()
             );
+        } catch (IllegalStateException e) {
+            String safeContactId = glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null;
+            log.warn("Rejected Glific reading request: {}", e.getMessage());
+            logReadingSubmission("/api/v1/telemetry/readings/glific", safeContactId, "FAILED", e.getMessage());
+
+            ReadingWebhookAckResponse errorResponse = ReadingWebhookAckResponse.builder()
+                    .success(false)
+                    .status("error")
+                    .jobId(null)
+                    .message(e.getMessage())
+                    .build();
+
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
         } catch (Exception e) {
             String safeContactId = glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null;
             log.error("Error processing webhook: {}", e.getMessage(), e);

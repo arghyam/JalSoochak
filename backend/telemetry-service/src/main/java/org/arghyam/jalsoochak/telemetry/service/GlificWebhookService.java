@@ -41,6 +41,10 @@ public class GlificWebhookService {
         return imageWorkflowService.processImage(glificWebhookRequest);
     }
 
+    public void validateSelectedChannelForGlificReading(GlificWebhookRequest glificWebhookRequest) {
+        imageWorkflowService.validateSelectedChannelForGlificReading(glificWebhookRequest);
+    }
+
     public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
         return imageWorkflowService.processAssamReading(request, preferredTenantId);
     }
