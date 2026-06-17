@@ -869,7 +869,7 @@ public class PublicPumpOperatorRepository {
     public List<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
             String schemaName,
             long schemeId,
-            long pumpOperatorId,
+            Long pumpOperatorId,
             LocalDate startDate,
             LocalDate endDate,
             int offset,
@@ -906,7 +906,7 @@ public class PublicPumpOperatorRepository {
                       ON ut.id = u.user_type
                     WHERE usm.deleted_at IS NULL
                       AND sm.id = ?
-                      AND u.id = ?
+                      AND (? IS NULL OR u.id = ?)
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 ),
@@ -1054,7 +1054,7 @@ public class PublicPumpOperatorRepository {
                     lastSubmissionAt,
                     confirmed
             );
-        }, schemeId, pumpOperatorId, startDate, endDate, startDate, endDate, limit, offset);
+        }, schemeId, pumpOperatorId, pumpOperatorId, startDate, endDate, startDate, endDate, limit, offset);
 
         if (rows.isEmpty()) {
             return List.of();
@@ -1092,7 +1092,7 @@ public class PublicPumpOperatorRepository {
     public long countPumpOperatorsBySchemeWithCompliance(
             String schemaName,
             long schemeId,
-            long pumpOperatorId,
+            Long pumpOperatorId,
             LocalDate startDate,
             LocalDate endDate
     ) {
@@ -1116,7 +1116,7 @@ public class PublicPumpOperatorRepository {
                       ON ut.id = u.user_type
                     WHERE usm.deleted_at IS NULL
                       AND sm.id = ?
-                      AND u.id = ?
+                      AND (? IS NULL OR u.id = ?)
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 ),
@@ -1140,6 +1140,7 @@ public class PublicPumpOperatorRepository {
                 sql,
                 Long.class,
                 schemeId,
+                pumpOperatorId,
                 pumpOperatorId,
                 startDate,
                 endDate,
