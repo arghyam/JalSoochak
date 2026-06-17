@@ -1058,7 +1058,7 @@ public class PublicPumpOperatorRepository {
                     lastSubmissionAt,
                     confirmed
             );
-        }, schemeId, pumpOperatorId, pumpOperatorId, startDate, endDate, startDate, endDate, schemeId, schemeId, limit, offset);
+        }, schemeId, pumpOperatorId, pumpOperatorId, startDate, endDate, startDate, endDate, schemeId, limit, offset, schemeId);
 
         if (rows.isEmpty()) {
             return List.of();
