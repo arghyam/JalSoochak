@@ -906,7 +906,7 @@ public class PublicPumpOperatorRepository {
                       ON ut.id = u.user_type
                     WHERE usm.deleted_at IS NULL
                       AND sm.id = ?
-                      AND (? IS NULL OR u.id = ?)
+                      AND (CAST(? AS BIGINT) IS NULL OR u.id = ?)
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 ),
@@ -1116,7 +1116,7 @@ public class PublicPumpOperatorRepository {
                       ON ut.id = u.user_type
                     WHERE usm.deleted_at IS NULL
                       AND sm.id = ?
-                      AND (? IS NULL OR u.id = ?)
+                      AND (CAST(? AS BIGINT) IS NULL OR u.id = ?)
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 ),
