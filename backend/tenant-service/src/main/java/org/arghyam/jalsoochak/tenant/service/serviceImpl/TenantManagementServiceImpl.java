@@ -52,6 +52,7 @@ import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum.ConfigType;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.event.TenantCreatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantDeactivatedEvent;
+import org.arghyam.jalsoochak.tenant.event.TenantConfigUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent;
@@ -381,6 +382,13 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 schedulerManager.rescheduleForTenant(finalTenantId, finalStateCode);
             }
         }
+
+        eventPublisher.publishEvent(new TenantConfigUpdatedEvent(
+                tenantId,
+                tenant.getStateCode(),
+                request.getConfigs().keySet().stream()
+                        .map(Enum::name)
+                        .collect(Collectors.toSet())));
 
         // Auto-transition ONBOARDED → CONFIGURED once all mandatory keys are present
         TenantStatusEnum currentStatus = TenantStatusEnum.valueOf(tenant.getStatus());

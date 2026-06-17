@@ -116,6 +116,27 @@ public class TenantEventListener {
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleTenantConfigUpdated(TenantConfigUpdatedEvent event) {
+        log.info("Handling TenantConfigUpdatedEvent after commit [tenantId={}]", event.getTenantId());
+        if (event.getTenantId() == null || event.getStateCode() == null || event.getStateCode().isBlank()) {
+            log.warn("Cannot publish TENANT_CONFIG_UPDATED event: tenantId or stateCode is null/blank [tenantId={}]",
+                    event.getTenantId());
+            return;
+        }
+        try {
+            Map<String, Object> payload = Map.of(
+                    "eventType", "TENANT_CONFIG_UPDATED",
+                    "tenantId", event.getTenantId(),
+                    "stateCode", event.getStateCode(),
+                    "configKeys", event.getConfigKeys() == null ? List.of() : event.getConfigKeys());
+            kafkaProducer.publishJson(TENANT_TOPIC, payload);
+            log.info("Published TENANT_CONFIG_UPDATED event [tenantId={}]", event.getTenantId());
+        } catch (Exception e) {
+            log.error("Failed to publish TENANT_CONFIG_UPDATED event [tenantId={}]", event.getTenantId(), e);
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleLocationHierarchyUpdated(TenantLocationHierarchyUpdatedEvent event) {
         log.info("Handling TenantLocationHierarchyUpdatedEvent after commit [tenantId={}]", event.getTenantId());
         if (event.getTenantId() == null || event.getStateCode() == null || event.getStateCode().isBlank()) {

@@ -60,8 +60,11 @@ import org.arghyam.jalsoochak.tenant.enums.StatusEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.event.TenantCreatedEvent;
+import org.arghyam.jalsoochak.tenant.event.TenantConfigUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantDeactivatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigKeyException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.LocationHierarchyStructureLockedException;
@@ -916,6 +919,13 @@ class TenantManagementServiceImplTest {
                             result.getConfigs().get(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS);
             assertNotNull(channels);
             assertTrue(channels.getChannels().containsAll(List.of("BFM", "ELM")));
+            ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher).publishEvent(eventCaptor.capture());
+            assertInstanceOf(TenantConfigUpdatedEvent.class, eventCaptor.getValue());
+            TenantConfigUpdatedEvent event = (TenantConfigUpdatedEvent) eventCaptor.getValue();
+            assertEquals(tenantId, event.getTenantId());
+            assertEquals("TN", event.getStateCode());
+            assertTrue(event.getConfigKeys().contains(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS.name()));
         }
 
         @Test
@@ -1122,10 +1132,12 @@ class TenantManagementServiceImplTest {
             tenantManagementService.setTenantConfigs(tenantId, request(configs));
 
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-            verify(eventPublisher).publishEvent(captor.capture());
-            assertInstanceOf(org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent.class, captor.getValue());
-            org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent event =
-                    (org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent) captor.getValue();
+            verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
+            WaterNormUpdatedEvent event = captor.getAllValues().stream()
+                    .filter(WaterNormUpdatedEvent.class::isInstance)
+                    .map(WaterNormUpdatedEvent.class::cast)
+                    .findFirst()
+                    .orElseThrow();
             assertEquals(tenantId, event.getTenantId());
             assertEquals("MP", event.getStateCode());
             assertEquals(70, event.getWaterNorm());
@@ -1181,10 +1193,12 @@ class TenantManagementServiceImplTest {
             tenantManagementService.setTenantConfigs(tenantId, request(configs));
 
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-            verify(eventPublisher).publishEvent(captor.capture());
-            assertInstanceOf(org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent.class, captor.getValue());
-            org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent event =
-                    (org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent) captor.getValue();
+            verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
+            WaterSupplyThresholdUpdatedEvent event = captor.getAllValues().stream()
+                    .filter(WaterSupplyThresholdUpdatedEvent.class::isInstance)
+                    .map(WaterSupplyThresholdUpdatedEvent.class::cast)
+                    .findFirst()
+                    .orElseThrow();
             assertEquals(tenantId, event.getTenantId());
             assertEquals("MP", event.getStateCode());
             assertEquals(20, event.getUnderSupplyThresholdPercent());
