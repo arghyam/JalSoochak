@@ -338,7 +338,7 @@ class AnalyticsTenantSchemeControllerTest {
     @Test
     void getMeterReadings_withTenantAndScheme_withoutDates_defaultsToYesterdayAnd30DayWindow() throws Exception {
         // Controller defaults are anchored to "yesterday" in the configured zone (Asia/Kolkata by default)
-        // to keep the window stable across the warm-cache 7PM→7PM cycle.
+        // to keep the window stable across the daily (midnight) warm-cache cycle.
         java.time.ZoneId zone = java.time.ZoneId.of("Asia/Kolkata");
         LocalDate defaultStart = LocalDate.now(zone).minusDays(1);
         LocalDate defaultEnd = defaultStart.minusDays(29);

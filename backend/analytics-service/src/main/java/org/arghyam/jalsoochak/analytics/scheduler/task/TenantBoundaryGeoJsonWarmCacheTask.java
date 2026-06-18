@@ -36,7 +36,7 @@ public class TenantBoundaryGeoJsonWarmCacheTask implements AnalyticsScheduledTas
 
     @Override
     @Scheduled(
-            cron = "${analytics.scheduler.common.cron:0 0 19 * * *}",
+            cron = "${analytics.scheduler.common.cron:0 0 0 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
         log.info("Scheduler START '{}'", taskName());

@@ -22,8 +22,9 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
     private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
     private static final int STATE_LGD_LEVEL = 1;
     /**
-     * Warm-cache runs at 7PM IST and should serve the same cached data until the next 7PM run.
-     * To avoid cache-key drift after midnight, anchor the date window to "yesterday" (IST).
+     * Warm-cache runs at midnight IST (the shared scheduler cron) and serves the same cached
+     * data until the next run. The date window is anchored to "yesterday" (IST) for a stable
+     * range that does not drift during the day.
      *
      * Window size is inclusive of both start and end dates.
      */
@@ -40,7 +41,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
 
     @Override
     @Scheduled(
-            cron = "${analytics.scheduler.common.cron:0 0 19 * * *}",
+            cron = "${analytics.scheduler.common.cron:0 0 0 * * *}",
             zone = "${analytics.scheduler.common.zone:Asia/Kolkata}")
     public void runTask() {
         log.info("Scheduler START '{}'", taskName());
