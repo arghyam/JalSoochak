@@ -437,7 +437,7 @@ public class AnalyticsTenantSchemeController {
         try {
             if (startDate == null && endDate == null) {
                 // Preserve existing (start_date > end_date) semantics, but anchor defaults to "yesterday" (IST)
-                // so they complement the warm-cache window across 7PM→7PM.
+                // so they complement the daily (midnight) warm-cache window.
                 DefaultAnalyticsDateWindowProvider.DateWindow window =
                         defaultAnalyticsDateWindowProvider.defaultWindow();
                 startDate = window.endDate();
