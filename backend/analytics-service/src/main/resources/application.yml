@@ -103,7 +103,7 @@ analytics:
 
   scheduler:
     common:
-      cron: ${ANALYTICS_SCHEDULER_CRON:0 0 19 * * *}
+      cron: ${ANALYTICS_SCHEDULER_CRON:0 0 0 * * *}
       zone: ${ANALYTICS_SCHEDULER_ZONE:Asia/Kolkata}
     national-dashboard:
       lookback-days: ${ANALYTICS_NATIONAL_DASHBOARD_LOOKBACK_DAYS:30}
