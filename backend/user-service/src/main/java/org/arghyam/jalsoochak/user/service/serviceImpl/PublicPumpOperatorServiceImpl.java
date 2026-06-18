@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -24,9 +25,21 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
     private final PublicPumpOperatorRepository publicPumpOperatorRepository;
 
     @Override
-    public PumpOperatorDetailsDTO getPumpOperatorDetails(String tenantCode, long pumpOperatorId) {
+    public PumpOperatorDetailsDTO getPumpOperatorDetails(
+            String tenantCode,
+            long pumpOperatorId,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        PumpOperatorDetailsDTO dto = publicPumpOperatorRepository.findPumpOperatorById(schemaName, pumpOperatorId);
+        PumpOperatorDetailsDTO dto = publicPumpOperatorRepository.findPumpOperatorById(
+                schemaName,
+                pumpOperatorId,
+                schemeId,
+                startDate,
+                endDate
+        );
         if (dto == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Pump operator not found");
         }
@@ -45,7 +58,11 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
 
     @Override
     public PumpOperatorDetailsWithComplianceDTO getPumpOperatorDetailsWithCompliance(String tenantCode, long pumpOperatorId) {
-        PumpOperatorDetailsDTO details = getPumpOperatorDetails(tenantCode, pumpOperatorId);
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        PumpOperatorDetailsDTO details = publicPumpOperatorRepository.findPumpOperatorById(schemaName, pumpOperatorId);
+        if (details == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Pump operator not found");
+        }
         PumpOperatorReadingComplianceDTO compliance = getReadingCompliance(tenantCode, pumpOperatorId);
         return PumpOperatorDetailsWithComplianceDTO.builder()
                 .details(details)
@@ -68,6 +85,9 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
     public PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
             String tenantCode,
             long schemeId,
+            Long pumpOperatorId,
+            LocalDate startDate,
+            LocalDate endDate,
             int page,
             int size
     ) {
@@ -78,10 +98,19 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
         List<PumpOperatorSchemeComplianceRowDTO> rows = publicPumpOperatorRepository.listPumpOperatorsBySchemeWithCompliance(
                 schemaName,
                 schemeId,
+                pumpOperatorId,
+                startDate,
+                endDate,
                 offset,
                 effectiveSize
         );
-        long total = publicPumpOperatorRepository.countPumpOperatorsBySchemeWithCompliance(schemaName, schemeId);
+        long total = publicPumpOperatorRepository.countPumpOperatorsBySchemeWithCompliance(
+                schemaName,
+                schemeId,
+                pumpOperatorId,
+                startDate,
+                endDate
+        );
         return PageResponseDTO.of(rows, total, p, effectiveSize);
     }
 

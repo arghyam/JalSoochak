@@ -30,6 +30,7 @@ import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
+import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,7 +40,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -54,6 +61,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -2452,7 +2460,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByLgd(
-            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer limit) {
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate,
+            Integer pageNumber, Integer limit, String sortBy, String sortDir) {
         validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
@@ -2471,7 +2480,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":limit:" + limit
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":sort_by:" + Objects.toString(sortBy, "reportingRate")
+                + ":sort_dir:" + Objects.toString(sortDir, "desc")
+                + ":v2";
         SchemeStatusAndTopReportingResponse cached =
                 readFromCache(cacheKey, SchemeStatusAndTopReportingResponse.class);
         if (cached != null) {
@@ -2487,7 +2498,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         String parentLgdTitle = schemeRegularityRepository.getParentLgdTitleByLgd(tenantId, parentLgdId);
         List<SchemeRegularityRepository.SchemeSubmissionMetrics> topSchemes =
                 schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(
-                        tenantId, parentLgdId, startDate, endDate, limit, offset);
+                        tenantId, parentLgdId, startDate, endDate, limit, offset, sortBy, sortDir);
 
         SchemeStatusAndTopReportingResponse response = SchemeStatusAndTopReportingResponse.builder()
                 .parentLgdId(parentLgdId)
@@ -2535,7 +2546,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByDepartment(
-            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer limit) {
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate,
+            Integer pageNumber, Integer limit, String sortBy, String sortDir) {
         validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
@@ -2558,7 +2570,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 schemeRegularityRepository.getParentDepartmentTitleByDepartment(tenantId, parentDepartmentId);
         List<SchemeRegularityRepository.SchemeSubmissionMetrics> topSchemes =
                 schemeRegularityRepository.getTopSchemeSubmissionMetricsByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate, limit, offset);
+                        tenantId, parentDepartmentId, startDate, endDate, limit, offset, sortBy, sortDir);
 
         return SchemeStatusAndTopReportingResponse.builder()
                 .parentLgdId(null)
@@ -2600,6 +2612,130 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                 .build())
                         .toList())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void writeSchemeStatusAndTopReportingCsvByLgd(
+            Integer tenantId,
+            Integer parentLgdId,
+            LocalDate startDate,
+            LocalDate endDate,
+            OutputStream outputStream,
+            String sortBy,
+            String sortDir) throws IOException {
+        validateTenantInput(tenantId);
+        validateLgdInput(parentLgdId);
+        validateDateRange(startDate, endDate);
+        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+
+        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8))) {
+            writer.write(AnalyticsControllerHelper.buildSchemeDashboardCsvHeader());
+            writer.newLine();
+            try {
+                schemeRegularityRepository.streamSchemeSubmissionMetricsByLgd(
+                        tenantId, parentLgdId, startDate, endDate, sortBy, sortDir, metric -> {
+                            try {
+                                writer.write(AnalyticsControllerHelper.buildSchemeDashboardCsvRow(
+                                        metric.schemeId(),
+                                        metric.schemeName(),
+                                        metric.operatingStatus(),
+                                        resolveSchemeStatus(metric.operatingStatus()),
+                                        metric.submissionDays(),
+                                        calculateReportingRate(metric.submissionDays(), daysInRange),
+                                        metric.totalWaterSupplied(),
+                                        metric.immediateParentLgdId(),
+                                        metric.immediateParentLgdCName(),
+                                        metric.immediateParentLgdTitle(),
+                                        metric.immediateParentLgdLevel(),
+                                        metric.immediateParentDepartmentId(),
+                                        metric.immediateParentDepartmentCName(),
+                                        metric.immediateParentDepartmentTitle(),
+                                        metric.immediateParentDepartmentLevel(),
+                                        metric.level1LgdId(),
+                                        metric.level2LgdId(),
+                                        metric.level3LgdId(),
+                                        metric.level4LgdId(),
+                                        metric.level5LgdId(),
+                                        metric.level6LgdId(),
+                                        metric.level1DeptId(),
+                                        metric.level2DeptId(),
+                                        metric.level3DeptId(),
+                                        metric.level4DeptId(),
+                                        metric.level5DeptId(),
+                                        metric.level6DeptId()));
+                                writer.newLine();
+                            } catch (IOException ex) {
+                                throw new UncheckedIOException(ex);
+                            }
+                        });
+            } catch (UncheckedIOException ex) {
+                throw ex.getCause();
+            }
+            writer.flush();
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void writeSchemeStatusAndTopReportingCsvByDepartment(
+            Integer tenantId,
+            Integer parentDepartmentId,
+            LocalDate startDate,
+            LocalDate endDate,
+            OutputStream outputStream,
+            String sortBy,
+            String sortDir) throws IOException {
+        validateTenantInput(tenantId);
+        validateDepartmentInput(parentDepartmentId);
+        validateDateRange(startDate, endDate);
+        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+
+        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8))) {
+            writer.write(AnalyticsControllerHelper.buildSchemeDashboardCsvHeader());
+            writer.newLine();
+            try {
+                schemeRegularityRepository.streamSchemeSubmissionMetricsByDepartment(
+                        tenantId, parentDepartmentId, startDate, endDate, sortBy, sortDir, metric -> {
+                            try {
+                                writer.write(AnalyticsControllerHelper.buildSchemeDashboardCsvRow(
+                                        metric.schemeId(),
+                                        metric.schemeName(),
+                                        metric.operatingStatus(),
+                                        resolveSchemeStatus(metric.operatingStatus()),
+                                        metric.submissionDays(),
+                                        calculateReportingRate(metric.submissionDays(), daysInRange),
+                                        metric.totalWaterSupplied(),
+                                        metric.immediateParentLgdId(),
+                                        metric.immediateParentLgdCName(),
+                                        metric.immediateParentLgdTitle(),
+                                        metric.immediateParentLgdLevel(),
+                                        metric.immediateParentDepartmentId(),
+                                        metric.immediateParentDepartmentCName(),
+                                        metric.immediateParentDepartmentTitle(),
+                                        metric.immediateParentDepartmentLevel(),
+                                        metric.level1LgdId(),
+                                        metric.level2LgdId(),
+                                        metric.level3LgdId(),
+                                        metric.level4LgdId(),
+                                        metric.level5LgdId(),
+                                        metric.level6LgdId(),
+                                        metric.level1DeptId(),
+                                        metric.level2DeptId(),
+                                        metric.level3DeptId(),
+                                        metric.level4DeptId(),
+                                        metric.level5DeptId(),
+                                        metric.level6DeptId()));
+                                writer.newLine();
+                            } catch (IOException ex) {
+                                throw new UncheckedIOException(ex);
+                            }
+                        });
+            } catch (UncheckedIOException ex) {
+                throw ex.getCause();
+            }
+            writer.flush();
+        }
     }
 
     private static Map<String, Integer> buildLevelLadder(

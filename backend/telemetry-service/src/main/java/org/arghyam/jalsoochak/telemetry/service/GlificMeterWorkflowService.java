@@ -21,6 +21,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRe
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -121,6 +122,7 @@ public class GlificMeterWorkflowService {
     private final TenantConfigRepository tenantConfigRepository;
     private final GlificMessageTemplatesService templatesService;
     private final TelemetryTenantRepository telemetryTenantRepository;
+    private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final ObjectMapper objectMapper;
 
@@ -129,6 +131,7 @@ public class GlificMeterWorkflowService {
                                       TenantConfigRepository tenantConfigRepository,
                                       GlificMessageTemplatesService templatesService,
                                       TelemetryTenantRepository telemetryTenantRepository,
+                                      UserChannelPreferenceRepository userChannelPreferenceRepository,
                                       TelemetryEventPublisher telemetryEventPublisher,
                                       ObjectMapper objectMapper) {
         this.operatorContextService = operatorContextService;
@@ -136,6 +139,7 @@ public class GlificMeterWorkflowService {
         this.tenantConfigRepository = tenantConfigRepository;
         this.templatesService = templatesService;
         this.telemetryTenantRepository = telemetryTenantRepository;
+        this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.telemetryEventPublisher = telemetryEventPublisher;
         this.objectMapper = objectMapper;
     }
@@ -538,7 +542,6 @@ public class GlificMeterWorkflowService {
             String languageKey = localizationService.normalizeLanguageKey(
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
-
             String rawIssueReason = request.getIssueReason().trim();
 
             List<GlificMessageTemplatesService.TemplateOption> templateReasons =

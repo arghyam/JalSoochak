@@ -17,6 +17,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.List;
 
 import org.springframework.dao.InvalidDataAccessApiUsageException;
@@ -103,7 +105,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @Test
         @DisplayName("throws InvalidDataAccessApiUsageException for invalid schema name")
         void throwsForInvalidSchemaName() {
-            assertThatThrownBy(() -> repo.findPumpOperatorById("bad schema!", 1L))
+            assertThatThrownBy(() -> repo.findPumpOperatorById("bad schema!", 1L, 1L, null, null))
                     .isInstanceOf(InvalidDataAccessApiUsageException.class)
                     .hasMessageContaining("Invalid schema name");
         }
@@ -118,14 +120,17 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @Test
         @DisplayName("returns null for non-existent pump operator")
         void returnsNullForMissing() {
-            assertThat(repo.findPumpOperatorById(SCHEMA, 999L)).isNull();
+            assertThat(repo.findPumpOperatorById(SCHEMA, 999L, 1L, null, null)).isNull();
         }
 
         @Test
         @DisplayName("returns operator details without readings")
         void returnsOperatorWithoutReadings() {
             long poId = insertPumpOperator("919876540001", "Test PO");
-            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId);
+            long schemeId = insertScheme("FPO-0");
+            mapUserToScheme(poId, schemeId);
+
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, null, null);
             assertThat(dto).isNotNull();
             assertThat(dto.id()).isEqualTo(poId);
             assertThat(dto.lastSubmissionAt()).isNull();
@@ -139,9 +144,11 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             mapUserToScheme(poId, schemeId);
             insertReading(schemeId, poId, 150.0, LocalDate.now().minusDays(1));
 
-            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId);
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, null, null);
             assertThat(dto).isNotNull();
             assertThat(dto.schemeId()).isEqualTo((int) schemeId);
+            assertThat(dto.stateSchemeId()).isEqualTo("FPO-1");
+            assertThat(dto.centerSchemeId()).isEqualTo("C-1");
             assertThat(dto.lastSubmissionAt()).isNotNull();
         }
 
@@ -149,7 +156,73 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @DisplayName("does not return non-pump-operator users")
         void ignoresNonPumpOperator() {
             long soId = insertUser("919876540003", 3, "Section Officer"); // SECTION_OFFICER
-            assertThat(repo.findPumpOperatorById(SCHEMA, soId)).isNull();
+            assertThat(repo.findPumpOperatorById(SCHEMA, soId, 1L, null, null)).isNull();
+        }
+
+        @Test
+        @DisplayName("returns missed submission days for requested range even when no readings exist in range")
+        void returnsMissedDaysForRequestedRangeWithoutReadingsInRange() {
+            long poId = insertPumpOperator("919876540017", "PO Historic Reading");
+            long schemeId = insertScheme("FPO-4");
+            mapUserToScheme(poId, schemeId);
+            backdateUserCreatedAt(poId, 30);
+            insertReading(schemeId, poId, 150.0, LocalDate.of(2026, 3, 17));
+
+            LocalDate startDate = LocalDate.of(2026, 6, 1);
+            LocalDate endDate = LocalDate.of(2026, 6, 15);
+
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, startDate, endDate);
+
+            List<LocalDate> expectedMissedDays = IntStream.rangeClosed(0, 14)
+                    .mapToObj(startDate::plusDays)
+                    .collect(Collectors.toList());
+
+            assertThat(dto).isNotNull();
+            assertThat(dto.lastSubmissionAt()).isNull();
+            assertThat(dto.firstSubmissionDate()).isNull();
+            assertThat(dto.submittedDays()).isEqualTo(0);
+            assertThat(dto.totalDaysSinceFirstSubmission()).isEqualTo(15);
+            assertThat(dto.reportingRatePercent()).isNotNull();
+            assertThat(dto.reportingRatePercent()).isEqualByComparingTo("0.00");
+            assertThat(dto.missedSubmissionDays()).containsExactlyElementsOf(expectedMissedDays);
+        }
+
+        @Test
+        @DisplayName("does not count days before onboarding as missed submissions")
+        void doesNotCountDaysBeforeOnboarding() {
+            long poId = insertPumpOperator("919876540018", "PO Onboarded In March");
+            long schemeId = insertScheme("FPO-5");
+            mapUserToScheme(poId, schemeId);
+            jdbc.update("UPDATE tenant_mp.user_table SET created_at = ? WHERE id = ?",
+                    java.sql.Timestamp.valueOf(LocalDate.of(2026, 3, 1).atStartOfDay()), poId);
+            insertReading(schemeId, poId, 150.0, LocalDate.of(2026, 3, 17));
+
+            LocalDate startDate = LocalDate.of(2026, 1, 1);
+            LocalDate endDate = LocalDate.of(2026, 3, 31);
+
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, startDate, endDate);
+
+            List<LocalDate> expectedMissedDays = IntStream.rangeClosed(0, 30)
+                    .mapToObj(LocalDate.of(2026, 3, 1)::plusDays)
+                    .filter(day -> !day.equals(LocalDate.of(2026, 3, 17)))
+                    .collect(Collectors.toList());
+
+            assertThat(dto).isNotNull();
+            assertThat(dto.totalDaysSinceFirstSubmission()).isEqualTo(31);
+            assertThat(dto.submittedDays()).isEqualTo(1);
+            assertThat(dto.reportingRatePercent()).isEqualByComparingTo("3.23");
+            assertThat(dto.missedSubmissionDays()).containsExactlyElementsOf(expectedMissedDays);
+        }
+
+        @Test
+        @DisplayName("returns null when operator is not mapped to the requested scheme")
+        void returnsNullForDifferentScheme() {
+            long poId = insertPumpOperator("919876540003", "Wrong Scheme PO");
+            long mappedSchemeId = insertScheme("FPO-2");
+            long otherSchemeId = insertScheme("FPO-3");
+            mapUserToScheme(poId, mappedSchemeId);
+
+            assertThat(repo.findPumpOperatorById(SCHEMA, poId, otherSchemeId, null, null)).isNull();
         }
     }
 
@@ -330,7 +403,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @Test
         @DisplayName("returns 0 for missing schema")
         void returnsZeroForMissingSchema() {
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L)).isZero();
+            assertThat(repo.countPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 1L, null, null)).isZero();
         }
 
         @Test
@@ -340,7 +413,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             long schemeId = insertScheme("CPC-1");
             mapUserToScheme(poId, schemeId);
 
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId)).isZero();
+            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null)).isZero();
         }
 
         @Test
@@ -353,7 +426,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(2));
             insertReading(schemeId, poId, 200.0, LocalDate.now().minusDays(1));
 
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId)).isEqualTo(1);
+            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null)).isEqualTo(1);
         }
     }
 
@@ -367,7 +440,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         @DisplayName("returns empty list for missing schema")
         void returnsEmptyForMissingSchema() {
             List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 0, 10);
+                    repo.listPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 1L, null, null, 0, 10);
             assertThat(result).isEmpty();
         }
 
@@ -379,7 +452,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             mapUserToScheme(poId, schemeId);
 
             List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, 0, 10);
+                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 10);
             assertThat(result).isEmpty();
         }
 
@@ -394,7 +467,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             insertReading(schemeId, poId, 200.0, LocalDate.now().minusDays(2));
 
             List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, 0, 10);
+                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 10);
             assertThat(result).hasSize(2);
             assertThat(result.get(0).schemeId()).isEqualTo(schemeId);
             assertThat(result.get(0).confirmedReading()).isNotNull();
@@ -412,8 +485,23 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             }
 
             List<PumpOperatorSchemeComplianceRowDTO> page =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, 0, 3);
+                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 3);
             assertThat(page).hasSize(3);
+        }
+
+        @Test
+        @DisplayName("returns empty list when operator is not mapped to requested scheme")
+        void returnsEmptyForWrongScheme() {
+            long poId = insertPumpOperator("919876540025", "PO Wrong Scheme");
+            backdateUserCreatedAt(poId, 10);
+            long mappedSchemeId = insertScheme("LPSC-4");
+            long otherSchemeId = insertScheme("LPSC-5");
+            mapUserToScheme(poId, mappedSchemeId);
+            insertReading(mappedSchemeId, poId, 100.0, LocalDate.now().minusDays(1));
+
+            List<PumpOperatorSchemeComplianceRowDTO> result =
+                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, otherSchemeId, poId, null, null, 0, 10);
+            assertThat(result).isEmpty();
         }
     }
 }

@@ -8,11 +8,18 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowD
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface PublicPumpOperatorService {
 
-    PumpOperatorDetailsDTO getPumpOperatorDetails(String tenantCode, long pumpOperatorId);
+    PumpOperatorDetailsDTO getPumpOperatorDetails(
+            String tenantCode,
+            long pumpOperatorId,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    );
 
     PumpOperatorReadingComplianceDTO getReadingCompliance(String tenantCode, long pumpOperatorId);
 
@@ -23,6 +30,9 @@ public interface PublicPumpOperatorService {
     PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
             String tenantCode,
             long schemeId,
+            Long pumpOperatorId,
+            LocalDate startDate,
+            LocalDate endDate,
             int page,
             int size
     );

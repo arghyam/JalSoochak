@@ -61,10 +61,30 @@ class PublicPumpOperatorControllerTest {
         @Test
         @DisplayName("returns 200 with pump operator details")
         void returns200() throws Exception {
-            PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
-            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L))).thenReturn(dto);
+            PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder()
+                    .id(1L)
+                    .stateSchemeId("STATE-5")
+                    .centerSchemeId("CENTER-5")
+                    .build();
+            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(5L), any(), any())).thenReturn(dto);
 
-            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1").param("tenantCode", "mp"))
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.id").value(1))
+                    .andExpect(jsonPath("$.data.stateSchemeId").value("STATE-5"))
+                    .andExpect(jsonPath("$.data.centerSchemeId").value("CENTER-5"));
+        }
+
+        @Test
+        @DisplayName("returns 200 when schemeId is omitted")
+        void returns200WithoutSchemeId() throws Exception {
+            PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
+            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(null), any(), any())).thenReturn(dto);
+
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
+                            .param("tenantCode", "mp"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.id").value(1));
         }
@@ -72,11 +92,24 @@ class PublicPumpOperatorControllerTest {
         @Test
         @DisplayName("returns 404 when operator not found")
         void returns404() throws Exception {
-            when(publicPumpOperatorService.getPumpOperatorDetails(anyString(), anyLong()))
+            when(publicPumpOperatorService.getPumpOperatorDetails(anyString(), anyLong(), any(), any(), any()))
                     .thenThrow(new ResponseStatusException(NOT_FOUND, "not found"));
 
-            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/99").param("tenantCode", "mp"))
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/99")
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5"))
                     .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("returns 400 when startDate is after endDate")
+        void returns400WhenStartDateAfterEndDate() throws Exception {
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("startDate", "2024-06-02")
+                            .param("endDate", "2024-06-01"))
+                    .andExpect(status().isBadRequest());
         }
     }
 
@@ -145,11 +178,40 @@ class PublicPumpOperatorControllerTest {
                     PageResponseDTO.<PumpOperatorSchemeComplianceRowDTO>builder()
                             .content(List.of()).totalElements(0L).totalPages(0).number(0).size(20).build();
             when(publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
-                    anyString(), anyLong(), anyInt(), anyInt())).thenReturn(page);
+                    anyString(), anyLong(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
-                            .param("tenantCode", "mp").param("schemeId", "5"))
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("pumpOperatorId", "9"))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("returns 200 when pumpOperatorId is missing")
+        void returns200WhenPumpOperatorIdMissing() throws Exception {
+            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
+                    PageResponseDTO.<PumpOperatorSchemeComplianceRowDTO>builder()
+                            .content(List.of()).totalElements(0L).totalPages(0).number(0).size(20).build();
+            when(publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
+                    anyString(), anyLong(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
+
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("returns 400 when startDate is after endDate")
+        void returns400WhenStartDateAfterEndDate() throws Exception {
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("pumpOperatorId", "9")
+                            .param("startDate", "2024-06-02")
+                            .param("endDate", "2024-06-01"))
+                    .andExpect(status().isBadRequest());
         }
     }
 

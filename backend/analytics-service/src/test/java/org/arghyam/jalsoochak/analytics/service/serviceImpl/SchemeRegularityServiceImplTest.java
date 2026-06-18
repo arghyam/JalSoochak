@@ -471,7 +471,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getSchemeStatusAndTopReportingByLgd_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
         mockRedisValueOps();
-        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:v1";
+        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v2";
         when(valueOperations.get(key)).thenReturn(null);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -481,7 +481,7 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getSchemeCountByLgdInScope(12, 101)).thenReturn(2L);
         when(schemeRegularityRepository.getParentLgdCNameByLgd(12, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(12, 101)).thenReturn("District");
-        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(12, 101, START, END, 5, 0))
+        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(12, 101, START, END, 5, 0, "reportingRate", "desc"))
                 .thenReturn(List.of(new SchemeRegularityRepository.SchemeSubmissionMetrics(
                         1,
                         "Scheme A",
@@ -501,7 +501,7 @@ class SchemeRegularityServiceImplTest {
                 )));
 
         SchemeStatusAndTopReportingResponse response =
-                service.getSchemeStatusAndTopReportingByLgd(12, 101, START, END, 1, 5);
+                service.getSchemeStatusAndTopReportingByLgd(12, 101, START, END, 1, 5, "reportingRate", "desc");
 
         assertThat(response.getParentLgdLevel()).isEqualTo(2);
         assertThat(response.getParentDepartmentLevel()).isNull();
@@ -526,7 +526,7 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getSchemeCountByDepartmentInScope(12, 201)).thenReturn(5L);
         when(schemeRegularityRepository.getParentDepartmentCNameByDepartment(12, 201)).thenReturn("Dept");
         when(schemeRegularityRepository.getParentDepartmentTitleByDepartment(12, 201)).thenReturn("Division");
-        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByDepartment(12, 201, START, END, 3, 0))
+        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByDepartment(12, 201, START, END, 3, 0, "reportingRate", "desc"))
                 .thenReturn(List.of(new SchemeRegularityRepository.SchemeSubmissionMetrics(
                         2,
                         "Scheme B",
@@ -546,7 +546,7 @@ class SchemeRegularityServiceImplTest {
                 )));
 
         SchemeStatusAndTopReportingResponse response =
-                service.getSchemeStatusAndTopReportingByDepartment(12, 201, START, END, 1, 3);
+                service.getSchemeStatusAndTopReportingByDepartment(12, 201, START, END, 1, 3, "reportingRate", "desc");
 
         assertThat(response.getParentLgdLevel()).isNull();
         assertThat(response.getParentDepartmentLevel()).isEqualTo(4);

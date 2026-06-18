@@ -25,6 +25,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.UserSubmissionStatusRespons
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -181,10 +183,20 @@ public interface SchemeRegularityService {
     Map<String, Integer> getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId);
 
     SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByLgd(
-            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer limit);
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate,
+            Integer pageNumber, Integer limit, String sortBy, String sortDir);
 
     SchemeStatusAndTopReportingResponse getSchemeStatusAndTopReportingByDepartment(
-            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer limit);
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate,
+            Integer pageNumber, Integer limit, String sortBy, String sortDir);
+
+    void writeSchemeStatusAndTopReportingCsvByLgd(
+            Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate,
+            OutputStream outputStream, String sortBy, String sortDir) throws IOException;
+
+    void writeSchemeStatusAndTopReportingCsvByDepartment(
+            Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate,
+            OutputStream outputStream, String sortBy, String sortDir) throws IOException;
 
     SchemeRegularityListResponse getSchemeRegionReportByLgd(
             Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate, Integer pageNumber, Integer count);
