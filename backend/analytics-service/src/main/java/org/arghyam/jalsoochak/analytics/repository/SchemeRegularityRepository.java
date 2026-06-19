@@ -14,6 +14,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +80,45 @@ public class SchemeRegularityRepository {
                 (Integer) rs.getObject("level_3_dept_id"),
                 (Integer) rs.getObject("level_4_dept_id"),
                 (Integer) rs.getObject("level_5_dept_id"),
-                (Integer) rs.getObject("level_6_dept_id"));
+                (Integer) rs.getObject("level_6_dept_id"),
+                getIntegerList(rs, "supplied_lgd_location_ids"),
+                getStringList(rs, "supplied_lgd_location_c_names"),
+                getStringList(rs, "supplied_lgd_location_titles"),
+                getIntegerList(rs, "supplied_lgd_location_levels"));
+    }
+
+    private List<Integer> getIntegerList(ResultSet rs, String columnName) throws SQLException {
+        java.sql.Array array = rs.getArray(columnName);
+        if (array == null) {
+            return List.of();
+        }
+        Object value = array.getArray();
+        if (value instanceof Integer[] integers) {
+            return Arrays.asList(integers);
+        }
+        if (value instanceof Object[] objects) {
+            return Arrays.stream(objects)
+                    .map(item -> item instanceof Number number ? number.intValue() : null)
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private List<String> getStringList(ResultSet rs, String columnName) throws SQLException {
+        java.sql.Array array = rs.getArray(columnName);
+        if (array == null) {
+            return List.of();
+        }
+        Object value = array.getArray();
+        if (value instanceof String[] strings) {
+            return Arrays.asList(strings);
+        }
+        if (value instanceof Object[] objects) {
+            return Arrays.stream(objects)
+                    .map(item -> item == null ? null : item.toString())
+                    .toList();
+        }
+        return List.of();
     }
 
     public SchemeRegularityMetrics getSchemeRegularityMetrics(Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
@@ -2615,8 +2654,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                 """, schemeLgdColumn);
@@ -2637,8 +2676,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                   AND s.tenant_id = ?
@@ -3376,7 +3415,7 @@ public class SchemeRegularityRepository {
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
         String sql = String.format("""
-                SELECT COUNT(*)::bigint AS total_count
+                SELECT COUNT(DISTINCT s.scheme_id)::bigint AS total_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                   AND s.tenant_id = ?
@@ -3480,7 +3519,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -3519,7 +3562,11 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("level_3_dept_id"),
                         (Integer) rs.getObject("level_4_dept_id"),
                         (Integer) rs.getObject("level_5_dept_id"),
-                        (Integer) rs.getObject("level_6_dept_id")),
+                        (Integer) rs.getObject("level_6_dept_id"),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of()),
                 parentLgdId,
                 startDate,
                 endDate,
@@ -3541,11 +3588,12 @@ public class SchemeRegularityRepository {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        String childSchemeLgdColumn = resolveSchemeLgdColumn(Math.min(lgdLevel + 1, 6));
         long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
         String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, true, daysInRange);
 
         String sql = String.format("""
-                WITH schemes_in_scope AS (
+                WITH scheme_rows_in_scope AS (
                     SELECT
                         s.scheme_id,
                         s.scheme_name,
@@ -3562,18 +3610,67 @@ public class SchemeRegularityRepository {
                         s.level_4_dept_id,
                         s.level_5_dept_id,
                         s.level_6_dept_id,
-                        CASE
-                            WHEN s.level_6_lgd_id IS NOT NULL THEN s.level_5_lgd_id
-                            WHEN s.level_5_lgd_id IS NOT NULL THEN s.level_4_lgd_id
-                            WHEN s.level_4_lgd_id IS NOT NULL THEN s.level_3_lgd_id
-                            WHEN s.level_3_lgd_id IS NOT NULL THEN s.level_2_lgd_id
-                            WHEN s.level_2_lgd_id IS NOT NULL THEN s.level_1_lgd_id
-                            WHEN s.level_1_lgd_id IS NOT NULL THEN s.parent_lgd_location_id
-                            ELSE NULL
-                        END AS immediate_parent_lgd_id
+                        s.%2$s AS supplied_lgd_location_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
+                ),
+                schemes_in_scope AS (
+                    SELECT DISTINCT ON (scheme_id)
+                        scheme_id,
+                        scheme_name,
+                        operating_status,
+                        level_1_lgd_id,
+                        level_2_lgd_id,
+                        level_3_lgd_id,
+                        level_4_lgd_id,
+                        level_5_lgd_id,
+                        level_6_lgd_id,
+                        level_1_dept_id,
+                        level_2_dept_id,
+                        level_3_dept_id,
+                        level_4_dept_id,
+                        level_5_dept_id,
+                        level_6_dept_id
+                    FROM scheme_rows_in_scope
+                    ORDER BY scheme_id, supplied_lgd_location_id NULLS LAST
+                ),
+                scheme_supplied_lgd_locations AS (
+                    SELECT DISTINCT scheme_id, supplied_lgd_location_id
+                    FROM scheme_rows_in_scope
+                    WHERE supplied_lgd_location_id IS NOT NULL
+                ),
+                supplied_lgd_locations AS (
+                    SELECT
+                        sll.scheme_id,
+                        sll.supplied_lgd_location_id,
+                        pl.lgd_c_name,
+                        pl.title,
+                        pl.lgd_level
+                    FROM scheme_supplied_lgd_locations sll
+                    LEFT JOIN analytics_schema.dim_lgd_location_table pl
+                        ON pl.lgd_id = sll.supplied_lgd_location_id
+                       AND pl.tenant_id = ?
+                ),
+                first_supplied_lgd_location AS (
+                    SELECT DISTINCT ON (scheme_id)
+                        scheme_id,
+                        supplied_lgd_location_id,
+                        lgd_c_name,
+                        title,
+                        lgd_level
+                    FROM supplied_lgd_locations
+                    ORDER BY scheme_id, LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id
+                ),
+                supplied_lgd_location_summary AS (
+                    SELECT
+                        scheme_id,
+                        ARRAY_AGG(supplied_lgd_location_id ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_ids,
+                        ARRAY_AGG(lgd_c_name ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_c_names,
+                        ARRAY_AGG(title ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_titles,
+                        ARRAY_AGG(lgd_level ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_levels
+                    FROM supplied_lgd_locations
+                    GROUP BY scheme_id
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -3594,7 +3691,7 @@ public class SchemeRegularityRepository {
                     ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
-                    ss.immediate_parent_lgd_id,
+                    fsl.supplied_lgd_location_id AS immediate_parent_lgd_id,
                     pl.lgd_c_name AS immediate_parent_lgd_c_name,
                     pl.title AS immediate_parent_lgd_title,
                     pl.lgd_level AS immediate_parent_lgd_level,
@@ -3613,22 +3710,31 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    COALESCE(slls.supplied_lgd_location_ids, ARRAY[]::integer[]) AS supplied_lgd_location_ids,
+                    COALESCE(slls.supplied_lgd_location_c_names, ARRAY[]::varchar[]) AS supplied_lgd_location_c_names,
+                    COALESCE(slls.supplied_lgd_location_titles, ARRAY[]::varchar[]) AS supplied_lgd_location_titles,
+                    COALESCE(slls.supplied_lgd_location_levels, ARRAY[]::integer[]) AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN first_supplied_lgd_location fsl
+                    ON fsl.scheme_id = ss.scheme_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table pl
-                    ON pl.lgd_id = ss.immediate_parent_lgd_id
+                    ON pl.lgd_id = fsl.supplied_lgd_location_id
                    AND pl.tenant_id = ?
-                ORDER BY %2$s
+                LEFT JOIN supplied_lgd_location_summary slls
+                    ON slls.scheme_id = ss.scheme_id
+                ORDER BY %3$s
                 LIMIT ?
                 OFFSET ?
-                """, schemeLgdColumn, orderByClause);
+                """, schemeLgdColumn, childSchemeLgdColumn, orderByClause);
 
         return jdbcTemplate.query(
                 sql,
                 (rs, rowNum) -> mapSchemeSubmissionMetrics(rs),
                 parentLgdId,
+                tenantId,
                 tenantId,
                 startDate,
                 endDate,
@@ -3722,7 +3828,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -3822,7 +3932,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -3861,7 +3975,11 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("level_3_dept_id"),
                         (Integer) rs.getObject("level_4_dept_id"),
                         (Integer) rs.getObject("level_5_dept_id"),
-                        (Integer) rs.getObject("level_6_dept_id")),
+                        (Integer) rs.getObject("level_6_dept_id"),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of()),
                 parentDepartmentId,
                 startDate,
                 endDate,
@@ -3956,7 +4074,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -7013,7 +7135,11 @@ public class SchemeRegularityRepository {
             Integer level3DeptId,
             Integer level4DeptId,
             Integer level5DeptId,
-            Integer level6DeptId) {
+            Integer level6DeptId,
+            List<Integer> suppliedLgdLocationIds,
+            List<String> suppliedLgdLocationCNames,
+            List<String> suppliedLgdLocationTitles,
+            List<Integer> suppliedLgdLocationLevels) {
     }
 
     public record SchemeRegularityListMetrics(
