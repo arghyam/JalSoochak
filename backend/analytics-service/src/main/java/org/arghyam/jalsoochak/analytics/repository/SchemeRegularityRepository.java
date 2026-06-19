@@ -45,8 +45,8 @@ public class SchemeRegularityRepository {
         String expression = switch (normalizedSort) {
             case "schemename" -> "LOWER(COALESCE(ss.scheme_name, ''))";
             case "lgd", "location" -> lgdScope
-                    ? "LOWER(COALESCE(pl.lgd_c_name, pl.title, ''))"
-                    : "LOWER(COALESCE(pd.department_c_name, pd.title, ''))";
+                    ? "LOWER(COALESCE(NULLIF(pl.title, ''), pl.lgd_c_name, ''))"
+                    : "LOWER(COALESCE(NULLIF(pd.title, ''), pd.department_c_name, ''))";
             case "reportingrate" -> "(COALESCE(sd.submission_days, 0)::numeric / " + daysInRange + ")";
             case "totalwatersupplied" -> "COALESCE(sd.total_water_supplied, 0)";
             default -> throw new IllegalArgumentException("Unsupported sort_by: " + sortBy);
@@ -3660,15 +3660,15 @@ public class SchemeRegularityRepository {
                         title,
                         lgd_level
                     FROM supplied_lgd_locations
-                    ORDER BY scheme_id, LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id
+                    ORDER BY scheme_id, LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id
                 ),
                 supplied_lgd_location_summary AS (
                     SELECT
                         scheme_id,
-                        ARRAY_AGG(supplied_lgd_location_id ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_ids,
-                        ARRAY_AGG(lgd_c_name ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_c_names,
-                        ARRAY_AGG(title ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_titles,
-                        ARRAY_AGG(lgd_level ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_levels
+                        ARRAY_AGG(supplied_lgd_location_id ORDER BY LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id) AS supplied_lgd_location_ids,
+                        ARRAY_AGG(lgd_c_name ORDER BY LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id) AS supplied_lgd_location_c_names,
+                        ARRAY_AGG(title ORDER BY LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id) AS supplied_lgd_location_titles,
+                        ARRAY_AGG(lgd_level ORDER BY LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id) AS supplied_lgd_location_levels
                     FROM supplied_lgd_locations
                     GROUP BY scheme_id
                 ),
