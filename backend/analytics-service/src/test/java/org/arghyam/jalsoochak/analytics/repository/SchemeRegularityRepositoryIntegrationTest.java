@@ -255,6 +255,90 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void crossTenantSchemeIdCollision_isIsolatedByTenantScopedOverloads() {
+        // scheme_id is unique only WITHIN a tenant. The region scope is tenant-scoped, but the fact
+        // join must also constrain tenant_id or another tenant's rows for the same scheme_id leak in.
+        // Seed tenant 2 with the SAME scheme_id (1) and three compliant readings for it.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_tenant_table
+                (tenant_id, state_code, title, country_code, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                """, 2, "up", "Uttar Pradesh", "IN", 1);
+        for (LocalDate d : List.of(D1, D2, D3)) {
+            jdbcTemplate.update("""
+                    INSERT INTO analytics_schema.fact_meter_reading_table
+                    (tenant_id, scheme_id, user_id, extracted_reading, confirmed_reading, confidence, image_url, reading_at, channel,
+                     reading_date, created_at, submission_status, reading_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, NOW(), ?, ?)
+                    """, 2, 1, 11, 7, 7, 90, "x", 1, d, 1, 0);
+        }
+        // Tenant 2 water row reusing scheme_id 2 (in tenant 1's scope) with a sentinel outage reason.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 2, 2, 11, 100, D2, SubmissionStatus.NOT_SUBMITTED.getCode(), "sentinel_tenant2", null);
+
+        // Tenant-scoped overload must isolate tenant 1 (5 compliant in the single-tenant seed), not 8.
+        SchemeRegularityRepository.SubmissionStatusCount status =
+                repository.getSubmissionStatusCountByLgd(1, 100, D1, D3);
+        assertThat(status.compliantSubmissionCount()).isEqualTo(5);
+        assertThat(status.anomalousSubmissionCount()).isEqualTo(0);
+
+        // Outage-reason rollup must not leak tenant 2's rows (the sentinel reason must be absent).
+        List<SchemeRegularityRepository.OutageReasonSchemeCount> outage =
+                repository.getOutageReasonSchemeCountByLgd(1, 100, D1, D3);
+        assertThat(outage).noneMatch(r -> "sentinel_tenant2".equals(r.outageReason()));
+    }
+
+    @Test
+    void duplicateSchemeMappingRows_doNotInflateEfficientSupplyDaysOrWaterTotals() {
+        // Region-wise water/efficient-range scope projects measure columns (fhtc/household/planned).
+        // A multi-mapped scheme (V24) whose mapping rows carry DIFFERING measures must still contribute
+        // ONCE per child region; plain SELECT DISTINCT over the measure projection keeps both rows and
+        // fans out the CROSS JOIN over dates and the SUM of measures. DISTINCT ON (scheme, region) fixes it.
+
+        // Non-zero water norm so the efficient window is meaningful:
+        // target for Scheme A (fhtc=10) = required_lpcd(2) * fhtc(10) * pph(5) = 100; range [100,100].
+        jdbcTemplate.update("""
+                UPDATE analytics_schema.dim_tenant_table
+                SET required_lpcd = 2, person_count_per_household = 5,
+                    over_supply_range_percentage = 0, under_supply_range_percentage = 0
+                WHERE tenant_id = 1
+                """);
+
+        // Baseline (single mapping row): Scheme A daily eWater = D1:100, D2:200, D8:300 -> only D1 hits [100,100].
+        List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> baseline =
+                repository.getRegionWiseWaterQuantityByLgd(1, 100, D1, D10);
+        assertThat(baseline.get(0).lgdId()).isEqualTo(101);
+        assertThat(baseline.get(0).supplyDaysInEfficientRange()).isEqualTo(1L);
+        assertThat(baseline.get(0).householdCount()).isEqualTo(10L);
+        assertThat(baseline.get(0).waterQuantity()).isEqualTo(600L);
+
+        // Second mapping row for Scheme A in the SAME child region (level_2=101), differing planned_fhtc
+        // and a different parent_department to satisfy the V24 unique key. fhtc stays 10 (threshold unchanged).
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 1, 1, "Scheme A (dup mapping)", 1001, 2001, 0.0, 0.0,
+                100, 100, 101, null, null, null, null,
+                202, 200, 201, null, null, null, null,
+                1, 10, 99, 10);
+
+        List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> withDup =
+                repository.getRegionWiseWaterQuantityByLgd(1, 100, D1, D10);
+        // Must NOT inflate: efficient days stay 1, household stays 10, water stays 600 (not 2 / 20 / 1200).
+        assertThat(withDup.get(0).lgdId()).isEqualTo(101);
+        assertThat(withDup.get(0).supplyDaysInEfficientRange()).isEqualTo(1L);
+        assertThat(withDup.get(0).householdCount()).isEqualTo(10L);
+        assertThat(withDup.get(0).waterQuantity()).isEqualTo(600L);
+    }
+
+    @Test
     void getSchemeStatusCountByLgd_countsActiveAndInactiveSchemes() {
         SchemeRegularityRepository.SchemeStatusCount count = repository.getSchemeStatusCountByLgd(100);
 
