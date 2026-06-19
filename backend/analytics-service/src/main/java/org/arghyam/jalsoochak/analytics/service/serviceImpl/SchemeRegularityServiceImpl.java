@@ -2482,7 +2482,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":end:" + endDate
                 + ":sort_by:" + Objects.toString(sortBy, "reportingRate")
                 + ":sort_dir:" + Objects.toString(sortDir, "desc")
-                + ":v3";
+                + ":v4";
         SchemeStatusAndTopReportingResponse cached =
                 readFromCache(cacheKey, SchemeStatusAndTopReportingResponse.class);
         if (cached != null) {
