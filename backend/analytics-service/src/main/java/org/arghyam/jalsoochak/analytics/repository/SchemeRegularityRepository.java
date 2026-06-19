@@ -5304,7 +5304,7 @@ public class SchemeRegularityRepository {
         String sql = """
                 SELECT
                     f.outage_reason,
-                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                    COUNT(DISTINCT (f.tenant_id, f.scheme_id))::int AS scheme_count
                 FROM analytics_schema.fact_water_quantity_table f
                 WHERE f.outage_reason IS NOT NULL
                   AND f.date BETWEEN ? AND ?
@@ -6638,6 +6638,7 @@ public class SchemeRegularityRepository {
                         ON s.scheme_id = f.scheme_id
                     WHERE f.outage_reason IS NOT NULL
                       AND f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
                     GROUP BY %5$s, f.outage_reason
                 )
                 SELECT
@@ -6676,7 +6677,8 @@ public class SchemeRegularityRepository {
                 startDate,
                 endDate,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     private List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityMetrics(

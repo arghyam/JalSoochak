@@ -292,6 +292,33 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void overallOutageReasonCount_countsSchemesDistinctlyAcrossTenants() {
+        // The national "overall outage" KPI counts distinct schemes across ALL tenants. scheme_id is
+        // unique only within a tenant, so two different schemes in different tenants that share a
+        // scheme_id and the same outage reason must count as TWO, not collapse to one.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_tenant_table
+                (tenant_id, state_code, title, country_code, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                """, 2, "up", "Uttar Pradesh", "IN", 1);
+        // Tenant 2 reuses scheme_id 1 (same id as tenant 1's Scheme A) with the same outage reason on D1.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 2, 1, 11, 100, D1, SubmissionStatus.NOT_SUBMITTED.getCode(), "draught", "app_issue");
+
+        List<SchemeRegularityRepository.OutageReasonSchemeCount> overall =
+                repository.getOverallOutageReasonSchemeCount(D1, D8);
+        int draught = overall.stream()
+                .filter(r -> "draught".equals(r.outageReason()))
+                .mapToInt(SchemeRegularityRepository.OutageReasonSchemeCount::schemeCount)
+                .findFirst().orElse(0);
+        // tenant 1 Scheme A (D1) + tenant 2 scheme 1 (D1) = two distinct (tenant, scheme) pairs.
+        assertThat(draught).isEqualTo(2);
+    }
+
+    @Test
     void duplicateSchemeMappingRows_doNotInflateEfficientSupplyDaysOrWaterTotals() {
         // Region-wise water/efficient-range scope projects measure columns (fhtc/household/planned).
         // A multi-mapped scheme (V24) whose mapping rows carry DIFFERING measures must still contribute
