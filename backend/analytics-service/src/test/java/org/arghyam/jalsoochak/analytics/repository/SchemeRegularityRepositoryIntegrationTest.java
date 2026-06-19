@@ -209,6 +209,52 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void duplicateSchemeMappingRows_doNotInflateRegionRollups() {
+        // A scheme legitimately has multiple dim_scheme_table rows (one per parent LGD/dept mapping;
+        // see migration V24 uq_dim_scheme_tenant_scheme_parent_lgd_dept). Insert a SECOND mapping row
+        // for Scheme A (id 1) in the SAME LGD region (level_2_lgd_id = 101), differing only by
+        // parent_department_location_id so it satisfies the unique constraint. Region rollups must
+        // count the scheme once and must not multiply its supply/submission days.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 1, 1, "Scheme A (duplicate mapping)", 1001, 2001, 0.0, 0.0,
+                100, 100, 101, null, null, null, null,
+                202, 200, 201, null, null, null, null,
+                1, 10, 10, 10);
+
+        // Parent metric already used DISTINCT — stays correct (control).
+        SchemeRegularityRepository.SchemeRegularityMetrics submission =
+                repository.getReadingSubmissionRateMetricsByLgd(100, D1, D3);
+        assertThat(submission.schemeCount()).isEqualTo(2);
+        assertThat(submission.totalSupplyDays()).isEqualTo(4);
+
+        // Child submission-rate rollup must NOT double-count Scheme A's mapping rows.
+        List<SchemeRegularityRepository.ChildRegionReadingSubmissionMetrics> childSubmission =
+                repository.getChildReadingSubmissionRateMetricsByLgd(100, D1, D3);
+        assertThat(childSubmission).hasSize(2);
+        assertThat(childSubmission.get(0).lgdId()).isEqualTo(101);
+        assertThat(childSubmission.get(0).schemeCount()).isEqualTo(1);
+        assertThat(childSubmission.get(0).totalSubmissionDays()).isEqualTo(3);
+        assertThat(childSubmission.get(0).readingSubmissionRate()).isEqualByComparingTo("1.0000");
+
+        // Child regularity rollup must NOT double-count either.
+        List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> childRegularity =
+                repository.getChildSchemeRegularityMetricsByLgd(100, D1, D3);
+        assertThat(childRegularity.get(0).lgdId()).isEqualTo(101);
+        assertThat(childRegularity.get(0).schemeCount()).isEqualTo(1);
+        assertThat(childRegularity.get(0).totalSupplyDays()).isEqualTo(2);
+        assertThat(childRegularity.get(0).averageRegularity()).isEqualByComparingTo("0.6667");
+
+        // Scheme-count helper stays distinct.
+        assertThat(repository.getSchemeCountByLgdInScope(1, 100)).isEqualTo(2);
+    }
+
+    @Test
     void getSchemeStatusCountByLgd_countsActiveAndInactiveSchemes() {
         SchemeRegularityRepository.SchemeStatusCount count = repository.getSchemeStatusCountByLgd(100);
 
