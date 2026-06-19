@@ -55,5 +55,17 @@ public class SchemeStatusAndTopReportingResponse {
         private Integer immediateParentDepartmentLevel;
         private Map<String, Integer> lgdLadder;
         private Map<String, Integer> departmentLadder;
+        private List<SuppliedLgdLocation> suppliedLgdLocations;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SuppliedLgdLocation {
+        private Integer lgdId;
+        private String lgdCName;
+        private String title;
+        private Integer lgdLevel;
     }
 }

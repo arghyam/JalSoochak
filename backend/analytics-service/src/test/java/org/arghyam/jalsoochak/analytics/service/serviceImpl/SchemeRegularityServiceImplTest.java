@@ -471,7 +471,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getSchemeStatusAndTopReportingByLgd_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
         mockRedisValueOps();
-        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v2";
+        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v3";
         when(valueOperations.get(key)).thenReturn(null);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -497,7 +497,11 @@ class SchemeRegularityServiceImplTest {
                         null,
                         null,
                         10, 50, 100, 101, null, null,
-                        2001, 2002, null, null, null, null
+                        2001, 2002, null, null, null, null,
+                        List.of(100, 101),
+                        List.of("Immediate Parent", "Other Parent"),
+                        List.of("Block", "Block"),
+                        List.of(3, 3)
                 )));
 
         SchemeStatusAndTopReportingResponse response =
@@ -508,6 +512,9 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getTotalCount()).isEqualTo(2L);
         assertThat(response.getTopSchemes()).hasSize(1);
         assertThat(response.getTopSchemes().getFirst().getImmediateParentLgdLevel()).isEqualTo(3);
+        assertThat(response.getTopSchemes().getFirst().getSuppliedLgdLocations())
+                .extracting(SchemeStatusAndTopReportingResponse.SuppliedLgdLocation::getLgdId)
+                .containsExactly(100, 101);
         assertThat(response.getTopSchemes().getFirst().getLgdLadder())
                 .containsEntry("level_1", 10)
                 .containsEntry("level_4", 101)
@@ -542,7 +549,11 @@ class SchemeRegularityServiceImplTest {
                         "SubDivision",
                         5,
                         11, 22, 33, null, null, null,
-                        900, 901, 902, 903, null, null
+                        900, 901, 902, 903, null, null,
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of()
                 )));
 
         SchemeStatusAndTopReportingResponse response =
