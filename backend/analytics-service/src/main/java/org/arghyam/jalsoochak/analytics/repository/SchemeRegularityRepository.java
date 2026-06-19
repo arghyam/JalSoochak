@@ -14,6 +14,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +80,45 @@ public class SchemeRegularityRepository {
                 (Integer) rs.getObject("level_3_dept_id"),
                 (Integer) rs.getObject("level_4_dept_id"),
                 (Integer) rs.getObject("level_5_dept_id"),
-                (Integer) rs.getObject("level_6_dept_id"));
+                (Integer) rs.getObject("level_6_dept_id"),
+                getIntegerList(rs, "supplied_lgd_location_ids"),
+                getStringList(rs, "supplied_lgd_location_c_names"),
+                getStringList(rs, "supplied_lgd_location_titles"),
+                getIntegerList(rs, "supplied_lgd_location_levels"));
+    }
+
+    private List<Integer> getIntegerList(ResultSet rs, String columnName) throws SQLException {
+        java.sql.Array array = rs.getArray(columnName);
+        if (array == null) {
+            return List.of();
+        }
+        Object value = array.getArray();
+        if (value instanceof Integer[] integers) {
+            return Arrays.asList(integers);
+        }
+        if (value instanceof Object[] objects) {
+            return Arrays.stream(objects)
+                    .map(item -> item instanceof Number number ? number.intValue() : null)
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private List<String> getStringList(ResultSet rs, String columnName) throws SQLException {
+        java.sql.Array array = rs.getArray(columnName);
+        if (array == null) {
+            return List.of();
+        }
+        Object value = array.getArray();
+        if (value instanceof String[] strings) {
+            return Arrays.asList(strings);
+        }
+        if (value instanceof Object[] objects) {
+            return Arrays.stream(objects)
+                    .map(item -> item == null ? null : item.toString())
+                    .toList();
+        }
+        return List.of();
     }
 
     public SchemeRegularityMetrics getSchemeRegularityMetrics(Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
@@ -519,7 +558,7 @@ public class SchemeRegularityRepository {
                       AND l.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -576,7 +615,7 @@ public class SchemeRegularityRepository {
                       AND d.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -637,7 +676,7 @@ public class SchemeRegularityRepository {
                       AND l.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -655,7 +694,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     c.child_lgd_id AS lgd_id,
                     c.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
@@ -721,7 +760,7 @@ public class SchemeRegularityRepository {
                       AND l.tenant_id = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -741,7 +780,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     c.child_lgd_id AS lgd_id,
                     c.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
@@ -810,7 +849,7 @@ public class SchemeRegularityRepository {
                       AND d.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -828,7 +867,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     c.child_department_id AS department_id,
                     c.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
@@ -895,7 +934,7 @@ public class SchemeRegularityRepository {
                       AND d.tenant_id = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -915,7 +954,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     c.child_department_id AS department_id,
                     c.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
@@ -983,7 +1022,7 @@ public class SchemeRegularityRepository {
                       AND l.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -1001,7 +1040,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     c.child_lgd_id AS lgd_id,
                     c.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
@@ -1067,7 +1106,7 @@ public class SchemeRegularityRepository {
                       AND l.tenant_id = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -1087,7 +1126,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     c.child_lgd_id AS lgd_id,
                     c.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
@@ -1156,7 +1195,7 @@ public class SchemeRegularityRepository {
                       AND d.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -1174,7 +1213,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     c.child_department_id AS department_id,
                     c.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
@@ -1241,7 +1280,7 @@ public class SchemeRegularityRepository {
                       AND d.tenant_id = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -1261,7 +1300,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     c.child_department_id AS department_id,
                     c.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
@@ -2237,7 +2276,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -2283,7 +2322,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -2331,7 +2370,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -2377,7 +2416,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -2425,7 +2464,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -2473,7 +2512,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -2523,7 +2562,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -2571,7 +2610,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
@@ -2615,8 +2654,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                 """, schemeLgdColumn);
@@ -2637,8 +2676,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                   AND s.tenant_id = ?
@@ -2660,8 +2699,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                 """, schemeDepartmentColumn);
@@ -2682,8 +2721,8 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 SELECT
-                    COUNT(*) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(*) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
+                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                   AND s.tenant_id = ?
@@ -2705,7 +2744,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT s.scheme_id
+                    SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -2749,7 +2788,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT s.scheme_id
+                    SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -2841,7 +2880,7 @@ public class SchemeRegularityRepository {
                       AND s.tenant_id = ?
                 ),
                 scheme_details AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.state_scheme_id,
@@ -2912,7 +2951,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT s.scheme_id, s.scheme_name, s.state_scheme_id, s.centre_scheme_id
+                    SELECT DISTINCT s.scheme_id, s.scheme_name, s.state_scheme_id, s.centre_scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -2977,7 +3016,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT s.scheme_id, s.scheme_name, s.state_scheme_id, s.centre_scheme_id
+                    SELECT DISTINCT s.scheme_id, s.scheme_name, s.state_scheme_id, s.centre_scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
@@ -3257,7 +3296,7 @@ public class SchemeRegularityRepository {
                       AND s.tenant_id = ?
                 ),
                 scheme_details AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
@@ -3376,7 +3415,7 @@ public class SchemeRegularityRepository {
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
         String sql = String.format("""
-                SELECT COUNT(*)::bigint AS total_count
+                SELECT COUNT(DISTINCT s.scheme_id)::bigint AS total_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                   AND s.tenant_id = ?
@@ -3394,7 +3433,7 @@ public class SchemeRegularityRepository {
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
         String sql = String.format("""
-                SELECT COUNT(*)::bigint AS total_count
+                SELECT COUNT(DISTINCT s.scheme_id)::bigint AS total_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
                   AND s.tenant_id = ?
@@ -3414,7 +3453,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -3480,7 +3519,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -3519,7 +3562,11 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("level_3_dept_id"),
                         (Integer) rs.getObject("level_4_dept_id"),
                         (Integer) rs.getObject("level_5_dept_id"),
-                        (Integer) rs.getObject("level_6_dept_id")),
+                        (Integer) rs.getObject("level_6_dept_id"),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of()),
                 parentLgdId,
                 startDate,
                 endDate,
@@ -3541,12 +3588,13 @@ public class SchemeRegularityRepository {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        String childSchemeLgdColumn = resolveSchemeLgdColumn(Math.min(lgdLevel + 1, 6));
         long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
         String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, true, daysInRange);
 
         String sql = String.format("""
-                WITH schemes_in_scope AS (
-                    SELECT
+                WITH scheme_rows_in_scope AS (
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -3562,18 +3610,67 @@ public class SchemeRegularityRepository {
                         s.level_4_dept_id,
                         s.level_5_dept_id,
                         s.level_6_dept_id,
-                        CASE
-                            WHEN s.level_6_lgd_id IS NOT NULL THEN s.level_5_lgd_id
-                            WHEN s.level_5_lgd_id IS NOT NULL THEN s.level_4_lgd_id
-                            WHEN s.level_4_lgd_id IS NOT NULL THEN s.level_3_lgd_id
-                            WHEN s.level_3_lgd_id IS NOT NULL THEN s.level_2_lgd_id
-                            WHEN s.level_2_lgd_id IS NOT NULL THEN s.level_1_lgd_id
-                            WHEN s.level_1_lgd_id IS NOT NULL THEN s.parent_lgd_location_id
-                            ELSE NULL
-                        END AS immediate_parent_lgd_id
+                        s.%2$s AS supplied_lgd_location_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
+                ),
+                schemes_in_scope AS (
+                    SELECT DISTINCT ON (scheme_id)
+                        scheme_id,
+                        scheme_name,
+                        operating_status,
+                        level_1_lgd_id,
+                        level_2_lgd_id,
+                        level_3_lgd_id,
+                        level_4_lgd_id,
+                        level_5_lgd_id,
+                        level_6_lgd_id,
+                        level_1_dept_id,
+                        level_2_dept_id,
+                        level_3_dept_id,
+                        level_4_dept_id,
+                        level_5_dept_id,
+                        level_6_dept_id
+                    FROM scheme_rows_in_scope
+                    ORDER BY scheme_id, supplied_lgd_location_id NULLS LAST
+                ),
+                scheme_supplied_lgd_locations AS (
+                    SELECT DISTINCT scheme_id, supplied_lgd_location_id
+                    FROM scheme_rows_in_scope
+                    WHERE supplied_lgd_location_id IS NOT NULL
+                ),
+                supplied_lgd_locations AS (
+                    SELECT
+                        sll.scheme_id,
+                        sll.supplied_lgd_location_id,
+                        pl.lgd_c_name,
+                        pl.title,
+                        pl.lgd_level
+                    FROM scheme_supplied_lgd_locations sll
+                    LEFT JOIN analytics_schema.dim_lgd_location_table pl
+                        ON pl.lgd_id = sll.supplied_lgd_location_id
+                       AND pl.tenant_id = ?
+                ),
+                first_supplied_lgd_location AS (
+                    SELECT DISTINCT ON (scheme_id)
+                        scheme_id,
+                        supplied_lgd_location_id,
+                        lgd_c_name,
+                        title,
+                        lgd_level
+                    FROM supplied_lgd_locations
+                    ORDER BY scheme_id, LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id
+                ),
+                supplied_lgd_location_summary AS (
+                    SELECT
+                        scheme_id,
+                        ARRAY_AGG(supplied_lgd_location_id ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_ids,
+                        ARRAY_AGG(lgd_c_name ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_c_names,
+                        ARRAY_AGG(title ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_titles,
+                        ARRAY_AGG(lgd_level ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_levels
+                    FROM supplied_lgd_locations
+                    GROUP BY scheme_id
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -3594,7 +3691,7 @@ public class SchemeRegularityRepository {
                     ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
-                    ss.immediate_parent_lgd_id,
+                    fsl.supplied_lgd_location_id AS immediate_parent_lgd_id,
                     pl.lgd_c_name AS immediate_parent_lgd_c_name,
                     pl.title AS immediate_parent_lgd_title,
                     pl.lgd_level AS immediate_parent_lgd_level,
@@ -3613,22 +3710,31 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    COALESCE(slls.supplied_lgd_location_ids, ARRAY[]::integer[]) AS supplied_lgd_location_ids,
+                    COALESCE(slls.supplied_lgd_location_c_names, ARRAY[]::varchar[]) AS supplied_lgd_location_c_names,
+                    COALESCE(slls.supplied_lgd_location_titles, ARRAY[]::varchar[]) AS supplied_lgd_location_titles,
+                    COALESCE(slls.supplied_lgd_location_levels, ARRAY[]::integer[]) AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN first_supplied_lgd_location fsl
+                    ON fsl.scheme_id = ss.scheme_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table pl
-                    ON pl.lgd_id = ss.immediate_parent_lgd_id
+                    ON pl.lgd_id = fsl.supplied_lgd_location_id
                    AND pl.tenant_id = ?
-                ORDER BY %2$s
+                LEFT JOIN supplied_lgd_location_summary slls
+                    ON slls.scheme_id = ss.scheme_id
+                ORDER BY %3$s
                 LIMIT ?
                 OFFSET ?
-                """, schemeLgdColumn, orderByClause);
+                """, schemeLgdColumn, childSchemeLgdColumn, orderByClause);
 
         return jdbcTemplate.query(
                 sql,
                 (rs, rowNum) -> mapSchemeSubmissionMetrics(rs),
                 parentLgdId,
+                tenantId,
                 tenantId,
                 startDate,
                 endDate,
@@ -3655,7 +3761,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -3722,7 +3828,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -3756,7 +3866,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -3822,7 +3932,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -3861,7 +3975,11 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("level_3_dept_id"),
                         (Integer) rs.getObject("level_4_dept_id"),
                         (Integer) rs.getObject("level_5_dept_id"),
-                        (Integer) rs.getObject("level_6_dept_id")),
+                        (Integer) rs.getObject("level_6_dept_id"),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of()),
                 parentDepartmentId,
                 startDate,
                 endDate,
@@ -3889,7 +4007,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -3956,7 +4074,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -3999,7 +4121,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -4099,7 +4221,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.state_scheme_id,
@@ -4158,7 +4280,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.state_scheme_id,
@@ -4220,7 +4342,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.state_scheme_id,
@@ -4280,7 +4402,7 @@ public class SchemeRegularityRepository {
 
         String sql = String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.state_scheme_id,
@@ -4491,7 +4613,7 @@ public class SchemeRegularityRepository {
         }
         String sql = """
                 WITH schemes_in_tenant AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.scheme_name,
                         s.house_hold_count::bigint AS house_hold_count,
@@ -4569,14 +4691,17 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(COALESCE(s.planned_fhtc, 0)), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
-                        WHEN COUNT(s.scheme_id) > 0
-                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(s.scheme_id), 4)
+                        WHEN COUNT(DISTINCT s.scheme_id) > 0
+                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(DISTINCT s.scheme_id), 4)
                         ELSE 0::numeric
                     END AS avg_water_supply_per_scheme
                 FROM analytics_schema.dim_tenant_table t
-                LEFT JOIN analytics_schema.dim_scheme_table s
+                LEFT JOIN (
+                    SELECT DISTINCT tenant_id, scheme_id, house_hold_count, fhtc_count, planned_fhtc
+                    FROM analytics_schema.dim_scheme_table
+                ) s
                     ON s.tenant_id = t.tenant_id
                 LEFT JOIN water_by_scheme w
                     ON w.tenant_id = s.tenant_id
@@ -4618,7 +4743,7 @@ public class SchemeRegularityRepository {
                     WHERE t.tenant_id > 0
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.tenant_id,
                         s.scheme_id,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count
@@ -4813,10 +4938,13 @@ public class SchemeRegularityRepository {
                     t.tenant_id,
                     t.state_code,
                     t.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
                 FROM analytics_schema.dim_tenant_table t
-                LEFT JOIN analytics_schema.dim_scheme_table s
+                LEFT JOIN (
+                    SELECT DISTINCT tenant_id, scheme_id
+                    FROM analytics_schema.dim_scheme_table
+                ) s
                     ON s.tenant_id = t.tenant_id
                 LEFT JOIN supply_days_by_scheme sd
                     ON sd.tenant_id = s.tenant_id
@@ -4855,10 +4983,13 @@ public class SchemeRegularityRepository {
                     t.tenant_id,
                     t.state_code,
                     t.title,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
                 FROM analytics_schema.dim_tenant_table t
-                LEFT JOIN analytics_schema.dim_scheme_table s
+                LEFT JOIN (
+                    SELECT DISTINCT tenant_id, scheme_id
+                    FROM analytics_schema.dim_scheme_table
+                ) s
                     ON s.tenant_id = t.tenant_id
                 LEFT JOIN submission_days_by_scheme sd
                     ON sd.tenant_id = s.tenant_id
@@ -4910,13 +5041,17 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(COALESCE(s.planned_fhtc, 0)), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
-                        WHEN COUNT(s.scheme_id) > 0
-                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(s.scheme_id), 4)
+                        WHEN COUNT(DISTINCT s.scheme_id) > 0
+                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(DISTINCT s.scheme_id), 4)
                         ELSE 0::numeric
                     END AS avg_water_supply_per_scheme
-                FROM analytics_schema.dim_scheme_table s
+                FROM (
+                    SELECT DISTINCT tenant_id, scheme_id, level_2_lgd_id,
+                           house_hold_count, fhtc_count, planned_fhtc
+                    FROM analytics_schema.dim_scheme_table
+                ) s
                 JOIN analytics_schema.dim_tenant_table t
                     ON t.tenant_id = s.tenant_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table l
@@ -4971,7 +5106,7 @@ public class SchemeRegularityRepository {
                     WHERE t.tenant_id > 0
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.tenant_id,
                         s.scheme_id,
                         s.level_2_lgd_id,
@@ -5061,9 +5196,12 @@ public class SchemeRegularityRepository {
                 SELECT
                     s.tenant_id,
                     s.level_2_lgd_id AS lgd_id,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
-                FROM analytics_schema.dim_scheme_table s
+                FROM (
+                    SELECT DISTINCT tenant_id, scheme_id, level_2_lgd_id
+                    FROM analytics_schema.dim_scheme_table
+                ) s
                 LEFT JOIN supply_days_by_scheme sd
                     ON sd.tenant_id = s.tenant_id
                    AND sd.scheme_id = s.scheme_id
@@ -5100,9 +5238,12 @@ public class SchemeRegularityRepository {
                 SELECT
                     s.tenant_id,
                     s.level_2_lgd_id AS lgd_id,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
-                FROM analytics_schema.dim_scheme_table s
+                FROM (
+                    SELECT DISTINCT tenant_id, scheme_id, level_2_lgd_id
+                    FROM analytics_schema.dim_scheme_table
+                ) s
                 LEFT JOIN submission_days_by_scheme sd
                     ON sd.tenant_id = s.tenant_id
                    AND sd.scheme_id = s.scheme_id
@@ -5171,7 +5312,7 @@ public class SchemeRegularityRepository {
                       AND l.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_lgd_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -5198,10 +5339,10 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(s.planned_fhtc), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
-                        WHEN COUNT(s.scheme_id) > 0
-                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(s.scheme_id), 4)
+                        WHEN COUNT(DISTINCT s.scheme_id) > 0
+                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(DISTINCT s.scheme_id), 4)
                         ELSE 0::numeric
                     END AS avg_water_supply_per_scheme
                 FROM child_regions c
@@ -5264,7 +5405,7 @@ public class SchemeRegularityRepository {
                       AND d.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_department_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -5291,10 +5432,10 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_fhtc_count,
                     COALESCE(SUM(s.planned_fhtc), 0)::bigint AS total_planned_fhtc,
                     COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
-                    COALESCE(COUNT(s.scheme_id), 0)::int AS scheme_count,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     CASE
-                        WHEN COUNT(s.scheme_id) > 0
-                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(s.scheme_id), 4)
+                        WHEN COUNT(DISTINCT s.scheme_id) > 0
+                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(DISTINCT s.scheme_id), 4)
                         ELSE 0::numeric
                     END AS avg_water_supply_per_scheme
                 FROM child_regions c
@@ -5367,7 +5508,7 @@ public class SchemeRegularityRepository {
                       AND l.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_lgd_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -5522,7 +5663,7 @@ public class SchemeRegularityRepository {
                       AND l.tenant_id = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_lgd_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -5684,7 +5825,7 @@ public class SchemeRegularityRepository {
                       AND d.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_department_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -5851,15 +5992,18 @@ public class SchemeRegularityRepository {
                     SELECT ?::date AS anchor_start
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.tenant_id,
                         s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                 ),
                 scheme_fhtc_totals AS (
                     SELECT
-                        COALESCE(SUM(COALESCE(s.fhtc_count, 0)), 0)::bigint AS total_achieved_fhtc_count
-                    FROM analytics_schema.dim_scheme_table s
+                        COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_achieved_fhtc_count
+                    FROM (
+                        SELECT DISTINCT tenant_id, scheme_id, COALESCE(fhtc_count, 0) AS fhtc_count
+                        FROM analytics_schema.dim_scheme_table
+                    ) s
                 ),
                 periods AS (
                     SELECT DISTINCT
@@ -5938,7 +6082,7 @@ public class SchemeRegularityRepository {
                     SELECT ?::date AS anchor_start
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
@@ -6034,7 +6178,7 @@ public class SchemeRegularityRepository {
                     SELECT ?::date AS anchor_start
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
@@ -6161,7 +6305,7 @@ public class SchemeRegularityRepository {
                       AND d.tenant_id = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         s.%2$s AS child_department_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -6513,7 +6657,7 @@ public class SchemeRegularityRepository {
                     SELECT ?::date AS anchor_start
                 ),
                 schemes_in_scope AS (
-                    SELECT
+                    SELECT DISTINCT
                         s.scheme_id,
                         COALESCE(s.house_hold_count, 0)::bigint AS house_hold_count,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count,
@@ -7013,7 +7157,11 @@ public class SchemeRegularityRepository {
             Integer level3DeptId,
             Integer level4DeptId,
             Integer level5DeptId,
-            Integer level6DeptId) {
+            Integer level6DeptId,
+            List<Integer> suppliedLgdLocationIds,
+            List<String> suppliedLgdLocationCNames,
+            List<String> suppliedLgdLocationTitles,
+            List<Integer> suppliedLgdLocationLevels) {
     }
 
     public record SchemeRegularityListMetrics(

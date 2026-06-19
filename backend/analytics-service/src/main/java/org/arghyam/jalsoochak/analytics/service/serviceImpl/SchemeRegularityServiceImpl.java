@@ -2482,7 +2482,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":end:" + endDate
                 + ":sort_by:" + Objects.toString(sortBy, "reportingRate")
                 + ":sort_dir:" + Objects.toString(sortDir, "desc")
-                + ":v2";
+                + ":v3";
         SchemeStatusAndTopReportingResponse cached =
                 readFromCache(cacheKey, SchemeStatusAndTopReportingResponse.class);
         if (cached != null) {
@@ -2537,6 +2537,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                         metric.level4LgdId(), metric.level5LgdId(), metric.level6LgdId()))
                                 .departmentLadder(buildLevelLadder(metric.level1DeptId(), metric.level2DeptId(), metric.level3DeptId(),
                                         metric.level4DeptId(), metric.level5DeptId(), metric.level6DeptId()))
+                                .suppliedLgdLocations(buildSuppliedLgdLocations(metric))
                                 .build())
                         .toList())
                 .build();
@@ -2609,6 +2610,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                         metric.level4LgdId(), metric.level5LgdId(), metric.level6LgdId()))
                                 .departmentLadder(buildLevelLadder(metric.level1DeptId(), metric.level2DeptId(), metric.level3DeptId(),
                                         metric.level4DeptId(), metric.level5DeptId(), metric.level6DeptId()))
+                                .suppliedLgdLocations(buildSuppliedLgdLocations(metric))
                                 .build())
                         .toList())
                 .build();
@@ -2748,6 +2750,25 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         ladder.put("level_5", level5);
         ladder.put("level_6", level6);
         return ladder;
+    }
+
+    private static List<SchemeStatusAndTopReportingResponse.SuppliedLgdLocation> buildSuppliedLgdLocations(
+            SchemeRegularityRepository.SchemeSubmissionMetrics metric) {
+        List<Integer> ids = metric.suppliedLgdLocationIds() == null ? List.of() : metric.suppliedLgdLocationIds();
+        List<String> names = metric.suppliedLgdLocationCNames() == null ? List.of() : metric.suppliedLgdLocationCNames();
+        List<String> titles = metric.suppliedLgdLocationTitles() == null ? List.of() : metric.suppliedLgdLocationTitles();
+        List<Integer> levels = metric.suppliedLgdLocationLevels() == null ? List.of() : metric.suppliedLgdLocationLevels();
+
+        List<SchemeStatusAndTopReportingResponse.SuppliedLgdLocation> locations = new ArrayList<>();
+        for (int i = 0; i < ids.size(); i++) {
+            locations.add(SchemeStatusAndTopReportingResponse.SuppliedLgdLocation.builder()
+                    .lgdId(ids.get(i))
+                    .lgdCName(i < names.size() ? names.get(i) : null)
+                    .title(i < titles.size() ? titles.get(i) : null)
+                    .lgdLevel(i < levels.size() ? levels.get(i) : null)
+                    .build());
+        }
+        return locations;
     }
 
     @Override
