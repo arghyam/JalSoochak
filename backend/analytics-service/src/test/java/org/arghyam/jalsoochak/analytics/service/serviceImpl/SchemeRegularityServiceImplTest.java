@@ -471,7 +471,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getSchemeStatusAndTopReportingByLgd_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
         mockRedisValueOps();
-        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v3";
+        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v4";
         when(valueOperations.get(key)).thenReturn(null);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
