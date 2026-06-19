@@ -45,8 +45,8 @@ public class SchemeRegularityRepository {
         String expression = switch (normalizedSort) {
             case "schemename" -> "LOWER(COALESCE(ss.scheme_name, ''))";
             case "lgd", "location" -> lgdScope
-                    ? "LOWER(COALESCE(pl.lgd_c_name, pl.title, ''))"
-                    : "LOWER(COALESCE(pd.department_c_name, pd.title, ''))";
+                    ? "LOWER(COALESCE(NULLIF(pl.title, ''), pl.lgd_c_name, ''))"
+                    : "LOWER(COALESCE(NULLIF(pd.title, ''), pd.department_c_name, ''))";
             case "reportingrate" -> "(COALESCE(sd.submission_days, 0)::numeric / " + daysInRange + ")";
             case "totalwatersupplied" -> "COALESCE(sd.total_water_supplied, 0)";
             default -> throw new IllegalArgumentException("Unsupported sort_by: " + sortBy);
@@ -1398,6 +1398,7 @@ public class SchemeRegularityRepository {
                     ON sl.scheme_id = f.scheme_id
                 WHERE f.outage_reason IS NOT NULL
                   AND f.date BETWEEN ? AND ?
+                  AND f.tenant_id = ?
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
                 """, schemeLgdColumn);
@@ -1410,7 +1411,8 @@ public class SchemeRegularityRepository {
                 lgdId,
                 tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByDepartment(
@@ -1472,6 +1474,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = f.scheme_id
                 WHERE f.outage_reason IS NOT NULL
                   AND f.date BETWEEN ? AND ?
+                  AND f.tenant_id = ?
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
                 """, schemeDepartmentColumn);
@@ -1484,7 +1487,8 @@ public class SchemeRegularityRepository {
                 departmentId,
                 tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByUser(
@@ -1623,6 +1627,7 @@ public class SchemeRegularityRepository {
                 WHERE f.non_submission_reason IS NOT NULL
                   AND f.submission_status = ?
                   AND f.date BETWEEN ? AND ?
+                  AND f.tenant_id = ?
                 GROUP BY f.non_submission_reason
                 ORDER BY f.non_submission_reason
                 """, schemeLgdColumn);
@@ -1636,7 +1641,8 @@ public class SchemeRegularityRepository {
                 tenantId,
                 NOT_SUBMITTED_STATUS,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<NonSubmissionReasonSchemeCount> getNonSubmissionReasonSchemeCountByDepartment(
@@ -1701,6 +1707,7 @@ public class SchemeRegularityRepository {
                 WHERE f.non_submission_reason IS NOT NULL
                   AND f.submission_status = ?
                   AND f.date BETWEEN ? AND ?
+                  AND f.tenant_id = ?
                 GROUP BY f.non_submission_reason
                 ORDER BY f.non_submission_reason
                 """, schemeDepartmentColumn);
@@ -1714,7 +1721,8 @@ public class SchemeRegularityRepository {
                 tenantId,
                 NOT_SUBMITTED_STATUS,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<NonSubmissionReasonSchemeCount> getNonSubmissionReasonSchemeCountByUser(
@@ -2008,9 +2016,10 @@ public class SchemeRegularityRepository {
                 JOIN schemes_in_scope ss
                     ON ss.scheme_id = m.scheme_id
                 WHERE m.reading_date BETWEEN ? AND ?
+                  AND m.tenant_id = ?
                 """, schemeLgdColumn);
 
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId, tenantId, startDate, endDate);
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId, tenantId, startDate, endDate, tenantId);
         int compliantSubmissionCount =
                 result.get("compliant_submission_count") instanceof Number value ? value.intValue() : 0;
         int anomalousSubmissionCount =
@@ -2095,9 +2104,10 @@ public class SchemeRegularityRepository {
                 JOIN schemes_in_scope ss
                     ON ss.scheme_id = m.scheme_id
                 WHERE m.reading_date BETWEEN ? AND ?
+                  AND m.tenant_id = ?
                 """, schemeDepartmentColumn);
 
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, tenantId, startDate, endDate);
+        Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, tenantId, startDate, endDate, tenantId);
         int compliantSubmissionCount =
                 result.get("compliant_submission_count") instanceof Number value ? value.intValue() : 0;
         int anomalousSubmissionCount =
@@ -2338,6 +2348,7 @@ public class SchemeRegularityRepository {
                     ON f.scheme_id = ss.scheme_id
                 WHERE f.outage_reason IS NOT NULL
                   AND f.date BETWEEN ? AND ?
+                  AND f.tenant_id = ?
                 GROUP BY ss.child_lgd_id, f.outage_reason
                 ORDER BY ss.child_lgd_id, f.outage_reason
                 """, childSchemeLgdColumn, parentSchemeLgdColumn);
@@ -2352,7 +2363,8 @@ public class SchemeRegularityRepository {
                 lgdId,
                 tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<ChildRegionOutageReasonSchemeCount> getChildOutageReasonSchemeCountByDepartment(
@@ -2432,6 +2444,7 @@ public class SchemeRegularityRepository {
                     ON f.scheme_id = ss.scheme_id
                 WHERE f.outage_reason IS NOT NULL
                   AND f.date BETWEEN ? AND ?
+                  AND f.tenant_id = ?
                 GROUP BY ss.child_department_id, f.outage_reason
                 ORDER BY ss.child_department_id, f.outage_reason
                 """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
@@ -2446,7 +2459,8 @@ public class SchemeRegularityRepository {
                 departmentId,
                 tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<ChildRegionNonSubmissionReasonSchemeCount> getChildNonSubmissionReasonSchemeCountByLgd(
@@ -2529,6 +2543,7 @@ public class SchemeRegularityRepository {
                 WHERE f.non_submission_reason IS NOT NULL
                   AND f.submission_status = ?
                   AND f.date BETWEEN ? AND ?
+                  AND f.tenant_id = ?
                 GROUP BY ss.child_lgd_id, f.non_submission_reason
                 ORDER BY ss.child_lgd_id, f.non_submission_reason
                 """, childSchemeLgdColumn, parentSchemeLgdColumn);
@@ -2544,7 +2559,8 @@ public class SchemeRegularityRepository {
                 tenantId,
                 NOT_SUBMITTED_STATUS,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<ChildRegionNonSubmissionReasonSchemeCount> getChildNonSubmissionReasonSchemeCountByDepartment(
@@ -2627,6 +2643,7 @@ public class SchemeRegularityRepository {
                 WHERE f.non_submission_reason IS NOT NULL
                   AND f.submission_status = ?
                   AND f.date BETWEEN ? AND ?
+                  AND f.tenant_id = ?
                 GROUP BY ss.child_department_id, f.non_submission_reason
                 ORDER BY ss.child_department_id, f.non_submission_reason
                 """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
@@ -2642,7 +2659,8 @@ public class SchemeRegularityRepository {
                 tenantId,
                 NOT_SUBMITTED_STATUS,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public SchemeStatusCount getSchemeStatusCountByLgd(Integer lgdId) {
@@ -3660,15 +3678,15 @@ public class SchemeRegularityRepository {
                         title,
                         lgd_level
                     FROM supplied_lgd_locations
-                    ORDER BY scheme_id, LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id
+                    ORDER BY scheme_id, LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id
                 ),
                 supplied_lgd_location_summary AS (
                     SELECT
                         scheme_id,
-                        ARRAY_AGG(supplied_lgd_location_id ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_ids,
-                        ARRAY_AGG(lgd_c_name ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_c_names,
-                        ARRAY_AGG(title ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_titles,
-                        ARRAY_AGG(lgd_level ORDER BY LOWER(COALESCE(lgd_c_name, title, '')), supplied_lgd_location_id) AS supplied_lgd_location_levels
+                        ARRAY_AGG(supplied_lgd_location_id ORDER BY LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id) AS supplied_lgd_location_ids,
+                        ARRAY_AGG(lgd_c_name ORDER BY LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id) AS supplied_lgd_location_c_names,
+                        ARRAY_AGG(title ORDER BY LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id) AS supplied_lgd_location_titles,
+                        ARRAY_AGG(lgd_level ORDER BY LOWER(COALESCE(NULLIF(title, ''), lgd_c_name, '')), supplied_lgd_location_id) AS supplied_lgd_location_levels
                     FROM supplied_lgd_locations
                     GROUP BY scheme_id
                 ),
@@ -3683,6 +3701,7 @@ public class SchemeRegularityRepository {
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading >= 0
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -3738,6 +3757,7 @@ public class SchemeRegularityRepository {
                 tenantId,
                 startDate,
                 endDate,
+                tenantId,
                 tenantId,
                 limit,
                 offset);
@@ -3801,6 +3821,7 @@ public class SchemeRegularityRepository {
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading >= 0
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -3851,6 +3872,7 @@ public class SchemeRegularityRepository {
             ps.setObject(i++, startDate);
             ps.setObject(i++, endDate);
             ps.setInt(i++, tenantId);
+            ps.setInt(i, tenantId);
             return ps;
         }, (RowCallbackHandler) rs -> consumer.accept(mapSchemeSubmissionMetrics(rs)));
     }
@@ -4047,6 +4069,7 @@ public class SchemeRegularityRepository {
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading >= 0
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -4097,6 +4120,7 @@ public class SchemeRegularityRepository {
                 tenantId,
                 startDate,
                 endDate,
+                tenantId,
                 tenantId,
                 limit,
                 offset);
@@ -4161,6 +4185,7 @@ public class SchemeRegularityRepository {
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading >= 0
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -4188,7 +4213,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -4207,6 +4236,7 @@ public class SchemeRegularityRepository {
             ps.setObject(i++, startDate);
             ps.setObject(i++, endDate);
             ps.setInt(i++, tenantId);
+            ps.setInt(i, tenantId);
             return ps;
         }, (RowCallbackHandler) rs -> consumer.accept(mapSchemeSubmissionMetrics(rs)));
     }
@@ -4299,6 +4329,7 @@ public class SchemeRegularityRepository {
                     JOIN schemes_in_scope ss
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -4328,7 +4359,8 @@ public class SchemeRegularityRepository {
                 parentLgdId,
                 tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public List<SchemeRegularityListMetrics> getSchemeRegionReportByDepartment(
@@ -4421,6 +4453,7 @@ public class SchemeRegularityRepository {
                     JOIN schemes_in_scope ss
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
+                      AND m.tenant_id = ?
                     GROUP BY m.scheme_id
                 )
                 SELECT
@@ -4450,7 +4483,8 @@ public class SchemeRegularityRepository {
                 parentDepartmentId,
                 tenantId,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     public String getParentLgdCNameByLgd(Integer lgdId) {
@@ -4613,7 +4647,7 @@ public class SchemeRegularityRepository {
         }
         String sql = """
                 WITH schemes_in_tenant AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.house_hold_count::bigint AS house_hold_count,
@@ -4623,6 +4657,7 @@ public class SchemeRegularityRepository {
                     WHERE s.tenant_id = ?
                       AND s.house_hold_count IS NOT NULL
                       AND s.house_hold_count > 0
+                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, s.house_hold_count DESC, COALESCE(s.planned_fhtc, 0) DESC
                 )
                 SELECT
                     s.scheme_id,
@@ -4699,8 +4734,9 @@ public class SchemeRegularityRepository {
                     END AS avg_water_supply_per_scheme
                 FROM analytics_schema.dim_tenant_table t
                 LEFT JOIN (
-                    SELECT DISTINCT tenant_id, scheme_id, house_hold_count, fhtc_count, planned_fhtc
+                    SELECT DISTINCT ON (tenant_id, scheme_id) tenant_id, scheme_id, house_hold_count, fhtc_count, planned_fhtc
                     FROM analytics_schema.dim_scheme_table
+                    ORDER BY tenant_id, scheme_id, fhtc_count DESC NULLS LAST, house_hold_count DESC NULLS LAST, planned_fhtc DESC NULLS LAST
                 ) s
                     ON s.tenant_id = t.tenant_id
                 LEFT JOIN water_by_scheme w
@@ -4743,12 +4779,13 @@ public class SchemeRegularityRepository {
                     WHERE t.tenant_id > 0
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.tenant_id, s.scheme_id)
                         s.tenant_id,
                         s.scheme_id,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id > 0
+                    ORDER BY s.tenant_id, s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
                 ),
                 dates_in_range AS (
                     SELECT d.full_date AS date
@@ -5048,9 +5085,10 @@ public class SchemeRegularityRepository {
                         ELSE 0::numeric
                     END AS avg_water_supply_per_scheme
                 FROM (
-                    SELECT DISTINCT tenant_id, scheme_id, level_2_lgd_id,
+                    SELECT DISTINCT ON (tenant_id, scheme_id, level_2_lgd_id) tenant_id, scheme_id, level_2_lgd_id,
                            house_hold_count, fhtc_count, planned_fhtc
                     FROM analytics_schema.dim_scheme_table
+                    ORDER BY tenant_id, scheme_id, level_2_lgd_id, fhtc_count DESC NULLS LAST, house_hold_count DESC NULLS LAST, planned_fhtc DESC NULLS LAST
                 ) s
                 JOIN analytics_schema.dim_tenant_table t
                     ON t.tenant_id = s.tenant_id
@@ -5106,7 +5144,7 @@ public class SchemeRegularityRepository {
                     WHERE t.tenant_id > 0
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.tenant_id, s.scheme_id, s.level_2_lgd_id)
                         s.tenant_id,
                         s.scheme_id,
                         s.level_2_lgd_id,
@@ -5114,6 +5152,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id > 0
                       AND s.level_2_lgd_id IS NOT NULL
+                    ORDER BY s.tenant_id, s.scheme_id, s.level_2_lgd_id, COALESCE(s.fhtc_count, 0) DESC
                 ),
                 dates_in_range AS (
                     SELECT d.full_date AS date
@@ -5269,7 +5308,7 @@ public class SchemeRegularityRepository {
         String sql = """
                 SELECT
                     f.outage_reason,
-                    COUNT(DISTINCT f.scheme_id)::int AS scheme_count
+                    COUNT(DISTINCT (f.tenant_id, f.scheme_id))::int AS scheme_count
                 FROM analytics_schema.fact_water_quantity_table f
                 WHERE f.outage_reason IS NOT NULL
                   AND f.date BETWEEN ? AND ?
@@ -5288,7 +5327,7 @@ public class SchemeRegularityRepository {
 
     public List<ChildRegionWaterSupplyMetrics> getAverageWaterSupplyPerCurrentRegionByLgd(
             Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
-        Integer lgdLevel = getLgdLevel(lgdId);
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
         if (lgdLevel == null) {
             throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
         }
@@ -5312,7 +5351,7 @@ public class SchemeRegularityRepository {
                       AND l.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id, s.%2$s)
                         s.scheme_id,
                         s.%2$s AS child_lgd_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -5321,6 +5360,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id = ?
                       AND s.%3$s = ?
+                    ORDER BY s.scheme_id, s.%2$s, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 water_by_scheme AS (
                     SELECT
@@ -5380,7 +5420,7 @@ public class SchemeRegularityRepository {
 
     public List<ChildRegionWaterSupplyMetrics> getAverageWaterSupplyPerCurrentRegionByDepartment(
             Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
-        Integer departmentLevel = getDepartmentLevel(parentDepartmentId);
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (departmentLevel == null) {
             throw new IllegalArgumentException(
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
@@ -5405,7 +5445,7 @@ public class SchemeRegularityRepository {
                       AND d.%1$s = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id, s.%2$s)
                         s.scheme_id,
                         s.%2$s AS child_department_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -5414,6 +5454,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id = ?
                       AND s.%3$s = ?
+                    ORDER BY s.scheme_id, s.%2$s, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 water_by_scheme AS (
                     SELECT
@@ -5648,10 +5689,7 @@ public class SchemeRegularityRepository {
                         COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
                         COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
                     FROM analytics_schema.dim_tenant_table t
-                    JOIN analytics_schema.dim_lgd_location_table l
-                        ON l.tenant_id = t.tenant_id
-                    WHERE l.lgd_id = ?
-                      AND l.tenant_id = ?
+                    WHERE t.tenant_id = ?
                 ),
                 child_regions AS (
                     SELECT
@@ -5663,7 +5701,7 @@ public class SchemeRegularityRepository {
                       AND l.tenant_id = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id, s.%2$s)
                         s.scheme_id,
                         s.%2$s AS child_lgd_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -5672,6 +5710,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
                       AND s.tenant_id = ?
+                    ORDER BY s.scheme_id, s.%2$s, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 dates_in_range AS (
                     SELECT d.full_date AS date
@@ -5770,7 +5809,6 @@ public class SchemeRegularityRepository {
                         rs.getLong("fhtc_count"),
                         rs.getLong("planned_fhtc"),
                         rs.getLong("supply_days_in_efficient_range")),
-                parentLgdId,
                 tenantId,
                 childLevel,
                 parentLgdId,
@@ -6001,8 +6039,9 @@ public class SchemeRegularityRepository {
                     SELECT
                         COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_achieved_fhtc_count
                     FROM (
-                        SELECT DISTINCT tenant_id, scheme_id, COALESCE(fhtc_count, 0) AS fhtc_count
+                        SELECT DISTINCT ON (tenant_id, scheme_id) tenant_id, scheme_id, COALESCE(fhtc_count, 0) AS fhtc_count
                         FROM analytics_schema.dim_scheme_table
+                        ORDER BY tenant_id, scheme_id, COALESCE(fhtc_count, 0) DESC
                     ) s
                 ),
                 periods AS (
@@ -6082,11 +6121,12 @@ public class SchemeRegularityRepository {
                     SELECT ?::date AS anchor_start
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
+                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
                 ),
                 scheme_fhtc_totals AS (
                     SELECT
@@ -6178,12 +6218,13 @@ public class SchemeRegularityRepository {
                     SELECT ?::date AS anchor_start
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
+                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
                 ),
                 scheme_fhtc_totals AS (
                     SELECT
@@ -6290,10 +6331,7 @@ public class SchemeRegularityRepository {
                         COALESCE(t.over_supply_range_percentage, 0) AS over_supply_range_percentage,
                         COALESCE(t.under_supply_range_percentage, 0) AS under_supply_range_percentage
                     FROM analytics_schema.dim_tenant_table t
-                    JOIN analytics_schema.dim_department_location_table d
-                        ON d.tenant_id = t.tenant_id
-                    WHERE d.department_id = ?
-                      AND d.tenant_id = ?
+                    WHERE t.tenant_id = ?
                 ),
                 child_regions AS (
                     SELECT
@@ -6305,7 +6343,7 @@ public class SchemeRegularityRepository {
                       AND d.tenant_id = ?
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id, s.%2$s)
                         s.scheme_id,
                         s.%2$s AS child_department_id,
                         COALESCE(s.house_hold_count, 0) AS house_hold_count,
@@ -6314,6 +6352,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
                       AND s.tenant_id = ?
+                    ORDER BY s.scheme_id, s.%2$s, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 dates_in_range AS (
                     SELECT d.full_date AS date
@@ -6412,7 +6451,6 @@ public class SchemeRegularityRepository {
                         rs.getLong("fhtc_count"),
                         rs.getLong("planned_fhtc"),
                         rs.getLong("supply_days_in_efficient_range")),
-                parentDepartmentId,
                 tenantId,
                 childLevel,
                 parentDepartmentId,
@@ -6604,6 +6642,7 @@ public class SchemeRegularityRepository {
                         ON s.scheme_id = f.scheme_id
                     WHERE f.outage_reason IS NOT NULL
                       AND f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
                     GROUP BY %5$s, f.outage_reason
                 )
                 SELECT
@@ -6642,7 +6681,8 @@ public class SchemeRegularityRepository {
                 startDate,
                 endDate,
                 startDate,
-                endDate);
+                endDate,
+                tenantId);
     }
 
     private List<PeriodicWaterQuantityMetrics> getPeriodicWaterQuantityMetrics(
@@ -6657,13 +6697,14 @@ public class SchemeRegularityRepository {
                     SELECT ?::date AS anchor_start
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         COALESCE(s.house_hold_count, 0)::bigint AS house_hold_count,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count,
                         COALESCE(s.planned_fhtc, 0)::bigint AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
+                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 periods AS (
                     SELECT DISTINCT
