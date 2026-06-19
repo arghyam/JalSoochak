@@ -3872,7 +3872,7 @@ public class SchemeRegularityRepository {
             ps.setObject(i++, startDate);
             ps.setObject(i++, endDate);
             ps.setInt(i++, tenantId);
-            ps.setInt(i++, tenantId);
+            ps.setInt(i, tenantId);
             return ps;
         }, (RowCallbackHandler) rs -> consumer.accept(mapSchemeSubmissionMetrics(rs)));
     }
@@ -4213,7 +4213,11 @@ public class SchemeRegularityRepository {
                     ss.level_3_dept_id,
                     ss.level_4_dept_id,
                     ss.level_5_dept_id,
-                    ss.level_6_dept_id
+                    ss.level_6_dept_id,
+                    ARRAY[]::integer[] AS supplied_lgd_location_ids,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_c_names,
+                    ARRAY[]::varchar[] AS supplied_lgd_location_titles,
+                    ARRAY[]::integer[] AS supplied_lgd_location_levels
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
@@ -4232,7 +4236,7 @@ public class SchemeRegularityRepository {
             ps.setObject(i++, startDate);
             ps.setObject(i++, endDate);
             ps.setInt(i++, tenantId);
-            ps.setInt(i++, tenantId);
+            ps.setInt(i, tenantId);
             return ps;
         }, (RowCallbackHandler) rs -> consumer.accept(mapSchemeSubmissionMetrics(rs)));
     }
@@ -5323,7 +5327,7 @@ public class SchemeRegularityRepository {
 
     public List<ChildRegionWaterSupplyMetrics> getAverageWaterSupplyPerCurrentRegionByLgd(
             Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
-        Integer lgdLevel = getLgdLevel(lgdId);
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
         if (lgdLevel == null) {
             throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
         }
@@ -5416,7 +5420,7 @@ public class SchemeRegularityRepository {
 
     public List<ChildRegionWaterSupplyMetrics> getAverageWaterSupplyPerCurrentRegionByDepartment(
             Integer tenantId, Integer parentDepartmentId, LocalDate startDate, LocalDate endDate) {
-        Integer departmentLevel = getDepartmentLevel(parentDepartmentId);
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         if (departmentLevel == null) {
             throw new IllegalArgumentException(
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);

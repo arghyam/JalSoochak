@@ -319,6 +319,19 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void streamSchemeSubmissionMetricsByDepartment_mapsRowsWithoutMissingColumns() {
+        // Regression: the by-department stream SELECT must expose the four supplied_lgd_location_* array
+        // columns that mapSchemeSubmissionMetrics reads, or row mapping throws SQLException at runtime.
+        List<SchemeRegularityRepository.SchemeSubmissionMetrics> rows = new java.util.ArrayList<>();
+        repository.streamSchemeSubmissionMetricsByDepartment(1, 200, D1, D3, "schemeName", "asc", rows::add);
+
+        assertThat(rows).extracting(SchemeRegularityRepository.SchemeSubmissionMetrics::schemeId)
+                .containsExactlyInAnyOrder(1, 2);
+        // arrays are selected (as empty literals) and mapped to non-null empty lists, not a SQLException
+        assertThat(rows.get(0).suppliedLgdLocationIds()).isNotNull();
+    }
+
+    @Test
     void duplicateSchemeMappingRows_doNotInflateEfficientSupplyDaysOrWaterTotals() {
         // Region-wise water/efficient-range scope projects measure columns (fhtc/household/planned).
         // A multi-mapped scheme (V24) whose mapping rows carry DIFFERING measures must still contribute
