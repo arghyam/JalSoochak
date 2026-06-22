@@ -1,13 +1,17 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -44,11 +48,19 @@ class BfmReadingServicePlaceholderRowTest {
     @Mock
     private TenantConfigRepository tenantConfigRepository;
 
+    @Mock
+    private GlificOperatorContextService glificOperatorContextService;
+
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
     private BfmReadingService service;
+
+    @AfterEach
+    void clearTenantContext() {
+        TenantContext.clear();
+    }
 
     @Test
     void createReadingUpdatesPlaceholderRowInsteadOfInsertingNewRow() {
@@ -104,6 +116,98 @@ class BfmReadingServicePlaceholderRowTest {
         );
         verify(telemetryTenantRepository, never()).createFlowReading(
                 anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
+        );
+    }
+
+    @Test
+    void updateConfirmedReadingWithoutCorrelationIdUpdatesLatestReadingAndPublishesEvent() {
+        String schemaName = "tenant_test";
+        TelemetryOperator operator = new TelemetryOperator(1L, 22, "op", "op@example.com", "919999999999", null);
+        LocalDate readingDate = LocalDate.of(2026, 6, 22);
+        LocalDateTime readingAt = LocalDateTime.of(2026, 6, 22, 9, 30);
+        TelemetryLatestFlowReadingRecord latestReading = new TelemetryLatestFlowReadingRecord(
+                99L,
+                10L,
+                1L,
+                "corr-1",
+                new BigDecimal("100"),
+                new BigDecimal("100"),
+                "http://example.com/img.jpg",
+                readingDate,
+                readingAt
+        );
+
+        when(glificOperatorContextService.resolveOperatorWithSchema("919999999999"))
+                .thenReturn(new TelemetryOperatorWithSchema(schemaName, operator));
+        when(telemetryTenantRepository.findLatestFlowReadingByOperator(schemaName, 1L))
+                .thenReturn(Optional.of(latestReading));
+
+        CreateReadingResponse resp = service.updateConfirmedReading(null, "919999999999", new BigDecimal("123"));
+
+        assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+        assertEquals("corr-1", resp.getCorrelationId());
+        assertEquals(new BigDecimal("123"), resp.getMeterReading());
+        verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L);
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(
+                22,
+                10L,
+                1L,
+                new BigDecimal("100"),
+                new BigDecimal("123"),
+                null,
+                "http://example.com/img.jpg",
+                readingAt,
+                null,
+                readingDate,
+                1,
+                0
+        );
+    }
+
+    @Test
+    void updateConfirmedReadingWithCorrelationIdUpdatesReadingAndPublishesEvent() {
+        String schemaName = "tenant_test";
+        TenantContext.setSchema(schemaName);
+        TelemetryOperator operator = new TelemetryOperator(1L, 22, "op", "op@example.com", "919999999999", null);
+        LocalDate readingDate = LocalDate.of(2026, 6, 22);
+        LocalDateTime readingAt = LocalDateTime.of(2026, 6, 22, 9, 30);
+        TelemetryLatestFlowReadingRecord reading = new TelemetryLatestFlowReadingRecord(
+                99L,
+                10L,
+                1L,
+                "corr-1",
+                new BigDecimal("100"),
+                new BigDecimal("100"),
+                "http://example.com/img.jpg",
+                readingDate,
+                readingAt
+        );
+
+        when(telemetryTenantRepository.findFlowReadingDetailsByCorrelationId(schemaName, "corr-1"))
+                .thenReturn(Optional.of(reading));
+        when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
+
+        CreateReadingResponse resp = service.updateConfirmedReading("corr-1", "919999999999", new BigDecimal("123"));
+
+        assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+        assertEquals("corr-1", resp.getCorrelationId());
+        assertEquals(new BigDecimal("123"), resp.getMeterReading());
+        verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L);
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(
+                22,
+                10L,
+                1L,
+                new BigDecimal("100"),
+                new BigDecimal("123"),
+                null,
+                "http://example.com/img.jpg",
+                readingAt,
+                null,
+                readingDate,
+                1,
+                0
         );
     }
 }
