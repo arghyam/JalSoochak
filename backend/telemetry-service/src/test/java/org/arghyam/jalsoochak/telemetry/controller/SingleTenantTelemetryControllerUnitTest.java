@@ -145,7 +145,7 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     @Test
-    void updateReadingsReturnsBadRequestWhenCorrelationIdMissing() {
+    void updateReadingsUsesPhoneNumberWhenCorrelationIdMissing() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -160,14 +160,14 @@ class SingleTenantTelemetryControllerUnitTest {
                         .build()
         );
 
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
-        assertEquals(false, response.getBody().isSuccess());
-        assertEquals("correlationId must be provided", response.getBody().getData().getMessage());
+        assertEquals(true, response.getBody().isSuccess());
+        assertEquals("919999999999", response.getBody().getData().getCorrelationId());
     }
 
     @Test
-    void updateReadingsUsesPhoneNumberWhenCorrelationIdMissing() {
+    void updateReadingsUsesCorrelationIdWhenProvided() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -261,6 +261,20 @@ class SingleTenantTelemetryControllerUnitTest {
         private StubBfmReadingService(boolean throwError) {
             super(null, null, null, null, null, null);
             this.throwError = throwError;
+        }
+
+        @Override
+        public CreateReadingResponse updateConfirmedReading(String correlationId, String phoneNumber, BigDecimal confirmedReading) {
+            if (throwError) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad request");
+            }
+            return CreateReadingResponse.builder()
+                    .success(true)
+                    .message("Reading updated successfully")
+                    .correlationId(correlationId != null ? correlationId : phoneNumber)
+                    .meterReading(confirmedReading)
+                    .qualityStatus("CONFIRMED")
+                    .build();
         }
 
         @Override

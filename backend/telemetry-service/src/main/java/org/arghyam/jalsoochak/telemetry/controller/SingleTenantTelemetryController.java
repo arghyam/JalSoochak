@@ -238,13 +238,6 @@ public class SingleTenantTelemetryController {
             boolean hasImageId = request.getImageId() != null && !request.getImageId().isBlank();
             boolean hasConfirmedReading = request.getConfirmedReading() != null;
 
-            if (!hasCorrelationId) {
-                throw new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST,
-                        "correlationId must be provided"
-                );
-            }
-
             if (!hasPhoneNumber) {
                 throw new ResponseStatusException(
                         HttpStatus.BAD_REQUEST,
@@ -259,18 +252,12 @@ public class SingleTenantTelemetryController {
                 );
             }
 
-            String resolvedIdentifier = request.getCorrelationId();
             if (hasConfirmedReading && hasImageId) {
                 log.debug("Both confirmedReading and imageId provided; confirmedReading update takes precedence.");
             }
-            if (resolvedIdentifier == null || resolvedIdentifier.isBlank()) {
-                throw new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST,
-                        "phoneNumber must be provided"
-                );
-            }
             CreateReadingResponse response = bfmReadingService.updateConfirmedReading(
-                    resolvedIdentifier,
+                    hasCorrelationId ? request.getCorrelationId().trim() : null,
+                    request.getPhoneNumber().trim(),
                     request.getConfirmedReading()
             );
             return ResponseEntity.ok(
