@@ -127,9 +127,31 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(rows).hasSize(1);
         assertThat(rows.getFirst().tenantId()).isEqualTo(1);
-        // In this test seed, tenant config values default to 0 (via COALESCE),
-        // so only scheme-days with zero daily eWater quantity count as "efficient".
-        assertThat(rows.getFirst().supplyDaysInEfficientRange()).isEqualTo(3L);
+        // Tenant config defaults to 0 (via COALESCE) -> efficient band is [0,0]. The seeded readings
+        // (100/200/50) never fall in [0,0], and days with NO reading no longer count (phantom-day
+        // over-count fix: the efficient CASE now requires an actual reading), so the count is 0.
+        // (Pre-fix this returned 3 -- the three no-reading scheme-days that COALESCE'd to 0.)
+        assertThat(rows.getFirst().supplyDaysInEfficientRange()).isEqualTo(0L);
+    }
+
+    @Test
+    void supplyDaysInEfficientRange_countsRealReadingDaysOnly_notPhantomNoReadingDays() {
+        // Regression for the efficient-range over-count: the query CROSS JOINs every scheme x every
+        // day and LEFT JOINs water, so a day with NO reading used to COALESCE to 0 and -- when the
+        // band includes 0 (fhtc=0 or required_lpcd=0) -- was wrongly counted as "efficient".
+        // Default config here gives band [0,0]; add ONE real zero-water reading (scheme 1, D3) and
+        // assert ONLY it counts (1), not the no-reading phantom days. Pre-fix this returned 3.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 1, 1, 11, 0, D3, SubmissionStatus.NOT_SUBMITTED.getCode(), "draught", "app_issue");
+
+        List<SchemeRegularityRepository.TenantSupplyDaysInEfficientRange> rows =
+                repository.getTenantWiseSupplyDaysInEfficientRange(D1, D3);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().supplyDaysInEfficientRange()).isEqualTo(1L);
     }
 
     @Test
