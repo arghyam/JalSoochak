@@ -1084,6 +1084,36 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    public Optional<TelemetryLatestFlowReadingRecord> findFlowReadingDetailsByCorrelationId(String schemaName,
+                                                                                            String correlationId) {
+        validateSchemaName(schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String sql = String.format("""
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, %s AS reading_time
+                FROM %s.flow_reading_table
+                WHERE correlation_id = ?
+                  AND deleted_at IS NULL
+                ORDER BY reading_date DESC, %s DESC NULLS LAST, id DESC
+                LIMIT 1
+                """, timeColumn, schemaName, timeColumn);
+        List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
+                sql,
+                (rs, n) -> new TelemetryLatestFlowReadingRecord(
+                        toLong(rs.getObject("id")),
+                        toLong(rs.getObject("scheme_id")),
+                        toLong(rs.getObject("created_by")),
+                        rs.getString("correlation_id"),
+                        rs.getBigDecimal("extracted_reading"),
+                        rs.getBigDecimal("confirmed_reading"),
+                        rs.getString("image_url"),
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getObject("reading_time", LocalDateTime.class)
+                ),
+                correlationId
+        );
+        return rows.stream().findFirst();
+    }
+
     public Optional<TelemetryFlowReadingDetails> findLatestFlowReadingForDate(String schemaName,
                                                                               Long schemeId,
                                                                               Long operatorId,

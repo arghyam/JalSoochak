@@ -23,7 +23,6 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AssamReadingRequest {
 
-    @NotBlank
     @JsonProperty("reading_url")
     private String readingUrl;
 
@@ -53,6 +52,11 @@ public class AssamReadingRequest {
     private boolean isSchemeIdPresent() {
         return (stateSchemeId != null && !stateSchemeId.isBlank())
                 || (centreSchemeId != null && !centreSchemeId.isBlank());
+    }
+
+    @AssertTrue(message = "Either readingUrl or confirmedReading must be provided")
+    private boolean isReadingPresent() {
+        return (readingUrl != null && !readingUrl.isBlank()) || confirmedReading != null;
     }
 
     @Data

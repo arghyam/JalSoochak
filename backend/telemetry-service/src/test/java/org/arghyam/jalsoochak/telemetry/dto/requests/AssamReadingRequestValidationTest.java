@@ -6,6 +6,7 @@ import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Set;
 
@@ -61,6 +62,33 @@ class AssamReadingRequestValidationTest {
 
         Set<ConstraintViolation<AssamReadingRequest>> violations = VALIDATOR.validate(request);
         assertEquals(0, violations.size());
+    }
+
+    @Test
+    void validationPassesWhenReadingUrlMissingAndConfirmedReadingProvided() {
+        AssamReadingRequest request = baseRequestBuilder()
+                .readingUrl(null)
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .centreSchemeId(null)
+                .build();
+
+        Set<ConstraintViolation<AssamReadingRequest>> violations = VALIDATOR.validate(request);
+        assertEquals(0, violations.size());
+    }
+
+    @Test
+    void validationFailsWhenReadingUrlAndConfirmedReadingMissing() {
+        AssamReadingRequest request = baseRequestBuilder()
+                .readingUrl(null)
+                .confirmedReading(null)
+                .stateSchemeId("30178236")
+                .centreSchemeId(null)
+                .build();
+
+        Set<ConstraintViolation<AssamReadingRequest>> violations = VALIDATOR.validate(request);
+        assertEquals(1, violations.size());
+        assertTrue(violations.iterator().next().getMessage().contains("Either readingUrl or confirmedReading must be provided"));
     }
 
     private AssamReadingRequest.AssamReadingRequestBuilder baseRequestBuilder() {

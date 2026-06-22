@@ -12,7 +12,6 @@ import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
-import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.springframework.http.HttpStatus;
@@ -414,6 +413,8 @@ public class BfmReadingService {
                 operator.id()
         );
 
+        publishConfirmedReadingUpdate(operator.tenantId(), latestReading, confirmedReading);
+
         return CreateReadingResponse.builder()
                 .success(true)
                 .message("Reading updated successfully")
@@ -433,8 +434,8 @@ public class BfmReadingService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "confirmedReading must be a non-negative number");
         }
 
-        TelemetryReadingRecord reading = telemetryTenantRepository
-                .findReadingByCorrelationId(schemaName, correlationId)
+        TelemetryLatestFlowReadingRecord reading = telemetryTenantRepository
+                .findFlowReadingDetailsByCorrelationId(schemaName, correlationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reading not found"));
 
         telemetryTenantRepository.updateConfirmedReading(
@@ -444,6 +445,14 @@ public class BfmReadingService {
                 reading.createdBy() != null ? reading.createdBy() : 1L
         );
 
+        Integer tenantId = null;
+        if (reading.createdBy() != null) {
+            tenantId = telemetryTenantRepository.findOperatorById(schemaName, reading.createdBy())
+                    .map(TelemetryOperator::tenantId)
+                    .orElse(null);
+        }
+        publishConfirmedReadingUpdate(tenantId, reading, confirmedReading);
+
         return CreateReadingResponse.builder()
                 .success(true)
                 .message("Reading updated successfully")
@@ -451,6 +460,27 @@ public class BfmReadingService {
                 .meterReading(confirmedReading)
                 .qualityStatus("CONFIRMED")
                 .build();
+    }
+
+    private void publishConfirmedReadingUpdate(Integer tenantId,
+                                               TelemetryLatestFlowReadingRecord reading,
+                                               BigDecimal confirmedReading) {
+        LocalDateTime readingAt = reading.readingAt() != null ? reading.readingAt() : LocalDateTime.now();
+        LocalDate readingDate = reading.readingDate() != null ? reading.readingDate() : readingAt.toLocalDate();
+        telemetryEventPublisher.publishMeterReadingRecorded(
+                tenantId,
+                reading.schemeId(),
+                reading.createdBy(),
+                reading.extractedReading(),
+                confirmedReading,
+                null,
+                reading.imageUrl(),
+                readingAt,
+                null,
+                readingDate,
+                1,
+                0
+        );
     }
 
     @Transactional
