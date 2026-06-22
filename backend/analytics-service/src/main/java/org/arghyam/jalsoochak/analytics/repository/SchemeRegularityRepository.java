@@ -4807,7 +4807,8 @@ public class SchemeRegularityRepository {
                         s.tenant_id,
                         COALESCE(SUM(
                             CASE
-                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                WHEN wd.daily_ewater_quantity IS NOT NULL
+                                     AND wd.daily_ewater_quantity::numeric BETWEEN
                                      (
                                          (tc.required_lpcd::numeric * (s.fhtc_count::numeric * tc.person_count_per_household::numeric))
                                          * (1 - (tc.under_supply_range_percentage::numeric / 100))
@@ -5175,7 +5176,8 @@ public class SchemeRegularityRepository {
                         s.level_2_lgd_id AS lgd_id,
                         COALESCE(SUM(
                             CASE
-                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                WHEN wd.daily_ewater_quantity IS NOT NULL
+                                     AND wd.daily_ewater_quantity::numeric BETWEEN
                                      (
                                          (tc.required_lpcd::numeric * (s.fhtc_count::numeric * tc.person_count_per_household::numeric))
                                          * (1 - (tc.under_supply_range_percentage::numeric / 100))
@@ -5597,7 +5599,8 @@ public class SchemeRegularityRepository {
                         sd.child_lgd_id,
                         COALESCE(SUM(
                             CASE
-                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                WHEN wd.daily_ewater_quantity IS NOT NULL
+                                     AND wd.daily_ewater_quantity::numeric BETWEEN
                                      (
                                          (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
                                          * (1 - (tc.under_supply_range_percentage::numeric / 100))
@@ -5753,7 +5756,8 @@ public class SchemeRegularityRepository {
                         sd.child_lgd_id,
                         COALESCE(SUM(
                             CASE
-                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                WHEN wd.daily_ewater_quantity IS NOT NULL
+                                     AND wd.daily_ewater_quantity::numeric BETWEEN
                                      (
                                          (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
                                          * (1 - (tc.under_supply_range_percentage::numeric / 100))
@@ -5911,7 +5915,8 @@ public class SchemeRegularityRepository {
                         sd.child_department_id,
                         COALESCE(SUM(
                             CASE
-                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                WHEN wd.daily_ewater_quantity IS NOT NULL
+                                     AND wd.daily_ewater_quantity::numeric BETWEEN
                                      (
                                          (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
                                          * (1 - (tc.under_supply_range_percentage::numeric / 100))
@@ -6395,7 +6400,8 @@ public class SchemeRegularityRepository {
                         sd.child_department_id,
                         COALESCE(SUM(
                             CASE
-                                WHEN COALESCE(wd.daily_ewater_quantity, 0)::numeric BETWEEN
+                                WHEN wd.daily_ewater_quantity IS NOT NULL
+                                     AND wd.daily_ewater_quantity::numeric BETWEEN
                                      (
                                          (tc.required_lpcd::numeric * (sd.fhtc_count::numeric * tc.person_count_per_household::numeric))
                                          * (1 - (tc.under_supply_range_percentage::numeric / 100))
