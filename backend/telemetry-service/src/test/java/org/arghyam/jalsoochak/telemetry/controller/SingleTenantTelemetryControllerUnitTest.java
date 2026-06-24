@@ -11,6 +11,8 @@ import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
@@ -20,6 +22,9 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class SingleTenantTelemetryControllerUnitTest {
 
@@ -98,6 +103,32 @@ class SingleTenantTelemetryControllerUnitTest {
         assertNotNull(response.getBody().getData());
         assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
         assertNull(response.getBody().getData().getCorrelationId());
+    }
+
+    @Test
+    void assamReadingsValidationFailureReturnsRejectedResponse() throws Exception {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .build();
+
+        mockMvc.perform(post("/api/v1/telemetry/readings")
+                        .header("X-Api-Key", "js_valid_key")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "reading_url": "https://example.com/meter.jpg",
+                                  "state_scheme_id": "30178236"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.message").value("must not be blank"));
     }
 
     @Test
