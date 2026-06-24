@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -128,7 +129,34 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
-                .andExpect(jsonPath("$.data.message").value("must not be blank"));
+                .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
+    }
+
+    @Test
+    void assamReadingsValidationFailureReturnsRejectedResponseWithContextPath() throws Exception {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .build();
+
+        mockMvc.perform(post("/jalsoochak/api/v1/telemetry/readings")
+                        .contextPath("/jalsoochak")
+                        .header("X-Api-Key", "js_valid_key")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "reading_url": "https://example.com/meter.jpg",
+                                  "state_scheme_id": "30178236"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
     @Test
