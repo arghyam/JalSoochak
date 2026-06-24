@@ -145,7 +145,7 @@ class GlificWebhookControllerUnitTest {
         private String lastContactId;
 
         private StubGlificReadingsAsyncService() {
-            super(null, null, Runnable::run);
+            super(null, null, Runnable::run, null);
         }
 
         @Override

@@ -20,6 +20,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingReque
 import org.arghyam.jalsoochak.telemetry.dto.requests.TriggerWelcomeMessageRequest;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
+import org.arghyam.jalsoochak.telemetry.service.GlificReadingFailurePolicyService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
 import jakarta.validation.Valid;
@@ -42,25 +43,28 @@ public class GlificWebhookController {
     private static final Logger log = LoggerFactory.getLogger(GlificWebhookController.class);
     private final GlificWebhookService glificWebhookService;
     private final GlificReadingsAsyncService glificReadingsAsyncService;
+    private final GlificReadingFailurePolicyService glificReadingFailurePolicyService;
     private final WelcomeMessageService welcomeMessageService;
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
     public GlificWebhookController(GlificWebhookService glificWebhookService) {
-        this(glificWebhookService, null, null, null);
+        this(glificWebhookService, null, null, null, null);
     }
 
     public GlificWebhookController(GlificWebhookService glificWebhookService,
                                    GlificReadingsAsyncService glificReadingsAsyncService) {
-        this(glificWebhookService, glificReadingsAsyncService, null, null);
+        this(glificWebhookService, glificReadingsAsyncService, null, null, null);
     }
 
     @Autowired
     public GlificWebhookController(GlificWebhookService glificWebhookService,
                                    GlificReadingsAsyncService glificReadingsAsyncService,
+                                   GlificReadingFailurePolicyService glificReadingFailurePolicyService,
                                    WelcomeMessageService welcomeMessageService,
                                    TelemetrySubmissionAuditService telemetrySubmissionAuditService) {
         this.glificWebhookService = glificWebhookService;
         this.glificReadingsAsyncService = glificReadingsAsyncService;
+        this.glificReadingFailurePolicyService = glificReadingFailurePolicyService;
         this.welcomeMessageService = welcomeMessageService;
         this.telemetrySubmissionAuditService = telemetrySubmissionAuditService;
     }
@@ -79,6 +83,12 @@ public class GlificWebhookController {
                 glificReadingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
             } else {
                 CreateReadingResponse response = glificWebhookService.processImage(glificWebhookRequest);
+                if (glificReadingFailurePolicyService != null) {
+                    response = glificReadingFailurePolicyService.applyToGlificReadingResult(
+                            glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null,
+                            response
+                    );
+                }
                 status = isSuccessful(response) ? "SUCCESS" : "FAILED";
                 message = response != null ? response.getMessage() : "Reading request processed.";
             }
@@ -94,7 +104,7 @@ public class GlificWebhookController {
                             .success(true)
                             .status("accepted")
                             .jobId(jobId)
-                            .message("Reading request accepted for asynchronous processing.")
+                            .message(message)
                             .build()
             );
         } catch (Exception e) {
@@ -103,11 +113,23 @@ public class GlificWebhookController {
             log.debug("Error processing webhook for contactId {}: {}", safeContactId, e.getMessage());
             logReadingSubmission("/api/v1/telemetry/readings/glific", safeContactId, "FAILED", e.getMessage());
 
+            String errorMessage = "Unable to accept webhook request.";
+            if (glificReadingFailurePolicyService != null) {
+                CreateReadingResponse policyResponse = glificReadingFailurePolicyService.applyToGlificReadingResult(
+                        safeContactId,
+                        CreateReadingResponse.builder()
+                                .success(false)
+                                .message(errorMessage)
+                                .build()
+                );
+                errorMessage = policyResponse != null ? policyResponse.getMessage() : errorMessage;
+            }
+
             ReadingWebhookAckResponse errorResponse = ReadingWebhookAckResponse.builder()
                     .success(false)
                     .status("error")
                     .jobId(null)
-                    .message("Unable to accept webhook request.")
+                    .message(errorMessage)
                     .build();
 
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
