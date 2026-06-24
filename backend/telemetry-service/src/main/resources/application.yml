@@ -40,6 +40,9 @@ minio:
 glific:
   api-token: ${GLIFIC_API_TOKEN:}
   media-base-url: ${GLIFIC_MEDIA_BASE_URL:https://api.glific.org/v1/media}
+  reading-failure-counter:
+    retention-days: ${GLIFIC_READING_FAILURE_COUNTER_RETENTION_DAYS:30}
+    cleanup-cron: ${GLIFIC_READING_FAILURE_COUNTER_CLEANUP_CRON:0 30 3 * * *}
   sync:
     enabled: ${GLIFIC_SYNC_ENABLED:false}
     base-url: ${GLIFIC_SYNC_BASE_URL:https://api.arghyam.glific.com}

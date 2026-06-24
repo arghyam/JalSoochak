@@ -24,14 +24,16 @@ import java.util.stream.Collectors;
 @RestControllerAdvice(assignableTypes = SingleTenantTelemetryController.class)
 public class TelemetryValidationExceptionHandler {
 
+    private static final String READINGS_PATH = "/api/v1/telemetry/readings";
+
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<?> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
         String message = validationMessage(ex);
-        String uri = request != null ? request.getRequestURI() : "";
+        String servletPath = requestPath(request);
 
-        if ("/api/v1/telemetry/readings".equals(uri)) {
+        if (READINGS_PATH.equals(servletPath)) {
             logReadingsValidationFailure(ex.getBindingResult().getTarget(), message);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                     ReadingsApiResponse.builder()
@@ -47,11 +49,27 @@ public class TelemetryValidationExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", message));
     }
 
+    private String requestPath(HttpServletRequest request) {
+        if (request == null) {
+            return "";
+        }
+        String servletPath = request.getServletPath();
+        if (servletPath != null && !servletPath.isBlank()) {
+            return servletPath;
+        }
+        String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (uri != null && contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
+            return uri.substring(contextPath.length());
+        }
+        return uri != null ? uri : "";
+    }
+
     private void logReadingsValidationFailure(Object target, String message) {
         TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit = auditSnapshot(target);
-        log.info(
+        log.debug(
                 "reading_submission api={} status={} phone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",
-                "/api/v1/telemetry/readings",
+                READINGS_PATH,
                 "FAILED",
                 audit.maskedPhone(),
                 audit.schemeId(),
