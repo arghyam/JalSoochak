@@ -15,13 +15,16 @@ public class GlificReadingsAsyncService {
     private final GlificWebhookService glificWebhookService;
     private final GlificFlowResumeService glificFlowResumeService;
     private final Executor glificSyncExecutor;
+    private final GlificReadingFailurePolicyService glificReadingFailurePolicyService;
 
     public GlificReadingsAsyncService(GlificWebhookService glificWebhookService,
                                       GlificFlowResumeService glificFlowResumeService,
-                                      @Qualifier("glificSyncExecutor") Executor glificSyncExecutor) {
+                                      @Qualifier("glificSyncExecutor") Executor glificSyncExecutor,
+                                      GlificReadingFailurePolicyService glificReadingFailurePolicyService) {
         this.glificWebhookService = glificWebhookService;
         this.glificFlowResumeService = glificFlowResumeService;
         this.glificSyncExecutor = glificSyncExecutor;
+        this.glificReadingFailurePolicyService = glificReadingFailurePolicyService;
     }
 
     public void enqueueProcessAndResume(GlificWebhookRequest request, String jobId) {
@@ -45,6 +48,9 @@ public class GlificReadingsAsyncService {
                     .build();
         }
 
+        if (glificReadingFailurePolicyService != null) {
+            result = glificReadingFailurePolicyService.applyToGlificReadingResult(contactId, result);
+        }
         glificFlowResumeService.resumeReadingsFlow(contactId, jobId, result);
     }
 }
