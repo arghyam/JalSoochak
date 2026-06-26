@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.config.properties.OtpProperties;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
+import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
@@ -78,7 +79,14 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         if (userOpt.isEmpty()) {
             // Log at INFO for production visibility, but without sensitive data
             log.info("OTP_REQUEST_DENIED reason=phone_not_registered");
-            return new OtpRequestResponseDTO(otpProperties.otpLength()); // Anti-enumeration: don't reveal whether phone is registered
+            // Deliberately reveal the unregistered-phone case: a generic "OTP sent" response leaves a
+            // legitimate user staring at an OTP screen for a code that will never arrive, with no way to
+            // tell they simply mistyped their number. The remaining anti-enumeration branches below
+            // (tenant existence/accessibility, cooldown timing, deactivated/ineligible accounts) stay
+            // silent because they leak more sensitive state (tenant topology and account status).
+            throw new ResourceNotFoundException(
+                    "We couldn't find an account with this number. Please check the number and try again, "
+                    + "or contact your administrator.");
         }
         TenantUserRecord user = userOpt.get();
 

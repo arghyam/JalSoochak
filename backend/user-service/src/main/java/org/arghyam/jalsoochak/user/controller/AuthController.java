@@ -190,17 +190,21 @@ public class AuthController {
 
     @Operation(summary = "Request staff OTP",
             description = "Send a login OTP to a staff user's phone via WhatsApp or SMS. " +
-                          "Response is identical whether or not the phone is registered (OWASP anti-enumeration).",
+                          "An unregistered phone returns 404 so the user knows to re-check the number; " +
+                          "more sensitive states (tenant accessibility, cooldown timing, deactivated or " +
+                          "ineligible accounts) remain indistinguishable from success (OWASP anti-enumeration).",
             security = {})
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "OTP sent if the phone is registered and active"),
-        @ApiResponse(responseCode = "400", description = "Validation error or cooldown active",
+        @ApiResponse(responseCode = "200", description = "OTP sent to the registered phone"),
+        @ApiResponse(responseCode = "400", description = "Validation error",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
+        @ApiResponse(responseCode = "404", description = "Phone number is not registered",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/staff/otp")
     public ResponseEntity<ApiResponseDTO<OtpRequestResponseDTO>> staffRequestOtp(@Valid @RequestBody StaffOtpRequestDTO request) {
         log.info("POST /api/v1/auth/staff/otp");
-        return ResponseEntity.ok(ApiResponseDTO.of(200, "OTP sent if this number is registered", staffAuthService.requestOtp(request)));
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "OTP sent", staffAuthService.requestOtp(request)));
     }
 
     @Operation(summary = "Verify staff OTP",
