@@ -30,6 +30,7 @@ import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
+import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
@@ -128,14 +129,16 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("returns silently when phone not registered (anti-enumeration)")
-        void silentWhenPhoneNotFound() {
+        @DisplayName("throws ResourceNotFoundException when phone not registered (user-friendly re-check guidance)")
+        void throwsWhenPhoneNotFound() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(3)); // ACTIVE
             when(userTenantRepository.findUserByPhone("tenant_mp", "919876543210"))
                     .thenReturn(Optional.empty());
 
-            service.requestOtp(request);
+            assertThatThrownBy(() -> service.requestOtp(request))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("couldn't find an account");
 
             verify(otpService, never()).requestOtp(any(), any(), any());
         }
