@@ -190,15 +190,21 @@ public class AuthController {
 
     @Operation(summary = "Request staff OTP",
             description = "Send a login OTP to a staff user's phone via WhatsApp or SMS. " +
-                          "An unregistered phone returns 404 so the user knows to re-check the number; " +
-                          "more sensitive states (tenant accessibility, cooldown timing, deactivated or " +
-                          "ineligible accounts) remain indistinguishable from success (OWASP anti-enumeration).",
+                          "A number with no usable account returns 404 so the user can re-check it — this " +
+                          "covers an unknown tenant, an unavailable tenant and an unregistered phone, all " +
+                          "with an identical response so they cannot be told apart. More sensitive states " +
+                          "(cooldown timing, deactivated or ineligible accounts) stay indistinguishable from " +
+                          "a successful 200 (OWASP anti-enumeration).",
             security = {})
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "OTP sent to the registered phone"),
-        @ApiResponse(responseCode = "400", description = "Validation error",
+        @ApiResponse(responseCode = "200", description = "Request accepted; returns the OTP length. An OTP " +
+            "is sent only to an eligible, active staff phone — ineligible accounts (deactivated, " +
+            "pump-operator, cooldown) return an identical 200 to prevent enumeration"),
+        @ApiResponse(responseCode = "400", description = "Validation error, or the phone belongs to a " +
+            "SUPER_USER/STATE_ADMIN who must sign in with email and password",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class))),
-        @ApiResponse(responseCode = "404", description = "Phone number is not registered",
+        @ApiResponse(responseCode = "404", description = "No account found for this number (unknown tenant, " +
+            "unavailable tenant, or unregistered phone)",
             content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
     })
     @PostMapping("/staff/otp")

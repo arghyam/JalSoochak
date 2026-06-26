@@ -118,11 +118,13 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("returns silently when tenant not found (anti-enumeration)")
-        void silentWhenTenantNotFound() {
+        @DisplayName("throws ResourceNotFoundException when tenant not found (same response as unregistered phone)")
+        void throwsWhenTenantNotFound() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.empty());
 
-            service.requestOtp(request); // must not throw
+            assertThatThrownBy(() -> service.requestOtp(request))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("couldn't find an account");
 
             verify(otpService, never()).requestOtp(any(), any(), any());
             verify(eventPublisher, never()).publishLoginOtpAfterCommit(any(), any(), any());
@@ -172,12 +174,14 @@ class StaffAuthServiceImplTest {
         }
 
         @Test
-        @DisplayName("returns silently when tenant is not accessible (anti-enumeration)")
-        void silentWhenTenantNotAccessible() {
+        @DisplayName("throws ResourceNotFoundException when tenant is not accessible (same response as unregistered phone)")
+        void throwsWhenTenantNotAccessible() {
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.of(1));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(4)); // SUSPENDED
 
-            service.requestOtp(request);
+            assertThatThrownBy(() -> service.requestOtp(request))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("couldn't find an account");
 
             verify(otpService, never()).requestOtp(any(), any(), any());
             verify(eventPublisher, never()).publishLoginOtpAfterCommit(any(), any(), any());
@@ -189,7 +193,8 @@ class StaffAuthServiceImplTest {
             request.setTenantCode("mp");
             when(userCommonRepository.findTenantIdByStateCode("MP")).thenReturn(Optional.empty());
 
-            service.requestOtp(request);
+            assertThatThrownBy(() -> service.requestOtp(request))
+                    .isInstanceOf(ResourceNotFoundException.class);
 
             verify(userCommonRepository).findTenantIdByStateCode("MP");
         }

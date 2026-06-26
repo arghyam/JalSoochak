@@ -42,6 +42,13 @@ public class StaffAuthServiceImpl implements StaffAuthService {
     private static final String ROLE_STATE_ADMIN = "STATE_ADMIN";
     private static final String ROLE_PUMP_OPERATOR = "PUMP_OPERATOR";
 
+    // Single message shared by every "no account for this number" branch (unknown tenant,
+    // inaccessible tenant, unregistered phone) so the responses are byte-for-byte identical and
+    // cannot be used to tell those cases apart (tenant enumeration).
+    private static final String NO_ACCOUNT_MESSAGE =
+            "We couldn't find an account with this number. Please check the number and try again, "
+            + "or contact your administrator.";
+
     private final UserCommonRepository userCommonRepository;
     private final UserTenantRepository userTenantRepository;
     private final OtpProperties otpProperties;
@@ -58,11 +65,17 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         String tenantCode = request.getTenantCode().trim().toUpperCase();
         String phone = request.getPhoneNumber().trim();
 
+        // "No account for this number" is surfaced to the user (a generic "OTP sent" would leave a
+        // legitimate user staring at an OTP screen for a code that never arrives, unable to tell they
+        // mistyped their number). To keep that UX without leaking tenant topology, the unknown-tenant,
+        // inaccessible-tenant and unregistered-phone branches all throw the SAME 404 with the SAME
+        // message, so they are indistinguishable. The branches further down (cooldown timing,
+        // deactivated/ineligible accounts) stay silent with a 200 because they leak account status.
         Optional<Integer> tenantIdOpt = userCommonRepository.findTenantIdByStateCode(tenantCode);
         if (tenantIdOpt.isEmpty()) {
             // Log at INFO for production visibility, but without sensitive data
             log.info("OTP_REQUEST_DENIED reason=tenant_not_found");
-            return new OtpRequestResponseDTO(otpProperties.otpLength()); // Anti-enumeration: don't reveal whether tenant exists
+            throw new ResourceNotFoundException(NO_ACCOUNT_MESSAGE);
         }
         int tenantId = tenantIdOpt.get();
         String schema = "tenant_" + tenantCode.toLowerCase();
@@ -72,21 +85,14 @@ public class StaffAuthServiceImpl implements StaffAuthService {
         if (tenantStatusOpt.isEmpty() || !TenantAccessValidator.isAccessibleToStaff(tenantStatusOpt.get())) {
             // Log at INFO for production visibility, but without sensitive data
             log.info("OTP_REQUEST_DENIED reason=tenant_not_accessible");
-            return new OtpRequestResponseDTO(otpProperties.otpLength()); // Anti-enumeration: don't reveal whether tenant is accessible
+            throw new ResourceNotFoundException(NO_ACCOUNT_MESSAGE);
         }
 
         Optional<TenantUserRecord> userOpt = userTenantRepository.findUserByPhone(schema, phone);
         if (userOpt.isEmpty()) {
             // Log at INFO for production visibility, but without sensitive data
             log.info("OTP_REQUEST_DENIED reason=phone_not_registered");
-            // Deliberately reveal the unregistered-phone case: a generic "OTP sent" response leaves a
-            // legitimate user staring at an OTP screen for a code that will never arrive, with no way to
-            // tell they simply mistyped their number. The remaining anti-enumeration branches below
-            // (tenant existence/accessibility, cooldown timing, deactivated/ineligible accounts) stay
-            // silent because they leak more sensitive state (tenant topology and account status).
-            throw new ResourceNotFoundException(
-                    "We couldn't find an account with this number. Please check the number and try again, "
-                    + "or contact your administrator.");
+            throw new ResourceNotFoundException(NO_ACCOUNT_MESSAGE);
         }
         TenantUserRecord user = userOpt.get();
 
