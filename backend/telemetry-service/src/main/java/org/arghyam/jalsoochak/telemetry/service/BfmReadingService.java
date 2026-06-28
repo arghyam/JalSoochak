@@ -372,6 +372,7 @@ public class BfmReadingService {
                 .meterReading(finalReading)
                 .qualityConfidence(confidenceLevel)
                 .qualityStatus(ocrResult != null ? ocrResult.getQualityStatus() : (isValid ? "CONFIRMED" : "REVIEW"))
+                .lastDigitColor(ocrResult != null ? ocrResult.getLastDigitColor() : null)
                 .lastConfirmedReading(lastConfirmedReading)
                 .build();
     }

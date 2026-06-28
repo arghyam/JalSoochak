@@ -32,6 +32,8 @@ class FlowVisionServiceTest {
         assertNotNull(result);
         assertEquals("corr-123", result.getCorrelationId());
         assertEquals("123.4", result.getAdjustedReading().toPlainString());
+        assertEquals("GOOD", result.getQualityStatus());
+        assertEquals("black", result.getLastDigitColor());
         assertEquals(1, restTemplate.getCallCount());
     }
 
@@ -47,6 +49,7 @@ class FlowVisionServiceTest {
         assertNotNull(result);
         assertEquals("corr-123", result.getCorrelationId());
         assertEquals("498.3", result.getAdjustedReading().toPlainString());
+        assertEquals("red", result.getLastDigitColor());
         assertEquals(1, restTemplate.getCallCount());
     }
 

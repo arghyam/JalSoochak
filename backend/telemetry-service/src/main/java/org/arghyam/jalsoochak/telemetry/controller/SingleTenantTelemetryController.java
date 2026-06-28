@@ -183,14 +183,14 @@ public class SingleTenantTelemetryController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                         ReadingsApiResponse.builder()
                                 .success(false)
-                                .data(toReadingsDataResponse(response, false))
+                                .data(toReadingsDataResponse(response, false, true))
                                 .build()
                 );
             }
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
-                            .data(toReadingsDataResponse(response, true))
+                            .data(toReadingsDataResponse(response, true, true))
                             .build()
             );
         } catch (ResponseStatusException e) {
@@ -421,6 +421,14 @@ public class SingleTenantTelemetryController {
     }
 
     private ReadingsDataResponse toReadingsDataResponse(CreateReadingResponse response, boolean includeCorrelationId) {
+        return toReadingsDataResponse(response, includeCorrelationId, false);
+    }
+
+    private ReadingsDataResponse toReadingsDataResponse(
+            CreateReadingResponse response,
+            boolean includeCorrelationId,
+            boolean includeLastDigitColor
+    ) {
         if (response == null) {
             return ReadingsDataResponse.builder()
                     .qualityStatus("REJECTED")
@@ -432,6 +440,7 @@ public class SingleTenantTelemetryController {
                 .meterReading(response.getMeterReading())
                 .qualityStatus(response.getQualityStatus())
                 .qualityConfidence(response.getQualityConfidence())
+                .lastDigitColor(includeLastDigitColor ? response.getLastDigitColor() : null)
                 .lastConfirmedReading(response.getLastConfirmedReading())
                 .message(response.getMessage())
                 .build();

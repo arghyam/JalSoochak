@@ -16,4 +16,6 @@ public class FlowVisionResult {
     private String qualityStatus;
 
     private BigDecimal qualityConfidence;
+
+    private String lastDigitColor;
 }

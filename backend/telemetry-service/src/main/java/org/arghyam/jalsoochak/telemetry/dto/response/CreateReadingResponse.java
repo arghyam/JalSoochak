@@ -12,6 +12,7 @@ public class CreateReadingResponse {
     private BigDecimal meterReading;
     private String qualityStatus;
     private BigDecimal qualityConfidence;
+    private String lastDigitColor;
     private BigDecimal lastConfirmedReading;
 
     private boolean success;
