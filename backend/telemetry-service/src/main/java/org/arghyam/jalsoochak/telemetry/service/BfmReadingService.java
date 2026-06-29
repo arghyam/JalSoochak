@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -39,6 +41,7 @@ public class BfmReadingService {
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
     private final GlificOperatorContextService glificOperatorContextService;
+    private final ReadingChannelResolver readingChannelResolver;
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
                                                String schemaName,
@@ -330,6 +333,8 @@ public class BfmReadingService {
                     .orElse(null);
         }
 
+        ReadingChannel resolvedChannel = readingChannelResolver.resolve(tenantId, contactId);
+        Integer channel = (resolvedChannel != null ? resolvedChannel : ReadingChannel.DEFAULT).getCode();
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
                 request.getSchemeId(),
@@ -339,7 +344,7 @@ public class BfmReadingService {
                 confidenceLevel,
                 request.getReadingUrl(),
                 readingAt,
-                null,
+                channel,
                 LocalDate.from(readingAt),
                 1,
                 0
