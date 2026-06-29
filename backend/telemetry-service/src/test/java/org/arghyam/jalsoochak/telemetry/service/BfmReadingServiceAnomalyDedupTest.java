@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
@@ -50,6 +51,9 @@ class BfmReadingServiceAnomalyDedupTest {
     @Mock
     private GlificOperatorContextService glificOperatorContextService;
 
+    @Mock
+    private ReadingChannelResolver readingChannelResolver;
+
     private BfmReadingService service;
 
     @BeforeEach
@@ -60,7 +64,8 @@ class BfmReadingServiceAnomalyDedupTest {
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService
+                glificOperatorContextService,
+                readingChannelResolver
         );
     }
 
