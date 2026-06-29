@@ -500,7 +500,10 @@ class GlificWhatsAppServiceTest {
 
         @BeforeEach
         void enableDryRun() {
-            ReflectionTestUtils.setField(service, "dryRun", true);
+            // Master + both purpose flags on → every Glific call suppressed.
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
         }
 
         @Test
@@ -571,6 +574,72 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "loginOtpTemplateId", "");
 
             assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+        }
+    }
+
+    // ──────────────────── decoupled nudge / escalation dry-run ──────────────────
+
+    /**
+     * Verifies the nudge and escalation dry-run guards are independent: muting one
+     * must not mute the other. The account master flag ({@code whatsappDryRun}) is
+     * kept off so opt-in remains live for the enabled flow.
+     */
+    @Nested
+    class DecoupledDryRun {
+
+        @Test
+        void nudgeMuted_escalationStillDelivered() throws Exception {
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", false);
+            ReflectionTestUtils.setField(service, "whatsappDryRun", false);
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":{"id":"777","url":"https://x/r.pdf"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":{"id":1,"body":"b","isHsm":true},"errors":[]}}
+                    """));
+
+            service.sendNudgeHsm(1L, "Ramesh", "02 March 2026");
+            service.startNudgeFlow(1L, "Ramesh", "02 March 2026");
+            service.sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
+
+            verify(client, never()).execute(contains("sendHsmMessage"), anyMap());
+            verify(client, never()).execute(contains("startContactFlow"), anyMap());
+            verify(client).execute(contains("createAndSendMessage"), anyMap());
+        }
+
+        @Test
+        void escalationMuted_nudgeStillDelivered() throws Exception {
+            ReflectionTestUtils.setField(service, "nudgeDryRun", false);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "whatsappDryRun", false);
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"sendHsmMessage":{"message":{"id":1,"body":"Hi","isHSM":true},"errors":[]}}
+                    """));
+
+            service.sendNudgeHsm(1L, "Ramesh", "02 March 2026");
+            String mediaId = service.uploadMedia("https://minio.example.com/r.pdf");
+            service.sendEscalationHsm(55L, "https://minio.example.com/r.pdf");
+
+            assertThat(mediaId).isEqualTo("dry-run-media-id");
+            verify(client).execute(contains("sendHsmMessage"), anyMap());
+            verify(client, never()).execute(contains("createMessageMedia"), anyMap());
+            verify(client, never()).execute(contains("createAndSendMessage"), anyMap());
+        }
+
+        @Test
+        void optIn_followsMasterFlag_notEscalationFlag() {
+            // Opt-in is an account operation: it stays muted under the master flag
+            // even when escalation delivery is enabled.
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", false);
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+
+            assertThat(service.optIn("919876543210")).isEqualTo(0L);
+            verifyNoInteractions(client);
         }
     }
 }

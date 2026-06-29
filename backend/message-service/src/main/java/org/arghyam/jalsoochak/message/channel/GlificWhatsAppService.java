@@ -89,8 +89,31 @@ public class GlificWhatsAppService {
     private final GlificGraphQLClient client;
     private final ObjectMapper objectMapper;
 
+    /**
+     * Master WhatsApp dry-run. Gates the shared account operations that are neither
+     * a nudge nor an escalation: contact opt-in, login OTP, welcome flow and language
+     * updates. The {@link #nudgeDryRun} and {@link #escalationDryRun} flags below default
+     * to this value when their own properties are unset, so a single
+     * {@code NOTIFICATIONS_WHATSAPP_DRY_RUN=true} still suppresses every Glific call
+     * (backwards compatible with the previous single-flag behaviour).
+     */
     @Value("${notifications.whatsapp.dry-run:false}")
-    private boolean dryRun;
+    private boolean whatsappDryRun;
+
+    /**
+     * Suppresses only the operator nudge (flow + HSM). Defaults to {@link #whatsappDryRun}.
+     * Set {@code NOTIFICATIONS_NUDGE_DRY_RUN=true} to mute nudges while escalations stay live.
+     */
+    @Value("${notifications.nudge.dry-run:${notifications.whatsapp.dry-run:false}}")
+    private boolean nudgeDryRun;
+
+    /**
+     * Suppresses only the officer escalation document HSM (and its media upload).
+     * Defaults to {@link #whatsappDryRun}. Set {@code NOTIFICATIONS_ESCALATION_DRY_RUN=false}
+     * to deliver escalations to officers (SO/SDO) while nudges stay muted.
+     */
+    @Value("${notifications.escalation.dry-run:${notifications.whatsapp.dry-run:false}}")
+    private boolean escalationDryRun;
 
     @Value("${glific.template.nudge-id:}")
     private String nudgeTemplateId;
@@ -109,25 +132,38 @@ public class GlificWhatsAppService {
 
     @PostConstruct
     void validateTemplates() {
-        if (dryRun) {
+        if (whatsappDryRun && nudgeDryRun && escalationDryRun) {
             log.warn("[Glific] DRY-RUN mode active — all Glific API calls will be suppressed."
                     + " Set NOTIFICATIONS_WHATSAPP_DRY_RUN=false for production.");
             return;
         }
-        if (nudgeFlowId == null || nudgeFlowId.isBlank()
-                || escalationTemplateId == null || escalationTemplateId.isBlank()
-                || welcomeFlowId == null || welcomeFlowId.isBlank()) {
-            throw new IllegalStateException(
-                    "glific.flow.nudge-id, glific.template.escalation-id and glific.flow.welcome-id must be configured");
+        if (nudgeDryRun || escalationDryRun || whatsappDryRun) {
+            log.warn("[Glific] Partial DRY-RUN — nudge={}, escalation={}, account-ops(opt-in/OTP/welcome/language)={}",
+                    nudgeDryRun, escalationDryRun, whatsappDryRun);
         }
-        if (loginOtpTemplateId == null || loginOtpTemplateId.isBlank()) {
+        // Validate only the templates whose delivery is enabled.
+        if (!nudgeDryRun && (nudgeFlowId == null || nudgeFlowId.isBlank())) {
+            throw new IllegalStateException(
+                    "glific.flow.nudge-id must be configured when nudge delivery is enabled"
+                    + " (set NOTIFICATIONS_NUDGE_DRY_RUN=true to suppress nudges)");
+        }
+        if (!escalationDryRun && (escalationTemplateId == null || escalationTemplateId.isBlank())) {
+            throw new IllegalStateException(
+                    "glific.template.escalation-id must be configured when escalation delivery is enabled"
+                    + " (set NOTIFICATIONS_ESCALATION_DRY_RUN=true to suppress escalations)");
+        }
+        if (!whatsappDryRun && (welcomeFlowId == null || welcomeFlowId.isBlank())) {
+            throw new IllegalStateException(
+                    "glific.flow.welcome-id must be configured");
+        }
+        if (!whatsappDryRun && (loginOtpTemplateId == null || loginOtpTemplateId.isBlank())) {
             throw new IllegalStateException(
                     "glific.template.login-otp-id must be configured — SEND_LOGIN_OTP events cannot be delivered without it");
         }
     }
 
-    private boolean isDryRun(String operation) {
-        if (dryRun) {
+    private boolean isDryRun(boolean flag, String operation) {
+        if (flag) {
             log.info("[Glific] DRY-RUN: suppressing {} — no message sent", operation);
             return true;
         }
@@ -148,7 +184,7 @@ public class GlificWhatsAppService {
      * @param otp       one-time password for template {@code {{1}}}
      */
     public void sendLoginOtpHsm(Long contactId, String otp) {
-        if (isDryRun("sendLoginOtpHsm")) return;
+        if (isDryRun(whatsappDryRun, "sendLoginOtpHsm")) return;
         if (loginOtpTemplateId == null || loginOtpTemplateId.isBlank()) {
             throw new IllegalStateException("glific.template.login-otp-id is not configured");
         }
@@ -165,7 +201,7 @@ public class GlificWhatsAppService {
      * Phone must be in E.164 format (e.g., 919876543210).
      */
     public Long optIn(String phone) {
-        if (isDryRun("optIn")) return 0L;
+        if (isDryRun(whatsappDryRun, "optIn")) return 0L;
         log.debug("[Glific] Opting in contact");
         JsonNode response = client.execute(OPTIN_MUTATION, Map.of("phone", phone));
         checkErrors(response, "optinContact");
@@ -177,7 +213,7 @@ public class GlificWhatsAppService {
      * Template variable {{1}} = operator name, {{2}} = today's date.
      */
     public void sendNudgeHsm(Long contactId, String operatorName, String date) {
-        if (isDryRun("sendNudgeHsm")) return;
+        if (isDryRun(nudgeDryRun, "sendNudgeHsm")) return;
         JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
                 "templateId", nudgeTemplateId,
                 "receiverId", contactId,
@@ -193,7 +229,7 @@ public class GlificWhatsAppService {
      * @return Glific {@code messageMedia.id} to pass to {@link #sendEscalationHsm}
      */
     public String uploadMedia(String publicUrl) {
-        if (isDryRun("uploadMedia")) return "dry-run-media-id";
+        if (isDryRun(escalationDryRun, "uploadMedia")) return "dry-run-media-id";
         log.debug("[Glific] Uploading media");
         JsonNode response = client.execute(CREATE_MESSAGE_MEDIA_MUTATION, Map.of(
                         "input", Map.of(
@@ -222,7 +258,7 @@ public class GlificWhatsAppService {
      * @param minioUrl  publicly reachable URL of the escalation PDF
      */
     public void sendEscalationHsm(Long contactId, String minioUrl) {
-        if (isDryRun("sendEscalationHsm")) return;
+        if (isDryRun(escalationDryRun, "sendEscalationHsm")) return;
 
         String mediaId = uploadMedia(minioUrl);
 
@@ -266,7 +302,7 @@ public class GlificWhatsAppService {
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */
     public void startNudgeFlow(Long contactId, String operatorName, String date) {
-        if (isDryRun("startNudgeFlow")) return;
+        if (isDryRun(nudgeDryRun, "startNudgeFlow")) return;
         if (nudgeFlowId == null || nudgeFlowId.isBlank()) {
             throw new IllegalStateException("glific.flow.nudge-id is not configured");
         }
@@ -317,7 +353,7 @@ public class GlificWhatsAppService {
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */
     public void startWelcomeFlow(Long contactId, String flowId, String name, String state) {
-        if (isDryRun("startWelcomeFlow")) return;
+        if (isDryRun(whatsappDryRun, "startWelcomeFlow")) return;
         if (flowId == null || flowId.isBlank()) {
             throw new IllegalStateException("glific.flow.welcome-id is not configured");
         }
@@ -343,7 +379,7 @@ public class GlificWhatsAppService {
      * @param glificLanguageId Glific-side language ID
      */
     public void updateContactLanguage(Long contactId, int glificLanguageId) {
-        if (isDryRun("updateContactLanguage")) return;
+        if (isDryRun(whatsappDryRun, "updateContactLanguage")) return;
         JsonNode response = client.execute(UPDATE_CONTACT_MUTATION, Map.of(
                 "id", contactId,
                 "input", Map.of("language_id", glificLanguageId)));
