@@ -25,6 +25,8 @@ import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
 import org.arghyam.jalsoochak.analytics.service.FactService;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculator;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -67,6 +69,7 @@ public class FactServiceImpl implements FactService {
     private final DimTenantRepository dimTenantRepository;
     private final DimDateRepository dimDateRepository;
     private final DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+    private final WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry;
 
     @Override
     @Transactional
@@ -272,7 +275,8 @@ public class FactServiceImpl implements FactService {
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(0);
 
-        int waterQuantity = Math.max(0, currentReading - (previousReading != null ? previousReading : 0));
+        WaterQuantityCalculator waterQuantityCalculator = waterQuantityCalculatorRegistry.resolve(event.getChannel());
+        int waterQuantity = waterQuantityCalculator.calculate(currentReading, previousReading);
         LocalDateTime now = LocalDateTime.now();
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
