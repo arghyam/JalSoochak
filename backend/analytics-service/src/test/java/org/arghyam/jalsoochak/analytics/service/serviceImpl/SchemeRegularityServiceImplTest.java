@@ -680,6 +680,9 @@ class SchemeRegularityServiceImplTest {
                         new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
                                 null, null, 401, null, "Village A", 100L, 90L, 110L, 10000L, 2, new BigDecimal("50.0000"))
                 ));
+        when(schemeRegularityRepository.getRegionOwnWaterSupplyByLgd(10, 101, START, END))
+                .thenReturn(new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                        10, null, 101, null, null, 100L, 90L, 110L, 10000L, 1, new BigDecimal("10000.0000")));
         when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -691,6 +694,9 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getParentLgdLevel()).isEqualTo(3);
         assertThat(response.getChildRegionCount()).isEqualTo(1);
         assertThat(response.getChildRegions().getFirst().getLgdId()).isEqualTo(401);
+        // The focal region's own deduped total is exposed separately for the region's headline figure.
+        assertThat(response.getCurrentRegion().getLgdId()).isEqualTo(101);
+        assertThat(response.getCurrentRegion().getSchemeCount()).isEqualTo(1);
     }
 
     @Test
@@ -822,6 +828,9 @@ class SchemeRegularityServiceImplTest {
                         new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
                                 null, null, null, 501, "Dept-1", 120L, 100L, 140L, 9000L, 3, new BigDecimal("3000.0000"))
                 ));
+        when(schemeRegularityRepository.getRegionOwnWaterSupplyByDepartment(10, 201, START, END))
+                .thenReturn(new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                        10, null, null, 201, null, 120L, 100L, 140L, 9000L, 1, new BigDecimal("9000.0000")));
         when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -831,6 +840,8 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getParentDepartmentLevel()).isEqualTo(2);
         assertThat(response.getChildRegionCount()).isEqualTo(1);
         assertThat(response.getChildRegions().getFirst().getDepartmentId()).isEqualTo(501);
+        assertThat(response.getCurrentRegion().getDepartmentId()).isEqualTo(201);
+        assertThat(response.getCurrentRegion().getSchemeCount()).isEqualTo(1);
     }
 
     @Test
@@ -1447,6 +1458,9 @@ class SchemeRegularityServiceImplTest {
                                 null, null, 401, null, "Village A", 100L, 90L, 110L, 10000L, 2,
                                 new BigDecimal("50.0000"))
                 ));
+        when(schemeRegularityRepository.getRegionOwnWaterSupplyByLgd(10, 101, START, END))
+                .thenReturn(new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                        10, null, 101, null, null, 100L, 90L, 110L, 10000L, 1, new BigDecimal("10000.0000")));
         when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -1456,6 +1470,8 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isNull();
         assertThat(response.getSchemes()).isNull();
         assertThat(response.getChildRegionCount()).isEqualTo(1);
+        // scope=child still exposes the region's own deduped total for the header.
+        assertThat(response.getCurrentRegion().getLgdId()).isEqualTo(101);
     }
 
     @Test
@@ -1469,6 +1485,9 @@ class SchemeRegularityServiceImplTest {
                                 null, null, null, 501, "Dept-1", 120L, 100L, 140L, 9000L, 3,
                                 new BigDecimal("3000.0000"))
                 ));
+        when(schemeRegularityRepository.getRegionOwnWaterSupplyByDepartment(10, 201, START, END))
+                .thenReturn(new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                        10, null, null, 201, null, 120L, 100L, 140L, 9000L, 1, new BigDecimal("9000.0000")));
         when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -1478,6 +1497,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isNull();
         assertThat(response.getSchemes()).isNull();
         assertThat(response.getChildRegionCount()).isEqualTo(1);
+        assertThat(response.getCurrentRegion().getDepartmentId()).isEqualTo(201);
     }
 
     @Test

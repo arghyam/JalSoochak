@@ -5514,6 +5514,104 @@ public class SchemeRegularityRepository {
                 endDate);
     }
 
+    /**
+     * Average water supply for a single region's OWN total (not its children), with each scheme counted
+     * exactly once regardless of how many sub-regions it maps to.
+     *
+     * <p>The child-scope aggregations dedup by {@code (scheme_id, child_region)}, so a scheme that spans
+     * several sub-regions legitimately appears once per sub-region. Deriving a region's header by summing
+     * those child rows therefore double-counts every region-spanning scheme (water and FHTC alike). This
+     * method scopes by the focal region's own level column and dedups by {@code scheme_id} alone, so it is
+     * the correct value for a region's headline figure and matches the row that region shows under its
+     * parent. See docs/analytics-scheme-duplication-bug-report.md (rule: never sum child totals for a parent).
+     */
+    public ChildRegionWaterSupplyMetrics getRegionOwnWaterSupplyByLgd(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        return getRegionOwnWaterSupply(schemeLgdColumn, true, tenantId, lgdId, startDate, endDate);
+    }
+
+    public ChildRegionWaterSupplyMetrics getRegionOwnWaterSupplyByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        return getRegionOwnWaterSupply(schemeDepartmentColumn, false, tenantId, departmentId, startDate, endDate);
+    }
+
+    private ChildRegionWaterSupplyMetrics getRegionOwnWaterSupply(
+            String schemeLocationColumn,
+            boolean isLgd,
+            Integer tenantId,
+            Integer regionId,
+            LocalDate startDate,
+            LocalDate endDate) {
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT DISTINCT ON (s.scheme_id)
+                        s.scheme_id,
+                        COALESCE(s.house_hold_count, 0) AS house_hold_count,
+                        COALESCE(s.fhtc_count, 0) AS fhtc_count,
+                        COALESCE(s.planned_fhtc, 0) AS planned_fhtc
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.tenant_id = ?
+                      AND s.%1$s = ?
+                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
+                ),
+                water_by_scheme AS (
+                    SELECT
+                        m.scheme_id,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
+                            AS total_water_supplied_liters
+                    FROM analytics_schema.fact_meter_reading_table m
+                    WHERE m.tenant_id = ?
+                      AND m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    COALESCE(SUM(s.house_hold_count), 0)::bigint AS total_household_count,
+                    COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_fhtc_count,
+                    COALESCE(SUM(s.planned_fhtc), 0)::bigint AS total_planned_fhtc,
+                    COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
+                    CASE
+                        WHEN COUNT(DISTINCT s.scheme_id) > 0
+                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(DISTINCT s.scheme_id), 4)
+                        ELSE 0::numeric
+                    END AS avg_water_supply_per_scheme
+                FROM schemes_in_scope s
+                LEFT JOIN water_by_scheme w
+                    ON w.scheme_id = s.scheme_id
+                """, schemeLocationColumn);
+
+        return jdbcTemplate.queryForObject(
+                sql,
+                (rs, rowNum) -> new ChildRegionWaterSupplyMetrics(
+                        tenantId,
+                        null,
+                        isLgd ? regionId : null,
+                        isLgd ? null : regionId,
+                        null,
+                        rs.getLong("total_household_count"),
+                        rs.getLong("total_fhtc_count"),
+                        rs.getLong("total_planned_fhtc"),
+                        rs.getLong("total_water_supplied_liters"),
+                        rs.getInt("scheme_count"),
+                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                tenantId,
+                regionId,
+                tenantId,
+                startDate,
+                endDate);
+    }
+
     public List<ChildRegionWaterQuantityMetrics> getRegionWiseWaterQuantityByLgd(
             Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
         Integer parentLgdLevel = getLgdLevel(parentLgdId);

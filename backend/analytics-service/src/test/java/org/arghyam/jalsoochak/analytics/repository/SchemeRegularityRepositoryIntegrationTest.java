@@ -401,6 +401,114 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void regionOwnWaterSupply_countsMultiSubRegionSchemeOnce_matchesParentChildRow_notSumOfChildren() {
+        // Reproduces the state-vs-district dashboard mismatch: a region's headline figure must NOT be
+        // derived by summing its child rows. A scheme that serves TWO blocks within one district has two
+        // dim_scheme_table mapping rows (V24). The per-block child rows each carry that scheme's full
+        // water + FHTC (water is attached per scheme), so summing the blocks double-counts it — inflating
+        // the district's total water (-> MLD up) and FHTC (-> LPCD down). getRegionOwnWaterSupplyByLgd
+        // dedups by scheme_id and is the correct value, equal to the row the district shows under its parent.
+
+        // Two level-3 blocks under district 101.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_lgd_location_table
+                (lgd_id, tenant_id, lgd_code, lgd_c_name, title, lgd_level,
+                 level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 geom, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW(), NOW())
+                """, 1011, 1, "L1011", "BlockA1", "Block A1", 3, 100, 101, 1011, null, null, null);
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_lgd_location_table
+                (lgd_id, tenant_id, lgd_code, lgd_c_name, title, lgd_level,
+                 level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 geom, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW(), NOW())
+                """, 1012, 1, "L1012", "BlockA2", "Block A2", 3, 100, 101, 1012, null, null, null);
+
+        // Place Scheme A's original mapping in block 1011, then add a second mapping in block 1012
+        // (same district 101, different block; differing parent_department satisfies the V24 unique key).
+        jdbcTemplate.update(
+                "UPDATE analytics_schema.dim_scheme_table SET level_3_lgd_id = 1011 WHERE scheme_id = 1 AND tenant_id = 1");
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 1, 1, "Scheme A (block 1012 mapping)", 1001, 2001, 0.0, 0.0,
+                100, 100, 101, 1012, null, null, null,
+                202, 200, 201, null, null, null, null,
+                1, 10, 10, 10);
+
+        // Scheme A water over D1..D3 (confirmed_reading > 0): 10 + 5 = 15. FHTC = 10, households = 10.
+        // Buggy path — summing the per-block child rows double-counts Scheme A (once per block).
+        List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> blocks =
+                repository.getAverageWaterSupplyPerCurrentRegionByLgd(1, 101, D1, D3);
+        assertThat(blocks).hasSize(2);
+        long blockSumWater = blocks.stream()
+                .mapToLong(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalWaterSuppliedLiters).sum();
+        long blockSumFhtc = blocks.stream()
+                .mapToLong(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalAchievedFhtcCount).sum();
+        assertThat(blockSumWater).isEqualTo(30L);
+        assertThat(blockSumFhtc).isEqualTo(20L);
+
+        // Fix — the district's own deduped total counts Scheme A once.
+        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics own =
+                repository.getRegionOwnWaterSupplyByLgd(1, 101, D1, D3);
+        assertThat(own.lgdId()).isEqualTo(101);
+        assertThat(own.schemeCount()).isEqualTo(1);
+        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(15L);
+        assertThat(own.totalAchievedFhtcCount()).isEqualTo(10L);
+        assertThat(own.totalHouseholdCount()).isEqualTo(10L);
+
+        // And it equals the trustworthy value the district shows as a child of its parent (state 100).
+        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics districtAsChild =
+                repository.getAverageWaterSupplyPerCurrentRegionByLgd(1, 100, D1, D3).stream()
+                        .filter(m -> m.lgdId() == 101)
+                        .findFirst()
+                        .orElseThrow();
+        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(districtAsChild.totalWaterSuppliedLiters());
+        assertThat(own.totalAchievedFhtcCount()).isEqualTo(districtAsChild.totalAchievedFhtcCount());
+        assertThat(own.schemeCount()).isEqualTo(districtAsChild.schemeCount());
+    }
+
+    @Test
+    void getRegionOwnWaterSupplyByDepartment_dedupsSchemeAcrossSubDepartments() {
+        // Department analogue: a scheme mapped to two child departments within one parent department must
+        // be counted once in the parent's own total (not once per child department).
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_department_location_table
+                (department_id, tenant_id, department_c_name, title, department_level,
+                 level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 2011, 1, "Child Dept A1", "Child Dept A1", 3, 200, 201, 2011, null, null, null);
+        // Move Scheme A's original mapping to level_3 dept 2011, then add a second mapping in a different
+        // level_3 dept value within the same parent dept 201 (different parent_lgd satisfies the V24 key).
+        jdbcTemplate.update(
+                "UPDATE analytics_schema.dim_scheme_table SET level_3_dept_id = 2011 WHERE scheme_id = 1 AND tenant_id = 1");
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 1, 1, "Scheme A (dept 2012 mapping)", 1001, 2001, 0.0, 0.0,
+                101, 100, 101, null, null, null, null,
+                201, 200, 201, 2012, null, null, null,
+                1, 10, 10, 10);
+
+        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics own =
+                repository.getRegionOwnWaterSupplyByDepartment(1, 201, D1, D3);
+        assertThat(own.departmentId()).isEqualTo(201);
+        assertThat(own.schemeCount()).isEqualTo(1);
+        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(15L);
+        assertThat(own.totalAchievedFhtcCount()).isEqualTo(10L);
+    }
+
+    @Test
     void getSchemeStatusCountByLgd_countsActiveAndInactiveSchemes() {
         SchemeRegularityRepository.SchemeStatusCount count = repository.getSchemeStatusCountByLgd(100);
 
