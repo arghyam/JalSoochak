@@ -40,7 +40,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -134,29 +133,15 @@ class StaffAuthControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("returns 200 with otpLength even for an unregistered phone (anti-enumeration)")
-        void returns200ForUnknownPhone() throws Exception {
-            MvcResult knownResult = mockMvc.perform(post("/api/v1/auth/staff/otp")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content("""
-                                    {"phoneNumber":"919876543210","tenantCode":"MP"}
-                                    """))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.otpLength", is(6)))
-                    .andReturn();
-
-            MvcResult unknownResult = mockMvc.perform(post("/api/v1/auth/staff/otp")
+        @DisplayName("returns 404 with a re-check message for an unregistered phone")
+        void returns404ForUnknownPhone() throws Exception {
+            mockMvc.perform(post("/api/v1/auth/staff/otp")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"phoneNumber":"911111111111","tenantCode":"MP"}
                                     """))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.otpLength", is(6)))
-                    .andReturn();
-
-            // Response bodies must be identical (same otpLength, same message)
-            assertThat(unknownResult.getResponse().getContentAsString())
-                    .isEqualTo(knownResult.getResponse().getContentAsString());
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.message", containsString("couldn't find an account")));
         }
 
         @Test
