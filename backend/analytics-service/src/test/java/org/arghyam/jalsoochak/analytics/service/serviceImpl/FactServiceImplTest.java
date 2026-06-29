@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.entity.FactWaterQuantity;
+import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.repository.AnomalyRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimDateRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimOperatorAttendanceRepository;
@@ -20,11 +21,14 @@ import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
+import org.arghyam.jalsoochak.analytics.service.water.BfmWaterQuantityCalculator;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
@@ -63,6 +67,12 @@ class FactServiceImplTest {
     private DimDateRepository dimDateRepository;
     @Mock
     private DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+
+    // Real registry (with the default BFM calculator) so ingestMeterReading runs the
+    // historical cumulative-delta calculation. @Spy is injected by @InjectMocks.
+    @Spy
+    private WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry =
+            new WaterQuantityCalculatorRegistry(List.of(new BfmWaterQuantityCalculator()));
 
     @InjectMocks
     private FactServiceImpl service;
@@ -131,6 +141,32 @@ class FactServiceImplTest {
         ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
         verify(waterQuantityRepository).save(captor.capture());
         assertThat(captor.getValue().getWaterQuantity()).isEqualTo(0);
+    }
+
+    @Test
+    void ingestMeterReading_resolvesWaterQuantityCalculatorByEventChannel() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setConfirmedReading(150);
+        event.setReadingAt("2026-01-02T10:15:00");
+        event.setReadingDate("2026-01-02");
+        event.setSubmissionStatus(1);
+        event.setChannel(ReadingChannel.ELM.getCode());
+
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        // The per-channel calculator is selected using the event's channel code.
+        verify(waterQuantityCalculatorRegistry).resolve(ReadingChannel.ELM.getCode());
     }
 
     @Test
