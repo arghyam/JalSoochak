@@ -1,5 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.arghyam.jalsoochak.telemetry.dto.requests.IntroRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.LocationReadingRequest;
@@ -16,7 +19,9 @@ import org.springframework.http.ResponseEntity;
 import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GlificWebhookControllerUnitTest {
 
@@ -102,6 +107,49 @@ class GlificWebhookControllerUnitTest {
         assertNotNull(response.getBody());
         assertEquals(true, response.getBody().isSuccess());
         assertEquals("location-ok", response.getBody().getMessage());
+    }
+
+    @Test
+    void readingsLogsMaskedEntrypointAndExposesRawContactIdOnlyAtDebug() {
+        StubGlificReadingsAsyncService asyncService = new StubGlificReadingsAsyncService();
+        GlificWebhookService service = new StubGlificWebhookService(false, false);
+        GlificWebhookController controller = new GlificWebhookController(service, asyncService);
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(GlificWebhookController.class);
+        Level originalLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(Level.DEBUG);
+        logger.addAppender(appender);
+
+        try {
+            controller.receive(
+                    GlificWebhookRequest.builder()
+                            .contactId("919999912345")
+                            .mediaId("media-123")
+                            .build()
+            );
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(originalLevel);
+        }
+
+        boolean entrypointLogged = appender.list.stream()
+                .filter(event -> event.getLevel() == Level.INFO)
+                .anyMatch(event -> event.getFormattedMessage().contains("readings/glific received")
+                        && event.getFormattedMessage().contains("hasMediaId=true"));
+        assertTrue(entrypointLogged, "Expected an entrypoint received log for the Glific image webhook");
+
+        boolean rawContactAtInfo = appender.list.stream()
+                .filter(event -> event.getLevel() == Level.INFO)
+                .anyMatch(event -> event.getFormattedMessage().contains("919999912345"));
+        assertFalse(rawContactAtInfo, "Raw contactId must never appear in INFO logs");
+
+        boolean rawContactAtDebug = appender.list.stream()
+                .filter(event -> event.getLevel() == Level.DEBUG)
+                .anyMatch(event -> event.getFormattedMessage().contains("919999912345"));
+        assertTrue(rawContactAtDebug, "Raw contactId should be available at DEBUG level");
     }
 
     private static final class StubGlificWebhookService extends GlificWebhookService {

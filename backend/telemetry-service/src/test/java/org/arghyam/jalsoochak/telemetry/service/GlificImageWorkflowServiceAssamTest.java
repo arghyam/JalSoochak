@@ -1,5 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
@@ -25,8 +28,10 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.anyString;
@@ -320,5 +325,161 @@ class GlificImageWorkflowServiceAssamTest {
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
         verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
         assertNull(requestCaptor.getValue().getReadingTime());
+    }
+
+    @Test
+    void processAssamReadingLogsSchemeNotFoundWhenSchemeIdsUnknown() {
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("99999999")
+                .centreSchemeId("88888888")
+                .phoneNumber("919876543210")
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "99999999"))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "88888888"))
+                .thenReturn(Optional.empty());
+        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+                .thenReturn("Reading rejected");
+
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        CreateReadingResponse response;
+        try {
+            response = service.processAssamReading(request, 22);
+        } finally {
+            detachAppender(appender);
+        }
+
+        assertNotNull(response);
+        assertFalse(response.isSuccess());
+        assertEquals("REJECTED", response.getQualityStatus());
+        assertTrue(infoLogged(appender, "reason=\"scheme_not_found\""),
+                "Expected a scheme_not_found rejection log");
+        assertFalse(infoLogged(appender, "operator_not_mapped_to_scheme"),
+                "Should not log operator_not_mapped_to_scheme when scheme ids are unknown");
+        // Scheme ids are not PII and must be logged so the rejection can be diagnosed.
+        assertTrue(infoLogged(appender, "stateSchemeId=99999999"));
+    }
+
+    @Test
+    void processAssamReadingLogsOperatorNotMappedWhenSchemeExistsButUnmapped() {
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
+                .phoneNumber("919876543210")
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L))
+                .thenReturn(false);
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
+                .thenReturn(Optional.empty());
+        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+                .thenReturn("Reading rejected");
+
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        CreateReadingResponse response;
+        try {
+            response = service.processAssamReading(request, 22);
+        } finally {
+            detachAppender(appender);
+        }
+
+        assertNotNull(response);
+        assertFalse(response.isSuccess());
+        assertTrue(infoLogged(appender, "reason=\"operator_not_mapped_to_scheme\""),
+                "Expected an operator_not_mapped_to_scheme rejection log");
+        assertFalse(infoLogged(appender, "scheme_not_found"),
+                "Should not log scheme_not_found when the scheme exists");
+        assertTrue(infoLogged(appender, "stateSchemeFound=true"));
+    }
+
+    @Test
+    void processAssamReadingNeverLogsRawPhoneAboveDebugWhenOperatorNotFound() {
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .phoneNumber("919876543210")
+                .build();
+
+        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22))
+                .thenThrow(new IllegalStateException("No operator found for the provided contactId"));
+        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+                .thenReturn("Operator could not be resolved for this contact.");
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(GlificImageWorkflowService.class);
+        Level originalLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(Level.DEBUG);
+        logger.addAppender(appender);
+
+        CreateReadingResponse response;
+        try {
+            response = service.processAssamReading(request, 22);
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(originalLevel);
+        }
+
+        assertNotNull(response);
+        assertFalse(response.isSuccess());
+
+        boolean rawAboveDebug = appender.list.stream()
+                .filter(event -> event.getLevel() != Level.DEBUG)
+                .anyMatch(event -> event.getFormattedMessage().contains("919876543210"));
+        assertFalse(rawAboveDebug, "Raw phone must not appear in INFO/WARN/ERROR logs");
+
+        boolean rawAtDebug = appender.list.stream()
+                .filter(event -> event.getLevel() == Level.DEBUG)
+                .anyMatch(event -> event.getFormattedMessage().contains("919876543210"));
+        assertTrue(rawAtDebug, "Raw phone should be available at DEBUG level");
+    }
+
+    private ListAppender<ILoggingEvent> attachAppender() {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(GlificImageWorkflowService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private void detachAppender(ListAppender<ILoggingEvent> appender) {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(GlificImageWorkflowService.class);
+        logger.detachAppender(appender);
+    }
+
+    private boolean infoLogged(ListAppender<ILoggingEvent> appender, String fragment) {
+        return appender.list.stream()
+                .filter(event -> event.getLevel() == Level.INFO)
+                .anyMatch(event -> event.getFormattedMessage().contains(fragment));
     }
 }
