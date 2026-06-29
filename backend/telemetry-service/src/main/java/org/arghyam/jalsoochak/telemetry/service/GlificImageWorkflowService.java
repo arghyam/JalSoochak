@@ -105,7 +105,10 @@ public class GlificImageWorkflowService {
             response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
             return response;
         } catch (Exception e) {
-            log.error("Unexpected error processing image for contactId {}: {}", glificWebhookRequest.getContactId(), e.getMessage(), e);
+            log.error("Unexpected error processing image for contactId {}: {}", maskPhone(glificWebhookRequest.getContactId()), e.getMessage(), e);
+            if (log.isDebugEnabled()) {
+                log.debug("Unexpected error processing image rawContactId={}: {}", glificWebhookRequest.getContactId(), e.getMessage());
+            }
             String languageKey = localizationService.resolveLanguageKeyForContact(glificWebhookRequest.getContactId());
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Image could not be processed.", languageKey);
             return CreateReadingResponse.builder()
@@ -153,7 +156,10 @@ public class GlificImageWorkflowService {
             response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
             return response;
         } catch (Exception e) {
-            log.error("Unexpected error processing Assam reading for contactId {}: {}", safeContactId, e.getMessage(), e);
+            log.error("Unexpected error processing Assam reading for contactId {}: {}", maskPhone(safeContactId), e.getMessage(), e);
+            if (log.isDebugEnabled()) {
+                log.debug("Unexpected error processing Assam reading rawContactId={}: {}", safeContactId, e.getMessage());
+            }
             String languageKey = localizationService.resolveLanguageKeyForContact(safeContactId);
             String descriptiveMessage = localizationService.resolveUserFacingErrorMessage(e, "Assam reading could not be processed.", languageKey);
             return CreateReadingResponse.builder()
@@ -166,19 +172,57 @@ public class GlificImageWorkflowService {
     }
 
     private Long resolveAssamSchemeId(String schemaName, Long operatorId, String stateSchemeId, String centreSchemeId) {
-        Optional<Long> stateResolvedSchemeId = telemetryTenantRepository.findSchemeIdByStateSchemeId(schemaName, stateSchemeId);
+        boolean hasStateSchemeId = stateSchemeId != null && !stateSchemeId.isBlank();
+        boolean hasCentreSchemeId = centreSchemeId != null && !centreSchemeId.isBlank();
+
+        Optional<Long> stateResolvedSchemeId = hasStateSchemeId
+                ? telemetryTenantRepository.findSchemeIdByStateSchemeId(schemaName, stateSchemeId)
+                : Optional.empty();
         if (stateResolvedSchemeId.isPresent()
                 && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, stateResolvedSchemeId.get())) {
             return stateResolvedSchemeId.get();
         }
 
-        Optional<Long> centreResolvedSchemeId = telemetryTenantRepository.findSchemeIdByCentreSchemeId(schemaName, centreSchemeId);
+        Optional<Long> centreResolvedSchemeId = hasCentreSchemeId
+                ? telemetryTenantRepository.findSchemeIdByCentreSchemeId(schemaName, centreSchemeId)
+                : Optional.empty();
         if (centreResolvedSchemeId.isPresent()
                 && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, centreResolvedSchemeId.get())) {
             return centreResolvedSchemeId.get();
         }
 
+        // Distinguish "scheme id is missing from our records" from "scheme exists but this operator
+        // is not mapped to it" so a drop in submissions can be diagnosed from the logs. Scheme ids and
+        // operatorId are not PII, so they are safe to log at INFO.
+        boolean schemeExistsButNotMapped = stateResolvedSchemeId.isPresent() || centreResolvedSchemeId.isPresent();
+        String rejectionReason = schemeExistsButNotMapped ? "operator_not_mapped_to_scheme" : "scheme_not_found";
+        log.info("Assam reading rejected reason=\"{}\" operatorId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
+                rejectionReason,
+                operatorId,
+                sanitizeSchemeId(stateSchemeId),
+                stateResolvedSchemeId.isPresent(),
+                sanitizeSchemeId(centreSchemeId),
+                centreResolvedSchemeId.isPresent());
+
         throw new IllegalStateException("Operator is not mapped to the provided state or centre scheme");
+    }
+
+    private String sanitizeSchemeId(String schemeId) {
+        if (schemeId == null || schemeId.isBlank()) {
+            return "n/a";
+        }
+        return schemeId.replace('\n', ' ').replace('\r', ' ').trim();
+    }
+
+    private String maskPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return "n/a";
+        }
+        String digits = phoneNumber.replaceAll("\\D", "");
+        if (digits.length() <= 4) {
+            return "****";
+        }
+        return "****" + digits.substring(digits.length() - 4);
     }
 
     private void applyGeolocationIfPresent(AssamReadingRequest request,

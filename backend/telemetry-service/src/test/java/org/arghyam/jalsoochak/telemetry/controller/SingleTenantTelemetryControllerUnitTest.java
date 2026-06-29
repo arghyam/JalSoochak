@@ -1,5 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
@@ -21,8 +24,10 @@ import java.util.Optional;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -268,6 +273,53 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(true, response.getBody().isSuccess());
         assertEquals("Latest reading reset successfully", response.getBody().getData().getMessage());
         assertEquals("CONFIRMED", response.getBody().getData().getQualityStatus());
+    }
+
+    @Test
+    void assamReadingsMaskPhoneAtInfoAndExposeRawOnlyAtDebug() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(SingleTenantTelemetryController.class);
+        Level originalLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(Level.DEBUG);
+        logger.addAppender(appender);
+
+        try {
+            controller.receiveAssamReading(
+                    "js_valid_key",
+                    AssamReadingRequest.builder()
+                            .readingUrl("https://example.com/meter.jpg")
+                            .confirmedReading(new BigDecimal("123.4"))
+                            .stateSchemeId("30178236")
+                            .phoneNumber("919999912345")
+                            .build()
+            );
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(originalLevel);
+        }
+
+        boolean rawPhoneAtInfo = appender.list.stream()
+                .filter(event -> event.getLevel() == Level.INFO)
+                .anyMatch(event -> event.getFormattedMessage().contains("919999912345"));
+        assertFalse(rawPhoneAtInfo, "Raw phone number must never appear in INFO logs");
+
+        boolean maskedPhoneAtInfo = appender.list.stream()
+                .filter(event -> event.getLevel() == Level.INFO)
+                .anyMatch(event -> event.getFormattedMessage().contains("****2345"));
+        assertTrue(maskedPhoneAtInfo, "Masked phone number should appear in INFO logs");
+
+        boolean rawPhoneAtDebug = appender.list.stream()
+                .filter(event -> event.getLevel() == Level.DEBUG)
+                .anyMatch(event -> event.getFormattedMessage().contains("919999912345"));
+        assertTrue(rawPhoneAtDebug, "Raw phone number should be available at DEBUG level");
     }
 
     private static final class StubGlificWebhookService extends GlificWebhookService {

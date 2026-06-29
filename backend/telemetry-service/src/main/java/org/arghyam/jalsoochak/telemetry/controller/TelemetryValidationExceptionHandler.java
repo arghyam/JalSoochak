@@ -124,6 +124,17 @@ public class TelemetryValidationExceptionHandler {
                 audit.date(),
                 sanitizeLogMessage(message)
         );
+        // Raw phone numbers are PII and must never appear in INFO/WARN/ERROR logs. Expose them only at
+        // DEBUG so an operator can correlate a masked rejection back to the actual number while debugging.
+        if (log.isDebugEnabled()) {
+            log.debug(
+                    "reading_validation_rejected_detail method={} api={} status=FAILED rawPhone={} fields=\"{}\"",
+                    requestMethod(request),
+                    requestPath(request),
+                    rawSubmittedPhone(target),
+                    validationFields(ex)
+            );
+        }
     }
 
     private TelemetrySubmissionAuditService.SubmissionAuditSnapshot auditSnapshot(Object target) {
@@ -160,7 +171,7 @@ public class TelemetryValidationExceptionHandler {
         if (target instanceof AssamReadingRequest request) {
             return String.format(
                     "{type=AssamReadingRequest,phone=%s,stateSchemeId=%s,centreSchemeId=%s,hasReadingUrl=%s,confirmedReading=%s,readingDateTime=%s,hasGeolocation=%s}",
-                    sanitizeLogValue(request.getPhoneNumber()),
+                    maskPhone(request.getPhoneNumber()),
                     sanitizeLogValue(request.getStateSchemeId()),
                     sanitizeLogValue(request.getCentreSchemeId()),
                     request.getReadingUrl() != null && !request.getReadingUrl().isBlank(),
@@ -172,7 +183,7 @@ public class TelemetryValidationExceptionHandler {
         if (target instanceof UpdateReadingRequest request) {
             return String.format(
                     "{type=UpdateReadingRequest,phone=%s,correlationId=%s,hasImageId=%s,confirmedReading=%s}",
-                    sanitizeLogValue(request.getPhoneNumber()),
+                    maskPhone(request.getPhoneNumber()),
                     sanitizeLogValue(request.getCorrelationId()),
                     request.getImageId() != null && !request.getImageId().isBlank(),
                     request.getConfirmedReading()
@@ -182,13 +193,32 @@ public class TelemetryValidationExceptionHandler {
     }
 
     private String submittedPhone(Object target) {
+        return maskPhone(rawTargetPhone(target));
+    }
+
+    private String rawSubmittedPhone(Object target) {
+        return sanitizeLogValue(rawTargetPhone(target));
+    }
+
+    private String rawTargetPhone(Object target) {
         if (target instanceof AssamReadingRequest request) {
-            return sanitizeLogValue(request.getPhoneNumber());
+            return request.getPhoneNumber();
         }
         if (target instanceof UpdateReadingRequest request) {
-            return sanitizeLogValue(request.getPhoneNumber());
+            return request.getPhoneNumber();
         }
-        return "n/a";
+        return null;
+    }
+
+    private String maskPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return "n/a";
+        }
+        String digits = phoneNumber.replaceAll("\\D", "");
+        if (digits.length() <= 4) {
+            return "****";
+        }
+        return "****" + digits.substring(digits.length() - 4);
     }
 
     private String requestMethod(HttpServletRequest request) {

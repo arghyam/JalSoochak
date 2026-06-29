@@ -448,12 +448,13 @@ public class SingleTenantTelemetryController {
                 api,
                 status,
                 audit.maskedPhone(),
-                sanitizeLogValue(phoneNumber),
+                maskPhone(phoneNumber),
                 audit.schemeId(),
                 audit.dailyUniqueUserCount(),
                 audit.date(),
                 sanitizeLogMessage(message)
         );
+        logRawSubmissionPhoneAtDebug(api, status, phoneNumber, audit);
     }
 
     private void logReadingSubmission(String api, AssamReadingRequest request, Integer tenantId, String status, String message) {
@@ -462,17 +463,19 @@ public class SingleTenantTelemetryController {
                         ? telemetrySubmissionAuditService.captureForAssamReading(request, tenantId)
                         : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now());
 
+        String submittedPhone = request != null ? request.getPhoneNumber() : null;
         log.info(
                 "reading_submission api={} status={} phone={} submittedPhone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",
                 api,
                 status,
                 audit.maskedPhone(),
-                sanitizeLogValue(request != null ? request.getPhoneNumber() : null),
+                maskPhone(submittedPhone),
                 audit.schemeId(),
                 audit.dailyUniqueUserCount(),
                 audit.date(),
                 sanitizeLogMessage(message)
         );
+        logRawSubmissionPhoneAtDebug(api, status, submittedPhone, audit);
     }
 
     private void logReadingSubmission(String api, UpdateReadingRequest request, Integer tenantId, String status, String message) {
@@ -484,17 +487,38 @@ public class SingleTenantTelemetryController {
                 )
                         : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now());
 
+        String submittedPhone = request != null ? request.getPhoneNumber() : null;
         log.info(
                 "reading_submission api={} status={} phone={} submittedPhone={} schemeId={} tenantId={} dailyUniqueUserCount={} date={} message=\"{}\"",
                 api,
                 status,
                 audit.maskedPhone(),
-                sanitizeLogValue(request != null ? request.getPhoneNumber() : null),
+                maskPhone(submittedPhone),
                 audit.schemeId(),
                 tenantId,
                 audit.dailyUniqueUserCount(),
                 audit.date(),
                 sanitizeLogMessage(message)
+        );
+        logRawSubmissionPhoneAtDebug(api, status, submittedPhone, audit);
+    }
+
+    private void logRawSubmissionPhoneAtDebug(String api,
+                                              String status,
+                                              String phoneNumber,
+                                              TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit) {
+        // Raw phone numbers are PII and must never appear in INFO/WARN/ERROR logs. Expose them only at
+        // DEBUG so an operator can correlate a masked rejection back to the actual number while debugging.
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        log.debug(
+                "reading_submission_detail api={} status={} rawPhone={} schemeId={} date={}",
+                api,
+                status,
+                sanitizeLogValue(phoneNumber),
+                audit.schemeId(),
+                audit.date()
         );
     }
 
@@ -504,7 +528,7 @@ public class SingleTenantTelemetryController {
         }
         return String.format(
                 "{phone=%s,stateSchemeId=%s,centreSchemeId=%s,hasReadingUrl=%s,confirmedReading=%s,readingDateTime=%s,hasGeolocation=%s}",
-                sanitizeLogValue(request.getPhoneNumber()),
+                maskPhone(request.getPhoneNumber()),
                 sanitizeLogValue(request.getStateSchemeId()),
                 sanitizeLogValue(request.getCentreSchemeId()),
                 request.getReadingUrl() != null && !request.getReadingUrl().isBlank(),
@@ -520,7 +544,7 @@ public class SingleTenantTelemetryController {
         }
         return String.format(
                 "{phone=%s,correlationId=%s,hasImageId=%s,confirmedReading=%s}",
-                sanitizeLogValue(request.getPhoneNumber()),
+                maskPhone(request.getPhoneNumber()),
                 sanitizeLogValue(request.getCorrelationId()),
                 request.getImageId() != null && !request.getImageId().isBlank(),
                 request.getConfirmedReading()
@@ -547,6 +571,17 @@ public class SingleTenantTelemetryController {
             return "n/a";
         }
         return value.replace('\n', ' ').replace('\r', ' ').trim();
+    }
+
+    private String maskPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return "n/a";
+        }
+        String digits = phoneNumber.replaceAll("\\D", "");
+        if (digits.length() <= 4) {
+            return "****";
+        }
+        return "****" + digits.substring(digits.length() - 4);
     }
 
     private String sanitizeLogMessage(String message) {

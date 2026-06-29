@@ -44,7 +44,7 @@ public class GlificOperatorContextService {
         if (looksLikePhoneHash(trimmed)) {
             return telemetryTenantRepository
                     .findOperatorByPhoneHashAcrossTenants(trimmed, preferredTenantId)
-                    .orElseThrow(() -> new IllegalStateException("No operator found for contactId " + contactId));
+                    .orElseThrow(() -> new IllegalStateException("No operator found for the provided contactId"));
         }
 
         if (looksLikeEncryptedValue(trimmed)) {

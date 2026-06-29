@@ -71,6 +71,10 @@ public class GlificWebhookController {
             produces = "application/json"
     )
     public ResponseEntity<ReadingWebhookAckResponse> receive(@RequestBody GlificWebhookRequest glificWebhookRequest) {
+        log.info("POST /api/v1/telemetry/readings/glific received request={}",
+                summarizeGlificWebhookRequest(glificWebhookRequest));
+        logRawContactIdAtDebug("/api/v1/telemetry/readings/glific",
+                glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null);
         try {
             String jobId = UUID.randomUUID().toString();
             String status = "ACCEPTED";
@@ -601,6 +605,58 @@ public class GlificWebhookController {
                 audit.date(),
                 sanitizeLogMessage(message)
         );
+        if (log.isDebugEnabled()) {
+            log.debug(
+                    "reading_submission_detail api={} status={} rawPhone={} schemeId={} date={}",
+                    api,
+                    status,
+                    sanitizeLogValue(contactId),
+                    audit.schemeId(),
+                    audit.date()
+            );
+        }
+    }
+
+    private String summarizeGlificWebhookRequest(GlificWebhookRequest request) {
+        if (request == null) {
+            return "null";
+        }
+        return String.format(
+                "{contactId=%s,messageType=%s,hasMediaId=%s,hasMediaUrl=%s,correlationId=%s,hasConfirmedReading=%s,isMeterReplaced=%s}",
+                maskPhone(request.getContactId()),
+                sanitizeLogValue(request.getMessageType()),
+                request.getMediaId() != null && !request.getMediaId().isBlank(),
+                request.getMediaUrl() != null && !request.getMediaUrl().isBlank(),
+                sanitizeLogValue(request.getCorrelationId()),
+                request.getConfirmedReading() != null && !request.getConfirmedReading().isBlank(),
+                request.getIsMeterReplaced()
+        );
+    }
+
+    private void logRawContactIdAtDebug(String api, String contactId) {
+        // Raw phone numbers / contact ids are PII and must never appear in INFO/WARN/ERROR logs. Expose
+        // them only at DEBUG so an operator can correlate a masked entry back to the actual number.
+        if (log.isDebugEnabled()) {
+            log.debug("{} received rawContactId={}", api, sanitizeLogValue(contactId));
+        }
+    }
+
+    private String maskPhone(String phoneNumber) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            return "n/a";
+        }
+        String digits = phoneNumber.replaceAll("\\D", "");
+        if (digits.length() <= 4) {
+            return "****";
+        }
+        return "****" + digits.substring(digits.length() - 4);
+    }
+
+    private String sanitizeLogValue(String value) {
+        if (value == null || value.isBlank()) {
+            return "n/a";
+        }
+        return value.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
     private boolean isSuccessful(CreateReadingResponse response) {
