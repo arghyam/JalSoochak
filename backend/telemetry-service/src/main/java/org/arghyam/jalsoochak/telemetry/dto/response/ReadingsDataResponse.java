@@ -14,6 +14,7 @@ public class ReadingsDataResponse {
     private BigDecimal meterReading;
     private String qualityStatus;
     private BigDecimal qualityConfidence;
+    private String lastDigitColor;
     private BigDecimal lastConfirmedReading;
     private String message;
 }

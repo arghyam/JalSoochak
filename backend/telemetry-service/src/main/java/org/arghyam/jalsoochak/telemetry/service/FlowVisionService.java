@@ -79,6 +79,7 @@ public class FlowVisionService {
                     (Map<String, Object>) resultMap.get("data");
 
             BigDecimal adjustedReading = parseMeterReading(dataMap);
+            String lastDigitColor = parseLastDigitColor(dataMap);
 
             String qualityStatus =
                     dataMap.getOrDefault("qualityStatus", "unknown").toString();
@@ -100,6 +101,7 @@ public class FlowVisionService {
                     .adjustedReading(adjustedReading)
                     .qualityStatus(qualityStatus)
                     .qualityConfidence(qualityConfidence)
+                    .lastDigitColor(lastDigitColor)
                     .correlationId(correlationId)
                     .build();
 
@@ -121,16 +123,22 @@ public class FlowVisionService {
         }
 
         BigDecimal parsedReading = new BigDecimal(meterReading);
-        Object lastDigitColorObj = dataMap.get("lastDigitColor");
-        String lastDigitColor = lastDigitColorObj == null
-                ? ""
-                : lastDigitColorObj.toString().trim().toLowerCase(Locale.ROOT);
+        String lastDigitColor = parseLastDigitColor(dataMap);
 
-        if (!"red".equals(lastDigitColor)) {
+        if (lastDigitColor == null || !"red".equals(lastDigitColor.toLowerCase(Locale.ROOT))) {
             return parsedReading;
         }
 
         return parsedReading.movePointLeft(1).setScale(1, RoundingMode.UNNECESSARY);
+    }
+
+    private String parseLastDigitColor(Map<String, Object> dataMap) {
+        Object lastDigitColorObj = dataMap.get("lastDigitColor");
+        if (lastDigitColorObj == null) {
+            return null;
+        }
+        String lastDigitColor = lastDigitColorObj.toString().trim();
+        return lastDigitColor.isEmpty() ? null : lastDigitColor;
     }
 
 }

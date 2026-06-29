@@ -60,6 +60,8 @@ class SingleTenantTelemetryControllerUnitTest {
         assertNotNull(response.getBody().getData());
         assertEquals("assam-reading-ok", response.getBody().getData().getMessage());
         assertEquals("corr-hidden", response.getBody().getData().getCorrelationId());
+        assertEquals("good", response.getBody().getData().getQualityStatus());
+        assertEquals("black", response.getBody().getData().getLastDigitColor());
     }
 
     @Test
@@ -228,6 +230,7 @@ class SingleTenantTelemetryControllerUnitTest {
         assertNotNull(response.getBody());
         assertEquals(true, response.getBody().isSuccess());
         assertEquals("919999999999", response.getBody().getData().getCorrelationId());
+        assertNull(response.getBody().getData().getLastDigitColor());
     }
 
     @Test
@@ -348,6 +351,8 @@ class SingleTenantTelemetryControllerUnitTest {
                     .success(true)
                     .message("assam-reading-ok")
                     .correlationId("corr-hidden")
+                    .qualityStatus("good")
+                    .lastDigitColor("black")
                     .build();
         }
     }
