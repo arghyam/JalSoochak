@@ -1186,7 +1186,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":lgd:" + lgdId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v4";
+                + ":v5";
         AverageWaterSupplyResponse cached = readFromCache(cacheKey, AverageWaterSupplyResponse.class);
         if (cached != null) {
             return cached;
@@ -1245,9 +1245,26 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .schemes(List.of())
                 .childRegionCount(childRegions.size())
                 .childRegions(childRegions)
+                .currentRegion(toCurrentRegion(
+                        schemeRegularityRepository.getRegionOwnWaterSupplyByLgd(tenantId, lgdId, startDate, endDate)))
                 .build();
         writeToCache(cacheKey, response);
         return response;
+    }
+
+    private AverageWaterSupplyResponse.ChildRegionWaterSupply toCurrentRegion(
+            SchemeRegularityRepository.ChildRegionWaterSupplyMetrics m) {
+        return AverageWaterSupplyResponse.ChildRegionWaterSupply.builder()
+                .lgdId(m.lgdId())
+                .departmentId(m.departmentId())
+                .title(m.title())
+                .totalHouseholdCount(m.totalHouseholdCount())
+                .totalAchievedFhtcCount(m.totalAchievedFhtcCount())
+                .totalPlannedFhtcCount(m.totalPlannedFhtcCount())
+                .totalWaterSuppliedLiters(m.totalWaterSuppliedLiters())
+                .schemeCount(m.schemeCount())
+                .avgWaterSupplyPerScheme(m.avgWaterSupplyPerScheme())
+                .build();
     }
 
     @Override
@@ -1283,7 +1300,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":department:" + parentDepartmentId
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v4";
+                + ":v5";
         AverageWaterSupplyResponse cached = readFromCache(cacheKey, AverageWaterSupplyResponse.class);
         if (cached != null) {
             return cached;
@@ -1343,6 +1360,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .schemes(List.of())
                 .childRegionCount(childRegions.size())
                 .childRegions(childRegions)
+                .currentRegion(toCurrentRegion(schemeRegularityRepository
+                        .getRegionOwnWaterSupplyByDepartment(tenantId, parentDepartmentId, startDate, endDate)))
                 .build();
         writeToCache(cacheKey, response);
         return response;
