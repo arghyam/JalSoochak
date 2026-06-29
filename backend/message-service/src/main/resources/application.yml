@@ -234,16 +234,31 @@ app:
   base-url: ${APP_BASE_URL:http://localhost:8085}
 
 # ──────────────────────────────────────────────────────────────
-# Notification Guards (per channel)
-# Set NOTIFICATIONS_WHATSAPP_DRY_RUN=true to suppress outbound Glific
-# (WhatsApp) API calls while keeping the Kafka pipeline live.
-# Set NOTIFICATIONS_SMS_DRY_RUN=true to suppress SMSCountry OTP
-# delivery (note: login OTPs will not reach users when enabled).
+# Notification Guards (per channel / per purpose)
+# whatsapp.dry-run  → master WhatsApp guard for the shared account
+#   operations: contact opt-in, login OTP, welcome flow, language update.
+#   NUDGE and ESCALATION default to this value when their own flags are
+#   unset, so NOTIFICATIONS_WHATSAPP_DRY_RUN=true still mutes everything.
+# nudge.dry-run      → suppress only operator nudges (NOTIFICATIONS_NUDGE_DRY_RUN).
+# escalation.dry-run → suppress only officer (SO/SDO) escalation documents
+#   (NOTIFICATIONS_ESCALATION_DRY_RUN). Set to false to deliver escalations
+#   while nudges stay muted.
+# sms.dry-run        → suppress SMSCountry OTP delivery (NOTIFICATIONS_SMS_DRY_RUN);
+#   note login OTPs will not reach users when enabled.
+#
+# To run escalations live while keeping nudges muted:
+#   NOTIFICATIONS_WHATSAPP_DRY_RUN=false   (opt-in/OTP/welcome live)
+#   NOTIFICATIONS_NUDGE_DRY_RUN=true       (nudges muted)
+#   NOTIFICATIONS_ESCALATION_DRY_RUN=false (escalations delivered)
 # ──────────────────────────────────────────────────────────────
 
 notifications:
   whatsapp:
     dry-run: ${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}
+  nudge:
+    dry-run: ${NOTIFICATIONS_NUDGE_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
+  escalation:
+    dry-run: ${NOTIFICATIONS_ESCALATION_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
   sms:
     dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
 

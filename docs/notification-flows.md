@@ -330,7 +330,9 @@ All Glific and storage properties can be overridden via environment variables.
 | `minio.bucket` | `MINIO_BUCKET` | No | Bucket name (default: `escalation-reports`) |
 | `minio.base-url` | `MINIO_BASE_URL` | No | Public base URL for PDF links |
 | `app.base-url` | `APP_BASE_URL` | No | Public URL of message-service itself |
-| `notifications.whatsapp.dry-run` | `NOTIFICATIONS_WHATSAPP_DRY_RUN` | No | Set `true` to suppress all Glific (WhatsApp) API calls |
+| `notifications.whatsapp.dry-run` | `NOTIFICATIONS_WHATSAPP_DRY_RUN` | No | Master WhatsApp guard. Set `true` to suppress the shared account Glific calls (contact opt-in, login OTP, welcome flow, language update). `nudge`/`escalation` default to this value when their own flags are unset, so `true` still mutes everything |
+| `notifications.nudge.dry-run` | `NOTIFICATIONS_NUDGE_DRY_RUN` | No | Set `true` to suppress only operator nudges (defaults to `notifications.whatsapp.dry-run`) |
+| `notifications.escalation.dry-run` | `NOTIFICATIONS_ESCALATION_DRY_RUN` | No | Set `true` to suppress only officer (SO/SDO) escalation documents (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver escalations while nudges stay muted |
 | `notifications.sms.dry-run` | `NOTIFICATIONS_SMS_DRY_RUN` | No | Set `true` to suppress SMSCountry OTP delivery (login OTPs will not reach users) |
 | `escalation.report.dir` | — | No | Local PDF output directory (default: `/tmp/escalation-reports/`) |
 
