@@ -81,10 +81,17 @@ public class GlificWebhookController {
             String message = "Reading request accepted for asynchronous processing.";
             if (glificReadingsAsyncService != null) {
                 glificReadingsAsyncService.enqueueProcessAndResume(glificWebhookRequest, jobId);
+                log.info("readings_glific queued jobId={} contact={} responseMode=async",
+                        jobId,
+                        maskPhone(glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null));
             } else {
                 CreateReadingResponse response = glificWebhookService.processImage(glificWebhookRequest);
                 status = isSuccessful(response) ? "SUCCESS" : "FAILED";
                 message = response != null ? response.getMessage() : "Reading request processed.";
+                log.info("readings_glific processed jobId={} contact={} response={}",
+                        jobId,
+                        maskPhone(glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null),
+                        summarizeCreateReadingResponse(response));
             }
             logReadingSubmission(
                     "/api/v1/telemetry/readings/glific",
@@ -93,14 +100,17 @@ public class GlificWebhookController {
                     message
             );
 
-            return ResponseEntity.ok(
-                    ReadingWebhookAckResponse.builder()
-                            .success(true)
-                            .status("accepted")
-                            .jobId(jobId)
-                            .message("Reading request accepted for asynchronous processing.")
-                            .build()
-            );
+            ReadingWebhookAckResponse ackResponse = ReadingWebhookAckResponse.builder()
+                    .success(true)
+                    .status("accepted")
+                    .jobId(jobId)
+                    .message("Reading request accepted for asynchronous processing.")
+                    .build();
+            log.info("readings_glific ack_response contact={} response={}",
+                    maskPhone(glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null),
+                    summarizeReadingWebhookAckResponse(ackResponse));
+
+            return ResponseEntity.ok(ackResponse);
         } catch (Exception e) {
             String safeContactId = glificWebhookRequest != null ? glificWebhookRequest.getContactId() : null;
             log.error("Error processing webhook: {}", e.getMessage(), e);
@@ -113,6 +123,9 @@ public class GlificWebhookController {
                     .jobId(null)
                     .message("Unable to accept webhook request.")
                     .build();
+            log.info("readings_glific error_response contact={} response={}",
+                    maskPhone(safeContactId),
+                    summarizeReadingWebhookAckResponse(errorResponse));
 
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
@@ -639,6 +652,35 @@ public class GlificWebhookController {
         if (log.isDebugEnabled()) {
             log.debug("{} received rawContactId={}", api, sanitizeLogValue(contactId));
         }
+    }
+
+    private String summarizeCreateReadingResponse(CreateReadingResponse response) {
+        if (response == null) {
+            return "null";
+        }
+        return String.format(
+                "{success=%s,qualityStatus=%s,correlationId=%s,meterReading=%s,qualityConfidence=%s,lastConfirmedReading=%s,message=\"%s\"}",
+                response.isSuccess(),
+                sanitizeLogValue(response.getQualityStatus()),
+                sanitizeLogValue(response.getCorrelationId()),
+                response.getMeterReading(),
+                response.getQualityConfidence(),
+                response.getLastConfirmedReading(),
+                sanitizeLogMessage(response.getMessage())
+        );
+    }
+
+    private String summarizeReadingWebhookAckResponse(ReadingWebhookAckResponse response) {
+        if (response == null) {
+            return "null";
+        }
+        return String.format(
+                "{success=%s,status=%s,jobId=%s,message=\"%s\"}",
+                response.isSuccess(),
+                sanitizeLogValue(response.getStatus()),
+                sanitizeLogValue(response.getJobId()),
+                sanitizeLogMessage(response.getMessage())
+        );
     }
 
     private String maskPhone(String phoneNumber) {

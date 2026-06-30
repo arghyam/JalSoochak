@@ -72,6 +72,11 @@ public class BfmReadingService {
 
             try {
                 ocrResult = flowVisionService.extractReading(request.getReadingUrl());
+                log.info("readings_glific flowvision_result operatorId={} schemeId={} imageUrlHash={} result={}",
+                        operatorInRequest.id(),
+                        request.getSchemeId(),
+                        imageUrlHash(request.getReadingUrl()),
+                        summarizeFlowVisionResult(ocrResult));
                 if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
                     String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                             AnomalyConstants.TYPE_UNREADABLE_IMAGE,
@@ -104,8 +109,18 @@ public class BfmReadingService {
                 }
                 finalReading = ocrResult.getAdjustedReading();
                 confidenceLevel = ocrResult.getQualityConfidence();
+                log.info("readings_glific ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
+                        operatorInRequest.id(),
+                        request.getSchemeId(),
+                        sanitizeLogValue(ocrResult.getCorrelationId()),
+                        finalReading,
+                        confidenceLevel,
+                        sanitizeLogValue(ocrResult.getQualityStatus()));
             } catch (Exception ex) {
-                log.error("FlowVision OCR failed for URL: {}", request.getReadingUrl(), ex);
+                log.error("FlowVision OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
+                if (log.isDebugEnabled()) {
+                    log.debug("FlowVision OCR failed for URL: {}", request.getReadingUrl());
+                }
                 String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                         AnomalyConstants.TYPE_UNREADABLE_IMAGE,
                         operatorInRequest.id(),
@@ -726,6 +741,33 @@ public class BfmReadingService {
                 AnomalyConstants.STATUS_OPEN,
                 correlationId
         );
+    }
+
+    private String summarizeFlowVisionResult(FlowVisionResult result) {
+        if (result == null) {
+            return "null";
+        }
+        return String.format(
+                "{adjustedReading=%s,qualityStatus=%s,qualityConfidence=%s,correlationId=%s}",
+                result.getAdjustedReading(),
+                sanitizeLogValue(result.getQualityStatus()),
+                result.getQualityConfidence(),
+                sanitizeLogValue(result.getCorrelationId())
+        );
+    }
+
+    private String imageUrlHash(String readingUrl) {
+        if (readingUrl == null || readingUrl.isBlank()) {
+            return "n/a";
+        }
+        return Integer.toHexString(readingUrl.hashCode());
+    }
+
+    private String sanitizeLogValue(String value) {
+        if (value == null || value.isBlank()) {
+            return "n/a";
+        }
+        return value.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {
