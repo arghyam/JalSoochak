@@ -70,7 +70,7 @@ class GlificImageWorkflowServiceAssamTest {
     private GlificImageWorkflowService service;
 
     @Test
-    void processImageRequiresSelectedChannelThatStillExists() throws Exception {
+    void processImageDoesNotRequireSelectedChannel() throws Exception {
         GlificWebhookRequest request = GlificWebhookRequest.builder()
                 .contactId("919876543210")
                 .mediaId("media-1")
@@ -87,9 +87,6 @@ class GlificImageWorkflowServiceAssamTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(userChannelPreferenceRepository.findChannelValue(22, "919876543210")).thenReturn(Optional.of("PDU"));
-        when(tenantConfigRepository.findConfigValue(22, "TENANT_SUPPORTED_CHANNELS"))
-                .thenReturn(Optional.of("{\"channels\":[\"PDU\",\"IOT\"]}"));
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
@@ -111,7 +108,7 @@ class GlificImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processImageFailsWhenSelectedChannelMissingOrRemoved() throws Exception {
+    void processImageContinuesWhenSelectedChannelMissingOrRemoved() throws Exception {
         GlificWebhookRequest request = GlificWebhookRequest.builder()
                 .contactId("919876543210")
                 .mediaId("media-1")
@@ -128,22 +125,24 @@ class GlificImageWorkflowServiceAssamTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(userChannelPreferenceRepository.findChannelValue(22, "919876543210")).thenReturn(Optional.of("BFM"));
-        when(tenantConfigRepository.findConfigValue(22, "TENANT_SUPPORTED_CHANNELS"))
-                .thenReturn(Optional.of("{\"channels\":[\"PDU\",\"IOT\"]}"));
-        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
-        when(localizationService.resolveUserFacingErrorMessage(
-                any(IllegalStateException.class),
-                anyString(),
-                anyString()
-        )).thenReturn("Selected channel is no longer available. Please make sure you have a channel selected.");
+        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
 
         CreateReadingResponse response = service.processImage(request);
 
         assertNotNull(response);
-        assertEquals(false, response.isSuccess());
-        assertEquals("Selected channel is no longer available. Please make sure you have a channel selected.", response.getMessage());
-        verify(bfmReadingService, never()).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
+        assertEquals(true, response.isSuccess());
+        verify(bfmReadingService).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
     }
 
     @Test
