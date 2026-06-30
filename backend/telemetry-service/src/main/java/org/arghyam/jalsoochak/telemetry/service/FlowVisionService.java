@@ -42,12 +42,16 @@ public class FlowVisionService {
             HttpEntity<Map<String, String>> requestEntity =
                     new HttpEntity<>(payload, headers);
 
+            log.info("flowvision request imageUrlHash={} endpoint={}", imageUrlHash(readingUrl), flowVisionUrl);
             ResponseEntity<Map> responseEntity = restTemplate.exchange(
                     flowVisionUrl,
                     HttpMethod.POST,
                     requestEntity,
                     Map.class
             );
+            log.info("flowvision response status={} body={}",
+                    responseEntity.getStatusCode(),
+                    responseEntity.getBody());
 
 
             if (!responseEntity.getStatusCode().is2xxSuccessful()) {
@@ -96,15 +100,22 @@ public class FlowVisionService {
                             UUID.randomUUID().toString()
                     ).toString();
 
-            return FlowVisionResult.builder()
+            FlowVisionResult result = FlowVisionResult.builder()
                     .adjustedReading(adjustedReading)
                     .qualityStatus(qualityStatus)
                     .qualityConfidence(qualityConfidence)
                     .correlationId(correlationId)
                     .build();
+            log.info("flowvision parsed_result imageUrlHash={} result={}",
+                    imageUrlHash(readingUrl),
+                    summarizeFlowVisionResult(result));
+            return result;
 
         } catch (Exception ex) {
-            log.error("FlowVision OCR call failed for image {}", readingUrl, ex);
+            log.error("FlowVision OCR call failed for imageUrlHash={}: {}", imageUrlHash(readingUrl), ex.getMessage(), ex);
+            if (log.isDebugEnabled()) {
+                log.debug("FlowVision OCR call failed for image {}", readingUrl);
+            }
             return null;
         }
     }
@@ -131,6 +142,33 @@ public class FlowVisionService {
         }
 
         return parsedReading.movePointLeft(1).setScale(1, RoundingMode.UNNECESSARY);
+    }
+
+    private String summarizeFlowVisionResult(FlowVisionResult result) {
+        if (result == null) {
+            return "null";
+        }
+        return String.format(
+                "{adjustedReading=%s,qualityStatus=%s,qualityConfidence=%s,correlationId=%s}",
+                result.getAdjustedReading(),
+                sanitizeLogValue(result.getQualityStatus()),
+                result.getQualityConfidence(),
+                sanitizeLogValue(result.getCorrelationId())
+        );
+    }
+
+    private String imageUrlHash(String readingUrl) {
+        if (readingUrl == null || readingUrl.isBlank()) {
+            return "n/a";
+        }
+        return Integer.toHexString(readingUrl.hashCode());
+    }
+
+    private String sanitizeLogValue(String value) {
+        if (value == null || value.isBlank()) {
+            return "n/a";
+        }
+        return value.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
 }
