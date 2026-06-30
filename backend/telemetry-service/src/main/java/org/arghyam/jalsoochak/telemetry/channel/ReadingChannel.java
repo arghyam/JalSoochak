@@ -57,11 +57,14 @@ public enum ReadingChannel {
         }
 
         String compact = normalized.replaceAll("[^A-Z0-9]+", "");
+        // Exact match against known legacy display labels (compacted), e.g. "ELECTRICMETER".
         for (ReadingChannel channel : values()) {
-            if (compact.contains(channel.name())) {
+            String compactLabel = channel.displayName.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]+", "");
+            if (compactLabel.equals(compact)) {
                 return channel;
             }
         }
+        // Keyword fallbacks for free-form legacy values; anything else falls through to DEFAULT.
         if (compact.contains("ELECTRIC")) {
             return ELM;
         }

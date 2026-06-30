@@ -22,7 +22,12 @@ public class WaterQuantityCalculatorRegistry {
 
     public WaterQuantityCalculatorRegistry(List<WaterQuantityCalculator> calculators) {
         for (WaterQuantityCalculator calculator : calculators) {
-            byChannel.put(calculator.channel(), calculator);
+            WaterQuantityCalculator existing = byChannel.putIfAbsent(calculator.channel(), calculator);
+            if (existing != null) {
+                throw new IllegalStateException(
+                        "Duplicate WaterQuantityCalculator registered for channel " + calculator.channel()
+                                + ": " + existing.getClass().getName() + " and " + calculator.getClass().getName());
+            }
         }
         if (!byChannel.containsKey(ReadingChannel.DEFAULT)) {
             throw new IllegalStateException(

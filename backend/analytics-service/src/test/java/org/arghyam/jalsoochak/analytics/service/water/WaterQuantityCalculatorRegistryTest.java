@@ -63,4 +63,12 @@ class WaterQuantityCalculatorRegistryTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("BFM");
     }
+
+    @Test
+    void constructor_withDuplicateChannelCalculators_throws() {
+        assertThatThrownBy(() ->
+                new WaterQuantityCalculatorRegistry(List.of(bfm, new BfmWaterQuantityCalculator())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Duplicate");
+    }
 }

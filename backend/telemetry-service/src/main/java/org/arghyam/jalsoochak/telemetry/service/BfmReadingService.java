@@ -26,7 +26,6 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -334,7 +333,9 @@ public class BfmReadingService {
         }
 
         ReadingChannel resolvedChannel = readingChannelResolver.resolve(tenantId, contactId);
-        Integer channel = (resolvedChannel != null ? resolvedChannel : ReadingChannel.DEFAULT).getCode();
+        ReadingChannel effectiveChannel = resolvedChannel != null ? resolvedChannel : ReadingChannel.DEFAULT;
+        Integer channel = effectiveChannel.getCode();
+        telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, effectiveChannel.name());
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
                 request.getSchemeId(),
@@ -481,11 +482,25 @@ public class BfmReadingService {
                 null,
                 reading.imageUrl(),
                 readingAt,
-                null,
+                channelCodeFromReading(reading),
                 readingDate,
                 1,
                 0
         );
+    }
+
+    /**
+     * Re-uses the channel persisted on the reading at submission so corrections keep the
+     * original channel (BFM/ELM/PDU...) and analytics does not recompute the water quantity
+     * with a different calculator. Returns {@code null} for legacy rows that never stored a
+     * channel, which analytics treats as the default (BFM).
+     */
+    private Integer channelCodeFromReading(TelemetryLatestFlowReadingRecord reading) {
+        String channelValue = reading.channel();
+        if (channelValue == null || channelValue.isBlank()) {
+            return null;
+        }
+        return ReadingChannel.fromChannelValue(channelValue).getCode();
     }
 
     @Transactional
@@ -520,7 +535,7 @@ public class BfmReadingService {
                 null,
                 latestReading.imageUrl(),
                 readingAt,
-                null,
+                channelCodeFromReading(latestReading),
                 readingDate,
                 1,
                 0

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
@@ -138,7 +139,8 @@ class BfmReadingServicePlaceholderRowTest {
                 new BigDecimal("100"),
                 "http://example.com/img.jpg",
                 readingDate,
-                readingAt
+                readingAt,
+                "BFM"
         );
 
         when(glificOperatorContextService.resolveOperatorWithSchema("919999999999"))
@@ -162,7 +164,7 @@ class BfmReadingServicePlaceholderRowTest {
                 null,
                 "http://example.com/img.jpg",
                 readingAt,
-                null,
+                ReadingChannel.BFM.getCode(),
                 readingDate,
                 1,
                 0
@@ -185,7 +187,8 @@ class BfmReadingServicePlaceholderRowTest {
                 new BigDecimal("100"),
                 "http://example.com/img.jpg",
                 readingDate,
-                readingAt
+                readingAt,
+                "BFM"
         );
 
         when(telemetryTenantRepository.findFlowReadingDetailsByCorrelationId(schemaName, "corr-1"))
@@ -208,7 +211,7 @@ class BfmReadingServicePlaceholderRowTest {
                 null,
                 "http://example.com/img.jpg",
                 readingAt,
-                null,
+                ReadingChannel.BFM.getCode(),
                 readingDate,
                 1,
                 0
