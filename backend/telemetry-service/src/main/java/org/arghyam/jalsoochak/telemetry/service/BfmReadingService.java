@@ -627,40 +627,40 @@ public class BfmReadingService {
                                               LocalDateTime previousReadingDate,
                                               Integer consecutiveDaysMissed,
                                               String correlationId) {
-        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
-                schemaName,
-                userId,
-                schemeId,
-                anomalyType
-        );
-        if (existingCount > 0) {
-            telemetryTenantRepository.touchLatestAnomalyByTypeForToday(
-                    schemaName,
-                    userId,
-                    schemeId,
-                    anomalyType
-            );
-            int effectiveRetries = Math.max(retries, existingCount + 1);
-            telemetryEventPublisher.publishAnomalyRecorded(
-                    tenantId,
-                    anomalyType,
-                    userId,
-                    schemeId,
-                    aiReading,
-                    aiConfidencePercentage,
-                    overriddenReading,
-                    effectiveRetries,
-                    previousReading,
-                    previousReadingDate,
-                    consecutiveDaysMissed,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN,
-                    correlationId
-            );
-            log.info("Skipping duplicate image anomaly publish for userId={} schemeId={} anomalyType={} correlationId={}",
-                    userId, schemeId, anomalyType, correlationId);
-            return;
-        }
+//        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
+//                schemaName,
+//                userId,
+//                schemeId,
+//                anomalyType
+//        );
+//        if (existingCount > 0) {
+//            telemetryTenantRepository.touchLatestAnomalyByTypeForToday(
+//                    schemaName,
+//                    userId,
+//                    schemeId,
+//                    anomalyType
+//            );
+//            int effectiveRetries = Math.max(retries, existingCount + 1);
+//            telemetryEventPublisher.publishAnomalyRecorded(
+//                    tenantId,
+//                    anomalyType,
+//                    userId,
+//                    schemeId,
+//                    aiReading,
+//                    aiConfidencePercentage,
+//                    overriddenReading,
+//                    effectiveRetries,
+//                    previousReading,
+//                    previousReadingDate,
+//                    consecutiveDaysMissed,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN,
+//                    correlationId
+//            );
+//            log.info("Skipping duplicate image anomaly publish for userId={} schemeId={} anomalyType={} correlationId={}",
+//                    userId, schemeId, anomalyType, correlationId);
+//            return;
+//        }
 
         telemetryTenantRepository.createTenantAnomalyRecord(
                 schemaName,

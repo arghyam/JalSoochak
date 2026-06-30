@@ -70,7 +70,7 @@ public class GlificImageWorkflowService {
             String languageKey = localizationService.normalizeLanguageKey(
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
-            ensureSelectedChannelExists(tenantId, contactId);
+//            ensureSelectedChannelExists(tenantId, contactId);
 
             Long schemeId = telemetryTenantRepository
                     .findLatestPendingSchemeSelectionForDate(
