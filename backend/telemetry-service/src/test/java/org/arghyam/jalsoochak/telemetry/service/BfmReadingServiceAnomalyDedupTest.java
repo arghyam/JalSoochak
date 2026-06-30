@@ -65,14 +65,11 @@ class BfmReadingServiceAnomalyDedupTest {
     }
 
     @Test
-    void unreadableImageIsDeduplicatedPerDayAndKeepsStableCorrelationId() {
+    void unreadableImageCreatesAnomalyForEachAttemptAndKeepsStableCorrelationId() {
         TelemetryOperator operator = new TelemetryOperator(11L, 7, "op", "op@example.com", "919999999999", null);
         when(telemetryTenantRepository.existsSchemeById("tenant_up", 100L)).thenReturn(true);
         when(telemetryTenantRepository.findOperatorById("tenant_up", 11L)).thenReturn(Optional.of(operator));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_up", 11L, 100L)).thenReturn(true);
-        when(telemetryTenantRepository.countAnomaliesByTypeForToday(
-                "tenant_up", 11L, 100L, AnomalyConstants.TYPE_UNREADABLE_IMAGE
-        )).thenReturn(0, 1);
         when(flowVisionService.extractReading("https://img.example.com/a.jpg")).thenReturn(null);
 
         CreateReadingRequest request = CreateReadingRequest.builder()
@@ -104,7 +101,7 @@ class BfmReadingServiceAnomalyDedupTest {
         assertEquals(2, correlationCaptor.getAllValues().size());
         assertFalse(correlationCaptor.getAllValues().get(0).isBlank());
         assertEquals(correlationCaptor.getAllValues().get(0), correlationCaptor.getAllValues().get(1));
-        verify(telemetryTenantRepository, times(1)).createTenantAnomalyRecord(
+        verify(telemetryTenantRepository, times(2)).createTenantAnomalyRecord(
                 eq("tenant_up"),
                 eq(11L),
                 eq(100L),
@@ -112,7 +109,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 contains("Unreadable image"),
                 eq(AnomalyConstants.STATUS_OPEN)
         );
-        verify(telemetryTenantRepository, times(1)).touchLatestAnomalyByTypeForToday(
+        verify(telemetryTenantRepository, never()).touchLatestAnomalyByTypeForToday(
                 eq("tenant_up"),
                 eq(11L),
                 eq(100L),
