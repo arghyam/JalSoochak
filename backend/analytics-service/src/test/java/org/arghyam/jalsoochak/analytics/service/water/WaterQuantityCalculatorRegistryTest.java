@@ -20,9 +20,9 @@ class WaterQuantityCalculatorRegistryTest {
         }
 
         @Override
-        public int calculate(Integer currentReading, Integer previousReading) {
+        public int calculate(WaterQuantityContext context) {
             // Distinct from BFM: the reading itself is the day's quantity.
-            return currentReading != null ? Math.max(0, currentReading) : 0;
+            return context.currentReading() != null ? Math.max(0, context.currentReading()) : 0;
         }
     }
 
@@ -30,22 +30,30 @@ class WaterQuantityCalculatorRegistryTest {
     void resolve_nullChannel_returnsDefaultBfmCalculator() {
         WaterQuantityCalculatorRegistry registry = new WaterQuantityCalculatorRegistry(List.of(bfm));
 
-        assertThat(registry.resolve(null)).isSameAs(bfm);
+        assertThat(registry.resolve(null)).contains(bfm);
     }
 
     @Test
     void resolve_unknownChannelCode_returnsDefaultBfmCalculator() {
         WaterQuantityCalculatorRegistry registry = new WaterQuantityCalculatorRegistry(List.of(bfm));
 
-        assertThat(registry.resolve(999)).isSameAs(bfm);
+        assertThat(registry.resolve(999)).contains(bfm);
     }
 
     @Test
-    void resolve_channelWithoutDedicatedCalculator_fallsBackToBfm() {
-        // ELM code provided but no ELM calculator registered -> BFM default.
+    void resolve_everyExplicitNonDefaultChannelWithoutCalculator_returnsEmpty() {
+        // Only BFM registered: every explicitly non-default channel (ELM/PDU/IOT/MAN) must
+        // resolve to empty so callers skip rather than silently mis-deriving with the BFM calculator.
         WaterQuantityCalculatorRegistry registry = new WaterQuantityCalculatorRegistry(List.of(bfm));
 
-        assertThat(registry.resolve(ReadingChannel.ELM.getCode())).isSameAs(bfm);
+        for (ReadingChannel channel : ReadingChannel.values()) {
+            if (channel == ReadingChannel.DEFAULT) {
+                continue;
+            }
+            assertThat(registry.resolve(channel.getCode()))
+                    .as("channel %s has no calculator and must not fall back to BFM", channel)
+                    .isEmpty();
+        }
     }
 
     @Test
@@ -53,8 +61,8 @@ class WaterQuantityCalculatorRegistryTest {
         ElmCalculator elm = new ElmCalculator();
         WaterQuantityCalculatorRegistry registry = new WaterQuantityCalculatorRegistry(List.of(bfm, elm));
 
-        assertThat(registry.resolve(ReadingChannel.ELM.getCode())).isSameAs(elm);
-        assertThat(registry.resolve(ReadingChannel.BFM.getCode())).isSameAs(bfm);
+        assertThat(registry.resolve(ReadingChannel.ELM.getCode())).contains(elm);
+        assertThat(registry.resolve(ReadingChannel.BFM.getCode())).contains(bfm);
     }
 
     @Test

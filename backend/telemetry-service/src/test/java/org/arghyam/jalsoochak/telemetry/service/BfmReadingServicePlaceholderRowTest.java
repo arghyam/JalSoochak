@@ -100,6 +100,7 @@ class BfmReadingServicePlaceholderRowTest {
                 1L,
                 LocalDate.now()
         )).thenReturn(Optional.of(99L));
+        when(readingChannelResolver.resolve(1, "919999999999")).thenReturn(ReadingChannel.BFM);
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -119,6 +120,8 @@ class BfmReadingServicePlaceholderRowTest {
                 any(),
                 anyLong()
         );
+        // The resolved channel is persisted onto the reading row by its short code.
+        verify(telemetryTenantRepository).updateFlowReadingChannel(schemaName, 99L, ReadingChannel.BFM.name());
         verify(telemetryTenantRepository, never()).createFlowReading(
                 anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
         );

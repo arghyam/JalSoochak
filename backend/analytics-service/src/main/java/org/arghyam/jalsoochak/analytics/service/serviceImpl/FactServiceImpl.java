@@ -27,6 +27,7 @@ import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
 import org.arghyam.jalsoochak.analytics.service.FactService;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculator;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -42,6 +43,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.WeekFields;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -265,6 +267,14 @@ public class FactServiceImpl implements FactService {
             return;
         }
 
+        Optional<WaterQuantityCalculator> calculatorOpt = waterQuantityCalculatorRegistry.resolve(event.getChannel());
+        if (calculatorOpt.isEmpty()) {
+            log.warn("Skipping water quantity update; no calculator registered for channel={} (tenantId={}, schemeId={}, date={}). "
+                            + "Not falling back to BFM to avoid mis-deriving the reading with the wrong calculator.",
+                    event.getChannel(), event.getTenantId(), event.getSchemeId(), readingDate);
+            return;
+        }
+
         LocalDate previousDate = readingDate.minusDays(1);
         Integer previousReading = meterReadingRepository
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(
@@ -275,8 +285,15 @@ public class FactServiceImpl implements FactService {
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(0);
 
-        WaterQuantityCalculator waterQuantityCalculator = waterQuantityCalculatorRegistry.resolve(event.getChannel());
-        int waterQuantity = waterQuantityCalculator.calculate(currentReading, previousReading);
+        WaterQuantityContext context = WaterQuantityContext.builder()
+                .tenantId(event.getTenantId())
+                .schemeId(event.getSchemeId())
+                .readingDate(readingDate)
+                .currentReading(currentReading)
+                .previousReading(previousReading)
+                .channel(event.getChannel())
+                .build();
+        int waterQuantity = calculatorOpt.get().calculate(context);
         LocalDateTime now = LocalDateTime.now();
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(

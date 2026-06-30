@@ -332,10 +332,10 @@ public class BfmReadingService {
                     .orElse(null);
         }
 
+        // ReadingChannelResolver.resolve never returns null (it falls back to DEFAULT/BFM).
         ReadingChannel resolvedChannel = readingChannelResolver.resolve(tenantId, contactId);
-        ReadingChannel effectiveChannel = resolvedChannel != null ? resolvedChannel : ReadingChannel.DEFAULT;
-        Integer channel = effectiveChannel.getCode();
-        telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, effectiveChannel.name());
+        Integer channel = resolvedChannel.getCode();
+        telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, resolvedChannel.name());
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
                 request.getSchemeId(),

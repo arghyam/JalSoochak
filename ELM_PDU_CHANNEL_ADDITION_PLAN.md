@@ -29,7 +29,23 @@ A pluggable per-channel architecture was just landed for BFM (`ReadingChannel` e
 
 ## Implementation (all in analytics-service unless noted)
 
-### 1. Widen the calculator seam
+### 0. Reading-value typing & precision — REQUIRED before adding the ELM/PDU calculators
+
+Review gap #2 (deferred to this PR on 2026-06-30). The calculator seam (`WaterQuantityContext`) now
+exists, but the reading is still a single `Integer` whose physical meaning is implicit and
+channel-dependent (BFM = cumulative meter index, ELM = kWh, PDU = minutes). Resolve this **before**
+the ELM/PDU calculators land, otherwise the input semantics stay implicit and lossy:
+
+- **Typing:** give the reading an explicit per-channel type instead of a bare `Integer` (e.g. a
+  `ReadingMeasure`/named value at the seam — BFM meter index, ELM energy, PDU duration) so each
+  calculator's expected input is self-describing, not a convention.
+- **Precision:** widen the reading from `Integer` to `BigDecimal` end-to-end — `MeterReadingEvent`
+  (telemetry publisher **and** analytics consumer), `FactMeterReading`/`FactWaterQuantity` columns +
+  a migration — because ELM kWh (and fractional PDU hours) lose data under integer truncation.
+- Designed now-deferred (rather than done speculatively) so the per-channel types match the first
+  real non-BFM channel; it is a prerequisite, not optional.
+
+### 1. Widen the calculator seam 
 
 - New value object `service/water/WaterQuantityContext.java`: `tenantId, schemeId, readingDate, currentReading, previousReading, channelCode` (all that a calculator may need; immutable, `@Builder`).
 - `WaterQuantityCalculator.calculate(...)` → `int calculate(WaterQuantityContext ctx)`. Keep `ReadingChannel channel()`.

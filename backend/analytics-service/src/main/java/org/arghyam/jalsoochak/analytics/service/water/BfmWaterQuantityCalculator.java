@@ -19,9 +19,9 @@ public class BfmWaterQuantityCalculator implements WaterQuantityCalculator {
     }
 
     @Override
-    public int calculate(Integer currentReading, Integer previousReading) {
-        int current = currentReading != null ? currentReading : 0;
-        int previous = previousReading != null ? previousReading : 0;
+    public int calculate(WaterQuantityContext context) {
+        int current = context.currentReading() != null ? context.currentReading() : 0;
+        int previous = context.previousReading() != null ? context.previousReading() : 0;
         return Math.max(0, current - previous);
     }
 }

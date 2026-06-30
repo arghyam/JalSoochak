@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Resolves the {@link WaterQuantityCalculator} for a reading's channel code.
@@ -36,12 +37,18 @@ public class WaterQuantityCalculatorRegistry {
     }
 
     /**
-     * Returns the calculator for the given numeric channel code, falling back to
-     * the default ({@link ReadingChannel#DEFAULT}) calculator when the channel is
-     * {@code null} or has no dedicated calculator registered.
+     * Returns the calculator for the given numeric channel code, if one can be
+     * safely applied.
+     *
+     * <p>{@code null} and unknown codes resolve to the default
+     * ({@link ReadingChannel#DEFAULT BFM}) calculator via {@link ReadingChannel#fromCode(Integer)},
+     * preserving legacy behaviour. An <em>explicitly</em> non-default channel
+     * (e.g. ELM/PDU) with no registered calculator returns {@link Optional#empty()}
+     * rather than silently falling back to BFM — callers must skip rather than
+     * mis-derive the reading with the wrong calculator.
      */
-    public WaterQuantityCalculator resolve(Integer channelCode) {
+    public Optional<WaterQuantityCalculator> resolve(Integer channelCode) {
         ReadingChannel channel = ReadingChannel.fromCode(channelCode);
-        return byChannel.getOrDefault(channel, byChannel.get(ReadingChannel.DEFAULT));
+        return Optional.ofNullable(byChannel.get(channel));
     }
 }

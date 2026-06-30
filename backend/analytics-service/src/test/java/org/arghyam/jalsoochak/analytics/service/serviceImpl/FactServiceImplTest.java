@@ -88,7 +88,7 @@ class FactServiceImplTest {
         event.setConfidence(90);
         event.setImageUrl("img");
         event.setReadingAt("2026-01-01T10:15:00");
-        event.setChannel(2);
+        event.setChannel(1);
         event.setReadingDate("2026-01-01");
         event.setSubmissionStatus(1);
         event.setReadingType(0);
@@ -158,15 +158,13 @@ class FactServiceImplTest {
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
         when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
-        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
-        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
 
         service.ingestMeterReading(event);
 
-        // The per-channel calculator is selected using the event's channel code.
+        // The per-channel calculator is selected using the event's channel code; ELM has no
+        // registered calculator here, so the water quantity is skipped rather than mis-derived as BFM.
         verify(waterQuantityCalculatorRegistry).resolve(ReadingChannel.ELM.getCode());
+        verify(waterQuantityRepository, never()).save(any());
     }
 
     @Test

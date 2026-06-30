@@ -16,21 +16,31 @@ class BfmWaterQuantityCalculatorTest {
 
     @Test
     void calculate_returnsDeltaOverPreviousReading() {
-        assertThat(calculator.calculate(150, 100)).isEqualTo(50);
+        assertThat(calculator.calculate(ctx(150, 100))).isEqualTo(50);
     }
 
     @Test
     void calculate_whenDeltaIsNegative_returnsZero() {
-        assertThat(calculator.calculate(95, 100)).isZero();
+        assertThat(calculator.calculate(ctx(95, 100))).isZero();
     }
 
     @Test
     void calculate_whenPreviousReadingNull_treatsItAsZero() {
-        assertThat(calculator.calculate(120, null)).isEqualTo(120);
+        assertThat(calculator.calculate(ctx(120, null))).isEqualTo(120);
     }
 
     @Test
     void calculate_whenCurrentReadingNull_returnsZero() {
-        assertThat(calculator.calculate(null, 100)).isZero();
+        assertThat(calculator.calculate(ctx(null, 100))).isZero();
+    }
+
+    private static WaterQuantityContext ctx(Integer currentReading, Integer previousReading) {
+        return WaterQuantityContext.builder()
+                .tenantId(1)
+                .schemeId(11)
+                .currentReading(currentReading)
+                .previousReading(previousReading)
+                .channel(ReadingChannel.BFM.getCode())
+                .build();
     }
 }
