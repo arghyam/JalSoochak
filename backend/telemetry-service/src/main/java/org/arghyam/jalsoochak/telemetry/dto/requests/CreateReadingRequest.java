@@ -30,4 +30,11 @@ public class CreateReadingRequest {
 
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime readingTime;
+
+    // LENIENT-INGEST: tracking fields populated only when a submission is recorded through the
+    // lenient path (missing scheme / missing operator / operator-not-mapped). Null/0 for normal reads.
+    private Integer ingestionSource;
+    private String submittedStateSchemeId;
+    private String submittedCentreSchemeId;
+    private String submittedPhoneHash;
 }

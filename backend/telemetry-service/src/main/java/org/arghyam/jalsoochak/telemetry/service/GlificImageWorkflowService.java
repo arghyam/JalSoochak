@@ -7,12 +7,14 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -34,6 +36,11 @@ public class GlificImageWorkflowService {
     private final TenantConfigRepository tenantConfigRepository;
     private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final ObjectMapper objectMapper;
+
+    // LENIENT-INGEST: master off-switch for recording submissions with a missing scheme/operator.
+    // Set telemetry.lenient-ingestion.enabled=false to restore the original reject behaviour.
+    @Value("${telemetry.lenient-ingestion.enabled:true}")
+    private boolean lenientIngestionEnabled = true;
 
     public GlificImageWorkflowService(GlificMediaService glificMediaService,
                                       BfmReadingService bfmReadingService,
@@ -124,30 +131,90 @@ public class GlificImageWorkflowService {
         String safeContactId = request != null ? request.getPhoneNumber() : null;
         try {
             String contactId = safeContactId;
-            TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId, preferredTenantId);
-            Long operatorId = operatorWithSchema.operator().id();
+
+            // LENIENT-INGEST: resolve the operator, falling back to the tenant's sentinel "Unknown
+            // operator" when the phone is not registered so the submission is still recorded.
+            Optional<TelemetryOperatorWithSchema> resolvedOperator =
+                    operatorContextService.tryResolveOperatorWithSchema(contactId, preferredTenantId);
+
+            int ingestionSource = IngestionSource.NORMAL;
+            boolean operatorIsSentinel = false;
+            String submittedPhoneHash = null;
+            TelemetryOperatorWithSchema operatorWithSchema;
+
+            if (resolvedOperator.isPresent()) {
+                operatorWithSchema = resolvedOperator.get();
+            } else if (lenientIngestionEnabled) {
+                String tenantSchema = telemetryTenantRepository.findSchemaNameByTenantId(preferredTenantId)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "No operator found and tenant schema could not be resolved for lenient ingestion"));
+                Long sentinelUserId = telemetryTenantRepository.getOrCreateUnknownOperatorUserId(tenantSchema, preferredTenantId);
+                TelemetryOperator sentinel = telemetryTenantRepository.findOperatorById(tenantSchema, sentinelUserId)
+                        .orElseThrow(() -> new IllegalStateException("Sentinel operator could not be resolved"));
+                operatorWithSchema = new TelemetryOperatorWithSchema(tenantSchema, sentinel);
+                operatorIsSentinel = true;
+                ingestionSource |= IngestionSource.UNKNOWN_OPERATOR;
+                submittedPhoneHash = telemetryTenantRepository.hashSubmittedPhone(contactId);
+                // Scheme ids / user ids are not PII; the raw phone stays at DEBUG only.
+                log.info("assam_reading_lenient reason=\"operator_not_found\" sentinelUserId={} submittedPhone={}",
+                        sentinelUserId, maskPhone(contactId));
+                if (log.isDebugEnabled()) {
+                    log.debug("assam_reading_lenient reason=\"operator_not_found\" rawContactId={}", contactId);
+                }
+            } else {
+                // Flag disabled: reproduce the original throwing behaviour (and its message).
+                operatorContextService.resolveOperatorWithSchema(contactId, preferredTenantId);
+                throw new IllegalStateException("No operator found for the provided contactId");
+            }
+
             String schemaName = operatorWithSchema.schemaName();
+            TelemetryOperator operator = operatorWithSchema.operator();
+            Long operatorId = operator.id();
             String languageKey = localizationService.normalizeLanguageKey(
-                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, operatorWithSchema.operator().tenantId())
+                    operatorContextService.resolveOperatorLanguage(operatorWithSchema, operator.tenantId())
             );
-            Long schemeId = resolveAssamSchemeId(schemaName, operatorId, request.getStateSchemeId(), request.getCentreSchemeId());
+
+            SchemeResolution schemeResolution = resolveAssamSchemeLenient(
+                    schemaName, operatorId, operatorIsSentinel,
+                    request.getStateSchemeId(), request.getCentreSchemeId());
+            ingestionSource |= schemeResolution.ingestionSourceBits();
+
             LocalDateTime readingTime = request.getReadingDateTime() != null
                     ? request.getReadingDateTime().atZoneSameInstant(ZoneOffset.UTC).toLocalDateTime()
                     : null;
 
+            boolean lenient = ingestionSource != IngestionSource.NORMAL;
             CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
-                    .schemeId(schemeId)
+                    .schemeId(schemeResolution.schemeId())
                     .operatorId(operatorId)
                     .readingUrl(request.getReadingUrl())
                     .readingValue(request.getConfirmedReading())
                     .meterChangeReason(null)
                     .readingTime(readingTime)
+                    .ingestionSource(lenient ? ingestionSource : null)
+                    .submittedStateSchemeId(lenient ? request.getStateSchemeId() : null)
+                    .submittedCentreSchemeId(lenient ? request.getCentreSchemeId() : null)
+                    .submittedPhoneHash(lenient ? submittedPhoneHash : null)
                     .build();
+
+            if (lenient) {
+                // Canonical, greppable audit line for every leniently-recorded submission.
+                log.info("assam_reading_lenient_recorded ingestionSource={} unknownScheme={} unknownOperator={} operatorNotMapped={} operatorId={} schemeId={} submittedStateSchemeId={} submittedCentreSchemeId={} submittedPhone={}",
+                        ingestionSource,
+                        IngestionSource.has(ingestionSource, IngestionSource.UNKNOWN_SCHEME),
+                        IngestionSource.has(ingestionSource, IngestionSource.UNKNOWN_OPERATOR),
+                        IngestionSource.has(ingestionSource, IngestionSource.OPERATOR_NOT_MAPPED),
+                        operatorId,
+                        schemeResolution.schemeId(),
+                        sanitizeSchemeId(request.getStateSchemeId()),
+                        sanitizeSchemeId(request.getCentreSchemeId()),
+                        maskPhone(contactId));
+            }
 
             CreateReadingResponse response = bfmReadingService.createReading(
                     createReadingRequest,
                     schemaName,
-                    operatorWithSchema.operator(),
+                    operator,
                     contactId,
                     false
             );
@@ -171,7 +238,23 @@ public class GlificImageWorkflowService {
         }
     }
 
-    private Long resolveAssamSchemeId(String schemaName, Long operatorId, String stateSchemeId, String centreSchemeId) {
+    // LENIENT-INGEST: result of scheme resolution — the scheme id to record against plus the
+    // ingestion-source bits describing why it had to be resolved leniently (0 for the normal path).
+    private record SchemeResolution(Long schemeId, int ingestionSourceBits) {
+    }
+
+    /**
+     * LENIENT-INGEST: resolves the scheme for an Assam reading. Prefers a scheme the operator is
+     * actually mapped to (normal path, bits=0). When that fails and lenient ingestion is enabled it
+     * records against the existing (unmapped) scheme, or auto-provisions a placeholder scheme when the
+     * scheme id is unknown — tagging each case so it can be filtered later. When lenient ingestion is
+     * disabled it preserves the original reject behaviour.
+     */
+    private SchemeResolution resolveAssamSchemeLenient(String schemaName,
+                                                       Long operatorId,
+                                                       boolean operatorIsSentinel,
+                                                       String stateSchemeId,
+                                                       String centreSchemeId) {
         boolean hasStateSchemeId = stateSchemeId != null && !stateSchemeId.isBlank();
         boolean hasCentreSchemeId = centreSchemeId != null && !centreSchemeId.isBlank();
 
@@ -180,7 +263,7 @@ public class GlificImageWorkflowService {
                 : Optional.empty();
         if (stateResolvedSchemeId.isPresent()
                 && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, stateResolvedSchemeId.get())) {
-            return stateResolvedSchemeId.get();
+            return new SchemeResolution(stateResolvedSchemeId.get(), IngestionSource.NORMAL);
         }
 
         Optional<Long> centreResolvedSchemeId = hasCentreSchemeId
@@ -188,23 +271,48 @@ public class GlificImageWorkflowService {
                 : Optional.empty();
         if (centreResolvedSchemeId.isPresent()
                 && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, centreResolvedSchemeId.get())) {
-            return centreResolvedSchemeId.get();
+            return new SchemeResolution(centreResolvedSchemeId.get(), IngestionSource.NORMAL);
         }
 
-        // Distinguish "scheme id is missing from our records" from "scheme exists but this operator
-        // is not mapped to it" so a drop in submissions can be diagnosed from the logs. Scheme ids and
-        // operatorId are not PII, so they are safe to log at INFO.
         boolean schemeExistsButNotMapped = stateResolvedSchemeId.isPresent() || centreResolvedSchemeId.isPresent();
-        String rejectionReason = schemeExistsButNotMapped ? "operator_not_mapped_to_scheme" : "scheme_not_found";
-        log.info("Assam reading rejected reason=\"{}\" operatorId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
-                rejectionReason,
+
+        if (!lenientIngestionEnabled) {
+            // Original behaviour: reject when nothing resolves-and-maps.
+            String rejectionReason = schemeExistsButNotMapped ? "operator_not_mapped_to_scheme" : "scheme_not_found";
+            log.info("Assam reading rejected reason=\"{}\" operatorId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
+                    rejectionReason,
+                    operatorId,
+                    sanitizeSchemeId(stateSchemeId),
+                    stateResolvedSchemeId.isPresent(),
+                    sanitizeSchemeId(centreSchemeId),
+                    centreResolvedSchemeId.isPresent());
+            throw new IllegalStateException("Operator is not mapped to the provided state or centre scheme");
+        }
+
+        // Scheme exists but the operator is not mapped to it -> record against the existing scheme.
+        if (schemeExistsButNotMapped) {
+            Long existingSchemeId = stateResolvedSchemeId.orElseGet(centreResolvedSchemeId::get);
+            // Only flag OPERATOR_NOT_MAPPED for a real operator; a sentinel operator is already flagged
+            // via UNKNOWN_OPERATOR and is never expected to be mapped to anything.
+            int bits = operatorIsSentinel ? IngestionSource.NORMAL : IngestionSource.OPERATOR_NOT_MAPPED;
+            log.info("assam_reading_lenient reason=\"operator_not_mapped_to_scheme\" operatorId={} schemeId={} stateSchemeId={} stateSchemeFound={} centreSchemeId={} centreSchemeFound={}",
+                    operatorId,
+                    existingSchemeId,
+                    sanitizeSchemeId(stateSchemeId),
+                    stateResolvedSchemeId.isPresent(),
+                    sanitizeSchemeId(centreSchemeId),
+                    centreResolvedSchemeId.isPresent());
+            return new SchemeResolution(existingSchemeId, bits);
+        }
+
+        // Scheme id not in our records at all -> auto-provision a placeholder scheme.
+        Long placeholderSchemeId = telemetryTenantRepository.getOrCreatePlaceholderScheme(schemaName, stateSchemeId, centreSchemeId);
+        log.info("assam_reading_lenient reason=\"scheme_not_found\" auto_provisioned_scheme_id={} operatorId={} stateSchemeId={} centreSchemeId={}",
+                placeholderSchemeId,
                 operatorId,
                 sanitizeSchemeId(stateSchemeId),
-                stateResolvedSchemeId.isPresent(),
-                sanitizeSchemeId(centreSchemeId),
-                centreResolvedSchemeId.isPresent());
-
-        throw new IllegalStateException("Operator is not mapped to the provided state or centre scheme");
+                sanitizeSchemeId(centreSchemeId));
+        return new SchemeResolution(placeholderSchemeId, IngestionSource.UNKNOWN_SCHEME);
     }
 
     private String sanitizeSchemeId(String schemeId) {
