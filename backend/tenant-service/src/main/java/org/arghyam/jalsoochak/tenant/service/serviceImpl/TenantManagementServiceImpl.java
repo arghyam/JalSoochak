@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -109,6 +110,10 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     @Override
     @Transactional
     public TenantResponseDTO createTenant(CreateTenantRequestDTO request) {
+        // Normalize to the canonical (upper-case) state code so a mixed-case request still matches
+        // a pre-seeded REGISTERED tenant instead of inserting a duplicate. All downstream repository
+        // calls (findByStateCode, onboardTenant, createTenant) then operate on the same canonical value.
+        request.setStateCode(request.getStateCode().trim().toUpperCase(Locale.ROOT));
         log.info("Onboarding tenant – stateCode: {}, name: {}", request.getStateCode(), request.getName());
 
         // Single Tenant Mode: fast-fail before any write. DataIntegrityViolationException is caught

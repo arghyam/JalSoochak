@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import org.arghyam.jalsoochak.user.constants.TenantStatusConstants;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.repository.records.AdminUserRow;
@@ -36,15 +37,15 @@ public class UserCommonRepository {
     // --- Tenant lookups ---
 
     public boolean existsTenantByStateCode(String stateCode) {
-        // Excludes pre-seeded REGISTERED (7) tenants: a not-yet-onboarded tenant cannot be invited into.
+        // Excludes pre-seeded REGISTERED tenants: a not-yet-onboarded tenant cannot be invited into.
         String sql = """
                 SELECT EXISTS (
                     SELECT 1
                     FROM common_schema.tenant_master_table
                     WHERE LOWER(state_code) = LOWER(?)
-                      AND status <> 7
+                      AND status <> %d
                 )
-                """;
+                """.formatted(TenantStatusConstants.REGISTERED);
         Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, stateCode);
         return Boolean.TRUE.equals(exists);
     }
@@ -94,7 +95,7 @@ public class UserCommonRepository {
      * round-trip instead of two separate lookups.
      */
     public boolean userBelongsToTenant(Long userId, String tenantStateCode) {
-        // Blocked statuses: INACTIVE(0), SUSPENDED(4), ARCHIVED(6), REGISTERED(7 - not yet onboarded).
+        // Blocked statuses: INACTIVE(0), SUSPENDED(4), ARCHIVED(6), REGISTERED (7 - not yet onboarded).
         String sql = """
                 SELECT EXISTS (
                     SELECT 1
@@ -102,9 +103,9 @@ public class UserCommonRepository {
                     JOIN common_schema.tenant_master_table t ON t.id = u.tenant_id
                     WHERE u.id = ?
                     AND UPPER(t.state_code) = UPPER(?)
-                    AND t.status NOT IN (0, 4, 6, 7)
+                    AND t.status NOT IN (0, 4, 6, %d)
                 )
-                """;
+                """.formatted(TenantStatusConstants.REGISTERED);
         Boolean result = jdbcTemplate.queryForObject(sql, Boolean.class, userId, tenantStateCode);
         return Boolean.TRUE.equals(result);
     }
@@ -138,10 +139,11 @@ public class UserCommonRepository {
     }
 
     public List<String> findAllTenantStateCodes() {
-        // Excludes pre-seeded REGISTERED (7) tenants, which have no provisioned schema to query.
+        // Excludes pre-seeded REGISTERED tenants, which have no provisioned schema to query.
         return jdbcTemplate.queryForList(
                 "SELECT state_code FROM common_schema.tenant_master_table "
-                        + "WHERE id != 0 AND status <> 7 ORDER BY state_code",
+                        + "WHERE id != 0 AND status <> " + TenantStatusConstants.REGISTERED
+                        + " ORDER BY state_code",
                 String.class);
     }
 
@@ -151,13 +153,13 @@ public class UserCommonRepository {
      * Used for SUPER_STATE_ADMIN role assignment in STM.
      */
     public Optional<Integer> findSingleTenant() {
-        // Excludes pre-seeded REGISTERED (7) tenants so STM resolves only an onboarded tenant.
+        // Excludes pre-seeded REGISTERED tenants so STM resolves only an onboarded tenant.
         String sql = """
                 SELECT id
                 FROM common_schema.tenant_master_table
-                WHERE id != 0 AND deleted_at IS NULL AND status <> 7
+                WHERE id != 0 AND deleted_at IS NULL AND status <> %d
                 LIMIT 1
-                """;
+                """.formatted(TenantStatusConstants.REGISTERED);
         List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> rs.getInt("id"));
         return rows.stream().findFirst();
     }
