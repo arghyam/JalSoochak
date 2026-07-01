@@ -425,6 +425,152 @@ public class TelemetryTenantRepository {
         return Boolean.TRUE.equals(exists);
     }
 
+    // ============================================================
+    // LENIENT-INGEST: helpers to record submissions whose scheme id
+    // or operator phone is missing from the tenant master data.
+    // Remove this block (and callers) to revert the feature.
+    // ============================================================
+
+    private static final String LENIENT_UNKNOWN_OPERATOR_EMAIL = "unknown-operator@auto.jalsoochak.invalid";
+    private static final int LENIENT_UNKNOWN_OPERATOR_USER_TYPE = 0;
+    private static final int LENIENT_UNKNOWN_OPERATOR_STATUS = 0;
+
+    /** Public accessor for the tenant schema name (e.g. "tenant_as") from a tenant id. */
+    public Optional<String> findSchemaNameByTenantId(Integer tenantId) {
+        return findSchemaByTenantId(tenantId);
+    }
+
+    /**
+     * LENIENT-INGEST: returns the id of an auto-provisioned placeholder scheme for the given
+     * submitted state/centre scheme ids, creating one (flagged is_auto_provisioned) if none exists.
+     * Placeholders are reused per submitted id pair so repeated submissions do not fan out rows.
+     */
+    public Long getOrCreatePlaceholderScheme(String schemaName, String stateSchemeId, String centreSchemeId) {
+        validateSchemaName(schemaName);
+        String state = stateSchemeId == null ? "" : stateSchemeId.trim();
+        String centre = centreSchemeId == null ? "" : centreSchemeId.trim();
+
+        String findSql = String.format("""
+                SELECT id
+                FROM %s.scheme_master_table
+                WHERE is_auto_provisioned = TRUE
+                  AND state_scheme_id = ?
+                  AND centre_scheme_id = ?
+                  AND deleted_at IS NULL
+                ORDER BY id
+                LIMIT 1
+                """, schemaName);
+        List<Long> existing = jdbcTemplate.query(findSql, (rs, n) -> toLong(rs.getObject("id")), state, centre);
+        if (!existing.isEmpty()) {
+            return existing.get(0);
+        }
+
+        String label = !state.isEmpty() ? ("state:" + state) : ("centre:" + centre);
+        String placeholderName = "Auto-provisioned scheme (" + label + ")";
+        String insertSql = String.format("""
+                INSERT INTO %s.scheme_master_table
+                    (state_scheme_id, centre_scheme_id, scheme_name, work_status, operating_status,
+                     is_auto_provisioned, created_at, updated_at)
+                VALUES (?, ?, ?, 0, 0, TRUE, NOW(), NOW())
+                RETURNING id
+                """, schemaName);
+        try {
+            Number id = jdbcTemplate.queryForObject(insertSql, Number.class, state, centre, placeholderName);
+            return id != null ? id.longValue() : null;
+        } catch (org.springframework.dao.DataIntegrityViolationException race) {
+            List<Long> afterRace = jdbcTemplate.query(findSql, (rs, n) -> toLong(rs.getObject("id")), state, centre);
+            return afterRace.stream().findFirst().orElseThrow(() -> race);
+        }
+    }
+
+    /**
+     * LENIENT-INGEST: returns the id of the single sentinel "Unknown operator" user for the tenant,
+     * creating it (flagged is_auto_provisioned, status inactive) if it does not exist yet. Used as
+     * created_by/updated_by when a submission arrives from a phone not present in user_table.
+     */
+    public Long getOrCreateUnknownOperatorUserId(String schemaName, Integer tenantId) {
+        validateSchemaName(schemaName);
+        String findSql = String.format("""
+                SELECT id
+                FROM %s.user_table
+                WHERE is_auto_provisioned = TRUE
+                  AND email = ?
+                ORDER BY id
+                LIMIT 1
+                """, schemaName);
+        List<Long> existing = jdbcTemplate.query(findSql, (rs, n) -> toLong(rs.getObject("id")), LENIENT_UNKNOWN_OPERATOR_EMAIL);
+        if (!existing.isEmpty()) {
+            return existing.get(0);
+        }
+
+        String insertSql = String.format("""
+                INSERT INTO %s.user_table
+                    (tenant_id, title, email, user_type, phone_number, status, is_auto_provisioned, created_at, updated_at)
+                VALUES (?, 'Unknown Operator', ?, ?, 'UNKNOWN', ?, TRUE, NOW(), NOW())
+                RETURNING id
+                """, schemaName);
+        try {
+            Number id = jdbcTemplate.queryForObject(
+                    insertSql,
+                    Number.class,
+                    tenantId,
+                    LENIENT_UNKNOWN_OPERATOR_EMAIL,
+                    LENIENT_UNKNOWN_OPERATOR_USER_TYPE,
+                    LENIENT_UNKNOWN_OPERATOR_STATUS);
+            return id != null ? id.longValue() : null;
+        } catch (org.springframework.dao.DataIntegrityViolationException race) {
+            List<Long> afterRace = jdbcTemplate.query(findSql, (rs, n) -> toLong(rs.getObject("id")), LENIENT_UNKNOWN_OPERATOR_EMAIL);
+            return afterRace.stream().findFirst().orElseThrow(() -> race);
+        }
+    }
+
+    /**
+     * LENIENT-INGEST: HMAC of the digit-normalized submitted phone, stored on the reading row so a
+     * missing-operator submission can be reconciled without persisting the raw (PII) phone number.
+     */
+    public String hashSubmittedPhone(String phoneNumber) {
+        String normalized = normalizePhone(phoneNumber);
+        if (normalized == null || normalized.isBlank()) {
+            return null;
+        }
+        return piiEncryptionService.hmac(normalized);
+    }
+
+    /**
+     * LENIENT-INGEST: tags an already-inserted flow_reading row with the ingestion source bitmask and
+     * the raw submitted scheme ids / phone hash. No-op when the tracking columns are absent (pre-V31).
+     */
+    public void applyIngestionTracking(String schemaName,
+                                       Long readingId,
+                                       int ingestionSource,
+                                       String submittedStateSchemeId,
+                                       String submittedCentreSchemeId,
+                                       String submittedPhoneHash) {
+        validateSchemaName(schemaName);
+        if (readingId == null || !columnExists(schemaName, "flow_reading_table", "ingestion_source")) {
+            return;
+        }
+        String sql = String.format("""
+                UPDATE %s.flow_reading_table
+                SET ingestion_source = ?,
+                    submitted_state_scheme_id = ?,
+                    submitted_centre_scheme_id = ?,
+                    submitted_phone_hash = ?
+                WHERE id = ?
+                """, schemaName);
+        jdbcTemplate.update(
+                sql,
+                ingestionSource,
+                blankToNull(submittedStateSchemeId),
+                blankToNull(submittedCentreSchemeId),
+                blankToNull(submittedPhoneHash),
+                readingId);
+    }
+
+    private static String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
     public Optional<Long> findSectionOfficerUserIdForScheme(String schemaName, Long schemeId) {
         List<Long> userIds = findSectionOfficerUserIdsForScheme(schemaName, schemeId);
         return userIds.stream().findFirst();
