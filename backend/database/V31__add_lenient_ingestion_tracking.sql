@@ -36,44 +36,62 @@ BEGIN
     FOR tenant_schema IN
         SELECT nspname FROM pg_namespace WHERE nspname LIKE 'tenant\_%' ESCAPE '\'
     LOOP
-        -- flow_reading_table tracking columns
-        EXECUTE format(
-            'ALTER TABLE %1$I.flow_reading_table
-                 ADD COLUMN IF NOT EXISTS ingestion_source           SMALLINT     NOT NULL DEFAULT 0,
-                 ADD COLUMN IF NOT EXISTS submitted_state_scheme_id  VARCHAR(255),
-                 ADD COLUMN IF NOT EXISTS submitted_centre_scheme_id VARCHAR(255),
-                 ADD COLUMN IF NOT EXISTS submitted_phone_hash       VARCHAR(64)',
-            tenant_schema);
+        -- Guard every table independently with to_regclass: a partially-provisioned schema that is
+        -- missing one of these tables must be skipped for that table only, never abort the whole
+        -- migration. (ALTER TABLE IF EXISTS alone is not enough — the follow-up CREATE INDEX would
+        -- still fail with "relation does not exist" on the missing table.)
 
-        -- Partial index: only leniently-ingested rows are ever filtered on this column,
-        -- so keep the index small.
-        EXECUTE format(
-            'CREATE INDEX IF NOT EXISTS idx_%1$s_flow_ingestion_source
-                 ON %1$I.flow_reading_table(ingestion_source)
-                 WHERE ingestion_source <> 0',
-            tenant_schema);
+        -- flow_reading_table tracking columns + partial index (only lenient rows are filtered here).
+        IF to_regclass(format('%I.flow_reading_table', tenant_schema)) IS NOT NULL THEN
+            EXECUTE format(
+                'ALTER TABLE %1$I.flow_reading_table
+                     ADD COLUMN IF NOT EXISTS ingestion_source           SMALLINT     NOT NULL DEFAULT 0,
+                     ADD COLUMN IF NOT EXISTS submitted_state_scheme_id  VARCHAR(255),
+                     ADD COLUMN IF NOT EXISTS submitted_centre_scheme_id VARCHAR(255),
+                     ADD COLUMN IF NOT EXISTS submitted_phone_hash       VARCHAR(64)',
+                tenant_schema);
+            EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS idx_%1$s_flow_ingestion_source
+                     ON %1$I.flow_reading_table(ingestion_source)
+                     WHERE ingestion_source <> 0',
+                tenant_schema);
+        END IF;
 
-        -- scheme_master_table auto-provision flag
-        EXECUTE format(
-            'ALTER TABLE %1$I.scheme_master_table
-                 ADD COLUMN IF NOT EXISTS is_auto_provisioned BOOLEAN NOT NULL DEFAULT FALSE',
-            tenant_schema);
-        EXECUTE format(
-            'CREATE INDEX IF NOT EXISTS idx_%1$s_scheme_auto_prov
-                 ON %1$I.scheme_master_table(is_auto_provisioned)
-                 WHERE is_auto_provisioned',
-            tenant_schema);
+        -- scheme_master_table auto-provision flag + indexes.
+        IF to_regclass(format('%I.scheme_master_table', tenant_schema)) IS NOT NULL THEN
+            EXECUTE format(
+                'ALTER TABLE %1$I.scheme_master_table
+                     ADD COLUMN IF NOT EXISTS is_auto_provisioned BOOLEAN NOT NULL DEFAULT FALSE',
+                tenant_schema);
+            EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS idx_%1$s_scheme_auto_prov
+                     ON %1$I.scheme_master_table(is_auto_provisioned)
+                     WHERE is_auto_provisioned',
+                tenant_schema);
+            -- Partial UNIQUE index so exactly one placeholder scheme exists per submitted
+            -- (state_scheme_id, centre_scheme_id) pair. This backs the get-or-create dedup in
+            -- TelemetryTenantRepository.getOrCreatePlaceholderScheme: without it, concurrent
+            -- unknown-scheme submissions would fan out duplicate placeholder schemes. Safe to build
+            -- now because is_auto_provisioned was just added defaulting to FALSE (no rows match yet).
+            EXECUTE format(
+                'CREATE UNIQUE INDEX IF NOT EXISTS uq_%1$s_scheme_auto_prov_ids
+                     ON %1$I.scheme_master_table(state_scheme_id, centre_scheme_id)
+                     WHERE is_auto_provisioned',
+                tenant_schema);
+        END IF;
 
-        -- user_table auto-provision flag (sentinel operator)
-        EXECUTE format(
-            'ALTER TABLE %1$I.user_table
-                 ADD COLUMN IF NOT EXISTS is_auto_provisioned BOOLEAN NOT NULL DEFAULT FALSE',
-            tenant_schema);
-        EXECUTE format(
-            'CREATE INDEX IF NOT EXISTS idx_%1$s_user_auto_prov
-                 ON %1$I.user_table(is_auto_provisioned)
-                 WHERE is_auto_provisioned',
-            tenant_schema);
+        -- user_table auto-provision flag (sentinel operator) + index.
+        IF to_regclass(format('%I.user_table', tenant_schema)) IS NOT NULL THEN
+            EXECUTE format(
+                'ALTER TABLE %1$I.user_table
+                     ADD COLUMN IF NOT EXISTS is_auto_provisioned BOOLEAN NOT NULL DEFAULT FALSE',
+                tenant_schema);
+            EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS idx_%1$s_user_auto_prov
+                     ON %1$I.user_table(is_auto_provisioned)
+                     WHERE is_auto_provisioned',
+                tenant_schema);
+        END IF;
     END LOOP;
 END $$;
 
@@ -131,6 +149,12 @@ BEGIN
     EXECUTE format(
         'CREATE INDEX IF NOT EXISTS idx_%1$s_scheme_auto_prov
              ON %1$I.scheme_master_table(is_auto_provisioned)
+             WHERE is_auto_provisioned',
+        schema_name);
+    -- Partial UNIQUE index backing getOrCreatePlaceholderScheme dedup (see Part A for rationale).
+    EXECUTE format(
+        'CREATE UNIQUE INDEX IF NOT EXISTS uq_%1$s_scheme_auto_prov_ids
+             ON %1$I.scheme_master_table(state_scheme_id, centre_scheme_id)
              WHERE is_auto_provisioned',
         schema_name);
 

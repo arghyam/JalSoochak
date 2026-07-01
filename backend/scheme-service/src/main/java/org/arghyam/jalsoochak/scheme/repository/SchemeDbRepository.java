@@ -81,9 +81,9 @@ public class SchemeDbRepository {
                        fhtc_count, planned_fhtc, house_hold_count,
                        latitude, longitude, channel, work_status, operating_status
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                 ORDER BY id DESC
-                """, schemaName);
+                """, schemaName, autoProvisionedExclusion(schemaName));
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> SchemeDTO.builder()
                 .id(rs.getInt("id"))
@@ -353,11 +353,11 @@ public class SchemeDbRepository {
                        fhtc_count, planned_fhtc, house_hold_count,
                        latitude, longitude, channel, work_status, operating_status
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                   %s
                 %s
                 LIMIT ? OFFSET ?
-                """, schemaName, where.sql(), orderBy);
+                """, schemaName, autoProvisionedExclusion(schemaName), where.sql(), orderBy);
 
         List<Object> args = new ArrayList<>(where.args());
         args.add(limit);
@@ -394,9 +394,9 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT COUNT(1)
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                   %s
-                """, schemaName, where.sql());
+                """, schemaName, autoProvisionedExclusion(schemaName), where.sql());
         Long total = jdbcTemplate.queryForObject(sql, Long.class, where.args().toArray());
         return total == null ? 0 : total;
     }
@@ -671,12 +671,13 @@ public class SchemeDbRepository {
 
     public SchemeCounts countActiveInactiveSchemes(String schemaName) {
         validateSchemaName(schemaName);
+        String exclusion = autoProvisionedExclusion(schemaName);
         String sql = String.format("""
                 SELECT
-                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status = 1) AS active,
-                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status <> 1) AS inactive
+                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status = 1%s) AS active,
+                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status <> 1%s) AS inactive
                 FROM %s.scheme_master_table
-                """, schemaName);
+                """, exclusion, exclusion, schemaName);
 
         return jdbcTemplate.queryForObject(sql, (rs, rowNum) ->
                 new SchemeCounts(rs.getLong("active"), rs.getLong("inactive")));
@@ -687,8 +688,8 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT COUNT(1)
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
-                """, schemaName);
+                WHERE deleted_at IS NULL%s
+                """, schemaName, autoProvisionedExclusion(schemaName));
         Long total = jdbcTemplate.queryForObject(sql, Long.class);
         return total == null ? 0 : total;
     }
@@ -698,10 +699,10 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT work_status AS code, COUNT(1) AS cnt
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                 GROUP BY work_status
                 ORDER BY work_status
-                """, schemaName);
+                """, schemaName, autoProvisionedExclusion(schemaName));
         return jdbcTemplate.query(sql, (rs, rowNum) -> CodeCountDTO.builder()
                 .status(workStatusLabel((Integer) rs.getObject("code")))
                 .count(rs.getLong("cnt"))
@@ -713,10 +714,10 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT operating_status AS code, COUNT(1) AS cnt
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                 GROUP BY operating_status
                 ORDER BY operating_status
-                """, schemaName);
+                """, schemaName, autoProvisionedExclusion(schemaName));
         return jdbcTemplate.query(sql, (rs, rowNum) -> CodeCountDTO.builder()
                 .status(operatingStatusLabel((Integer) rs.getObject("code")))
                 .count(rs.getLong("cnt"))
@@ -1618,6 +1619,18 @@ public class SchemeDbRepository {
             List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> 1, schemaName, tableName, columnName);
             return !rows.isEmpty();
         });
+    }
+
+    /**
+     * LENIENT-INGEST: SQL fragment that excludes auto-provisioned placeholder schemes (created by the
+     * telemetry lenient-ingestion path for submissions whose scheme id is unknown) from registry
+     * counts and lists, so they never inflate scheme totals or dashboard breakdowns. Guarded by
+     * {@link #columnExists} so it is a safe no-op on schemas not yet migrated to V31.
+     */
+    private String autoProvisionedExclusion(String schemaName) {
+        return columnExists(schemaName, "scheme_master_table", "is_auto_provisioned")
+                ? " AND is_auto_provisioned = FALSE"
+                : "";
     }
 
     /**

@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -43,6 +44,11 @@ class SchemeDbRepositoryTest {
     void listSchemes_andCountSchemes_mapAndReturnData() throws Exception {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
                 .thenAnswer(invocation -> {
+                    // columnExists() probes information_schema; return "absent" so this test keeps
+                    // exercising the pre-existing (unfiltered) query shape.
+                    if (invocation.getArgument(0, String.class).contains("information_schema")) {
+                        return List.of();
+                    }
                     @SuppressWarnings("unchecked")
                     RowMapper<SchemeDTO> mapper = invocation.getArgument(1);
                     ResultSet rs = org.mockito.Mockito.mock(ResultSet.class);
@@ -219,5 +225,76 @@ class SchemeDbRepositoryTest {
 
         assertThat(snapshots).containsKey("ss-1");
         assertThat(snapshots.get("ss-1").schemeName()).isEqualTo("Scheme");
+    }
+
+    // LENIENT-INGEST: auto-provisioned placeholder schemes must be excluded from registry counts so
+    // they don't inflate scheme totals. The exclusion is applied only when the is_auto_provisioned
+    // column is present (post-V31), otherwise it is a safe no-op.
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemesTotal_excludesAutoProvisionedWhenColumnPresent() {
+        stubColumnExists(true);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class))).thenReturn(3L);
+
+        long total = repository.countSchemesTotal("tenant_as");
+
+        assertThat(total).isEqualTo(3L);
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), eq(Long.class));
+        assertThat(sqlCaptor.getValue()).contains("is_auto_provisioned = FALSE");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemesTotal_countsAllWhenColumnAbsent() {
+        stubColumnExists(false);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class))).thenReturn(9L);
+
+        long total = repository.countSchemesTotal("tenant_ka");
+
+        assertThat(total).isEqualTo(9L);
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), eq(Long.class));
+        assertThat(sqlCaptor.getValue()).doesNotContain("is_auto_provisioned");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemes_excludesAutoProvisionedWhenColumnPresent() {
+        stubColumnExists(true);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(2L);
+
+        long total = repository.countSchemes("tenant_as", null, null, null, null, null, null);
+
+        assertThat(total).isEqualTo(2L);
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), eq(Long.class), any(Object[].class));
+        assertThat(sqlCaptor.getValue()).contains("is_auto_provisioned = FALSE");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countActiveInactiveSchemes_excludesAutoProvisionedFromBothFiltersWhenColumnPresent() {
+        stubColumnExists(true);
+        when(jdbcTemplate.queryForObject(anyString(), any(RowMapper.class)))
+                .thenReturn(new SchemeDbRepository.SchemeCounts(1L, 2L));
+
+        repository.countActiveInactiveSchemes("tenant_as");
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), any(RowMapper.class));
+        // Both the active and inactive FILTERs must exclude placeholders, otherwise the two counts
+        // would be computed over different populations.
+        String sql = sqlCaptor.getValue();
+        int occurrences = sql.split("is_auto_provisioned = FALSE", -1).length - 1;
+        assertThat(occurrences).isEqualTo(2);
+    }
+
+    // Makes SchemeDbRepository.columnExists("...","scheme_master_table","is_auto_provisioned") resolve
+    // to the desired value by stubbing its information_schema lookup (a 3-arg query call).
+    @SuppressWarnings("unchecked")
+    private void stubColumnExists(boolean present) {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(), any(), any()))
+                .thenReturn(present ? List.of(1) : List.of());
     }
 }

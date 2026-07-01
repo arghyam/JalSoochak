@@ -467,11 +467,13 @@ public class TelemetryTenantRepository {
 
         String label = !state.isEmpty() ? ("state:" + state) : ("centre:" + centre);
         String placeholderName = "Auto-provisioned scheme (" + label + ")";
+        // LENIENT-INGEST: placeholders are created is_active = FALSE so they never inflate active-scheme
+        // counts/dashboards; they stay discoverable via is_auto_provisioned for later reconciliation.
         String insertSql = String.format("""
                 INSERT INTO %s.scheme_master_table
                     (state_scheme_id, centre_scheme_id, scheme_name, work_status, operating_status,
-                     is_auto_provisioned, created_at, updated_at)
-                VALUES (?, ?, ?, 0, 0, TRUE, NOW(), NOW())
+                     is_auto_provisioned, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, 0, 0, TRUE, FALSE, NOW(), NOW())
                 RETURNING id
                 """, schemaName);
         try {
