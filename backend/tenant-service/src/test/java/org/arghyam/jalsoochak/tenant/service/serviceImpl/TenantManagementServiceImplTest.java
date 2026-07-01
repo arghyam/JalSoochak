@@ -227,16 +227,21 @@ class TenantManagementServiceImplTest {
                     .stateCode("TT")
                     .build();
 
-            TenantResponseDTO existing = TenantResponseDTO.builder().build();
+            TenantResponseDTO existing = TenantResponseDTO.builder()
+                    .id(1)
+                    .stateCode("TT")
+                    .status(TenantStatusEnum.ACTIVE.name())
+                    .build();
             when(tenantCommonRepository.findByStateCode("TT"))
                     .thenReturn(Optional.of(existing));
 
             // Act & Assert
-            assertThrows(IllegalStateException.class, 
+            assertThrows(IllegalStateException.class,
                     () -> tenantManagementService.createTenant(request));
-            
+
             verify(tenantCommonRepository).findByStateCode("TT");
             verify(tenantCommonRepository, never()).createTenant(any(), any());
+            verify(tenantCommonRepository, never()).onboardTenant(any(), any(), any());
         }
 
         @Test
@@ -337,6 +342,53 @@ class TenantManagementServiceImplTest {
             // Level 3+ must NOT be seeded (hierarchy only has 2 LGD and 1 dept level)
             verify(tenantCommonRepository, never()).upsertConfig(eq(1), eq("DISPLAY_MAP_LGD_LEVEL_3"), anyString(), any());
             verify(tenantCommonRepository, never()).upsertConfig(eq(1), eq("DISPLAY_DEPARTMENT_MAP_LEVEL_2"), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Should onboard a pre-seeded REGISTERED tenant in place without inserting a new row")
+        void testCreateTenant_OnboardsRegisteredTenant() throws Exception {
+            // Arrange
+            CreateTenantRequestDTO request = CreateTenantRequestDTO.builder()
+                    .name("Test Tenant")
+                    .stateCode("TT")
+                    .lgdCode(123)
+                    .build();
+
+            TenantResponseDTO registered = TenantResponseDTO.builder()
+                    .id(7)
+                    .name("Seeded Name")
+                    .stateCode("TT")
+                    .status(TenantStatusEnum.REGISTERED.name())
+                    .build();
+            TenantResponseDTO onboarded = TenantResponseDTO.builder()
+                    .id(7)
+                    .name("Test Tenant")
+                    .stateCode("TT")
+                    .status(TenantStatusEnum.ONBOARDED.name())
+                    .build();
+
+            when(tenantCommonRepository.findByStateCode("TT")).thenReturn(Optional.of(registered));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.onboardTenant(eq("TT"), any(CreateTenantRequestDTO.class), eq(100)))
+                    .thenReturn(Optional.of(onboarded));
+            when(tenantCommonRepository.upsertConfig(eq(7), eq("METER_CHANGE_REASONS"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
+            when(tenantCommonRepository.upsertConfig(eq(7), eq("SUPPLY_OUTAGE_REASONS"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
+            when(tenantCommonRepository.upsertConfig(eq(7), eq("LOCATION_CHECK_REQUIRED"), anyString(), eq(100)))
+                    .thenReturn(Optional.of(ConfigDTO.builder().build()));
+
+            // Act
+            TenantResponseDTO result = tenantManagementService.createTenant(request);
+
+            // Assert — onboarded in place, id preserved, no insert
+            assertEquals(7, result.getId());
+            assertEquals(TenantStatusEnum.ONBOARDED.name(), result.getStatus());
+            verify(tenantCommonRepository).onboardTenant(eq("TT"), eq(request), eq(100));
+            verify(tenantCommonRepository, never()).createTenant(any(), any());
+            verify(tenantCommonRepository).provisionTenantSchema("tenant_tt");
+            verify(eventPublisher).publishEvent(any(TenantCreatedEvent.class));
         }
     }
 
