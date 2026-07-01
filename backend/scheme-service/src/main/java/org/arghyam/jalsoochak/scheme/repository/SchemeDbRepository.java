@@ -81,9 +81,9 @@ public class SchemeDbRepository {
                        fhtc_count, planned_fhtc, house_hold_count,
                        latitude, longitude, channel, work_status, operating_status
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                 ORDER BY id DESC
-                """, schemaName);
+                """, schemaName, autoProvisionedExclusion(schemaName));
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> SchemeDTO.builder()
                 .id(rs.getInt("id"))
@@ -161,9 +161,9 @@ public class SchemeDbRepository {
                        fhtc_count, planned_fhtc, house_hold_count,
                        latitude, longitude, channel, work_status, operating_status
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                 ORDER BY id DESC
-                """, schemaName);
+                """, schemaName, autoProvisionedExclusion(schemaName));
 
         jdbcTemplate.query(con -> {
             PreparedStatement ps = con.prepareStatement(sql);
@@ -189,6 +189,11 @@ public class SchemeDbRepository {
     public void streamAllSchemeMappings(String schemaName, Consumer<SchemeMappingDTO> consumer) {
         validateSchemaName(schemaName);
         boolean hasDept = hasDepartmentTables(schemaName);
+        // Exclude auto-provisioned placeholder schemes from the export, consistent with the registry
+        // lists/counts. Qualified to sm because this query joins several tables.
+        String schemeExclusion = columnExists(schemaName, "scheme_master_table", "is_auto_provisioned")
+                ? " AND sm.is_auto_provisioned = FALSE"
+                : "";
         String sql = hasDept
                 ? String.format("""
                 SELECT slm.id,
@@ -207,9 +212,9 @@ public class SchemeDbRepository {
                   ON sdm.scheme_id = sm.id AND sdm.deleted_at IS NULL
                 LEFT JOIN %s.department_location_master_table dept
                   ON dept.id = sdm.parent_department_id AND dept.deleted_at IS NULL
-                WHERE slm.deleted_at IS NULL
+                WHERE slm.deleted_at IS NULL%s
                 ORDER BY slm.id DESC
-                """, schemaName, schemaName, schemaName, schemaName, schemaName)
+                """, schemaName, schemaName, schemaName, schemaName, schemaName, schemeExclusion)
                 : String.format("""
                 SELECT slm.id,
                        sm.id AS scheme_id,
@@ -223,9 +228,9 @@ public class SchemeDbRepository {
                   ON sm.id = slm.scheme_id AND sm.deleted_at IS NULL
                 JOIN %s.lgd_location_master_table lgd
                   ON lgd.id = slm.parent_lgd_id AND lgd.deleted_at IS NULL
-                WHERE slm.deleted_at IS NULL
+                WHERE slm.deleted_at IS NULL%s
                 ORDER BY slm.id DESC
-                """, schemaName, schemaName, schemaName);
+                """, schemaName, schemaName, schemaName, schemeExclusion);
 
         jdbcTemplate.query(con -> {
             PreparedStatement ps = con.prepareStatement(sql);
@@ -353,11 +358,11 @@ public class SchemeDbRepository {
                        fhtc_count, planned_fhtc, house_hold_count,
                        latitude, longitude, channel, work_status, operating_status
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                   %s
                 %s
                 LIMIT ? OFFSET ?
-                """, schemaName, where.sql(), orderBy);
+                """, schemaName, autoProvisionedExclusion(schemaName), where.sql(), orderBy);
 
         List<Object> args = new ArrayList<>(where.args());
         args.add(limit);
@@ -394,9 +399,9 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT COUNT(1)
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                   %s
-                """, schemaName, where.sql());
+                """, schemaName, autoProvisionedExclusion(schemaName), where.sql());
         Long total = jdbcTemplate.queryForObject(sql, Long.class, where.args().toArray());
         return total == null ? 0 : total;
     }
@@ -671,12 +676,13 @@ public class SchemeDbRepository {
 
     public SchemeCounts countActiveInactiveSchemes(String schemaName) {
         validateSchemaName(schemaName);
+        String exclusion = autoProvisionedExclusion(schemaName);
         String sql = String.format("""
                 SELECT
-                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status = 1) AS active,
-                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status <> 1) AS inactive
+                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status = 1%s) AS active,
+                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status <> 1%s) AS inactive
                 FROM %s.scheme_master_table
-                """, schemaName);
+                """, exclusion, exclusion, schemaName);
 
         return jdbcTemplate.queryForObject(sql, (rs, rowNum) ->
                 new SchemeCounts(rs.getLong("active"), rs.getLong("inactive")));
@@ -687,8 +693,8 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT COUNT(1)
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
-                """, schemaName);
+                WHERE deleted_at IS NULL%s
+                """, schemaName, autoProvisionedExclusion(schemaName));
         Long total = jdbcTemplate.queryForObject(sql, Long.class);
         return total == null ? 0 : total;
     }
@@ -698,10 +704,10 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT work_status AS code, COUNT(1) AS cnt
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                 GROUP BY work_status
                 ORDER BY work_status
-                """, schemaName);
+                """, schemaName, autoProvisionedExclusion(schemaName));
         return jdbcTemplate.query(sql, (rs, rowNum) -> CodeCountDTO.builder()
                 .status(workStatusLabel((Integer) rs.getObject("code")))
                 .count(rs.getLong("cnt"))
@@ -713,10 +719,10 @@ public class SchemeDbRepository {
         String sql = String.format("""
                 SELECT operating_status AS code, COUNT(1) AS cnt
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                 GROUP BY operating_status
                 ORDER BY operating_status
-                """, schemaName);
+                """, schemaName, autoProvisionedExclusion(schemaName));
         return jdbcTemplate.query(sql, (rs, rowNum) -> CodeCountDTO.builder()
                 .status(operatingStatusLabel((Integer) rs.getObject("code")))
                 .count(rs.getLong("cnt"))
@@ -1618,6 +1624,18 @@ public class SchemeDbRepository {
             List<Integer> rows = jdbcTemplate.query(sql, (rs, n) -> 1, schemaName, tableName, columnName);
             return !rows.isEmpty();
         });
+    }
+
+    /**
+     * LENIENT-INGEST: SQL fragment that excludes auto-provisioned placeholder schemes (created by the
+     * telemetry lenient-ingestion path for submissions whose scheme id is unknown) from registry
+     * counts and lists, so they never inflate scheme totals or dashboard breakdowns. Guarded by
+     * {@link #columnExists} so it is a safe no-op on schemas not yet migrated to V31.
+     */
+    private String autoProvisionedExclusion(String schemaName) {
+        return columnExists(schemaName, "scheme_master_table", "is_auto_provisioned")
+                ? " AND is_auto_provisioned = FALSE"
+                : "";
     }
 
     /**

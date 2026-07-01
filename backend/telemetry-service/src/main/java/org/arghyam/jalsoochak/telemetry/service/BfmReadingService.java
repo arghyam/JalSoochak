@@ -54,10 +54,16 @@ public class BfmReadingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Operator not found"));
         Integer tenantId = operatorInRequest.tenantId();
 
+        // LENIENT-INGEST: submissions recorded through the lenient path (missing scheme / missing
+        // operator / operator-not-mapped) carry a non-zero ingestionSource. For those we skip the
+        // operator-to-scheme mapping guard so the reading is still recorded and counted.
+        boolean lenientIngestion = request.getIngestionSource() != null
+                && request.getIngestionSource() != IngestionSource.NORMAL;
+
         boolean belongsToScheme = telemetryTenantRepository
                 .isOperatorMappedToScheme(schemaName, operatorInRequest.id(), request.getSchemeId());
 
-        if (!belongsToScheme) {
+        if (!belongsToScheme && !lenientIngestion) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
         FlowVisionResult ocrResult = null;
@@ -302,14 +308,33 @@ public class BfmReadingService {
                     .build();
         }
 
-        Long readingId = null;
+        Long readingId;
         Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName,
                 request.getSchemeId(),
                 operatorInRequest.id(),
                 LocalDate.from(readingAt)
         );
-        if (placeholderIdOpt.isPresent()) {
+        if (lenientIngestion) {
+            // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
+            // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
+            // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
+            readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
+                    schemaName,
+                    placeholderIdOpt.orElse(null),
+                    request.getSchemeId(),
+                    operatorInRequest.id(),
+                    readingAt,
+                    extractedReading,
+                    effectiveConfirmedReading,
+                    correlationId,
+                    request.getReadingUrl(),
+                    request.getMeterChangeReason(),
+                    request.getIngestionSource(),
+                    request.getSubmittedStateSchemeId(),
+                    request.getSubmittedCentreSchemeId(),
+                    request.getSubmittedPhoneHash());
+        } else if (placeholderIdOpt.isPresent()) {
             readingId = placeholderIdOpt.get();
             telemetryTenantRepository.updateFlowReadingFromIngestion(
                     schemaName,
