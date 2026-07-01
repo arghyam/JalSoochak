@@ -308,14 +308,33 @@ public class BfmReadingService {
                     .build();
         }
 
-        Long readingId = null;
+        Long readingId;
         Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName,
                 request.getSchemeId(),
                 operatorInRequest.id(),
                 LocalDate.from(readingAt)
         );
-        if (placeholderIdOpt.isPresent()) {
+        if (lenientIngestion) {
+            // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
+            // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
+            // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
+            readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
+                    schemaName,
+                    placeholderIdOpt.orElse(null),
+                    request.getSchemeId(),
+                    operatorInRequest.id(),
+                    readingAt,
+                    extractedReading,
+                    effectiveConfirmedReading,
+                    correlationId,
+                    request.getReadingUrl(),
+                    request.getMeterChangeReason(),
+                    request.getIngestionSource(),
+                    request.getSubmittedStateSchemeId(),
+                    request.getSubmittedCentreSchemeId(),
+                    request.getSubmittedPhoneHash());
+        } else if (placeholderIdOpt.isPresent()) {
             readingId = placeholderIdOpt.get();
             telemetryTenantRepository.updateFlowReadingFromIngestion(
                     schemaName,
@@ -340,18 +359,6 @@ public class BfmReadingService {
                     request.getReadingUrl(),
                     request.getMeterChangeReason()
             );
-        }
-
-        // LENIENT-INGEST: tag the row with why it was recorded leniently and the raw submitted
-        // scheme ids / phone hash so it can be filtered and reconciled later.
-        if (lenientIngestion) {
-            telemetryTenantRepository.applyIngestionTracking(
-                    schemaName,
-                    readingId,
-                    request.getIngestionSource(),
-                    request.getSubmittedStateSchemeId(),
-                    request.getSubmittedCentreSchemeId(),
-                    request.getSubmittedPhoneHash());
         }
 
         BigDecimal lastConfirmedReading = latestSnapshotOpt

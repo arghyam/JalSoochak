@@ -161,9 +161,9 @@ public class SchemeDbRepository {
                        fhtc_count, planned_fhtc, house_hold_count,
                        latitude, longitude, channel, work_status, operating_status
                 FROM %s.scheme_master_table
-                WHERE deleted_at IS NULL
+                WHERE deleted_at IS NULL%s
                 ORDER BY id DESC
-                """, schemaName);
+                """, schemaName, autoProvisionedExclusion(schemaName));
 
         jdbcTemplate.query(con -> {
             PreparedStatement ps = con.prepareStatement(sql);
@@ -189,6 +189,11 @@ public class SchemeDbRepository {
     public void streamAllSchemeMappings(String schemaName, Consumer<SchemeMappingDTO> consumer) {
         validateSchemaName(schemaName);
         boolean hasDept = hasDepartmentTables(schemaName);
+        // Exclude auto-provisioned placeholder schemes from the export, consistent with the registry
+        // lists/counts. Qualified to sm because this query joins several tables.
+        String schemeExclusion = columnExists(schemaName, "scheme_master_table", "is_auto_provisioned")
+                ? " AND sm.is_auto_provisioned = FALSE"
+                : "";
         String sql = hasDept
                 ? String.format("""
                 SELECT slm.id,
@@ -207,9 +212,9 @@ public class SchemeDbRepository {
                   ON sdm.scheme_id = sm.id AND sdm.deleted_at IS NULL
                 LEFT JOIN %s.department_location_master_table dept
                   ON dept.id = sdm.parent_department_id AND dept.deleted_at IS NULL
-                WHERE slm.deleted_at IS NULL
+                WHERE slm.deleted_at IS NULL%s
                 ORDER BY slm.id DESC
-                """, schemaName, schemaName, schemaName, schemaName, schemaName)
+                """, schemaName, schemaName, schemaName, schemaName, schemaName, schemeExclusion)
                 : String.format("""
                 SELECT slm.id,
                        sm.id AS scheme_id,
@@ -223,9 +228,9 @@ public class SchemeDbRepository {
                   ON sm.id = slm.scheme_id AND sm.deleted_at IS NULL
                 JOIN %s.lgd_location_master_table lgd
                   ON lgd.id = slm.parent_lgd_id AND lgd.deleted_at IS NULL
-                WHERE slm.deleted_at IS NULL
+                WHERE slm.deleted_at IS NULL%s
                 ORDER BY slm.id DESC
-                """, schemaName, schemaName, schemaName);
+                """, schemaName, schemaName, schemaName, schemeExclusion);
 
         jdbcTemplate.query(con -> {
             PreparedStatement ps = con.prepareStatement(sql);

@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -288,6 +289,50 @@ class SchemeDbRepositoryTest {
         String sql = sqlCaptor.getValue();
         int occurrences = sql.split("is_auto_provisioned = FALSE", -1).length - 1;
         assertThat(occurrences).isEqualTo(2);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listSchemes_excludesAutoProvisionedWhenColumnPresent() {
+        // listSchemes probes columnExists and runs the main query through the same varargs overload,
+        // so distinguish them by SQL content (the probe hits information_schema).
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+                .thenAnswer(invocation -> invocation.getArgument(0, String.class).contains("information_schema")
+                        ? List.of(1)   // is_auto_provisioned column present
+                        : List.of());
+
+        repository.listSchemes("tenant_as", null, null, null, null, null, null, null, null, 0, 10);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate, atLeastOnce()).query(sqlCaptor.capture(), any(RowMapper.class), any(Object[].class));
+        assertThat(sqlCaptor.getAllValues())
+                .anyMatch(sql -> !sql.contains("information_schema") && sql.contains("is_auto_provisioned = FALSE"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemesByWorkStatus_excludesAutoProvisionedWhenColumnPresent() {
+        stubColumnExists(true);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(List.of());
+
+        repository.countSchemesByWorkStatus("tenant_as");
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class));
+        assertThat(sqlCaptor.getValue()).contains("is_auto_provisioned = FALSE");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemesByOperatingStatus_excludesAutoProvisionedWhenColumnPresent() {
+        stubColumnExists(true);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(List.of());
+
+        repository.countSchemesByOperatingStatus("tenant_as");
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class));
+        assertThat(sqlCaptor.getValue()).contains("is_auto_provisioned = FALSE");
     }
 
     // Makes SchemeDbRepository.columnExists("...","scheme_master_table","is_auto_provisioned") resolve

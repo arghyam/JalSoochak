@@ -76,7 +76,7 @@ BEGIN
             EXECUTE format(
                 'CREATE UNIQUE INDEX IF NOT EXISTS uq_%1$s_scheme_auto_prov_ids
                      ON %1$I.scheme_master_table(state_scheme_id, centre_scheme_id)
-                     WHERE is_auto_provisioned',
+                     WHERE is_auto_provisioned AND deleted_at IS NULL',
                 tenant_schema);
         END IF;
 
@@ -128,44 +128,53 @@ BEGIN
     -- Execute the existing provisioning logic first.
     PERFORM common_schema.create_tenant_schema_v31_base(schema_name);
 
-    -- LENIENT-INGEST: tracking columns for new tenant schemas.
-    EXECUTE format(
-        'ALTER TABLE IF EXISTS %1$I.flow_reading_table
-             ADD COLUMN IF NOT EXISTS ingestion_source           SMALLINT     NOT NULL DEFAULT 0,
-             ADD COLUMN IF NOT EXISTS submitted_state_scheme_id  VARCHAR(255),
-             ADD COLUMN IF NOT EXISTS submitted_centre_scheme_id VARCHAR(255),
-             ADD COLUMN IF NOT EXISTS submitted_phone_hash       VARCHAR(64)',
-        schema_name);
-    EXECUTE format(
-        'CREATE INDEX IF NOT EXISTS idx_%1$s_flow_ingestion_source
-             ON %1$I.flow_reading_table(ingestion_source)
-             WHERE ingestion_source <> 0',
-        schema_name);
+    -- LENIENT-INGEST: tracking columns for new tenant schemas. Guard each table with to_regclass so a
+    -- partially-provisioned schema is skipped per-table instead of aborting on the follow-up
+    -- CREATE INDEX (ALTER TABLE IF EXISTS alone is not enough — the index would still fail).
+    IF to_regclass(format('%I.flow_reading_table', schema_name)) IS NOT NULL THEN
+        EXECUTE format(
+            'ALTER TABLE %1$I.flow_reading_table
+                 ADD COLUMN IF NOT EXISTS ingestion_source           SMALLINT     NOT NULL DEFAULT 0,
+                 ADD COLUMN IF NOT EXISTS submitted_state_scheme_id  VARCHAR(255),
+                 ADD COLUMN IF NOT EXISTS submitted_centre_scheme_id VARCHAR(255),
+                 ADD COLUMN IF NOT EXISTS submitted_phone_hash       VARCHAR(64)',
+            schema_name);
+        EXECUTE format(
+            'CREATE INDEX IF NOT EXISTS idx_%1$s_flow_ingestion_source
+                 ON %1$I.flow_reading_table(ingestion_source)
+                 WHERE ingestion_source <> 0',
+            schema_name);
+    END IF;
 
-    EXECUTE format(
-        'ALTER TABLE IF EXISTS %1$I.scheme_master_table
-             ADD COLUMN IF NOT EXISTS is_auto_provisioned BOOLEAN NOT NULL DEFAULT FALSE',
-        schema_name);
-    EXECUTE format(
-        'CREATE INDEX IF NOT EXISTS idx_%1$s_scheme_auto_prov
-             ON %1$I.scheme_master_table(is_auto_provisioned)
-             WHERE is_auto_provisioned',
-        schema_name);
-    -- Partial UNIQUE index backing getOrCreatePlaceholderScheme dedup (see Part A for rationale).
-    EXECUTE format(
-        'CREATE UNIQUE INDEX IF NOT EXISTS uq_%1$s_scheme_auto_prov_ids
-             ON %1$I.scheme_master_table(state_scheme_id, centre_scheme_id)
-             WHERE is_auto_provisioned',
-        schema_name);
+    IF to_regclass(format('%I.scheme_master_table', schema_name)) IS NOT NULL THEN
+        EXECUTE format(
+            'ALTER TABLE %1$I.scheme_master_table
+                 ADD COLUMN IF NOT EXISTS is_auto_provisioned BOOLEAN NOT NULL DEFAULT FALSE',
+            schema_name);
+        EXECUTE format(
+            'CREATE INDEX IF NOT EXISTS idx_%1$s_scheme_auto_prov
+                 ON %1$I.scheme_master_table(is_auto_provisioned)
+                 WHERE is_auto_provisioned',
+            schema_name);
+        -- Partial UNIQUE index backing getOrCreatePlaceholderScheme dedup (see Part A for rationale).
+        -- Scoped to live rows so a soft-deleted placeholder never blocks reinserting the same ids.
+        EXECUTE format(
+            'CREATE UNIQUE INDEX IF NOT EXISTS uq_%1$s_scheme_auto_prov_ids
+                 ON %1$I.scheme_master_table(state_scheme_id, centre_scheme_id)
+                 WHERE is_auto_provisioned AND deleted_at IS NULL',
+            schema_name);
+    END IF;
 
-    EXECUTE format(
-        'ALTER TABLE IF EXISTS %1$I.user_table
-             ADD COLUMN IF NOT EXISTS is_auto_provisioned BOOLEAN NOT NULL DEFAULT FALSE',
-        schema_name);
-    EXECUTE format(
-        'CREATE INDEX IF NOT EXISTS idx_%1$s_user_auto_prov
-             ON %1$I.user_table(is_auto_provisioned)
-             WHERE is_auto_provisioned',
-        schema_name);
+    IF to_regclass(format('%I.user_table', schema_name)) IS NOT NULL THEN
+        EXECUTE format(
+            'ALTER TABLE %1$I.user_table
+                 ADD COLUMN IF NOT EXISTS is_auto_provisioned BOOLEAN NOT NULL DEFAULT FALSE',
+            schema_name);
+        EXECUTE format(
+            'CREATE INDEX IF NOT EXISTS idx_%1$s_user_auto_prov
+                 ON %1$I.user_table(is_auto_provisioned)
+                 WHERE is_auto_provisioned',
+            schema_name);
+    END IF;
 END;
 $func$;

@@ -63,10 +63,10 @@ public class TelemetryTenantRepository {
                 SELECT id
                 FROM %s.scheme_master_table
                 WHERE state_scheme_id = ?
-                  AND deleted_at IS NULL
+                  AND deleted_at IS NULL%s
                 ORDER BY id
                 LIMIT 1
-                """, schemaName);
+                """, schemaName, realSchemeOnlyFilter(schemaName));
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), stateSchemeId.trim());
         return rows.stream().findFirst();
     }
@@ -80,10 +80,10 @@ public class TelemetryTenantRepository {
                 SELECT id
                 FROM %s.scheme_master_table
                 WHERE centre_scheme_id = ?
-                  AND deleted_at IS NULL
+                  AND deleted_at IS NULL%s
                 ORDER BY id
                 LIMIT 1
-                """, schemaName);
+                """, schemaName, realSchemeOnlyFilter(schemaName));
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), centreSchemeId.trim());
         return rows.stream().findFirst();
     }
@@ -571,6 +571,53 @@ public class TelemetryTenantRepository {
 
     private static String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
+    /**
+     * LENIENT-INGEST: scheme-id resolvers must return only real schemes, never auto-provisioned
+     * placeholders — otherwise a placeholder would shadow a later-added real scheme and repeat
+     * unknown-scheme submissions would be tagged inconsistently. Guarded by columnExists so it is a
+     * safe no-op on schemas that predate V31.
+     */
+    private String realSchemeOnlyFilter(String schemaName) {
+        return columnExists(schemaName, "scheme_master_table", "is_auto_provisioned")
+                ? " AND is_auto_provisioned = FALSE"
+                : "";
+    }
+
+    /**
+     * LENIENT-INGEST: persists a flow_reading row (new insert, or update of a same-day placeholder row)
+     * together with its ingestion tracking in a single transaction, so a failure can never leave a
+     * recorded reading without its ingestion_source/submitted-id metadata. When {@code existingReadingId}
+     * is non-null the placeholder row is updated in place; otherwise a new row is inserted.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public Long persistFlowReadingWithTracking(String schemaName,
+                                               Long existingReadingId,
+                                               Long schemeId,
+                                               Long operatorId,
+                                               LocalDateTime readingAt,
+                                               BigDecimal extractedReading,
+                                               BigDecimal confirmedReading,
+                                               String correlationId,
+                                               String imageUrl,
+                                               String meterChangeReason,
+                                               int ingestionSource,
+                                               String submittedStateSchemeId,
+                                               String submittedCentreSchemeId,
+                                               String submittedPhoneHash) {
+        Long readingId;
+        if (existingReadingId != null) {
+            readingId = existingReadingId;
+            updateFlowReadingFromIngestion(schemaName, readingId, readingAt, extractedReading,
+                    confirmedReading, correlationId, imageUrl, meterChangeReason, operatorId);
+        } else {
+            readingId = createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading,
+                    confirmedReading, correlationId, imageUrl, meterChangeReason);
+        }
+        applyIngestionTracking(schemaName, readingId, ingestionSource, submittedStateSchemeId,
+                submittedCentreSchemeId, submittedPhoneHash);
+        return readingId;
     }
 
     public Optional<Long> findSectionOfficerUserIdForScheme(String schemaName, Long schemeId) {

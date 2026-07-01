@@ -41,6 +41,11 @@ public class GlificOperatorContextService {
      * caller can fall back to recording the submission against a sentinel operator.
      */
     public Optional<TelemetryOperatorWithSchema> tryResolveOperatorWithSchema(String contactId, Integer preferredTenantId) {
+        if (contactId == null || contactId.isBlank()) {
+            // A missing contactId is a validation error, not a lookup miss — let it propagate so the
+            // submission is rejected rather than silently recorded against the sentinel operator.
+            throw new IllegalStateException("contactId is required");
+        }
         try {
             return Optional.of(resolveOperatorWithSchema(contactId, preferredTenantId));
         } catch (IllegalStateException notFound) {
