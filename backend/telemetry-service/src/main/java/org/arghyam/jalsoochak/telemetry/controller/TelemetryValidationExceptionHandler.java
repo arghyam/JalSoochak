@@ -27,6 +27,8 @@ import java.util.stream.Collectors;
 public class TelemetryValidationExceptionHandler {
 
     private static final String READINGS_PATH = "/api/v1/telemetry/readings";
+    // Assam's integration hits both /readings and /readings/ (trailing slash), so treat both as the readings endpoint.
+    private static final String READINGS_PATH_TRAILING_SLASH = READINGS_PATH + "/";
 
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
 
@@ -35,7 +37,7 @@ public class TelemetryValidationExceptionHandler {
         String message = validationMessage(ex);
         String servletPath = requestPath(request);
 
-        if (READINGS_PATH.equals(servletPath)) {
+        if (isReadingsPath(servletPath)) {
             logReadingsValidationFailure(request, ex.getBindingResult().getTarget(), ex, message);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                     ReadingsApiResponse.builder()
@@ -56,7 +58,7 @@ public class TelemetryValidationExceptionHandler {
         String servletPath = requestPath(request);
         String message = "Malformed request body";
 
-        if (READINGS_PATH.equals(servletPath)) {
+        if (isReadingsPath(servletPath)) {
             log.info(
                     "reading_validation_rejected method={} api={} status=FAILED reason=\"{}\" exception=\"{}\" request=\"unreadable\"",
                     requestMethod(request),
@@ -76,6 +78,10 @@ public class TelemetryValidationExceptionHandler {
         }
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", message));
+    }
+
+    private boolean isReadingsPath(String servletPath) {
+        return READINGS_PATH.equals(servletPath) || READINGS_PATH_TRAILING_SLASH.equals(servletPath);
     }
 
     private String requestPath(HttpServletRequest request) {

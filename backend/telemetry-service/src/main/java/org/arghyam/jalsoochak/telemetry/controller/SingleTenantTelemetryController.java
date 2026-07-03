@@ -136,7 +136,7 @@ public class SingleTenantTelemetryController {
     }
 
     @PostMapping(
-            value = "/readings",
+            value = {"/readings", "/readings/"},
             consumes = "application/json",
             produces = "application/json"
     )
@@ -243,7 +243,7 @@ public class SingleTenantTelemetryController {
     }
 
     @PutMapping(
-            value = "/readings",
+            value = {"/readings", "/readings/"},
             consumes = "application/json",
             produces = "application/json"
     )
