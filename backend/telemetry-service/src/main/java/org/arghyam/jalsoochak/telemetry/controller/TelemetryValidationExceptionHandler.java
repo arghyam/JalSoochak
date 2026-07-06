@@ -45,6 +45,7 @@ public class TelemetryValidationExceptionHandler {
                             .data(ReadingsDataResponse.builder()
                                     .message(message)
                                     .qualityStatus("REJECTED")
+                                    .errorCode("validationFailed")
                                     .build())
                             .build()
             );
@@ -72,6 +73,7 @@ public class TelemetryValidationExceptionHandler {
                             .data(ReadingsDataResponse.builder()
                                     .message(message)
                                     .qualityStatus("REJECTED")
+                                    .errorCode("malformedRequest")
                                     .build())
                             .build()
             );

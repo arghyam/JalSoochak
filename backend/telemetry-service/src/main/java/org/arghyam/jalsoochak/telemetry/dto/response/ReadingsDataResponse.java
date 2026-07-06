@@ -15,5 +15,6 @@ public class ReadingsDataResponse {
     private String qualityStatus;
     private BigDecimal qualityConfidence;
     private BigDecimal lastConfirmedReading;
+    private String errorCode;
     private String message;
 }

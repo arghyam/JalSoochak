@@ -15,5 +15,6 @@ public class CreateReadingResponse {
     private BigDecimal lastConfirmedReading;
 
     private boolean success;
+    private String errorCode;
     private String message;
 }

@@ -111,6 +111,7 @@ public class BfmReadingService {
                             .message("Could not read meter value from image. Please retry with a clearer photo.")
                             .correlationId(UUID.randomUUID().toString())
                             .qualityStatus("REJECTED")
+                            .errorCode(flowVisionErrorCode(ocrResult))
                             .build();
                 }
                 finalReading = ocrResult.getAdjustedReading();
@@ -154,6 +155,7 @@ public class BfmReadingService {
                         .message("OCR failed. Please try again with a clearer image.")
                         .correlationId(UUID.randomUUID().toString())
                         .qualityStatus("REJECTED")
+                        .errorCode("flowVisionFailed")
                         .build();
             }
         }
@@ -164,9 +166,18 @@ public class BfmReadingService {
                 || confidenceLevel.compareTo(BigDecimal.valueOf(0.7)) >= 0;
         boolean isValid = hasPositiveReading && hasAcceptableConfidence;
 
-        String correlationId = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getCorrelationId)
+        String storageCorrelationId = Optional.ofNullable(ocrResult)
+                .map(FlowVisionResult::getRequestId)
+                .filter(value -> !value.isBlank())
                 .orElse(UUID.randomUUID().toString());
+        String responseCorrelationId = Optional.ofNullable(ocrResult)
+                .map(FlowVisionResult::getCorrelationId)
+                .filter(value -> !value.isBlank())
+                .orElse(storageCorrelationId);
+        String flowVisionCorrelationId = Optional.ofNullable(ocrResult)
+                .map(FlowVisionResult::getCorrelationId)
+                .filter(value -> !value.isBlank())
+                .orElse(null);
         LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(LocalDateTime.now());
 
         BigDecimal extractedReading = Optional.ofNullable(ocrResult)
@@ -300,10 +311,11 @@ public class BfmReadingService {
             return CreateReadingResponse.builder()
                     .success(false)
                     .message("Duplicate image submission detected. The extracted reading matches the previous reading.")
-                    .correlationId(correlationId)
+                    .correlationId(responseCorrelationId)
                     .meterReading(confirmedReading)
                     .qualityConfidence(confidenceLevel)
                     .qualityStatus("REJECTED")
+                    .errorCode("duplicateImage")
                     .lastConfirmedReading(previousSnapshot.confirmedReading())
                     .build();
         }
@@ -319,46 +331,95 @@ public class BfmReadingService {
             // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
             // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
             // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
-            readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
-                    schemaName,
-                    placeholderIdOpt.orElse(null),
-                    request.getSchemeId(),
-                    operatorInRequest.id(),
-                    readingAt,
-                    extractedReading,
-                    effectiveConfirmedReading,
-                    correlationId,
-                    request.getReadingUrl(),
-                    request.getMeterChangeReason(),
-                    request.getIngestionSource(),
-                    request.getSubmittedStateSchemeId(),
-                    request.getSubmittedCentreSchemeId(),
-                    request.getSubmittedPhoneHash());
+            if (flowVisionCorrelationId != null) {
+                readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
+                        schemaName,
+                        placeholderIdOpt.orElse(null),
+                        request.getSchemeId(),
+                        operatorInRequest.id(),
+                        readingAt,
+                        extractedReading,
+                        effectiveConfirmedReading,
+                        storageCorrelationId,
+                        flowVisionCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason(),
+                        request.getIngestionSource(),
+                        request.getSubmittedStateSchemeId(),
+                        request.getSubmittedCentreSchemeId(),
+                        request.getSubmittedPhoneHash());
+            } else {
+                readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
+                        schemaName,
+                        placeholderIdOpt.orElse(null),
+                        request.getSchemeId(),
+                        operatorInRequest.id(),
+                        readingAt,
+                        extractedReading,
+                        effectiveConfirmedReading,
+                        storageCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason(),
+                        request.getIngestionSource(),
+                        request.getSubmittedStateSchemeId(),
+                        request.getSubmittedCentreSchemeId(),
+                        request.getSubmittedPhoneHash());
+            }
         } else if (placeholderIdOpt.isPresent()) {
             readingId = placeholderIdOpt.get();
-            telemetryTenantRepository.updateFlowReadingFromIngestion(
-                    schemaName,
-                    readingId,
-                    readingAt,
-                    extractedReading,
-                    effectiveConfirmedReading,
-                    correlationId,
-                    request.getReadingUrl(),
-                    request.getMeterChangeReason(),
-                    operatorInRequest.id()
-            );
+            if (flowVisionCorrelationId != null) {
+                telemetryTenantRepository.updateFlowReadingFromIngestion(
+                        schemaName,
+                        readingId,
+                        readingAt,
+                        extractedReading,
+                        effectiveConfirmedReading,
+                        storageCorrelationId,
+                        flowVisionCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason(),
+                        operatorInRequest.id()
+                );
+            } else {
+                telemetryTenantRepository.updateFlowReadingFromIngestion(
+                        schemaName,
+                        readingId,
+                        readingAt,
+                        extractedReading,
+                        effectiveConfirmedReading,
+                        storageCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason(),
+                        operatorInRequest.id()
+                );
+            }
         } else {
-            readingId = telemetryTenantRepository.createFlowReading(
-                    schemaName,
-                    request.getSchemeId(),
-                    operatorInRequest.id(),
-                    readingAt,
-                    extractedReading,
-                    effectiveConfirmedReading,
-                    correlationId,
-                    request.getReadingUrl(),
-                    request.getMeterChangeReason()
-            );
+            if (flowVisionCorrelationId != null) {
+                readingId = telemetryTenantRepository.createFlowReading(
+                        schemaName,
+                        request.getSchemeId(),
+                        operatorInRequest.id(),
+                        readingAt,
+                        extractedReading,
+                        effectiveConfirmedReading,
+                        storageCorrelationId,
+                        flowVisionCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason()
+                );
+            } else {
+                readingId = telemetryTenantRepository.createFlowReading(
+                        schemaName,
+                        request.getSchemeId(),
+                        operatorInRequest.id(),
+                        readingAt,
+                        extractedReading,
+                        effectiveConfirmedReading,
+                        storageCorrelationId,
+                        request.getReadingUrl(),
+                        request.getMeterChangeReason()
+                );
+            }
         }
 
         BigDecimal lastConfirmedReading = latestSnapshotOpt
@@ -408,7 +469,7 @@ public class BfmReadingService {
         return CreateReadingResponse.builder()
                 .success(hasPositiveReading)
                 .message(messageOverride(contactId, finalMessage))
-                .correlationId(correlationId)
+                .correlationId(responseCorrelationId)
                 .meterReading(finalReading)
                 .qualityConfidence(confidenceLevel)
                 .qualityStatus(ocrResult != null ? ocrResult.getQualityStatus() : (isValid ? "CONFIRMED" : "REVIEW"))
@@ -779,6 +840,13 @@ public class BfmReadingService {
                 result.getQualityConfidence(),
                 sanitizeLogValue(result.getCorrelationId())
         );
+    }
+
+    private String flowVisionErrorCode(FlowVisionResult result) {
+        if (result != null && result.getRejectionReason() != null && !result.getRejectionReason().isBlank()) {
+            return result.getRejectionReason();
+        }
+        return "flowVisionRejected";
     }
 
     private String imageUrlHash(String readingUrl) {

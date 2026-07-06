@@ -122,6 +122,7 @@ public class GlificImageWorkflowService {
                     .success(false)
                     .message(descriptiveMessage)
                     .qualityStatus("REJECTED")
+                    .errorCode(errorCodeForException(e))
                     .correlationId(glificWebhookRequest.getContactId())
                     .build();
         }
@@ -233,9 +234,28 @@ public class GlificImageWorkflowService {
                     .success(false)
                     .message(descriptiveMessage)
                     .qualityStatus("REJECTED")
+                    .errorCode(errorCodeForException(e))
                     .correlationId(safeContactId)
                     .build();
         }
+    }
+
+    private String errorCodeForException(Exception e) {
+        String message = e != null ? e.getMessage() : null;
+        if (message == null || message.isBlank()) {
+            return "processingFailed";
+        }
+        String normalized = message.toLowerCase();
+        if (normalized.contains("operator") && normalized.contains("scheme")) {
+            return "operatorNotMappedToScheme";
+        }
+        if (normalized.contains("scheme") && normalized.contains("not found")) {
+            return "schemeNotFound";
+        }
+        if (normalized.contains("operator") && normalized.contains("not found")) {
+            return "operatorNotFound";
+        }
+        return "processingFailed";
     }
 
     // LENIENT-INGEST: result of scheme resolution — the scheme id to record against plus the

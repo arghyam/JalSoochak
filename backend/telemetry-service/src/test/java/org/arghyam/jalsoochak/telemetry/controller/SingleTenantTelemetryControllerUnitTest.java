@@ -109,6 +109,7 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(false, response.getBody().isSuccess());
         assertNotNull(response.getBody().getData());
         assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
+        assertEquals("operatorNotMappedToScheme", response.getBody().getData().getErrorCode());
         assertNull(response.getBody().getData().getCorrelationId());
     }
 
@@ -135,6 +136,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.errorCode").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -162,6 +164,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.errorCode").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -213,6 +216,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.errorCode").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -418,6 +422,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 return CreateReadingResponse.builder()
                         .success(false)
                         .qualityStatus("REJECTED")
+                        .errorCode("operatorNotMappedToScheme")
                         .message("Operator is not mapped to the provided state or centre scheme")
                         .correlationId("corr-rejected")
                         .build();

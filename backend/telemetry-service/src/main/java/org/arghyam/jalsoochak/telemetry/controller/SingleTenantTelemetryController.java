@@ -212,6 +212,7 @@ public class SingleTenantTelemetryController {
                             .data(ReadingsDataResponse.builder()
                                     .message(e.getReason())
                                     .qualityStatus("REJECTED")
+                                    .errorCode(errorCodeForStatusException(e))
                                     .build())
                             .build()
             );
@@ -235,6 +236,7 @@ public class SingleTenantTelemetryController {
                             .success(false)
                             .data(ReadingsDataResponse.builder()
                                     .qualityStatus("REJECTED")
+                                    .errorCode("processingFailed")
                                     .message("Failed to process reading")
                                     .build())
                             .build()
@@ -433,8 +435,30 @@ public class SingleTenantTelemetryController {
                 .qualityStatus(response.getQualityStatus())
                 .qualityConfidence(response.getQualityConfidence())
                 .lastConfirmedReading(response.getLastConfirmedReading())
+                .errorCode(response.getErrorCode())
                 .message(response.getMessage())
                 .build();
+    }
+
+    private String errorCodeForStatusException(ResponseStatusException e) {
+        if (e == null) {
+            return "requestFailed";
+        }
+        if (HttpStatus.UNAUTHORIZED.equals(e.getStatusCode())) {
+            return "invalidApiKey";
+        }
+        if (HttpStatus.INTERNAL_SERVER_ERROR.equals(e.getStatusCode())) {
+            return "serverError";
+        }
+        String reason = e.getReason();
+        if (reason == null || reason.isBlank()) {
+            return "requestFailed";
+        }
+        String normalized = reason.toLowerCase();
+        if (normalized.contains("api key")) {
+            return "invalidApiKey";
+        }
+        return "badRequest";
     }
 
     private void logReadingSubmission(String api, String phoneNumber, Long schemeId, String status, String message) {
