@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
@@ -135,6 +136,10 @@ public class AnalyticsKafkaConsumer {
                 case "ANOMALY_RECORDED" -> {
                     AnomalyEvent event = objectMapper.readValue(message, AnomalyEvent.class);
                     factService.ingestAnomalyRecorded(event);
+                }
+                case "SUBMISSION_REJECTED" -> {   // REPORTED-METRIC
+                    SubmissionRejectedEvent event = objectMapper.readValue(message, SubmissionRejectedEvent.class);
+                    factService.ingestSubmissionRejected(event);
                 }
                 default -> log.debug("Ignoring telemetry event type: {}", eventType);
             }

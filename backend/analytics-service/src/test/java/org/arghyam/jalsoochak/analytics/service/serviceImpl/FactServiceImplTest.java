@@ -63,9 +63,61 @@ class FactServiceImplTest {
     private DimDateRepository dimDateRepository;
     @Mock
     private DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+    @Mock
+    private org.arghyam.jalsoochak.analytics.repository.SubmissionAttemptRepository submissionAttemptRepository;
 
     @InjectMocks
     private FactServiceImpl service;
+
+    @Test
+    void ingestSubmissionRejected_resolvesSchemeAndInserts() {
+        org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent event =
+                org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent.builder()
+                        .eventType("SUBMISSION_REJECTED")
+                        .tenantId(17)
+                        .submittedStateSchemeId("6121849")
+                        .submittedPhoneHash("phv")
+                        .reason("validation: phone must not be blank")
+                        .attemptedAt("2026-07-05T10:15:00")
+                        .build();
+        when(submissionAttemptRepository.resolveScheme(17, "6121849", null))
+                .thenReturn(Optional.of(new int[]{555, 17}));
+
+        service.ingestSubmissionRejected(event);
+
+        verify(submissionAttemptRepository).insert(
+                org.mockito.ArgumentMatchers.eq(17),
+                org.mockito.ArgumentMatchers.eq(555),
+                org.mockito.ArgumentMatchers.eq("6121849"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq("phv"),
+                org.mockito.ArgumentMatchers.eq("validation: phone must not be blank"),
+                org.mockito.ArgumentMatchers.eq(LocalDateTime.parse("2026-07-05T10:15:00")));
+    }
+
+    @Test
+    void ingestSubmissionRejected_unresolvedScheme_insertsNullSchemeId() {
+        org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent event =
+                org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent.builder()
+                        .eventType("SUBMISSION_REJECTED")
+                        .tenantId(17)
+                        .submittedStateSchemeId("99999999")
+                        .reason("validation")
+                        .attemptedAt("2026-07-05T10:15:00")
+                        .build();
+        when(submissionAttemptRepository.resolveScheme(17, "99999999", null)).thenReturn(Optional.empty());
+
+        service.ingestSubmissionRejected(event);
+
+        verify(submissionAttemptRepository).insert(
+                org.mockito.ArgumentMatchers.eq(17),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq("99999999"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq("validation"),
+                org.mockito.ArgumentMatchers.any(LocalDateTime.class));
+    }
 
     @Test
     void ingestMeterReading_mapsAndSavesFactEntity() {
