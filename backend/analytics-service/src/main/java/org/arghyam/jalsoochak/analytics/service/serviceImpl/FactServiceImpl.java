@@ -334,7 +334,7 @@ public class FactServiceImpl implements FactService {
     @Transactional
     public void ingestTenantEscalation(TenantEscalationEvent event) {
         ensureTenantExists(event.getTenantId(), event.getTenantSchema());
-        OffsetDateTime now = OffsetDateTime.now();
+        LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
         int operatorCount = event.getOperators() != null ? event.getOperators().size() : 0;
         int escalationRowsCreated = 0;
         int anomalyRowsCreated = 0;
@@ -400,8 +400,8 @@ public class FactServiceImpl implements FactService {
                             .userId(event.getOfficerId().intValue())
                             .resolutionStatus(1) // UNRESOLVED
                             .remark(null)
-                            .createdAt(now.toLocalDateTime())
-                            .updatedAt(now.toLocalDateTime())
+                            .createdAt(now)
+                            .updatedAt(now)
                             .build();
                     escalationRepository.save(escalationFact);
                     escalationRowsCreated++;
@@ -450,7 +450,8 @@ public class FactServiceImpl implements FactService {
     @Override
     @Transactional
     public void ingestAnomalyRecorded(AnomalyEvent event) {
-        OffsetDateTime now = OffsetDateTime.now();
+        // anomaly_table timestamps are plain TIMESTAMP holding UTC (V41) -> write UTC-naive LocalDateTime.
+        LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
         String uuid = event.getUuid();
         if (uuid == null || uuid.isBlank()) {
             uuid = UUID.randomUUID().toString();

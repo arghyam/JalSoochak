@@ -246,7 +246,9 @@ public class TelemetryEventPublisher {
                 .submittedCentreSchemeId(submittedCentreSchemeId)
                 .submittedPhoneHash(submittedPhoneHash)
                 .reason(reason)
-                .attemptedAt(LocalDateTime.now().toString())
+                // REPORTED-METRIC: emit UTC so analytics can convert to the IST day deterministically
+                // (submission_attempt_table.attempted_at is read as UTC -> Asia/Kolkata).
+                .attemptedAt(LocalDateTime.now(java.time.ZoneOffset.UTC).toString())
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);

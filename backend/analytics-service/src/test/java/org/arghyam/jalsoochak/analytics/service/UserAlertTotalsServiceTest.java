@@ -10,8 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -37,8 +36,8 @@ class UserAlertTotalsServiceTest {
         LocalDate start = LocalDate.of(2026, 3, 1);
         LocalDate end = LocalDate.of(2026, 3, 31);
 
-        OffsetDateTime expectedFrom = start.atStartOfDay().atOffset(ZoneOffset.UTC);
-        OffsetDateTime expectedTo = end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        LocalDateTime expectedFrom = start.atStartOfDay();
+        LocalDateTime expectedTo = end.plusDays(1).atStartOfDay();
 
         when(escalationQueryService.countEscalations(eq(10), eq(9001), eq(start), eq(end))).thenReturn(12L);
         when(anomalyRepository.countAnomaliesForMappedUserSchemesInRange(eq(10), eq(9001), eq(expectedFrom), eq(expectedTo)))

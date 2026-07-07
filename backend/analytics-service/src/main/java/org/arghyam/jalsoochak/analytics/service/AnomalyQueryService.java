@@ -8,8 +8,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
@@ -30,8 +29,9 @@ public class AnomalyQueryService {
         LocalDate safeEndDate = (endDate != null) ? endDate : LocalDate.now();
         LocalDate safeStartDate = (startDate != null) ? startDate : safeEndDate.minusDays(30);
 
-        OffsetDateTime from = safeStartDate.atStartOfDay().atOffset(ZoneOffset.UTC);
-        OffsetDateTime to = safeEndDate.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC); // exclusive upper bound
+        // anomaly_table.created_at is plain TIMESTAMP holding UTC, so use UTC-naive LocalDateTime bounds.
+        LocalDateTime from = safeStartDate.atStartOfDay();
+        LocalDateTime to = safeEndDate.plusDays(1).atStartOfDay(); // exclusive upper bound
 
         // Empty string (never null) avoids PostgreSQL 42P18 on untyped NULL JDBC parameters for :anomalyType.
         String typeFilter = (anomalyType == null || anomalyType.isBlank()) ? "" : anomalyType.trim();
