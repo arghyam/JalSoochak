@@ -32,85 +32,7 @@ public class FlowVisionService {
     public FlowVisionResult extractReading(String readingUrl) {
 
         try {
-
-            Map<String, String> payload = new HashMap<>();
-            payload.put("imageURL", readingUrl);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-
-            HttpEntity<Map<String, String>> requestEntity =
-                    new HttpEntity<>(payload, headers);
-
-            log.info("flowvision request imageUrlHash={} endpoint={}", imageUrlHash(readingUrl), flowVisionUrl);
-            ResponseEntity<Map> responseEntity = restTemplate.exchange(
-                    flowVisionUrl,
-                    HttpMethod.POST,
-                    requestEntity,
-                    Map.class
-            );
-            log.info("flowvision response status={} body={}",
-                    responseEntity.getStatusCode(),
-                    responseEntity.getBody());
-
-
-            if (!responseEntity.getStatusCode().is2xxSuccessful()) {
-                log.error("FlowVision HTTP error: {}", responseEntity.getStatusCode());
-                return null;
-            }
-
-            Map<String, Object> responseBody = responseEntity.getBody();
-
-            if (responseBody == null || !responseBody.containsKey("result")) {
-                log.error("FlowVision response missing 'result'");
-                return null;
-            }
-
-            Map<String, Object> resultMap =
-                    (Map<String, Object>) responseBody.get("result");
-
-            if (resultMap == null || !"SUCCESS".equals(resultMap.get("status"))) {
-                log.warn("FlowVision OCR not successful: {}", resultMap);
-                return null;
-            }
-
-            if (!resultMap.containsKey("data")) {
-                log.error("FlowVision result missing 'data'");
-                return null;
-            }
-
-            Map<String, Object> dataMap =
-                    (Map<String, Object>) resultMap.get("data");
-
-            BigDecimal adjustedReading = parseMeterReading(dataMap);
-
-            String qualityStatus =
-                    dataMap.getOrDefault("qualityStatus", "unknown").toString();
-
-            BigDecimal qualityConfidence = null;
-            Object confidenceObj = dataMap.get("qualityConfidence");
-
-            if (confidenceObj != null) {
-                qualityConfidence = new BigDecimal(confidenceObj.toString());
-            }
-
-            String correlationId =
-                    resultMap.getOrDefault(
-                            "correlationId",
-                            UUID.randomUUID().toString()
-                    ).toString();
-
-            FlowVisionResult result = FlowVisionResult.builder()
-                    .adjustedReading(adjustedReading)
-                    .qualityStatus(qualityStatus)
-                    .qualityConfidence(qualityConfidence)
-                    .correlationId(correlationId)
-                    .build();
-            log.info("flowvision parsed_result imageUrlHash={} result={}",
-                    imageUrlHash(readingUrl),
-                    summarizeFlowVisionResult(result));
-            return result;
-
+            return extractReadingOrThrow(readingUrl);
         } catch (Exception ex) {
             log.error("FlowVision OCR call failed for imageUrlHash={}: {}", imageUrlHash(readingUrl), ex.getMessage(), ex);
             if (log.isDebugEnabled()) {
@@ -118,6 +40,86 @@ public class FlowVisionService {
             }
             return null;
         }
+    }
+
+    public FlowVisionResult extractReadingOrThrow(String readingUrl) {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("imageURL", readingUrl);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<Map<String, String>> requestEntity =
+                new HttpEntity<>(payload, headers);
+
+        log.info("flowvision request imageUrlHash={} endpoint={}", imageUrlHash(readingUrl), flowVisionUrl);
+        ResponseEntity<Map> responseEntity = restTemplate.exchange(
+                flowVisionUrl,
+                HttpMethod.POST,
+                requestEntity,
+                Map.class
+        );
+        log.info("flowvision response status={} body={}",
+                responseEntity.getStatusCode(),
+                responseEntity.getBody());
+
+
+        if (!responseEntity.getStatusCode().is2xxSuccessful()) {
+            log.error("FlowVision HTTP error: {}", responseEntity.getStatusCode());
+            return null;
+        }
+
+        Map<String, Object> responseBody = responseEntity.getBody();
+
+        if (responseBody == null || !responseBody.containsKey("result")) {
+            log.error("FlowVision response missing 'result'");
+            return null;
+        }
+
+        Map<String, Object> resultMap =
+                (Map<String, Object>) responseBody.get("result");
+
+        if (resultMap == null || !"SUCCESS".equals(resultMap.get("status"))) {
+            log.warn("FlowVision OCR not successful: {}", resultMap);
+            return null;
+        }
+
+        if (!resultMap.containsKey("data")) {
+            log.error("FlowVision result missing 'data'");
+            return null;
+        }
+
+        Map<String, Object> dataMap =
+                (Map<String, Object>) resultMap.get("data");
+
+        BigDecimal adjustedReading = parseMeterReading(dataMap);
+
+        String qualityStatus =
+                dataMap.getOrDefault("qualityStatus", "unknown").toString();
+
+        BigDecimal qualityConfidence = null;
+        Object confidenceObj = dataMap.get("qualityConfidence");
+
+        if (confidenceObj != null) {
+            qualityConfidence = new BigDecimal(confidenceObj.toString());
+        }
+
+        String correlationId =
+                resultMap.getOrDefault(
+                        "correlationId",
+                        UUID.randomUUID().toString()
+                ).toString();
+
+        FlowVisionResult result = FlowVisionResult.builder()
+                .adjustedReading(adjustedReading)
+                .qualityStatus(qualityStatus)
+                .qualityConfidence(qualityConfidence)
+                .correlationId(correlationId)
+                .build();
+        log.info("flowvision parsed_result imageUrlHash={} result={}",
+                imageUrlHash(readingUrl),
+                summarizeFlowVisionResult(result));
+        return result;
     }
 
     private BigDecimal parseMeterReading(Map<String, Object> dataMap) {

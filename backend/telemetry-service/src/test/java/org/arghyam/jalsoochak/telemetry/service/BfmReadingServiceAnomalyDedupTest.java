@@ -60,7 +60,8 @@ class BfmReadingServiceAnomalyDedupTest {
                 telemetryEventPublisher,
                 tenantConfigRepository,
                 new ObjectMapper(),
-                glificOperatorContextService
+                glificOperatorContextService,
+                null
         );
     }
 

@@ -51,6 +51,9 @@ class BfmReadingServicePlaceholderRowTest {
     @Mock
     private GlificOperatorContextService glificOperatorContextService;
 
+    @Mock
+    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 

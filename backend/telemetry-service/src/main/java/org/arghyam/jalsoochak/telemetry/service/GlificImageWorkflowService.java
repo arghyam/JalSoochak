@@ -216,7 +216,8 @@ public class GlificImageWorkflowService {
                     schemaName,
                     operator,
                     contactId,
-                    false
+                    false,
+                    FlowVisionRetryMode.READINGS_API
             );
 
             applyGeolocationIfPresent(request, schemaName, operatorId, response.getCorrelationId());
