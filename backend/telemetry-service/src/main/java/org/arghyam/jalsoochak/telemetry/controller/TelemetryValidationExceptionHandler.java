@@ -161,10 +161,12 @@ public class TelemetryValidationExceptionHandler {
             return; // nothing to attribute the reject to
         }
         telemetryEventPublisher.publishSubmissionRejected(
-                null,
+                null,                          // tenantId: not resolved at validation time; analytics derives it from the scheme id
                 request.getStateSchemeId(),
                 request.getCentreSchemeId(),
-                null,
+                null,                          // submittedPhoneHash: intentionally null here — validation rejects often carry a
+                                               // blank/invalid phone, and the reported-count keys on scheme_id, not the phone.
+                                               // The field stays for callers that DO have a resolvable phone to hash.
                 sanitizeLogMessage(reason)
         );
     }
