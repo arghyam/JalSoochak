@@ -66,7 +66,8 @@ WITH params AS (
            DATE '2026-06-18'    AS end_date
 ),
 schemes_in_scope AS (
-    SELECT DISTINCT s.scheme_id
+    -- matches the code exactly: the endpoint selects (scheme_id, scheme_name), not just scheme_id
+    SELECT DISTINCT s.scheme_id, s.scheme_name
     FROM analytics_schema.dim_scheme_table s, params p
     WHERE s.<LEVEL_COLUMN> = p.lgd_id
       AND s.tenant_id = p.tenant_id
@@ -87,13 +88,6 @@ reported_events AS (
       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
       AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN p.start_date AND p.end_date
 
-    UNION ALL   -- (C) pre-anomaly rejects (validation/auth)
-    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
-    FROM analytics_schema.submission_attempt_table sa
-    JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id, params p
-    WHERE sa.tenant_id = p.tenant_id
-      AND sa.scheme_id IS NOT NULL
-      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN p.start_date AND p.end_date
 ),
 reported_days AS (
     SELECT scheme_id, COUNT(DISTINCT event_date)::int AS reported_days
