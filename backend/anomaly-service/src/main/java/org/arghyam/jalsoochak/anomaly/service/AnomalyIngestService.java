@@ -9,6 +9,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.UUID;
 
 @Service
@@ -16,13 +17,15 @@ import java.util.UUID;
 @Slf4j
 public class AnomalyIngestService {
 
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+
     private final AnomalyRepository anomalyRepository;
 
     public void ingest(AnomalyEvent event) {
         if (event == null) {
             return;
         }
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(IST_ZONE);
         Anomaly anomaly = Anomaly.builder()
                 .uuid(event.getUuid() != null && !event.getUuid().isBlank()
                         ? event.getUuid()

@@ -36,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.WeekFields;
@@ -46,6 +47,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class FactServiceImpl implements FactService {
+
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     /**
      * Sentinel value used when an operator has never uploaded a reading.
@@ -309,7 +312,8 @@ public class FactServiceImpl implements FactService {
     @Transactional
     public void ingestTenantEscalation(TenantEscalationEvent event) {
         ensureTenantExists(event.getTenantId(), event.getTenantSchema());
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime anomalyTimestamp = OffsetDateTime.now(IST_ZONE);
+        LocalDateTime now = LocalDateTime.now();
         int operatorCount = event.getOperators() != null ? event.getOperators().size() : 0;
         int escalationRowsCreated = 0;
         int anomalyRowsCreated = 0;
@@ -375,8 +379,8 @@ public class FactServiceImpl implements FactService {
                             .userId(event.getOfficerId().intValue())
                             .resolutionStatus(1) // UNRESOLVED
                             .remark(null)
-                            .createdAt(now.toLocalDateTime())
-                            .updatedAt(now.toLocalDateTime())
+                            .createdAt(now)
+                            .updatedAt(now)
                             .build();
                     escalationRepository.save(escalationFact);
                     escalationRowsCreated++;
@@ -409,8 +413,8 @@ public class FactServiceImpl implements FactService {
                         .reason(anomalyReason)
                         .status(1) // OPEN
                         .correlationId(correlationId)
-                        .createdAt(now)
-                        .updatedAt(now)
+                        .createdAt(anomalyTimestamp)
+                        .updatedAt(anomalyTimestamp)
                         .build();
                 anomalyRepository.save(anomaly);
                 anomalyRowsCreated++;
@@ -425,7 +429,7 @@ public class FactServiceImpl implements FactService {
     @Override
     @Transactional
     public void ingestAnomalyRecorded(AnomalyEvent event) {
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(IST_ZONE);
         String uuid = event.getUuid();
         if (uuid == null || uuid.isBlank()) {
             uuid = UUID.randomUUID().toString();

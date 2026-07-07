@@ -11,8 +11,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,6 +21,8 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AnomalyQueryServiceTest {
+
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     @Mock
     private AnomalyRepository anomalyRepository;
@@ -38,8 +39,8 @@ class AnomalyQueryServiceTest {
         when(anomalyRepository.findAnomaliesForMappedUserSchemesInRange(
                 eq(10),
                 eq(42),
-                eq(start.atStartOfDay().atOffset(ZoneOffset.UTC)),
-                eq(end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC)),
+                eq(start.atStartOfDay(IST_ZONE).toOffsetDateTime()),
+                eq(end.plusDays(1).atStartOfDay(IST_ZONE).toOffsetDateTime()),
                 eq(""),
                 eq(""),
                 eq(-1),
@@ -51,8 +52,8 @@ class AnomalyQueryServiceTest {
         verify(anomalyRepository).findAnomaliesForMappedUserSchemesInRange(
                 eq(10),
                 eq(42),
-                eq(start.atStartOfDay().atOffset(ZoneOffset.UTC)),
-                eq(end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC)),
+                eq(start.atStartOfDay(IST_ZONE).toOffsetDateTime()),
+                eq(end.plusDays(1).atStartOfDay(IST_ZONE).toOffsetDateTime()),
                 eq(""),
                 eq(""),
                 eq(-1),

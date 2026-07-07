@@ -32,6 +32,7 @@ import org.springframework.dao.DuplicateKeyException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import java.util.List;
 import java.util.Optional;
@@ -263,7 +264,10 @@ class FactServiceImplTest {
 
         service.ingestAnomalyRecorded(event);
 
-        verify(anomalyRepository, times(1)).save(any());
+        ArgumentCaptor<Anomaly> anomalyCaptor = ArgumentCaptor.forClass(Anomaly.class);
+        verify(anomalyRepository, times(1)).save(anomalyCaptor.capture());
+        assertThat(anomalyCaptor.getValue().getCreatedAt().getOffset()).isEqualTo(ZoneOffset.ofHoursMinutes(5, 30));
+        assertThat(anomalyCaptor.getValue().getUpdatedAt().getOffset()).isEqualTo(ZoneOffset.ofHoursMinutes(5, 30));
         ArgumentCaptor<FactEscalation> captor = ArgumentCaptor.forClass(FactEscalation.class);
         verify(escalationRepository, times(1)).save(captor.capture());
         FactEscalation saved = captor.getValue();
@@ -379,6 +383,8 @@ class FactServiceImplTest {
         assertThat(anomalyCaptor.getValue().getUserId()).isEqualTo(21); // operator userId
         assertThat(anomalyCaptor.getValue().getConsecutiveDaysMissed()).isEqualTo(5);
         assertThat(anomalyCaptor.getValue().getType()).isEqualTo("NO_SUBMISSION");
+        assertThat(anomalyCaptor.getValue().getCreatedAt().getOffset()).isEqualTo(ZoneOffset.ofHoursMinutes(5, 30));
+        assertThat(anomalyCaptor.getValue().getUpdatedAt().getOffset()).isEqualTo(ZoneOffset.ofHoursMinutes(5, 30));
     }
 
     @Test

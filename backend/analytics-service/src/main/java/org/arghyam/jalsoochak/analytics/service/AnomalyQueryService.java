@@ -9,11 +9,13 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 
 @Service
 @RequiredArgsConstructor
 public class AnomalyQueryService {
+
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final AnomalyRepository anomalyRepository;
 
@@ -30,8 +32,8 @@ public class AnomalyQueryService {
         LocalDate safeEndDate = (endDate != null) ? endDate : LocalDate.now();
         LocalDate safeStartDate = (startDate != null) ? startDate : safeEndDate.minusDays(30);
 
-        OffsetDateTime from = safeStartDate.atStartOfDay().atOffset(ZoneOffset.UTC);
-        OffsetDateTime to = safeEndDate.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC); // exclusive upper bound
+        OffsetDateTime from = safeStartDate.atStartOfDay(IST_ZONE).toOffsetDateTime();
+        OffsetDateTime to = safeEndDate.plusDays(1).atStartOfDay(IST_ZONE).toOffsetDateTime(); // exclusive upper bound
 
         // Empty string (never null) avoids PostgreSQL 42P18 on untyped NULL JDBC parameters for :anomalyType.
         String typeFilter = (anomalyType == null || anomalyType.isBlank()) ? "" : anomalyType.trim();
@@ -50,4 +52,3 @@ public class AnomalyQueryService {
         );
     }
 }
-
