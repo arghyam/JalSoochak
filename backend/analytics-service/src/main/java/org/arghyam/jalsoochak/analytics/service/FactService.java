@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent;
 
 public interface FactService {
 
@@ -21,4 +22,7 @@ public interface FactService {
 
     //a
     void ingestAnomalyRecorded(AnomalyEvent event);
+
+    // REPORTED-METRIC: persist a pre-anomaly submission reject so "reported" counts can include it.
+    void ingestSubmissionRejected(SubmissionRejectedEvent event);
 }

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.event.AnomalyEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.MeterReadingEvent;
+import org.arghyam.jalsoochak.telemetry.dto.event.SubmissionRejectedEvent;
 import org.arghyam.jalsoochak.telemetry.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.telemetry.kafka.KafkaProducer;
 import org.arghyam.jalsoochak.telemetry.service.AnomalyConstants;
@@ -29,6 +30,8 @@ public class TelemetryEventPublisher {
     public static final String EVENT_METER_READING_RECORDED = "METER_READING_RECORDED";
     public static final String EVENT_ANOMALY_RECORDED = "ANOMALY_RECORDED";
     public static final String EVENT_ESCALATION_CREATED = "ESCALATION_CREATED";
+    // REPORTED-METRIC: pre-anomaly submission rejects (validation/auth) captured for "reported" counts.
+    public static final String EVENT_SUBMISSION_REJECTED = "SUBMISSION_REJECTED";
     public static final int NOT_SUBMITTED_STATUS = 0;
 
     private final KafkaProducer kafkaProducer;
@@ -223,6 +226,32 @@ public class TelemetryEventPublisher {
         if (!ok) {
             log.warn("[telemetry-events] publish_failed meter_reading tenantId={} schemeId={} userId={}",
                     tenantId, schemeId, userId);
+        }
+    }
+
+    /**
+     * REPORTED-METRIC: publish a submission that was rejected before any reading/anomaly was written
+     * (bean-validation, invalid API key, etc.), so analytics can count the scheme as having reported.
+     */
+    @Async("kafkaPublisherExecutor")
+    public void publishSubmissionRejected(Integer tenantId,
+                                          String submittedStateSchemeId,
+                                          String submittedCentreSchemeId,
+                                          String submittedPhoneHash,
+                                          String reason) {
+        SubmissionRejectedEvent event = SubmissionRejectedEvent.builder()
+                .eventType(EVENT_SUBMISSION_REJECTED)
+                .tenantId(tenantId)
+                .submittedStateSchemeId(submittedStateSchemeId)
+                .submittedCentreSchemeId(submittedCentreSchemeId)
+                .submittedPhoneHash(submittedPhoneHash)
+                .reason(reason)
+                .attemptedAt(LocalDateTime.now().toString())
+                .build();
+
+        boolean ok = kafkaProducer.publishJson(TOPIC, event);
+        if (!ok) {
+            log.warn("[telemetry-events] publish_failed submission_rejected tenantId={} reason={}", tenantId, reason);
         }
     }
 
