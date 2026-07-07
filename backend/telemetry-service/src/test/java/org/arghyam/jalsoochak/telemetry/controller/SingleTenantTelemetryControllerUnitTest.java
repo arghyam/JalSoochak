@@ -45,6 +45,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
                 "js_valid_key",
+                null,
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .confirmedReading(new BigDecimal("123.4"))
@@ -73,6 +74,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
                 "js_invalid_key",
+                null,
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .phoneNumber("919999999999")
@@ -97,6 +99,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
                 "js_valid_key",
+                null,
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .phoneNumber("919999999999")
@@ -256,6 +259,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
                 "js_valid_key",
+                null,
                 UpdateReadingRequest.builder()
                         .correlationId("corr-123")
                         .imageId("img-1")
@@ -278,6 +282,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
                 "js_invalid_key",
+                null,
                 UpdateReadingRequest.builder()
                         .correlationId("corr-123")
                         .confirmedReading(new BigDecimal("111"))
@@ -300,6 +305,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
                 "js_valid_key",
+                null,
                 UpdateReadingRequest.builder()
                         .phoneNumber("919999999999")
                         .confirmedReading(new BigDecimal("111"))
@@ -322,6 +328,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
                 "js_valid_key",
+                null,
                 UpdateReadingRequest.builder()
                         .correlationId("corr-123")
                         .phoneNumber("919999999999")
@@ -376,6 +383,7 @@ class SingleTenantTelemetryControllerUnitTest {
         try {
             controller.receiveAssamReading(
                     "js_valid_key",
+                    null,
                     AssamReadingRequest.builder()
                             .readingUrl("https://example.com/meter.jpg")
                             .confirmedReading(new BigDecimal("123.4"))

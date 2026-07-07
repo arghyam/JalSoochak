@@ -38,6 +38,7 @@ import java.time.LocalDate;
 public class SingleTenantTelemetryController {
 
     private static final Logger log = LoggerFactory.getLogger(SingleTenantTelemetryController.class);
+    private static final String TENANT_CODE_HEADER = "X-Tenant-Code";
 
     private final GlificWebhookService glificWebhookService;
     private final TelemetryApiKeyService telemetryApiKeyService;
@@ -142,6 +143,7 @@ public class SingleTenantTelemetryController {
     )
     public ResponseEntity<ReadingsApiResponse> receiveAssamReading(
             @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
+            @RequestHeader(value = TENANT_CODE_HEADER, required = false) String tenantCode,
             @RequestBody @Valid AssamReadingRequest request
     ) {
         log.info("POST /api/v1/telemetry/readings received request={}", summarizeAssamReadingRequest(request));
@@ -251,6 +253,7 @@ public class SingleTenantTelemetryController {
     )
     public ResponseEntity<ReadingsApiResponse> updateReading(
             @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
+            @RequestHeader(value = TENANT_CODE_HEADER, required = false) String tenantCode,
             @RequestBody @Valid UpdateReadingRequest request
     ) {
         log.info("PUT /api/v1/telemetry/readings received request={}", summarizeUpdateReadingRequest(request));
