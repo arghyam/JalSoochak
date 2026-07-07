@@ -3122,21 +3122,21 @@ public class SchemeRegularityRepository {
                       -- AND m.confirmed_reading > 0            -- REVERT lever (A)
 
                     UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
-                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    SELECT a.scheme_id, (a.created_at AT TIME ZONE 'Asia/Kolkata')::date AS event_date
                     FROM analytics_schema.anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
                       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
-                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      AND (a.created_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
                     UNION ALL   -- (C) pre-anomaly rejects (validation/auth) captured in submission_attempt_table
-                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    SELECT sa.scheme_id, (sa.attempted_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date AS event_date
                     FROM analytics_schema.submission_attempt_table sa
                     JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id
                     WHERE sa.tenant_id = ?
                       AND sa.scheme_id IS NOT NULL
-                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      AND (sa.attempted_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ? AND ?
                       -- REVERT lever (C): delete this UNION ALL block
                 ),
                 reported_days AS (
@@ -3303,21 +3303,21 @@ public class SchemeRegularityRepository {
                       -- AND m.confirmed_reading > 0            -- REVERT lever (A)
 
                     UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
-                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    SELECT a.scheme_id, (a.created_at AT TIME ZONE 'Asia/Kolkata')::date AS event_date
                     FROM analytics_schema.anomaly_table a
                     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
                     WHERE a.tenant_id = ?
                       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
-                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      AND (a.created_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ? AND ?
                       -- REVERT lever (B): delete this UNION ALL block
 
                     UNION ALL   -- (C) pre-anomaly rejects captured in submission_attempt_table
-                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    SELECT sa.scheme_id, (sa.attempted_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date AS event_date
                     FROM analytics_schema.submission_attempt_table sa
                     JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id
                     WHERE sa.tenant_id = ?
                       AND sa.scheme_id IS NOT NULL
-                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      AND (sa.attempted_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ? AND ?
                       -- REVERT lever (C): delete this UNION ALL block
                 ),
                 reported_days AS (
