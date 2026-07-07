@@ -3103,8 +3103,10 @@ public class SchemeRegularityRepository {
         //   (B) include image-quality rejects (duplicate/unreadable/less-than-previous) as reported days
         //   (C) include pre-anomaly rejects (validation/auth) via submission_attempt_table
         //   (D) N/A for this region-scoped view: not-in-dim schemes have no region and cannot be "continuous"
-        // Reject days use IST-adjusted timestamps (anomaly.created_at / attempt.attempted_at) to line up
-        // with the reading_date day boundary; approximate at the range edges.
+        // Reject days use "+ 5:30" on the reject timestamps (anomaly.created_at / attempt.attempted_at)
+        // to line up with the reading_date IST day boundary. Both are plain TIMESTAMP storing UTC (anomaly
+        // is normalized by migration V41; attempt is written UTC by telemetry), so "+ 5:30" is
+        // session-timezone-independent — do NOT switch to AT TIME ZONE unless a column becomes timestamptz.
         String sql = String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name

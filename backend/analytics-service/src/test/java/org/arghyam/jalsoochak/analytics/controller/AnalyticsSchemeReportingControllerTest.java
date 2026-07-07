@@ -1082,7 +1082,7 @@ class AnalyticsSchemeReportingControllerTest {
                 .schemeId(101)
                 .tenantId(10)
                 .statusCode(1)
-                .createdAt(OffsetDateTime.of(2026, 3, 15, 10, 0, 0, 0, ZoneOffset.UTC))
+                .createdAt(java.time.LocalDateTime.of(2026, 3, 15, 10, 0, 0, 0))
                 .schemeName("Mapped Scheme")
                 .build();
 
