@@ -81,12 +81,12 @@ reported_events AS (
       AND m.reading_date BETWEEN p.start_date AND p.end_date
 
     UNION ALL   -- (B) arrived-but-rejected image submissions
-    SELECT a.scheme_id, (a.created_at AT TIME ZONE 'Asia/Kolkata')::date AS event_date
+    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
     FROM analytics_schema.anomaly_table a
     JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id, params p
     WHERE a.tenant_id = p.tenant_id
       AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
-      AND (a.created_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN p.start_date AND p.end_date
+      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN p.start_date AND p.end_date
 
 ),
 reported_days AS (
@@ -103,14 +103,13 @@ WHERE COALESCE(rd.reported_days, 0) = ((p.end_date - p.start_date) + 1);
 **Pass criteria:** this equals the `continuousSchemeCount` returned by
 `/api/v1/analytics/continuous-schemes?...&list=false` for the same params.
 
-> **Timezone (important):** `anomaly_table.created_at` is `timestamptz`, so the reject day must be
-> derived with `AT TIME ZONE 'Asia/Kolkata'` — **not** `+ INTERVAL '5:30'`. The `+5:30` form is only
-> correct when the DB session TZ is UTC; on an `Asia/Kolkata` session it double-shifts and moves
-> 13:00–18:30 UTC events to the next day. `AT TIME ZONE` is session-independent, so this query returns
-> the same result whether you run it in psql (often `Asia/Kolkata`) or the app's JDBC session.
-> The deployed query also has a `submission_attempt_table` branch (pre-anomaly rejects), omitted here
-> because it is empty pre-deployment; when populated its day is `(attempted_at AT TIME ZONE 'UTC' AT
-> TIME ZONE 'Asia/Kolkata')::date` (attempted_at is stored UTC).
+> **Timezone:** after migration **V41**, `anomaly_table.created_at` is a plain `TIMESTAMP` holding
+> **UTC** (matching every other table in the repo), so `(created_at + INTERVAL '5:30')::date` gives the
+> IST reporting day **session-independently** — the same result in psql (`Asia/Kolkata`) or the app's
+> JDBC session. (Do *not* use `+5:30` while the column is still `timestamptz`: there it depends on the
+> session TZ and double-shifts on `Asia/Kolkata`. V41 removes that.) The deployed query also has a
+> `submission_attempt_table` branch (pre-anomaly rejects), omitted here because it is empty
+> pre-deployment; `attempted_at` is likewise plain `TIMESTAMP` in UTC, so it uses the same `+5:30`.
 
 ---
 

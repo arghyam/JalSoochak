@@ -79,10 +79,10 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
 
         // Scheme 10: supplied all 3 days -> reported 3 (branch A)
         reading(10, D1, 5); reading(10, LocalDate.of(2026, 1, 2), 5); reading(10, D3, 5);
-        // Scheme 20: supplied days 1,2 + duplicate reject at 2026-01-02 20:00 UTC = 2026-01-03 01:30 IST -> day 3
-        // (branch B + IST boundary; AT TIME ZONE makes this session-independent)
+        // Scheme 20: supplied days 1,2 + duplicate reject at 2026-01-02 20:00 UTC -> + 5:30 = 2026-01-03 01:30 -> day 3
+        // (branch B + IST boundary; created_at is plain TIMESTAMP holding UTC after V41, so +5:30 is session-independent)
         reading(20, D1, 5); reading(20, LocalDate.of(2026, 1, 2), 5);
-        anomaly(20, "DUPLICATE_IMAGE_SUBMISSION", "2026-01-02 20:00:00+00");
+        anomaly(20, "DUPLICATE_IMAGE_SUBMISSION", "2026-01-02 20:00:00");
         // Scheme 30: supplied days 1,2 + submission_attempt on day 3 (branch C)
         reading(30, D1, 5); reading(30, LocalDate.of(2026, 1, 2), 5);
         submissionAttempt(30, "2026-01-03 06:00:00");
@@ -154,7 +154,7 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.anomaly_table
                 (uuid, type, scheme_id, tenant_id, status, created_at)
-                VALUES (?, ?, ?, ?, 1, ?::timestamptz)
+                VALUES (?, ?, ?, ?, 1, ?::timestamp)
                 """, "u-" + schemeId + "-" + type, type, schemeId, TENANT, createdAtUtc);
     }
 
