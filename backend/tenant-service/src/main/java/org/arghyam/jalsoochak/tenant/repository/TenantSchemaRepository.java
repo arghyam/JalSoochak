@@ -328,16 +328,16 @@ public class TenantSchemaRepository {
                 
                 if (parentId == null) {
                         sql = String.format(
-                                "SELECT * FROM %s.lgd_location_master_table WHERE parent_id IS NULL AND status = ? ORDER BY title",
+                                "SELECT * FROM %s.lgd_location_master_table WHERE parent_id IS NULL AND status = ? AND deleted_at IS NULL ORDER BY title",
                                 schemaName);
                         params = new Object[]{StatusEnum.ACTIVE.getCode()};
                 } else {
                         sql = String.format(
-                                "SELECT * FROM %s.lgd_location_master_table WHERE parent_id = ? AND status = ? ORDER BY title",
+                                "SELECT * FROM %s.lgd_location_master_table WHERE parent_id = ? AND status = ? AND deleted_at IS NULL ORDER BY title",
                                 schemaName);
                         params = new Object[]{parentId, StatusEnum.ACTIVE.getCode()};
                 }
-                
+
                 log.debug("Fetching LGD locations from schema: {} with parentId: {}", schemaName, parentId);
                 return jdbcTemplate.query(sql, LGD_LOCATION_ROW_MAPPER, params);
         }
@@ -358,16 +358,16 @@ public class TenantSchemaRepository {
                 
                 if (parentId == null) {
                         sql = String.format(
-                                "SELECT * FROM %s.department_location_master_table WHERE parent_id IS NULL AND status = ? ORDER BY title",
+                                "SELECT * FROM %s.department_location_master_table WHERE parent_id IS NULL AND status = ? AND deleted_at IS NULL ORDER BY title",
                                 schemaName);
                         params = new Object[]{StatusEnum.ACTIVE.getCode()};
                 } else {
                         sql = String.format(
-                                "SELECT * FROM %s.department_location_master_table WHERE parent_id = ? AND status = ? ORDER BY title",
+                                "SELECT * FROM %s.department_location_master_table WHERE parent_id = ? AND status = ? AND deleted_at IS NULL ORDER BY title",
                                 schemaName);
                         params = new Object[]{parentId, StatusEnum.ACTIVE.getCode()};
                 }
-                
+
                 log.debug("Fetching department locations from schema: {} with parentId: {}", schemaName, parentId);
                 return jdbcTemplate.query(sql, DEPT_LOCATION_ROW_MAPPER, params);
         }
