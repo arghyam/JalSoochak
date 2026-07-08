@@ -23,6 +23,7 @@ import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceReposito
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
 import org.arghyam.jalsoochak.analytics.service.water.BfmWaterQuantityCalculator;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -75,6 +76,9 @@ class FactServiceImplTest {
     @Spy
     private WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry =
             new WaterQuantityCalculatorRegistry(List.of(new BfmWaterQuantityCalculator()));
+
+    @Spy
+    private SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks
     private FactServiceImpl service;

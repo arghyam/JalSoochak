@@ -30,6 +30,7 @@ import org.arghyam.jalsoochak.analytics.service.FactService;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculator;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -76,6 +77,7 @@ public class FactServiceImpl implements FactService {
     // REPORTED-METRIC: persistence for pre-anomaly submission rejects.
     private final SubmissionAttemptRepository submissionAttemptRepository;
     private final WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry;
+    private final MeterRegistry meterRegistry;
 
     @Override
     @Transactional
@@ -297,6 +299,11 @@ public class FactServiceImpl implements FactService {
             log.warn("Skipping water quantity update; no calculator registered for channel={} (tenantId={}, schemeId={}, date={}). "
                             + "Not falling back to BFM to avoid mis-deriving the reading with the wrong calculator.",
                     event.getChannel(), event.getTenantId(), event.getSchemeId(), readingDate);
+            meterRegistry.counter("water_quantity.calculator.missing",
+                            "channel", String.valueOf(event.getChannel()),
+                            "tenantId", String.valueOf(event.getTenantId()),
+                            "schemeId", String.valueOf(event.getSchemeId()))
+                    .increment();
             return;
         }
 
