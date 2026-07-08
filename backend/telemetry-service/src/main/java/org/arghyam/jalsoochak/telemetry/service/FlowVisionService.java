@@ -202,7 +202,7 @@ public class FlowVisionService {
         if (map == null) {
             return null;
         }
-        for (String key : new String[]{"rejectionReason", "reason", "message", "error", "qualityStatus", "status"}) {
+        for (String key : new String[]{"rejectionReason", "reason", "message", "error"}) {
             Object value = map.get(key);
             if (value != null && !value.toString().isBlank()) {
                 return value.toString();
@@ -210,7 +210,7 @@ public class FlowVisionService {
         }
         Object data = map.get("data");
         if (data instanceof Map<?, ?> dataMap) {
-            for (String key : new String[]{"rejectionReason", "reason", "message", "error", "qualityStatus", "status"}) {
+            for (String key : new String[]{"rejectionReason", "reason", "message", "error"}) {
                 Object value = dataMap.get(key);
                 if (value != null && !value.toString().isBlank()) {
                     return value.toString();

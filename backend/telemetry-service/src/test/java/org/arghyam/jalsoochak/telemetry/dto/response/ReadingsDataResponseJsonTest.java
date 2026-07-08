@@ -17,11 +17,13 @@ class ReadingsDataResponseJsonTest {
         ReadingsDataResponse response = ReadingsDataResponse.builder()
                 .correlationId("corr-123")
                 .message("ok")
+                .errorCode(TelemetryErrorCode.UNREADABLE_IMAGE)
                 .build();
 
         JsonNode json = OBJECT_MAPPER.readTree(OBJECT_MAPPER.writeValueAsString(response));
         assertTrue(json.has("correlationId"));
         assertEquals("corr-123", json.get("correlationId").asText());
         assertFalse(json.has("correlation_id"));
+        assertEquals("unreadableImage", json.get("errorCode").asText());
     }
 }

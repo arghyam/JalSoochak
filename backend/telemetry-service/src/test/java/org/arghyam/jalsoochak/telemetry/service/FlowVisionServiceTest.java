@@ -92,6 +92,28 @@ class FlowVisionServiceTest {
     }
 
     @Test
+    void extractReadingDoesNotUseStatusAsRejectionReason() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(Map.of(
+                "result", Map.of(
+                        "status", "FAILED",
+                        "correlationId", "corr-rejected",
+                        "data", Map.of("qualityStatus", "REJECTED")
+                )
+        ), HttpStatus.OK));
+
+        FlowVisionService service = new FlowVisionService(restTemplate, FLOW_VISION_URL);
+
+        FlowVisionResult result = service.extractReading("https://image-url");
+
+        assertNotNull(result);
+        assertNull(result.getAdjustedReading());
+        assertEquals("corr-rejected", result.getCorrelationId());
+        assertNull(result.getRejectionReason());
+        assertEquals(1, restTemplate.getCallCount());
+    }
+
+    @Test
     void extractReadingReturnsErrorMsgOnFlowVisionErrorResponse() {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(HttpServerErrorException.create(

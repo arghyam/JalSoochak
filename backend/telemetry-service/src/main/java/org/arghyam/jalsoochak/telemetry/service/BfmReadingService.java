@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -108,7 +109,7 @@ public class BfmReadingService {
                     );
                     return CreateReadingResponse.builder()
                             .success(false)
-                            .message("Could not read meter value from image. Please retry with a clearer photo.")
+                            .message(unreadableImageMessage(ocrResult))
                             .correlationId(UUID.randomUUID().toString())
                             .qualityStatus("REJECTED")
                             .errorCode(flowVisionErrorCode(ocrResult))
@@ -155,7 +156,7 @@ public class BfmReadingService {
                         .message("OCR failed. Please try again with a clearer image.")
                         .correlationId(UUID.randomUUID().toString())
                         .qualityStatus("REJECTED")
-                        .errorCode("flowVisionFailed")
+                        .errorCode(TelemetryErrorCode.FLOW_VISION_FAILED)
                         .build();
             }
         }
@@ -315,7 +316,7 @@ public class BfmReadingService {
                     .meterReading(confirmedReading)
                     .qualityConfidence(confidenceLevel)
                     .qualityStatus("REJECTED")
-                    .errorCode("duplicateImage")
+                    .errorCode(TelemetryErrorCode.DUPLICATE_IMAGE)
                     .lastConfirmedReading(previousSnapshot.confirmedReading())
                     .build();
         }
@@ -842,11 +843,19 @@ public class BfmReadingService {
         );
     }
 
-    private String flowVisionErrorCode(FlowVisionResult result) {
-        if (result != null && result.getRejectionReason() != null && !result.getRejectionReason().isBlank()) {
-            return result.getRejectionReason();
+    private TelemetryErrorCode flowVisionErrorCode(FlowVisionResult result) {
+        return TelemetryErrorCode.UNREADABLE_IMAGE;
+    }
+
+    private String unreadableImageMessage(FlowVisionResult result) {
+        String rejectionReason = Optional.ofNullable(result)
+                .map(FlowVisionResult::getRejectionReason)
+                .filter(reason -> !reason.isBlank())
+                .orElse(null);
+        if (rejectionReason == null) {
+            return "Could not read meter value from image. Please retry with a clearer photo.";
         }
-        return "flowVisionRejected";
+        return "Could not read meter value from image. " + rejectionReason;
     }
 
     private String imageUrlHash(String readingUrl) {

@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -45,7 +46,7 @@ public class TelemetryValidationExceptionHandler {
                             .data(ReadingsDataResponse.builder()
                                     .message(message)
                                     .qualityStatus("REJECTED")
-                                    .errorCode("validationFailed")
+                                    .errorCode(TelemetryErrorCode.VALIDATION_FAILED)
                                     .build())
                             .build()
             );
@@ -73,7 +74,7 @@ public class TelemetryValidationExceptionHandler {
                             .data(ReadingsDataResponse.builder()
                                     .message(message)
                                     .qualityStatus("REJECTED")
-                                    .errorCode("malformedRequest")
+                                    .errorCode(TelemetryErrorCode.MALFORMED_REQUEST)
                                     .build())
                             .build()
             );

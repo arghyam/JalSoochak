@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateYesterdayFinalReading
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.dto.response.UpdateYesterdayFinalReadingBySchemeResponse;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
@@ -238,7 +239,7 @@ public class SingleTenantTelemetryController {
                             .success(false)
                             .data(ReadingsDataResponse.builder()
                                     .qualityStatus("REJECTED")
-                                    .errorCode("processingFailed")
+                                    .errorCode(TelemetryErrorCode.PROCESSING_FAILED)
                                     .message("Failed to process reading")
                                     .build())
                             .build()
@@ -443,25 +444,25 @@ public class SingleTenantTelemetryController {
                 .build();
     }
 
-    private String errorCodeForStatusException(ResponseStatusException e) {
+    private TelemetryErrorCode errorCodeForStatusException(ResponseStatusException e) {
         if (e == null) {
-            return "requestFailed";
+            return TelemetryErrorCode.REQUEST_FAILED;
         }
         if (HttpStatus.UNAUTHORIZED.equals(e.getStatusCode())) {
-            return "invalidApiKey";
+            return TelemetryErrorCode.INVALID_API_KEY;
         }
         if (HttpStatus.INTERNAL_SERVER_ERROR.equals(e.getStatusCode())) {
-            return "serverError";
+            return TelemetryErrorCode.SERVER_ERROR;
         }
         String reason = e.getReason();
         if (reason == null || reason.isBlank()) {
-            return "requestFailed";
+            return TelemetryErrorCode.REQUEST_FAILED;
         }
         String normalized = reason.toLowerCase();
         if (normalized.contains("api key")) {
-            return "invalidApiKey";
+            return TelemetryErrorCode.INVALID_API_KEY;
         }
-        return "badRequest";
+        return TelemetryErrorCode.BAD_REQUEST;
     }
 
     private void logReadingSubmission(String api, String phoneNumber, Long schemeId, String status, String message) {

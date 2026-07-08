@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
@@ -112,7 +113,7 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(false, response.getBody().isSuccess());
         assertNotNull(response.getBody().getData());
         assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
-        assertEquals("operatorNotMappedToScheme", response.getBody().getData().getErrorCode());
+        assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getBody().getData().getErrorCode());
         assertNull(response.getBody().getData().getCorrelationId());
     }
 
@@ -430,7 +431,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 return CreateReadingResponse.builder()
                         .success(false)
                         .qualityStatus("REJECTED")
-                        .errorCode("operatorNotMappedToScheme")
+                        .errorCode(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME)
                         .message("Operator is not mapped to the provided state or centre scheme")
                         .correlationId("corr-rejected")
                         .build();

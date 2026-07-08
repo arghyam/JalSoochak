@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
@@ -568,6 +569,7 @@ class GlificImageWorkflowServiceAssamTest {
         assertNotNull(response);
         assertFalse(response.isSuccess());
         assertEquals("REJECTED", response.getQualityStatus());
+        assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getErrorCode());
         verify(telemetryTenantRepository, never()).getOrCreatePlaceholderScheme(anyString(), any(), any());
         verify(bfmReadingService, never()).createReading(any(), anyString(), any(), anyString(), anyBoolean());
     }

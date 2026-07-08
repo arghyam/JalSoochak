@@ -15,6 +15,6 @@ public class ReadingsDataResponse {
     private String qualityStatus;
     private BigDecimal qualityConfidence;
     private BigDecimal lastConfirmedReading;
-    private String errorCode;
+    private TelemetryErrorCode errorCode;
     private String message;
 }
