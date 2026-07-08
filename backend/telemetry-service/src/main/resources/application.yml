@@ -49,10 +49,18 @@ glific:
   resume:
     enabled: ${GLIFIC_RESUME_ENABLED:true}
     base-url: ${GLIFIC_RESUME_BASE_URL:https://api.arghyam.glific.com}
-    flow-id: ${GLIFIC_RESUME_FLOW_ID:37172}
+    flow-id: ${GLIFIC_RESUME_FLOW_ID:40368}
     user:
       phone: ${GLIFIC_RESUME_USER_PHONE:${GLIFIC_SYNC_USER_PHONE:}}
       password: ${GLIFIC_RESUME_USER_PASSWORD:${GLIFIC_SYNC_USER_PASSWORD:}}
+
+# LENIENT-INGEST: when true, Assam meter-reading submissions whose scheme id or operator phone is
+# missing from the tenant master data are still recorded (against a placeholder scheme / sentinel
+# operator) and tagged on flow_reading_table.ingestion_source, instead of being rejected. Set to
+# false to restore the original reject behaviour once the underlying data gaps are fixed.
+telemetry:
+  lenient-ingestion:
+    enabled: ${TELEMETRY_LENIENT_INGESTION_ENABLED:true}
 
 flowvision:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}

@@ -3097,6 +3097,16 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
+        // REPORTED-METRIC: a "reported day" = any day the scheme SUPPLIED or ATTEMPTED a submission.
+        // Four levers, each independently revertible (grep REPORTED-METRIC):
+        //   (A) supplied -> reported: drop the confirmed_reading>0 filter (re-add to revert)
+        //   (B) include image-quality rejects (duplicate/unreadable/less-than-previous) as reported days
+        //   (C) include pre-anomaly rejects (validation/auth) via submission_attempt_table
+        //   (D) N/A for this region-scoped view: not-in-dim schemes have no region and cannot be "continuous"
+        // Reject days use "+ 5:30" on the reject timestamps (anomaly.created_at / attempt.attempted_at)
+        // to line up with the reading_date IST day boundary. Both are plain TIMESTAMP storing UTC (anomaly
+        // is normalized by migration V41; attempt is written UTC by telemetry), so "+ 5:30" is
+        // session-timezone-independent — do NOT switch to AT TIME ZONE unless a column becomes timestamptz.
         String sql = String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
@@ -3104,33 +3114,61 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings in fact.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN schemes_in_scope ss
-                      ON ss.scheme_id = m.scheme_id
+                    JOIN schemes_in_scope ss ON ss.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects (validation/auth) captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT COUNT(*)::bigint AS continuous_count
                 FROM schemes_in_scope ss
-                LEFT JOIN supply_days sd
-                  ON sd.scheme_id = ss.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) = ?
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = ss.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) = ?
                 """, schemeLgdColumn);
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
                 Long.class,
-                lgdId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate,
-                daysInRange
+                lgdId,          // schemes_in_scope: region
+                tenantId,       // schemes_in_scope: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate,        // (C) range end
+                daysInRange     // continuous == reported every day
         );
         return count == null ? 0L : count;
     }
@@ -3248,6 +3286,8 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
+        // REPORTED-METRIC: must use the SAME "reported day" definition as getContinuousSchemeCountByLgd so
+        // the count (list=false) and the list (list=true) agree. Levers A/B/C mirror the count method.
         String sql = String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
@@ -3255,24 +3295,46 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN schemes_in_scope ss
-                      ON ss.scheme_id = m.scheme_id
+                    JOIN schemes_in_scope ss ON ss.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name
                 FROM schemes_in_scope ss
-                LEFT JOIN supply_days sd
-                  ON sd.scheme_id = ss.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) = ?
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = ss.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) = ?
                 ORDER BY ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3284,12 +3346,18 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name")
                 ),
-                lgdId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate,
-                daysInRange,
+                lgdId,          // schemes_in_scope: region
+                tenantId,       // schemes_in_scope: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate,        // (C) range end
+                daysInRange,    // continuous == reported every day
                 limit,
                 offset
         );
@@ -5509,6 +5577,104 @@ public class SchemeRegularityRepository {
                 parentDepartmentId,
                 tenantId,
                 parentDepartmentId,
+                tenantId,
+                startDate,
+                endDate);
+    }
+
+    /**
+     * Average water supply for a single region's OWN total (not its children), with each scheme counted
+     * exactly once regardless of how many sub-regions it maps to.
+     *
+     * <p>The child-scope aggregations dedup by {@code (scheme_id, child_region)}, so a scheme that spans
+     * several sub-regions legitimately appears once per sub-region. Deriving a region's header by summing
+     * those child rows therefore double-counts every region-spanning scheme (water and FHTC alike). This
+     * method scopes by the focal region's own level column and dedups by {@code scheme_id} alone, so it is
+     * the correct value for a region's headline figure and matches the row that region shows under its
+     * parent. See docs/analytics-scheme-duplication-bug-report.md (rule: never sum child totals for a parent).
+     */
+    public ChildRegionWaterSupplyMetrics getRegionOwnWaterSupplyByLgd(
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate) {
+        Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
+        if (lgdLevel == null) {
+            throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
+        }
+        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
+        return getRegionOwnWaterSupply(schemeLgdColumn, true, tenantId, lgdId, startDate, endDate);
+    }
+
+    public ChildRegionWaterSupplyMetrics getRegionOwnWaterSupplyByDepartment(
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate) {
+        Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
+        if (departmentLevel == null) {
+            throw new IllegalArgumentException(
+                    "department_id not found in dim_department_location_table: " + departmentId);
+        }
+        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        return getRegionOwnWaterSupply(schemeDepartmentColumn, false, tenantId, departmentId, startDate, endDate);
+    }
+
+    private ChildRegionWaterSupplyMetrics getRegionOwnWaterSupply(
+            String schemeLocationColumn,
+            boolean isLgd,
+            Integer tenantId,
+            Integer regionId,
+            LocalDate startDate,
+            LocalDate endDate) {
+        String sql = String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT DISTINCT ON (s.scheme_id)
+                        s.scheme_id,
+                        COALESCE(s.house_hold_count, 0) AS house_hold_count,
+                        COALESCE(s.fhtc_count, 0) AS fhtc_count,
+                        COALESCE(s.planned_fhtc, 0) AS planned_fhtc
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE s.tenant_id = ?
+                      AND s.%1$s = ?
+                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
+                ),
+                water_by_scheme AS (
+                    SELECT
+                        m.scheme_id,
+                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
+                            AS total_water_supplied_liters
+                    FROM analytics_schema.fact_meter_reading_table m
+                    WHERE m.tenant_id = ?
+                      AND m.reading_date BETWEEN ? AND ?
+                    GROUP BY m.scheme_id
+                )
+                SELECT
+                    COALESCE(SUM(s.house_hold_count), 0)::bigint AS total_household_count,
+                    COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_fhtc_count,
+                    COALESCE(SUM(s.planned_fhtc), 0)::bigint AS total_planned_fhtc,
+                    COALESCE(SUM(w.total_water_supplied_liters), 0)::bigint AS total_water_supplied_liters,
+                    COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
+                    CASE
+                        WHEN COUNT(DISTINCT s.scheme_id) > 0
+                            THEN ROUND(COALESCE(SUM(w.total_water_supplied_liters), 0)::numeric / COUNT(DISTINCT s.scheme_id), 4)
+                        ELSE 0::numeric
+                    END AS avg_water_supply_per_scheme
+                FROM schemes_in_scope s
+                LEFT JOIN water_by_scheme w
+                    ON w.scheme_id = s.scheme_id
+                """, schemeLocationColumn);
+
+        return jdbcTemplate.queryForObject(
+                sql,
+                (rs, rowNum) -> new ChildRegionWaterSupplyMetrics(
+                        tenantId,
+                        null,
+                        isLgd ? regionId : null,
+                        isLgd ? null : regionId,
+                        null,
+                        rs.getLong("total_household_count"),
+                        rs.getLong("total_fhtc_count"),
+                        rs.getLong("total_planned_fhtc"),
+                        rs.getLong("total_water_supplied_liters"),
+                        rs.getInt("scheme_count"),
+                        rs.getBigDecimal("avg_water_supply_per_scheme")),
+                tenantId,
+                regionId,
                 tenantId,
                 startDate,
                 endDate);

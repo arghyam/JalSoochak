@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
+import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,16 +28,22 @@ import java.util.stream.Collectors;
 public class TelemetryValidationExceptionHandler {
 
     private static final String READINGS_PATH = "/api/v1/telemetry/readings";
+    // Assam's integration hits both /readings and /readings/ (trailing slash), so treat both as the readings endpoint.
+    private static final String READINGS_PATH_TRAILING_SLASH = READINGS_PATH + "/";
 
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
+    // REPORTED-METRIC: optional (may be null in unit tests); publishes pre-anomaly rejects for the
+    // "reported" scheme counts. Remove this field + publishSubmissionRejected(...) to revert.
+    private final TelemetryEventPublisher telemetryEventPublisher;
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<?> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
         String message = validationMessage(ex);
         String servletPath = requestPath(request);
 
-        if (READINGS_PATH.equals(servletPath)) {
+        if (isReadingsPath(servletPath)) {
             logReadingsValidationFailure(request, ex.getBindingResult().getTarget(), ex, message);
+            publishSubmissionRejected(ex.getBindingResult().getTarget(), "validation: " + message);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                     ReadingsApiResponse.builder()
                             .success(false)
@@ -56,7 +63,7 @@ public class TelemetryValidationExceptionHandler {
         String servletPath = requestPath(request);
         String message = "Malformed request body";
 
-        if (READINGS_PATH.equals(servletPath)) {
+        if (isReadingsPath(servletPath)) {
             log.info(
                     "reading_validation_rejected method={} api={} status=FAILED reason=\"{}\" exception=\"{}\" request=\"unreadable\"",
                     requestMethod(request),
@@ -76,6 +83,10 @@ public class TelemetryValidationExceptionHandler {
         }
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", message));
+    }
+
+    private boolean isReadingsPath(String servletPath) {
+        return READINGS_PATH.equals(servletPath) || READINGS_PATH_TRAILING_SLASH.equals(servletPath);
     }
 
     private String requestPath(HttpServletRequest request) {
@@ -135,6 +146,29 @@ public class TelemetryValidationExceptionHandler {
                     validationFields(ex)
             );
         }
+    }
+
+    // REPORTED-METRIC: capture a validation-rejected submission (before any reading/anomaly is written)
+    // so analytics can count the scheme as having reported. Tenant is not resolved at validation time;
+    // analytics resolves the scheme/tenant from the submitted scheme id. No raw PII is sent.
+    private void publishSubmissionRejected(Object target, String reason) {
+        if (telemetryEventPublisher == null || !(target instanceof AssamReadingRequest request)) {
+            return;
+        }
+        boolean hasSchemeId = (request.getStateSchemeId() != null && !request.getStateSchemeId().isBlank())
+                || (request.getCentreSchemeId() != null && !request.getCentreSchemeId().isBlank());
+        if (!hasSchemeId) {
+            return; // nothing to attribute the reject to
+        }
+        telemetryEventPublisher.publishSubmissionRejected(
+                null,                          // tenantId: not resolved at validation time; analytics derives it from the scheme id
+                request.getStateSchemeId(),
+                request.getCentreSchemeId(),
+                null,                          // submittedPhoneHash: intentionally null here — validation rejects often carry a
+                                               // blank/invalid phone, and the reported-count keys on scheme_id, not the phone.
+                                               // The field stays for callers that DO have a resolvable phone to hash.
+                sanitizeLogMessage(reason)
+        );
     }
 
     private TelemetrySubmissionAuditService.SubmissionAuditSnapshot auditSnapshot(Object target) {

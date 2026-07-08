@@ -21,6 +21,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -70,7 +71,7 @@ class GlificImageWorkflowServiceAssamTest {
     private GlificImageWorkflowService service;
 
     @Test
-    void processImageRequiresSelectedChannelThatStillExists() throws Exception {
+    void processImageDoesNotRequireSelectedChannel() throws Exception {
         GlificWebhookRequest request = GlificWebhookRequest.builder()
                 .contactId("919876543210")
                 .mediaId("media-1")
@@ -87,9 +88,6 @@ class GlificImageWorkflowServiceAssamTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(userChannelPreferenceRepository.findChannelValue(22, "919876543210")).thenReturn(Optional.of("PDU"));
-        when(tenantConfigRepository.findConfigValue(22, "TENANT_SUPPORTED_CHANNELS"))
-                .thenReturn(Optional.of("{\"channels\":[\"PDU\",\"IOT\"]}"));
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
@@ -111,7 +109,7 @@ class GlificImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processImageFailsWhenSelectedChannelMissingOrRemoved() throws Exception {
+    void processImageContinuesWhenSelectedChannelMissingOrRemoved() throws Exception {
         GlificWebhookRequest request = GlificWebhookRequest.builder()
                 .contactId("919876543210")
                 .mediaId("media-1")
@@ -128,22 +126,24 @@ class GlificImageWorkflowServiceAssamTest {
         when(operatorContextService.resolveOperatorWithSchema("919876543210")).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
-        when(userChannelPreferenceRepository.findChannelValue(22, "919876543210")).thenReturn(Optional.of("BFM"));
-        when(tenantConfigRepository.findConfigValue(22, "TENANT_SUPPORTED_CHANNELS"))
-                .thenReturn(Optional.of("{\"channels\":[\"PDU\",\"IOT\"]}"));
-        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
-        when(localizationService.resolveUserFacingErrorMessage(
-                any(IllegalStateException.class),
-                anyString(),
-                anyString()
-        )).thenReturn("Selected channel is no longer available. Please make sure you have a channel selected.");
+        when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
 
         CreateReadingResponse response = service.processImage(request);
 
         assertNotNull(response);
-        assertEquals(false, response.isSuccess());
-        assertEquals("Selected channel is no longer available. Please make sure you have a channel selected.", response.getMessage());
-        verify(bfmReadingService, never()).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
+        assertEquals(true, response.isSuccess());
+        verify(bfmReadingService).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
     }
 
     @Test
@@ -162,7 +162,8 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
@@ -205,7 +206,8 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
@@ -259,7 +261,8 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
@@ -301,7 +304,8 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(localizationService.localizeMessage("Reading created successfully", "english"))
@@ -328,7 +332,11 @@ class GlificImageWorkflowServiceAssamTest {
     }
 
     @Test
-    void processAssamReadingLogsSchemeNotFoundWhenSchemeIdsUnknown() {
+    void processAssamReadingRecordsAgainstPlaceholderWhenSchemeIdsUnknown() {
+        // LENIENT-INGEST: unknown scheme ids are now recorded against an auto-provisioned placeholder
+        // scheme (and tagged UNKNOWN_SCHEME) instead of being rejected.
+        ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
+
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
@@ -342,16 +350,25 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "99999999"))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "88888888"))
                 .thenReturn(Optional.empty());
-        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
-        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
-                .thenReturn("Reading rejected");
+        when(telemetryTenantRepository.getOrCreatePlaceholderScheme("tenant_assam", "99999999", "88888888"))
+                .thenReturn(55555L);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
 
         ListAppender<ILoggingEvent> appender = attachAppender();
         CreateReadingResponse response;
@@ -362,18 +379,27 @@ class GlificImageWorkflowServiceAssamTest {
         }
 
         assertNotNull(response);
-        assertFalse(response.isSuccess());
-        assertEquals("REJECTED", response.getQualityStatus());
-        assertTrue(infoLogged(appender, "reason=\"scheme_not_found\""),
-                "Expected a scheme_not_found rejection log");
-        assertFalse(infoLogged(appender, "operator_not_mapped_to_scheme"),
-                "Should not log operator_not_mapped_to_scheme when scheme ids are unknown");
-        // Scheme ids are not PII and must be logged so the rejection can be diagnosed.
-        assertTrue(infoLogged(appender, "stateSchemeId=99999999"));
+        assertTrue(response.isSuccess());
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        CreateReadingRequest captured = requestCaptor.getValue();
+        assertEquals(55555L, captured.getSchemeId());
+        assertNotNull(captured.getIngestionSource());
+        assertTrue((captured.getIngestionSource() & IngestionSource.UNKNOWN_SCHEME) != 0,
+                "Reading should be tagged UNKNOWN_SCHEME");
+        assertEquals("99999999", captured.getSubmittedStateSchemeId());
+        // Scheme ids are not PII and must be logged so the auto-provisioning can be traced.
+        assertTrue(infoLogged(appender, "reason=\"scheme_not_found\""));
+        assertTrue(infoLogged(appender, "auto_provisioned_scheme_id=55555"));
     }
 
     @Test
-    void processAssamReadingLogsOperatorNotMappedWhenSchemeExistsButUnmapped() {
+    void processAssamReadingRecordsAgainstExistingSchemeWhenOperatorNotMapped() {
+        // LENIENT-INGEST: when the scheme exists but the operator is not mapped to it, the reading is
+        // now recorded against that scheme and tagged OPERATOR_NOT_MAPPED instead of being rejected.
+        ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
+
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
@@ -387,7 +413,8 @@ class GlificImageWorkflowServiceAssamTest {
                 new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
         );
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22)).thenReturn(operatorWithSchema);
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
         when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
@@ -396,9 +423,15 @@ class GlificImageWorkflowServiceAssamTest {
                 .thenReturn(false);
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
                 .thenReturn(Optional.empty());
-        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
-        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
-                .thenReturn("Reading rejected");
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
 
         ListAppender<ILoggingEvent> appender = attachAppender();
         CreateReadingResponse response;
@@ -409,16 +442,27 @@ class GlificImageWorkflowServiceAssamTest {
         }
 
         assertNotNull(response);
-        assertFalse(response.isSuccess());
-        assertTrue(infoLogged(appender, "reason=\"operator_not_mapped_to_scheme\""),
-                "Expected an operator_not_mapped_to_scheme rejection log");
+        assertTrue(response.isSuccess());
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        CreateReadingRequest captured = requestCaptor.getValue();
+        assertEquals(30178236L, captured.getSchemeId());
+        assertNotNull(captured.getIngestionSource());
+        assertTrue((captured.getIngestionSource() & IngestionSource.OPERATOR_NOT_MAPPED) != 0,
+                "Reading should be tagged OPERATOR_NOT_MAPPED");
+        assertTrue(infoLogged(appender, "reason=\"operator_not_mapped_to_scheme\""));
         assertFalse(infoLogged(appender, "scheme_not_found"),
                 "Should not log scheme_not_found when the scheme exists");
         assertTrue(infoLogged(appender, "stateSchemeFound=true"));
     }
 
     @Test
-    void processAssamReadingNeverLogsRawPhoneAboveDebugWhenOperatorNotFound() {
+    void processAssamReadingRecordsAgainstSentinelWhenOperatorNotFoundAndNeverLogsRawPhoneAboveDebug() {
+        // LENIENT-INGEST: an unregistered phone is now recorded against the sentinel "Unknown operator"
+        // (tagged UNKNOWN_OPERATOR). The raw phone must still never appear above DEBUG.
+        ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
+
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
                 .confirmedReading(new BigDecimal("123.4"))
@@ -426,11 +470,31 @@ class GlificImageWorkflowServiceAssamTest {
                 .phoneNumber("919876543210")
                 .build();
 
-        when(operatorContextService.resolveOperatorWithSchema("919876543210", 22))
-                .thenThrow(new IllegalStateException("No operator found for the provided contactId"));
-        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
-        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
-                .thenReturn("Operator could not be resolved for this contact.");
+        TelemetryOperator sentinel = new TelemetryOperator(
+                999L, 22, "Unknown Operator", "unknown-operator@auto.jalsoochak.invalid", "UNKNOWN", null);
+        TelemetryOperatorWithSchema sentinelWithSchema = new TelemetryOperatorWithSchema("tenant_assam", sentinel);
+
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findSchemaNameByTenantId(22)).thenReturn(Optional.of("tenant_assam"));
+        when(telemetryTenantRepository.getOrCreateUnknownOperatorUserId("tenant_assam", 22)).thenReturn(999L);
+        when(telemetryTenantRepository.findOperatorById("tenant_assam", 999L)).thenReturn(Optional.of(sentinel));
+        when(telemetryTenantRepository.hashSubmittedPhone("919876543210")).thenReturn("phv-hash");
+        when(operatorContextService.resolveOperatorLanguage(sentinelWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 999L, 30178236L))
+                .thenReturn(false);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
 
         ch.qos.logback.classic.Logger logger =
                 (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(GlificImageWorkflowService.class);
@@ -449,7 +513,14 @@ class GlificImageWorkflowServiceAssamTest {
         }
 
         assertNotNull(response);
-        assertFalse(response.isSuccess());
+        assertTrue(response.isSuccess());
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        CreateReadingRequest captured = requestCaptor.getValue();
+        assertTrue((captured.getIngestionSource() & IngestionSource.UNKNOWN_OPERATOR) != 0,
+                "Reading should be tagged UNKNOWN_OPERATOR");
+        assertEquals("phv-hash", captured.getSubmittedPhoneHash());
 
         boolean rawAboveDebug = appender.list.stream()
                 .filter(event -> event.getLevel() != Level.DEBUG)
@@ -460,6 +531,45 @@ class GlificImageWorkflowServiceAssamTest {
                 .filter(event -> event.getLevel() == Level.DEBUG)
                 .anyMatch(event -> event.getFormattedMessage().contains("919876543210"));
         assertTrue(rawAtDebug, "Raw phone should be available at DEBUG level");
+    }
+
+    @Test
+    void processAssamReadingRejectsUnknownSchemeWhenLenientIngestionDisabled() {
+        // With the LENIENT-INGEST off-switch disabled, the original reject behaviour is preserved.
+        ReflectionTestUtils.setField(service, "lenientIngestionEnabled", false);
+
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("99999999")
+                .centreSchemeId("88888888")
+                .phoneNumber("919876543210")
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "99999999"))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "88888888"))
+                .thenReturn(Optional.empty());
+        when(localizationService.resolveLanguageKeyForContact("919876543210")).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+                .thenReturn("Reading rejected");
+
+        CreateReadingResponse response = service.processAssamReading(request, 22);
+
+        assertNotNull(response);
+        assertFalse(response.isSuccess());
+        assertEquals("REJECTED", response.getQualityStatus());
+        verify(telemetryTenantRepository, never()).getOrCreatePlaceholderScheme(anyString(), any(), any());
+        verify(bfmReadingService, never()).createReading(any(), anyString(), any(), anyString(), anyBoolean());
     }
 
     private ListAppender<ILoggingEvent> attachAppender() {

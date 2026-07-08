@@ -29,6 +29,10 @@ public class AverageWaterSupplyResponse {
     private List<SchemeWaterSupply> schemes;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private List<ChildRegionWaterSupply> childRegions;
+    // The focal region's OWN deduped total (each scheme counted once). Use this for a region's headline
+    // figure instead of summing childRegions, which double-counts schemes that span multiple sub-regions.
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private ChildRegionWaterSupply currentRegion;
 
     @Data
     @Builder

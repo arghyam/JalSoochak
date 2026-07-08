@@ -11,8 +11,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,8 +36,8 @@ class AnomalyQueryServiceTest {
         when(anomalyRepository.findAnomaliesForMappedUserSchemesInRange(
                 eq(10),
                 eq(42),
-                eq(start.atStartOfDay().atOffset(ZoneOffset.UTC)),
-                eq(end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC)),
+                eq(start.atStartOfDay()),
+                eq(end.plusDays(1).atStartOfDay()),
                 eq(""),
                 eq(""),
                 eq(-1),
@@ -51,8 +49,8 @@ class AnomalyQueryServiceTest {
         verify(anomalyRepository).findAnomaliesForMappedUserSchemesInRange(
                 eq(10),
                 eq(42),
-                eq(start.atStartOfDay().atOffset(ZoneOffset.UTC)),
-                eq(end.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC)),
+                eq(start.atStartOfDay()),
+                eq(end.plusDays(1).atStartOfDay()),
                 eq(""),
                 eq(""),
                 eq(-1),

@@ -56,10 +56,16 @@ public class BfmReadingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Operator not found"));
         Integer tenantId = operatorInRequest.tenantId();
 
+        // LENIENT-INGEST: submissions recorded through the lenient path (missing scheme / missing
+        // operator / operator-not-mapped) carry a non-zero ingestionSource. For those we skip the
+        // operator-to-scheme mapping guard so the reading is still recorded and counted.
+        boolean lenientIngestion = request.getIngestionSource() != null
+                && request.getIngestionSource() != IngestionSource.NORMAL;
+
         boolean belongsToScheme = telemetryTenantRepository
                 .isOperatorMappedToScheme(schemaName, operatorInRequest.id(), request.getSchemeId());
 
-        if (!belongsToScheme) {
+        if (!belongsToScheme && !lenientIngestion) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Operator does not belong to the specified scheme");
         }
         FlowVisionResult ocrResult = null;
@@ -74,6 +80,11 @@ public class BfmReadingService {
 
             try {
                 ocrResult = flowVisionService.extractReading(request.getReadingUrl());
+                log.info("readings_glific flowvision_result operatorId={} schemeId={} imageUrlHash={} result={}",
+                        operatorInRequest.id(),
+                        request.getSchemeId(),
+                        imageUrlHash(request.getReadingUrl()),
+                        summarizeFlowVisionResult(ocrResult));
                 if (ocrResult == null || ocrResult.getAdjustedReading() == null) {
                     String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                             AnomalyConstants.TYPE_UNREADABLE_IMAGE,
@@ -106,8 +117,18 @@ public class BfmReadingService {
                 }
                 finalReading = ocrResult.getAdjustedReading();
                 confidenceLevel = ocrResult.getQualityConfidence();
+                log.info("readings_glific ocr_accepted operatorId={} schemeId={} correlationId={} adjustedReading={} confidence={} qualityStatus={}",
+                        operatorInRequest.id(),
+                        request.getSchemeId(),
+                        sanitizeLogValue(ocrResult.getCorrelationId()),
+                        finalReading,
+                        confidenceLevel,
+                        sanitizeLogValue(ocrResult.getQualityStatus()));
             } catch (Exception ex) {
-                log.error("FlowVision OCR failed for URL: {}", request.getReadingUrl(), ex);
+                log.error("FlowVision OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
+                if (log.isDebugEnabled()) {
+                    log.debug("FlowVision OCR failed for URL: {}", request.getReadingUrl());
+                }
                 String anomalyCorrelationId = buildImageAnomalyCorrelationId(
                         AnomalyConstants.TYPE_UNREADABLE_IMAGE,
                         operatorInRequest.id(),
@@ -289,14 +310,33 @@ public class BfmReadingService {
                     .build();
         }
 
-        Long readingId = null;
+        Long readingId;
         Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName,
                 request.getSchemeId(),
                 operatorInRequest.id(),
                 LocalDate.from(readingAt)
         );
-        if (placeholderIdOpt.isPresent()) {
+        if (lenientIngestion) {
+            // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
+            // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
+            // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
+            readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
+                    schemaName,
+                    placeholderIdOpt.orElse(null),
+                    request.getSchemeId(),
+                    operatorInRequest.id(),
+                    readingAt,
+                    extractedReading,
+                    effectiveConfirmedReading,
+                    correlationId,
+                    request.getReadingUrl(),
+                    request.getMeterChangeReason(),
+                    request.getIngestionSource(),
+                    request.getSubmittedStateSchemeId(),
+                    request.getSubmittedCentreSchemeId(),
+                    request.getSubmittedPhoneHash());
+        } else if (placeholderIdOpt.isPresent()) {
             readingId = placeholderIdOpt.get();
             telemetryTenantRepository.updateFlowReadingFromIngestion(
                     schemaName,
@@ -647,40 +687,40 @@ public class BfmReadingService {
                                               LocalDateTime previousReadingDate,
                                               Integer consecutiveDaysMissed,
                                               String correlationId) {
-        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
-                schemaName,
-                userId,
-                schemeId,
-                anomalyType
-        );
-        if (existingCount > 0) {
-            telemetryTenantRepository.touchLatestAnomalyByTypeForToday(
-                    schemaName,
-                    userId,
-                    schemeId,
-                    anomalyType
-            );
-            int effectiveRetries = Math.max(retries, existingCount + 1);
-            telemetryEventPublisher.publishAnomalyRecorded(
-                    tenantId,
-                    anomalyType,
-                    userId,
-                    schemeId,
-                    aiReading,
-                    aiConfidencePercentage,
-                    overriddenReading,
-                    effectiveRetries,
-                    previousReading,
-                    previousReadingDate,
-                    consecutiveDaysMissed,
-                    reason,
-                    AnomalyConstants.STATUS_OPEN,
-                    correlationId
-            );
-            log.info("Skipping duplicate image anomaly publish for userId={} schemeId={} anomalyType={} correlationId={}",
-                    userId, schemeId, anomalyType, correlationId);
-            return;
-        }
+//        int existingCount = telemetryTenantRepository.countAnomaliesByTypeForToday(
+//                schemaName,
+//                userId,
+//                schemeId,
+//                anomalyType
+//        );
+//        if (existingCount > 0) {
+//            telemetryTenantRepository.touchLatestAnomalyByTypeForToday(
+//                    schemaName,
+//                    userId,
+//                    schemeId,
+//                    anomalyType
+//            );
+//            int effectiveRetries = Math.max(retries, existingCount + 1);
+//            telemetryEventPublisher.publishAnomalyRecorded(
+//                    tenantId,
+//                    anomalyType,
+//                    userId,
+//                    schemeId,
+//                    aiReading,
+//                    aiConfidencePercentage,
+//                    overriddenReading,
+//                    effectiveRetries,
+//                    previousReading,
+//                    previousReadingDate,
+//                    consecutiveDaysMissed,
+//                    reason,
+//                    AnomalyConstants.STATUS_OPEN,
+//                    correlationId
+//            );
+//            log.info("Skipping duplicate image anomaly publish for userId={} schemeId={} anomalyType={} correlationId={}",
+//                    userId, schemeId, anomalyType, correlationId);
+//            return;
+//        }
 
         telemetryTenantRepository.createTenantAnomalyRecord(
                 schemaName,
@@ -746,6 +786,33 @@ public class BfmReadingService {
                 AnomalyConstants.STATUS_OPEN,
                 correlationId
         );
+    }
+
+    private String summarizeFlowVisionResult(FlowVisionResult result) {
+        if (result == null) {
+            return "null";
+        }
+        return String.format(
+                "{adjustedReading=%s,qualityStatus=%s,qualityConfidence=%s,correlationId=%s}",
+                result.getAdjustedReading(),
+                sanitizeLogValue(result.getQualityStatus()),
+                result.getQualityConfidence(),
+                sanitizeLogValue(result.getCorrelationId())
+        );
+    }
+
+    private String imageUrlHash(String readingUrl) {
+        if (readingUrl == null || readingUrl.isBlank()) {
+            return "n/a";
+        }
+        return Integer.toHexString(readingUrl.hashCode());
+    }
+
+    private String sanitizeLogValue(String value) {
+        if (value == null || value.isBlank()) {
+            return "n/a";
+        }
+        return value.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {

@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -119,7 +120,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
         mockMvc.perform(post("/api/v1/telemetry/readings")
@@ -145,7 +146,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
         mockMvc.perform(post("/jalsoochak/api/v1/telemetry/readings")
@@ -162,6 +163,83 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
+    }
+
+    @Test
+    void assamReadingsAcceptsTrailingSlashPath() throws Exception {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
+                .build();
+
+        mockMvc.perform(post("/api/v1/telemetry/readings/")
+                        .header("X-Api-Key", "js_valid_key")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "reading_url": "https://example.com/meter.jpg",
+                                  "state_scheme_id": "30178236",
+                                  "phone_number": "919999999999"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void assamReadingsValidationFailureOnTrailingSlashReturnsRejectedResponse() throws Exception {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
+                .build();
+
+        mockMvc.perform(post("/api/v1/telemetry/readings/")
+                        .header("X-Api-Key", "js_valid_key")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "reading_url": "https://example.com/meter.jpg",
+                                  "state_scheme_id": "30178236"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
+    }
+
+    @Test
+    void updateReadingsAcceptsTrailingSlashPath() throws Exception {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
+                .build();
+
+        mockMvc.perform(put("/api/v1/telemetry/readings/")
+                        .header("X-Api-Key", "js_valid_key")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "correlation_id": "corr-123",
+                                  "phone_number": "919999999999",
+                                  "confirmed_reading": 111
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.correlationId").value("corr-123"));
     }
 
     @Test
