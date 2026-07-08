@@ -448,7 +448,7 @@ class SingleTenantTelemetryControllerUnitTest {
         private final boolean throwError;
 
         private StubBfmReadingService(boolean throwError) {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null);
             this.throwError = throwError;
         }
 
