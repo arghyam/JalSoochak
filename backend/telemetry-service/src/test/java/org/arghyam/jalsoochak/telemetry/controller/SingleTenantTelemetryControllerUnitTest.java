@@ -125,7 +125,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
         mockMvc.perform(post("/api/v1/telemetry/readings")
@@ -152,7 +152,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
         mockMvc.perform(post("/jalsoochak/api/v1/telemetry/readings")
@@ -180,7 +180,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
         mockMvc.perform(post("/api/v1/telemetry/readings/")
@@ -205,7 +205,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
         mockMvc.perform(post("/api/v1/telemetry/readings/")
@@ -232,7 +232,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new TelemetryValidationExceptionHandler(null))
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
         mockMvc.perform(put("/api/v1/telemetry/readings/")
