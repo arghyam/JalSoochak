@@ -3591,6 +3591,7 @@ public class SchemeRegularityRepository {
                         ), 0)::bigint AS total_water_supplied
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -3801,6 +3802,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -3940,6 +3942,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -4063,6 +4066,7 @@ public class SchemeRegularityRepository {
                         ), 0)::bigint AS total_water_supplied
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -4224,6 +4228,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -4359,6 +4364,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -4851,6 +4857,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_tenant)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -5578,6 +5585,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -5679,6 +5687,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
@@ -5793,6 +5802,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.fact_water_quantity_table f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
                 )
                 SELECT
