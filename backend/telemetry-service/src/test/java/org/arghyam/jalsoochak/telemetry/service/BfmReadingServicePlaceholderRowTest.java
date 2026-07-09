@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -58,6 +60,9 @@ class BfmReadingServicePlaceholderRowTest {
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
+    @Mock
+    private ReadingChannelResolver readingChannelResolver;
+
     @InjectMocks
     private BfmReadingService service;
 
@@ -99,6 +104,7 @@ class BfmReadingServicePlaceholderRowTest {
                 1L,
                 LocalDate.now()
         )).thenReturn(Optional.of(99L));
+        when(readingChannelResolver.resolve(1, "919999999999")).thenReturn(ReadingChannel.BFM);
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -118,6 +124,8 @@ class BfmReadingServicePlaceholderRowTest {
                 any(),
                 anyLong()
         );
+        // The resolved channel is persisted onto the reading row by its short code.
+        verify(telemetryTenantRepository).updateFlowReadingChannel(schemaName, 99L, ReadingChannel.BFM.name());
         verify(telemetryTenantRepository, never()).createFlowReading(
                 anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
         );
@@ -189,7 +197,8 @@ class BfmReadingServicePlaceholderRowTest {
                 new BigDecimal("100"),
                 "http://example.com/img.jpg",
                 readingDate,
-                readingAt
+                readingAt,
+                "BFM"
         );
 
         when(glificOperatorContextService.resolveOperatorWithSchema("919999999999"))
@@ -213,7 +222,7 @@ class BfmReadingServicePlaceholderRowTest {
                 null,
                 "http://example.com/img.jpg",
                 readingAt,
-                null,
+                ReadingChannel.BFM.getCode(),
                 readingDate,
                 1,
                 0
@@ -236,7 +245,8 @@ class BfmReadingServicePlaceholderRowTest {
                 new BigDecimal("100"),
                 "http://example.com/img.jpg",
                 readingDate,
-                readingAt
+                readingAt,
+                "BFM"
         );
 
         when(telemetryTenantRepository.findFlowReadingDetailsByCorrelationId(schemaName, "corr-1"))
@@ -259,7 +269,7 @@ class BfmReadingServicePlaceholderRowTest {
                 null,
                 "http://example.com/img.jpg",
                 readingAt,
-                null,
+                ReadingChannel.BFM.getCode(),
                 readingDate,
                 1,
                 0

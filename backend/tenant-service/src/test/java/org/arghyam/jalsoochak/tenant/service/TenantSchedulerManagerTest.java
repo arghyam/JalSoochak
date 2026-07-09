@@ -90,6 +90,20 @@ class TenantSchedulerManagerTest {
     }
 
     @Test
+    void loadAndScheduleAll_skipsRegisteredTenants() {
+        TenantResponseDTO active = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        TenantResponseDTO registered = TenantResponseDTO.builder().id(2).stateCode("UP").status(TenantStatusEnum.REGISTERED.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(active, registered));
+
+        stubConfigs(1, 8, 0, 9, 0);
+
+        manager.loadAndScheduleAll();
+
+        // Only 2 calls for the active tenant; the pre-seeded REGISTERED tenant (no schema) is excluded
+        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(CronTrigger.class));
+    }
+
+    @Test
     void loadAndScheduleAll_skipsNullStatusTenants() {
         TenantResponseDTO active = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
         TenantResponseDTO nullStatus = TenantResponseDTO.builder().id(2).stateCode("UP").status(null).build();

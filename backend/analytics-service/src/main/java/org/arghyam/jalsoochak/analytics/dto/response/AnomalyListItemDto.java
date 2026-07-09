@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
+import java.time.LocalDateTime;
 
 @Data
 @Builder
@@ -36,11 +36,11 @@ public class AnomalyListItemDto {
     private String remarks;
     private String correlationId;
     private Integer resolvedBy;
-    private OffsetDateTime resolvedAt;
-    private OffsetDateTime deletedAt;
+    private LocalDateTime resolvedAt;
+    private LocalDateTime deletedAt;
     private Integer deletedBy;
-    private OffsetDateTime createdAt;
-    private OffsetDateTime updatedAt;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 
     @JsonProperty("scheme_name")
     private String schemeName;

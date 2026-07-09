@@ -19,10 +19,18 @@ import org.springframework.web.client.ResourceAccessException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -92,14 +100,69 @@ class FlowVisionReadingsRetryServiceTest {
         verify(flowVisionService).extractReadingOrThrow("https://example.com/img.jpg");
     }
 
+    @Test
+    void releasesBulkheadPermitBetweenRetryAttempts() throws Exception {
+        FlowVisionService flowVisionService = mock(FlowVisionService.class);
+        CountDownLatch firstAttemptFailed = new CountDownLatch(1);
+        AtomicInteger firstCallAttempts = new AtomicInteger();
+        FlowVisionResult firstResult = FlowVisionResult.builder()
+                .adjustedReading(new BigDecimal("100"))
+                .qualityStatus("GOOD")
+                .build();
+        FlowVisionResult secondResult = FlowVisionResult.builder()
+                .adjustedReading(new BigDecimal("200"))
+                .qualityStatus("GOOD")
+                .build();
+
+        when(flowVisionService.extractReadingOrThrow(anyString())).thenAnswer(invocation -> {
+            String readingUrl = invocation.getArgument(0);
+            if ("https://example.com/first.jpg".equals(readingUrl)
+                    && firstCallAttempts.incrementAndGet() == 1) {
+                firstAttemptFailed.countDown();
+                throw new ResourceAccessException("Read timed out");
+            }
+            if ("https://example.com/first.jpg".equals(readingUrl)) {
+                return firstResult;
+            }
+            return secondResult;
+        });
+
+        FlowVisionReadingsRetryService service = newService(
+                flowVisionService,
+                1,
+                Duration.ofMillis(300)
+        );
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<FlowVisionResult> firstFuture = executor.submit(
+                    () -> service.extractReading("https://example.com/first.jpg")
+            );
+            assertTrue(firstAttemptFailed.await(1, TimeUnit.SECONDS));
+
+            FlowVisionResult secondActual = service.extractReading("https://example.com/second.jpg");
+            FlowVisionResult firstActual = firstFuture.get(1, TimeUnit.SECONDS);
+
+            assertEquals(secondResult, secondActual);
+            assertEquals(firstResult, firstActual);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private FlowVisionReadingsRetryService newService(FlowVisionService flowVisionService) {
+        return newService(flowVisionService, 10, Duration.ZERO);
+    }
+
+    private FlowVisionReadingsRetryService newService(FlowVisionService flowVisionService,
+                                                      int maxConcurrentCalls,
+                                                      Duration waitDuration) {
         RetryConfig retryConfig = RetryConfig.custom()
                 .maxAttempts(3)
-                .waitDuration(Duration.ZERO)
+                .waitDuration(waitDuration)
                 .retryExceptions(FlowVisionTransientFailures.retriableExceptions())
                 .build();
         BulkheadConfig bulkheadConfig = BulkheadConfig.custom()
-                .maxConcurrentCalls(10)
+                .maxConcurrentCalls(maxConcurrentCalls)
                 .maxWaitDuration(Duration.ZERO)
                 .build();
         CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom()

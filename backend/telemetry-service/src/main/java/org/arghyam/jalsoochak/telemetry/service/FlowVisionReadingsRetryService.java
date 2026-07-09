@@ -33,9 +33,9 @@ public class FlowVisionReadingsRetryService {
 
     public FlowVisionResult extractReading(String readingUrl) {
         Supplier<FlowVisionResult> supplier = () -> flowVisionService.extractReadingOrThrow(readingUrl);
-        Supplier<FlowVisionResult> resilientSupplier = Bulkhead.decorateSupplier(
-                bulkhead,
-                CircuitBreaker.decorateSupplier(circuitBreaker, Retry.decorateSupplier(retry, supplier))
+        Supplier<FlowVisionResult> resilientSupplier = Retry.decorateSupplier(
+                retry,
+                CircuitBreaker.decorateSupplier(circuitBreaker, Bulkhead.decorateSupplier(bulkhead, supplier))
         );
 
         try {

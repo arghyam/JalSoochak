@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.SubmissionRejectedEvent;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.arghyam.jalsoochak.analytics.entity.Anomaly;
 import org.arghyam.jalsoochak.analytics.entity.DimDate;
@@ -24,7 +25,12 @@ import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactMeterReadingRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
+import org.arghyam.jalsoochak.analytics.repository.SubmissionAttemptRepository;
 import org.arghyam.jalsoochak.analytics.service.FactService;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculator;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -40,6 +46,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.WeekFields;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -67,6 +74,10 @@ public class FactServiceImpl implements FactService {
     private final DimTenantRepository dimTenantRepository;
     private final DimDateRepository dimDateRepository;
     private final DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
+    // REPORTED-METRIC: persistence for pre-anomaly submission rejects.
+    private final SubmissionAttemptRepository submissionAttemptRepository;
+    private final WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry;
+    private final MeterRegistry meterRegistry;
 
     @Override
     @Transactional
@@ -99,6 +110,27 @@ public class FactServiceImpl implements FactService {
         updateOperatorAttendance(event, readingDate);
         updateWaterQuantityFromReading(event, readingDate, submissionStatus);
         log.info("Ingested fact_meter_reading_table for scheme={} tenant={}", event.getSchemeId(), event.getTenantId());
+    }
+
+    // REPORTED-METRIC: persist a pre-anomaly submission reject. Resolves the submitted gov scheme id to
+    // our scheme_id + tenant_id via dim_scheme when possible, so the "reported" counts can include it.
+    @Override
+    @Transactional
+    public void ingestSubmissionRejected(SubmissionRejectedEvent event) {
+        java.util.Optional<int[]> resolved = submissionAttemptRepository.resolveScheme(
+                event.getTenantId(), event.getSubmittedStateSchemeId(), event.getSubmittedCentreSchemeId());
+        Integer schemeId = resolved.map(a -> a[0]).orElse(null);
+        Integer tenantId = resolved.map(a -> a[1]).orElse(event.getTenantId());
+        LocalDateTime attemptedAt = parseTimestamp(event.getAttemptedAt());
+        submissionAttemptRepository.insert(
+                tenantId,
+                schemeId,
+                event.getSubmittedStateSchemeId(),
+                event.getSubmittedCentreSchemeId(),
+                event.getSubmittedPhoneHash(),
+                event.getReason(),
+                attemptedAt != null ? attemptedAt : LocalDateTime.now());
+        log.info("Ingested submission_attempt_table scheme={} tenant={} reason={}", schemeId, tenantId, event.getReason());
     }
 
     @Override
@@ -262,6 +294,19 @@ public class FactServiceImpl implements FactService {
             return;
         }
 
+        Optional<WaterQuantityCalculator> calculatorOpt = waterQuantityCalculatorRegistry.resolve(event.getChannel());
+        if (calculatorOpt.isEmpty()) {
+            log.warn("Skipping water quantity update; no calculator registered for channel={} (tenantId={}, schemeId={}, date={}). "
+                            + "Not falling back to BFM to avoid mis-deriving the reading with the wrong calculator.",
+                    event.getChannel(), event.getTenantId(), event.getSchemeId(), readingDate);
+            meterRegistry.counter("water_quantity.calculator.missing",
+                            "channel", String.valueOf(event.getChannel()),
+                            "tenantId", String.valueOf(event.getTenantId()),
+                            "schemeId", String.valueOf(event.getSchemeId()))
+                    .increment();
+            return;
+        }
+
         LocalDate previousDate = readingDate.minusDays(1);
         Integer previousReading = meterReadingRepository
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(
@@ -272,7 +317,15 @@ public class FactServiceImpl implements FactService {
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(0);
 
-        int waterQuantity = Math.max(0, currentReading - (previousReading != null ? previousReading : 0));
+        WaterQuantityContext context = WaterQuantityContext.builder()
+                .tenantId(event.getTenantId())
+                .schemeId(event.getSchemeId())
+                .readingDate(readingDate)
+                .currentReading(currentReading)
+                .previousReading(previousReading)
+                .channel(event.getChannel())
+                .build();
+        int waterQuantity = calculatorOpt.get().calculate(context);
         LocalDateTime now = LocalDateTime.now();
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
@@ -309,7 +362,7 @@ public class FactServiceImpl implements FactService {
     @Transactional
     public void ingestTenantEscalation(TenantEscalationEvent event) {
         ensureTenantExists(event.getTenantId(), event.getTenantSchema());
-        OffsetDateTime now = OffsetDateTime.now();
+        LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
         int operatorCount = event.getOperators() != null ? event.getOperators().size() : 0;
         int escalationRowsCreated = 0;
         int anomalyRowsCreated = 0;
@@ -375,8 +428,8 @@ public class FactServiceImpl implements FactService {
                             .userId(event.getOfficerId().intValue())
                             .resolutionStatus(1) // UNRESOLVED
                             .remark(null)
-                            .createdAt(now.toLocalDateTime())
-                            .updatedAt(now.toLocalDateTime())
+                            .createdAt(now)
+                            .updatedAt(now)
                             .build();
                     escalationRepository.save(escalationFact);
                     escalationRowsCreated++;
@@ -425,7 +478,8 @@ public class FactServiceImpl implements FactService {
     @Override
     @Transactional
     public void ingestAnomalyRecorded(AnomalyEvent event) {
-        OffsetDateTime now = OffsetDateTime.now();
+        // anomaly_table timestamps are plain TIMESTAMP holding UTC (V41) -> write UTC-naive LocalDateTime.
+        LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
         String uuid = event.getUuid();
         if (uuid == null || uuid.isBlank()) {
             uuid = UUID.randomUUID().toString();

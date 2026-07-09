@@ -357,6 +357,20 @@ class TenantCommonRepositoryIntegrationTest {
         }
 
         @Test
+        @DisplayName("excludes pre-seeded REGISTERED tenants")
+        void findAll_paginated_excludesRegistered() {
+            insertTenant("KL", "Kerala", TenantStatusEnum.ACTIVE);
+            insertTenant("RG", "Registered State", TenantStatusEnum.REGISTERED);
+
+            List<TenantResponseDTO> result = repository.findAll(10, 0, null, null);
+
+            assertThat(result).extracting(TenantResponseDTO::getStateCode)
+                    .contains("KL")
+                    .doesNotContain("RG");
+            assertThat(repository.countAllTenants(null, null)).isEqualTo(1);
+        }
+
+        @Test
         @DisplayName("throws IllegalArgumentException for limit <= 0")
         void findAll_paginated_throwsForNonPositiveLimit() {
             assertThatThrownBy(() -> repository.findAll(0, 0, null, null))
@@ -478,6 +492,18 @@ class TenantCommonRepositoryIntegrationTest {
             TenantSummaryResponseDTO summary = repository.getTenantSummary();
 
             assertThat(summary.getTotalTenants()).isZero();
+        }
+
+        @Test
+        @DisplayName("excludes pre-seeded REGISTERED tenants from summary")
+        void getTenantSummary_excludesRegistered() {
+            insertTenant("SA1", "Active 1", TenantStatusEnum.ACTIVE);
+            insertTenant("RG1", "Registered 1", TenantStatusEnum.REGISTERED);
+
+            TenantSummaryResponseDTO summary = repository.getTenantSummary();
+
+            assertThat(summary.getTotalTenants()).isEqualTo(1);
+            assertThat(summary.getActiveTenants()).isEqualTo(1);
         }
     }
 
@@ -834,43 +860,86 @@ class TenantCommonRepositoryIntegrationTest {
         }
     }
 
-    // ── countNonDeletedTenants ───────────────────────────────────────────────────
+    // ── countOnboardedTenants ────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("countNonDeletedTenants")
-    class CountNonDeletedTenants {
+    @DisplayName("countOnboardedTenants")
+    class CountOnboardedTenants {
 
         @Test
         @DisplayName("returns zero when no real tenants exist")
-        void countNonDeletedTenants_returnsZero_whenEmpty() {
-            assertThat(repository.countNonDeletedTenants()).isZero();
+        void countOnboardedTenants_returnsZero_whenEmpty() {
+            assertThat(repository.countOnboardedTenants()).isZero();
         }
 
         @Test
-        @DisplayName("returns correct count of real tenants")
-        void countNonDeletedTenants_returnsCorrectCount() {
+        @DisplayName("returns correct count of onboarded tenants")
+        void countOnboardedTenants_returnsCorrectCount() {
             insertTenant("N1", "Non Del 1", TenantStatusEnum.ACTIVE);
             insertTenant("N2", "Non Del 2", TenantStatusEnum.ACTIVE);
 
-            assertThat(repository.countNonDeletedTenants()).isEqualTo(2);
+            assertThat(repository.countOnboardedTenants()).isEqualTo(2);
         }
 
         @Test
         @DisplayName("excludes system tenant (id=0) from count")
-        void countNonDeletedTenants_excludesSystemTenant() {
+        void countOnboardedTenants_excludesSystemTenant() {
             // Only the system tenant exists; should return 0
-            assertThat(repository.countNonDeletedTenants()).isZero();
+            assertThat(repository.countOnboardedTenants()).isZero();
         }
 
         @Test
         @DisplayName("excludes soft-deleted tenants from count")
-        void countNonDeletedTenants_excludesSoftDeleted() {
+        void countOnboardedTenants_excludesSoftDeleted() {
             TenantResponseDTO t = insertTenant("NS", "Soft Del", TenantStatusEnum.ACTIVE);
             jdbcTemplate.update(
                     "UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?",
                     t.getId());
 
-            assertThat(repository.countNonDeletedTenants()).isZero();
+            assertThat(repository.countOnboardedTenants()).isZero();
+        }
+
+        @Test
+        @DisplayName("excludes pre-seeded REGISTERED tenants from count")
+        void countOnboardedTenants_excludesRegistered() {
+            insertTenant("RG", "Registered State", TenantStatusEnum.REGISTERED);
+            insertTenant("AC", "Active State", TenantStatusEnum.ACTIVE);
+
+            assertThat(repository.countOnboardedTenants()).isEqualTo(1);
+        }
+    }
+
+    // ── onboardTenant ────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("onboardTenant")
+    class OnboardTenant {
+
+        @Test
+        @DisplayName("onboards a REGISTERED tenant in place, keeping its id and trusting request fields")
+        void onboardTenant_flipsRegisteredInPlace() {
+            TenantResponseDTO seeded = insertTenant("KA", "Seeded Karnataka", TenantStatusEnum.REGISTERED);
+
+            CreateTenantRequestDTO request = validCreateRequest("KA");
+            Optional<TenantResponseDTO> result = repository.onboardTenant("KA", request, 1);
+
+            assertThat(result).isPresent();
+            TenantResponseDTO onboarded = result.get();
+            assertThat(onboarded.getId()).isEqualTo(seeded.getId());
+            assertThat(onboarded.getStatus()).isEqualTo(TenantStatusEnum.ONBOARDED.name());
+            assertThat(onboarded.getName()).isEqualTo("Test State KA");
+            assertThat(onboarded.getLgdCode()).isEqualTo(29);
+            assertThat(onboarded.getOnboardedAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("returns empty when no REGISTERED row exists for the state code")
+        void onboardTenant_returnsEmpty_whenAlreadyOnboarded() {
+            insertTenant("KA", "Active Karnataka", TenantStatusEnum.ACTIVE);
+
+            Optional<TenantResponseDTO> result = repository.onboardTenant("KA", validCreateRequest("KA"), 1);
+
+            assertThat(result).isEmpty();
         }
     }
 

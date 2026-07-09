@@ -10,7 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.OffsetDateTime;
+import java.time.LocalDateTime;
 
 @Repository
 public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
@@ -30,7 +30,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
             """)
     int touchByUuid(
             @Param("uuid") String uuid,
-            @Param("timestamp") OffsetDateTime timestamp
+            @Param("timestamp") LocalDateTime timestamp
     );
 
     @Query(
@@ -67,8 +67,8 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
     Page<AnomalyListItemDto> findAnomaliesForMappedUserSchemesInRange(
             @Param("tenantId") Integer tenantId,
             @Param("mappedUserId") Integer mappedUserId,
-            @Param("fromInclusive") OffsetDateTime fromInclusive,
-            @Param("toExclusive") OffsetDateTime toExclusive,
+            @Param("fromInclusive") LocalDateTime fromInclusive,
+            @Param("toExclusive") LocalDateTime toExclusive,
             @Param("anomalyType") String anomalyType,
             @Param("schemeName") String schemeName,
             @Param("status") int status,
@@ -87,7 +87,7 @@ public interface AnomalyRepository extends JpaRepository<Anomaly, Long> {
     long countAnomaliesForMappedUserSchemesInRange(
             @Param("tenantId") Integer tenantId,
             @Param("mappedUserId") Integer mappedUserId,
-            @Param("fromInclusive") OffsetDateTime fromInclusive,
-            @Param("toExclusive") OffsetDateTime toExclusive
+            @Param("fromInclusive") LocalDateTime fromInclusive,
+            @Param("toExclusive") LocalDateTime toExclusive
     );
 }

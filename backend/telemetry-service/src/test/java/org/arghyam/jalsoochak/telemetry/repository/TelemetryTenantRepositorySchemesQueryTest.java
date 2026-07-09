@@ -12,6 +12,7 @@ import org.springframework.jdbc.core.RowMapper;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -19,6 +20,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -113,5 +115,45 @@ class TelemetryTenantRepositorySchemesQueryTest {
         Long id = repository.getOrCreatePlaceholderScheme("tenant_as", "99999999", "88888888");
 
         assertEquals(77L, id);
+    }
+
+    // SCHEME-ID-MISMATCH: after a reading resolves on one id, the other submitted id is cross-checked
+    // against the matched scheme. The UPDATE must trim the submitted ids, target real schemes only
+    // (is_auto_provisioned = FALSE), record only the side that disagrees, and be guarded so it is a
+    // no-op once the scheme already carries the same mismatching value.
+    @Test
+    void recordSchemeIdMismatchIfAnyIssuesGuardedUpdateWithBothSubmittedIds() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+
+        repository.recordSchemeIdMismatchIfAny("tenant_as", 42L, " 30178236 ", "30244993");
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> argsCaptor = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(sqlCaptor.capture(), argsCaptor.capture());
+
+        String sql = sqlCaptor.getValue();
+        assertTrue(sql.contains("UPDATE tenant_as.scheme_master_table"));
+        assertTrue(sql.contains("is_auto_provisioned = FALSE"), "must never flag placeholder schemes");
+        assertTrue(sql.contains("IS DISTINCT FROM"));
+        assertTrue(sql.contains("id_mismatch_last_seen_at = NOW()"));
+
+        // Submitted ids are trimmed; arg order: state,state,centre,centre,schemeId,state,state,centre,centre.
+        assertArrayEquals(
+                new Object[]{"30178236", "30178236", "30244993", "30244993",
+                        42L, "30178236", "30178236", "30244993", "30244993"},
+                argsCaptor.getValue());
+    }
+
+    // SCHEME-ID-MISMATCH: a single-id submission (or a missing scheme) has nothing to cross-check, so
+    // it must never touch the master table.
+    @Test
+    void recordSchemeIdMismatchIfAnySkipsWhenAnIdOrSchemeIsMissing() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+
+        repository.recordSchemeIdMismatchIfAny("tenant_as", 42L, "30178236", "   ");
+        repository.recordSchemeIdMismatchIfAny("tenant_as", 42L, null, "30244993");
+        repository.recordSchemeIdMismatchIfAny("tenant_as", null, "30178236", "30244993");
+
+        verifyNoInteractions(jdbcTemplate);
     }
 }

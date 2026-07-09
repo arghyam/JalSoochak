@@ -7,8 +7,7 @@ import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
@@ -33,8 +32,9 @@ public class UserAlertTotalsService {
 
         long totalEscalationCount = escalationQueryService.countEscalations(tenantId, userId, safeStartDate, safeEndDate);
 
-        OffsetDateTime from = safeStartDate.atStartOfDay().atOffset(ZoneOffset.UTC);
-        OffsetDateTime to = safeEndDate.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        // anomaly_table.created_at is plain TIMESTAMP holding UTC, so use UTC-naive LocalDateTime bounds.
+        LocalDateTime from = safeStartDate.atStartOfDay();
+        LocalDateTime to = safeEndDate.plusDays(1).atStartOfDay();
         long totalAnomalyCount = anomalyRepository.countAnomaliesForMappedUserSchemesInRange(tenantId, userId, from, to);
 
         int totalMappedSchemeCount = schemeRegularityRepository.getSchemeCountByUser(tenantId, userId);

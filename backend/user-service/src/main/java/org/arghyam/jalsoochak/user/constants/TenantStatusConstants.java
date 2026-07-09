@@ -18,6 +18,7 @@ package org.arghyam.jalsoochak.user.constants;
  *   <li>SUSPENDED (4): System Users only; access blocked for business users</li>
  *   <li>DEGRADED (5): All users (with known issues)</li>
  *   <li>ARCHIVED (6): Super User only; State Admin blocked</li>
+ *   <li>REGISTERED (7): Pre-seeded tenant, not yet onboarded; no schema; hidden from all access</li>
  * </ul>
  */
 public final class TenantStatusConstants {
@@ -33,4 +34,5 @@ public final class TenantStatusConstants {
     public static final int SUSPENDED  = 4;
     public static final int DEGRADED   = 5;
     public static final int ARCHIVED   = 6;
+    public static final int REGISTERED = 7;
 }

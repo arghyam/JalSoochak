@@ -1068,10 +1068,12 @@ public class SchemeDbRepository {
     }
 
     public List<String> findAllActiveTenantSchemas() {
+        // Excludes pre-seeded REGISTERED (7) tenants, which have no provisioned schema to sync.
         String sql = """
                 SELECT state_code
                 FROM common_schema.tenant_master_table
                 WHERE deleted_at IS NULL
+                  AND status <> 7
                   AND state_code IS NOT NULL
                   AND btrim(state_code) <> ''
                 """;

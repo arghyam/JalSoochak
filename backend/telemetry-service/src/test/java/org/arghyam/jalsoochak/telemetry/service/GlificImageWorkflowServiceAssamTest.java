@@ -202,6 +202,96 @@ class GlificImageWorkflowServiceAssamTest {
     }
 
     @Test
+    void processAssamReadingFlagsSchemeIdMismatchWhenMatchedSchemeIsReal() {
+        // SCHEME-ID-MISMATCH: the reading matched on the state id and resolved to a real scheme; the
+        // other (centre) id must be cross-checked so a wrong master id can be reconciled later. The raw
+        // submitted ids are handed to the repository, which decides whether they actually disagree.
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
+                .phoneNumber("919876543210")
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+
+        CreateReadingResponse response = service.processAssamReading(request, 22);
+
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+        verify(telemetryTenantRepository).recordSchemeIdMismatchIfAny(
+                "tenant_assam", 30178236L, "30178236", "30244993");
+    }
+
+    @Test
+    void processAssamReadingDoesNotFlagMismatchForAutoProvisionedPlaceholder() {
+        // SCHEME-ID-MISMATCH: when both ids are unknown the reading lands on an auto-provisioned
+        // placeholder scheme; there is no master row to reconcile against, so nothing must be flagged.
+        ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
+
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("99999999")
+                .centreSchemeId("88888888")
+                .phoneNumber("919876543210")
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "99999999"))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "88888888"))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.getOrCreatePlaceholderScheme("tenant_assam", "99999999", "88888888"))
+                .thenReturn(55555L);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+
+        CreateReadingResponse response = service.processAssamReading(request, 22);
+
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+        verify(telemetryTenantRepository, never()).recordSchemeIdMismatchIfAny(
+                anyString(), any(), anyString(), anyString());
+    }
+
+    @Test
     void processAssamReadingUpdatesLocationWhenGeolocationPresent() {
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")

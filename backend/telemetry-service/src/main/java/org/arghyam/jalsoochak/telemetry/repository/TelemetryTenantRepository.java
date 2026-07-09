@@ -1,8 +1,10 @@
 package org.arghyam.jalsoochak.telemetry.repository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.service.PiiEncryptionService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -20,6 +22,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Slf4j
 @Repository
 @RequiredArgsConstructor
 public class TelemetryTenantRepository {
@@ -86,6 +89,61 @@ public class TelemetryTenantRepository {
                 """, schemaName, realSchemeOnlyFilter(schemaName));
         List<Long> rows = jdbcTemplate.query(sql, (rs, n) -> toLong(rs.getObject("id")), centreSchemeId.trim());
         return rows.stream().findFirst();
+    }
+
+    /**
+     * SCHEME-ID-MISMATCH: records, on an existing (real) scheme row, a submitted state/centre scheme
+     * id that disagrees with our master data. The reading matching logic is unchanged — this only
+     * cross-checks the *other* submitted id after the reading has already resolved to {@code schemeId}.
+     *
+     * <p>Only acts when the request carried BOTH ids (a single-id submission has nothing to
+     * cross-check) and the matched scheme is not an auto-provisioned placeholder. It is a no-op on the
+     * hot reading path once a scheme is already flagged with the same value, so it does not repeatedly
+     * write the master table. Best-effort: any failure is logged and swallowed so reconciliation
+     * tracking can never break reading ingestion.
+     */
+    public void recordSchemeIdMismatchIfAny(String schemaName,
+                                            Long schemeId,
+                                            String submittedStateSchemeId,
+                                            String submittedCentreSchemeId) {
+        validateSchemaName(schemaName);
+        if (schemeId == null
+                || submittedStateSchemeId == null || submittedStateSchemeId.isBlank()
+                || submittedCentreSchemeId == null || submittedCentreSchemeId.isBlank()) {
+            return;
+        }
+        String state = submittedStateSchemeId.trim();
+        String centre = submittedCentreSchemeId.trim();
+        // Record only the side that disagrees with our stored id; the id the reading matched on equals
+        // the stored value, so its CASE branch is a no-op. The WHERE guard fires only when a genuinely
+        // new mismatching value is seen, keeping this a no-op for already-flagged schemes.
+        String sql = String.format("""
+                UPDATE %s.scheme_master_table
+                   SET submitted_state_scheme_id_mismatch =
+                           CASE WHEN state_scheme_id  IS DISTINCT FROM ? THEN ? ELSE submitted_state_scheme_id_mismatch END,
+                       submitted_centre_scheme_id_mismatch =
+                           CASE WHEN centre_scheme_id IS DISTINCT FROM ? THEN ? ELSE submitted_centre_scheme_id_mismatch END,
+                       id_mismatch_last_seen_at = NOW()
+                 WHERE id = ?
+                   AND is_auto_provisioned = FALSE
+                   AND (
+                         (state_scheme_id  IS DISTINCT FROM ? AND submitted_state_scheme_id_mismatch  IS DISTINCT FROM ?)
+                      OR (centre_scheme_id IS DISTINCT FROM ? AND submitted_centre_scheme_id_mismatch IS DISTINCT FROM ?)
+                       )
+                """, schemaName);
+        try {
+            int updated = jdbcTemplate.update(sql,
+                    state, state, centre, centre,
+                    schemeId,
+                    state, state, centre, centre);
+            if (updated > 0) {
+                log.info("scheme_id_mismatch_recorded schemeId={} submittedStateSchemeId={} submittedCentreSchemeId={}",
+                        schemeId, state, centre);
+            }
+        } catch (DataAccessException e) {
+            log.warn("Failed to record scheme id mismatch for schemeId={} in schema={}: {}",
+                    schemeId, schemaName, e.getMessage());
+        }
     }
 
     public Optional<TelemetryOperator> findOperatorById(String schemaName, Long operatorId) {
@@ -721,6 +779,20 @@ public class TelemetryTenantRepository {
         return id != null ? id.longValue() : null;
     }
 
+    /** Persists the resolved reading channel (short code, e.g. "BFM"/"ELM") on the flow reading row. */
+    public void updateFlowReadingChannel(String schemaName, Long readingId, String channel) {
+        validateSchemaName(schemaName);
+        if (readingId == null) {
+            return;
+        }
+        String sql = String.format("""
+                UPDATE %s.flow_reading_table
+                SET channel = ?, updated_at = NOW()
+                WHERE id = ?
+                """, schemaName);
+        jdbcTemplate.update(sql, channel, readingId);
+    }
+
     public Long createMeterChangeReasonRecord(String schemaName,
                                               Long schemeId,
                                               Long operatorId,
@@ -1284,7 +1356,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, %s AS reading_time
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE correlation_id = ?
                   AND deleted_at IS NULL
@@ -1302,7 +1374,8 @@ public class TelemetryTenantRepository {
                         rs.getBigDecimal("confirmed_reading"),
                         rs.getString("image_url"),
                         rs.getObject("reading_date", LocalDate.class),
-                        rs.getObject("reading_time", LocalDateTime.class)
+                        rs.getObject("reading_time", LocalDateTime.class),
+                        rs.getString("channel")
                 ),
                 correlationId
         );
@@ -1393,7 +1466,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, %s AS reading_time
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE created_by = ?
                   AND deleted_at IS NULL
@@ -1411,7 +1484,8 @@ public class TelemetryTenantRepository {
                         rs.getBigDecimal("confirmed_reading"),
                         rs.getString("image_url"),
                         rs.getObject("reading_date", LocalDate.class),
-                        rs.getObject("reading_time", LocalDateTime.class)
+                        rs.getObject("reading_time", LocalDateTime.class),
+                        rs.getString("channel")
                 ),
                 operatorId
         );

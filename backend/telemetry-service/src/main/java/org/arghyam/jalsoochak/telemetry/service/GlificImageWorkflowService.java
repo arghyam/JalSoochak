@@ -180,6 +180,18 @@ public class GlificImageWorkflowService {
                     request.getStateSchemeId(), request.getCentreSchemeId());
             ingestionSource |= schemeResolution.ingestionSourceBits();
 
+            // SCHEME-ID-MISMATCH: the reading matched on one id (state first, then centre); when it
+            // resolved to a real scheme (not an auto-provisioned placeholder) and the request carried
+            // both ids, cross-check the other id against our master data and flag the scheme if it
+            // disagrees, so suspect ids can be reconciled with the govt dept later. Best-effort only.
+            if (!IngestionSource.has(ingestionSource, IngestionSource.UNKNOWN_SCHEME)) {
+                telemetryTenantRepository.recordSchemeIdMismatchIfAny(
+                        schemaName,
+                        schemeResolution.schemeId(),
+                        request.getStateSchemeId(),
+                        request.getCentreSchemeId());
+            }
+
             LocalDateTime readingTime = request.getReadingDateTime() != null
                     ? request.getReadingDateTime().atZoneSameInstant(ZoneOffset.UTC).toLocalDateTime()
                     : null;
