@@ -441,7 +441,8 @@ class SchemeRegularityRepositoryIntegrationTest {
                 202, 200, 201, null, null, null, null,
                 1, 10, 10, 10);
 
-        // Scheme A water over D1..D3 (confirmed_reading > 0): 10 + 5 = 15. FHTC = 10, households = 10.
+        // Scheme A water over D1..D3 from fact_water_quantity_table (SUBMITTED only): D2=200 => 200.
+        // FHTC = 10, households = 10.
         // Buggy path — summing the per-block child rows double-counts Scheme A (once per block).
         List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> blocks =
                 repository.getAverageWaterSupplyPerCurrentRegionByLgd(1, 101, D1, D3);
@@ -450,7 +451,7 @@ class SchemeRegularityRepositoryIntegrationTest {
                 .mapToLong(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalWaterSuppliedLiters).sum();
         long blockSumFhtc = blocks.stream()
                 .mapToLong(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalAchievedFhtcCount).sum();
-        assertThat(blockSumWater).isEqualTo(30L);
+        assertThat(blockSumWater).isEqualTo(400L);
         assertThat(blockSumFhtc).isEqualTo(20L);
 
         // Fix — the district's own deduped total counts Scheme A once.
@@ -458,7 +459,7 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getRegionOwnWaterSupplyByLgd(1, 101, D1, D3);
         assertThat(own.lgdId()).isEqualTo(101);
         assertThat(own.schemeCount()).isEqualTo(1);
-        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(15L);
+        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(200L);
         assertThat(own.totalAchievedFhtcCount()).isEqualTo(10L);
         assertThat(own.totalHouseholdCount()).isEqualTo(10L);
 
@@ -504,7 +505,7 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getRegionOwnWaterSupplyByDepartment(1, 201, D1, D3);
         assertThat(own.departmentId()).isEqualTo(201);
         assertThat(own.schemeCount()).isEqualTo(1);
-        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(15L);
+        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(200L);
         assertThat(own.totalAchievedFhtcCount()).isEqualTo(10L);
     }
 
@@ -530,7 +531,7 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getTopSchemeSubmissionMetricsByLgd(100, D1, D3, 5);
 
         assertThat(rows).hasSize(2);
-        assertThat(rows.get(0).totalWaterSupplied()).isEqualTo(15L);
+        assertThat(rows.get(0).totalWaterSupplied()).isEqualTo(200L);
         assertThat(rows.get(1).totalWaterSupplied()).isEqualTo(0L);
         assertThat(rows.get(0).immediateParentLgdId()).isEqualTo(100);
         assertThat(rows.get(0).immediateParentLgdCName()).isEqualTo("Parent");
@@ -543,7 +544,7 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getTopSchemeSubmissionMetricsByDepartment(200, D1, D3, 5);
 
         assertThat(rows).hasSize(2);
-        assertThat(rows.get(0).totalWaterSupplied()).isEqualTo(15L);
+        assertThat(rows.get(0).totalWaterSupplied()).isEqualTo(200L);
         assertThat(rows.get(1).totalWaterSupplied()).isEqualTo(0L);
         assertThat(rows.get(0).immediateParentDepartmentId()).isEqualTo(200);
         assertThat(rows.get(0).immediateParentDepartmentCName()).isEqualTo("Parent Dept");
@@ -1020,9 +1021,10 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(current).hasSize(2);
         assertThat(current.get(0).schemeId()).isEqualTo(1);
-        assertThat(current.get(0).totalWaterSuppliedLiters()).isEqualTo(15L);
+        assertThat(current.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
         assertThat(current.get(0).supplyDays()).isEqualTo(2);
-        assertThat(current.get(0).averageLitersPerHousehold()).isEqualByComparingTo("0.5000");
+        // 200 liters (D2 SUBMITTED) / (households 10 * 3 days) = 6.6667
+        assertThat(current.get(0).averageLitersPerHousehold()).isEqualByComparingTo("6.6667");
         assertThat(current.get(1).schemeId()).isEqualTo(2);
         assertThat(current.get(1).totalWaterSuppliedLiters()).isEqualTo(0L);
         assertThat(current.get(1).averageLitersPerHousehold()).isEqualByComparingTo("0.0000");
@@ -1038,14 +1040,14 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
-        assertThat(byLgd.get(0).totalWaterSuppliedLiters()).isEqualTo(15L);
-        assertThat(byLgd.get(0).avgWaterSupplyPerScheme()).isEqualByComparingTo("15.0000");
+        assertThat(byLgd.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
+        assertThat(byLgd.get(0).avgWaterSupplyPerScheme()).isEqualByComparingTo("200.0000");
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).totalWaterSuppliedLiters()).isEqualTo(0L);
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
-        assertThat(byDept.get(0).totalWaterSuppliedLiters()).isEqualTo(15L);
+        assertThat(byDept.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
         assertThat(byDept.get(1).totalWaterSuppliedLiters()).isEqualTo(0L);
     }
