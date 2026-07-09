@@ -106,7 +106,7 @@ public class TenantManagementServiceSingleTenantModeTest {
         void testSecondTenantCreationInSTMThrowsConflictBeforeStateCodeCheck() {
             // Arrange
             when(appProperties.isSingleTenantMode()).thenReturn(true);
-            when(tenantCommonRepository.countNonDeletedTenants()).thenReturn(1);
+            when(tenantCommonRepository.countOnboardedTenants()).thenReturn(1);
 
             CreateTenantRequestDTO request = new CreateTenantRequestDTO();
             request.setStateCode("TN");
@@ -120,7 +120,7 @@ public class TenantManagementServiceSingleTenantModeTest {
 
             assertEquals("A tenant already exists. Only one tenant is allowed in Single Tenant Mode.",
                     exception.getMessage());
-            verify(tenantCommonRepository).countNonDeletedTenants();
+            verify(tenantCommonRepository).countOnboardedTenants();
             // Verify that we never check for duplicate state code (STM check happens first)
             verify(tenantCommonRepository, never()).findByStateCode(anyString());
             verify(tenantCommonRepository, never()).createTenant(any(), anyInt());
@@ -139,7 +139,7 @@ public class TenantManagementServiceSingleTenantModeTest {
             request.setLgdCode(1);
 
             // Act
-            // When in MTM, the countNonDeletedTenants() should never be called
+            // When in MTM, the countOnboardedTenants() should never be called
             try {
                 tenantManagementService.createTenant(request);
             } catch (Exception e) {
@@ -149,7 +149,7 @@ public class TenantManagementServiceSingleTenantModeTest {
 
             // Assert
             verify(appProperties).isSingleTenantMode();
-            verify(tenantCommonRepository, never()).countNonDeletedTenants();
+            verify(tenantCommonRepository, never()).countOnboardedTenants();
         }
 
         @Test
@@ -157,7 +157,7 @@ public class TenantManagementServiceSingleTenantModeTest {
         void testSTMCheckBeforeDuplicateStateCodeCheck() {
             // Arrange
             when(appProperties.isSingleTenantMode()).thenReturn(true);
-            when(tenantCommonRepository.countNonDeletedTenants()).thenReturn(1);
+            when(tenantCommonRepository.countOnboardedTenants()).thenReturn(1);
 
             CreateTenantRequestDTO request = new CreateTenantRequestDTO();
             request.setStateCode("KA");
@@ -172,7 +172,7 @@ public class TenantManagementServiceSingleTenantModeTest {
             assertEquals("A tenant already exists. Only one tenant is allowed in Single Tenant Mode.",
                     exception.getMessage());
             // Verify STM check was performed
-            verify(tenantCommonRepository).countNonDeletedTenants();
+            verify(tenantCommonRepository).countOnboardedTenants();
             // Verify state code check was NOT performed (STM check failed first)
             verify(tenantCommonRepository, never()).findByStateCode(anyString());
         }
@@ -181,7 +181,7 @@ public class TenantManagementServiceSingleTenantModeTest {
         @DisplayName("DataIntegrityViolationException in STM is wrapped as single-tenant conflict")
         void testDataIntegrityViolationInSTMWrapsAsIllegalState() {
             when(appProperties.isSingleTenantMode()).thenReturn(true);
-            when(tenantCommonRepository.countNonDeletedTenants()).thenReturn(0);
+            when(tenantCommonRepository.countOnboardedTenants()).thenReturn(0);
             when(tenantCommonRepository.findByStateCode(anyString())).thenReturn(Optional.empty());
             mockedSecurityUtils.when(SecurityUtils::getCurrentUserUuid).thenReturn("user-uuid");
             when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(1));

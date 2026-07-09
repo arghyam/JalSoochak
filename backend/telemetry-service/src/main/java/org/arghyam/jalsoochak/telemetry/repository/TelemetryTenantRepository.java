@@ -793,6 +793,20 @@ public class TelemetryTenantRepository {
         return id != null ? id.longValue() : null;
     }
 
+    /** Persists the resolved reading channel (short code, e.g. "BFM"/"ELM") on the flow reading row. */
+    public void updateFlowReadingChannel(String schemaName, Long readingId, String channel) {
+        validateSchemaName(schemaName);
+        if (readingId == null) {
+            return;
+        }
+        String sql = String.format("""
+                UPDATE %s.flow_reading_table
+                SET channel = ?, updated_at = NOW()
+                WHERE id = ?
+                """, schemaName);
+        jdbcTemplate.update(sql, channel, readingId);
+    }
+
     public Long createMeterChangeReasonRecord(String schemaName,
                                               Long schemeId,
                                               Long operatorId,
@@ -1367,7 +1381,7 @@ public class TelemetryTenantRepository {
                 ? "(correlation_id = ? OR flowvision_correlation_id = ?)"
                 : "correlation_id = ?";
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, %s AS reading_time
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE %s
                   AND deleted_at IS NULL
@@ -1388,7 +1402,8 @@ public class TelemetryTenantRepository {
                         rs.getBigDecimal("confirmed_reading"),
                         rs.getString("image_url"),
                         rs.getObject("reading_date", LocalDate.class),
-                        rs.getObject("reading_time", LocalDateTime.class)
+                        rs.getObject("reading_time", LocalDateTime.class),
+                        rs.getString("channel")
                 ),
                 args
         );
@@ -1479,7 +1494,7 @@ public class TelemetryTenantRepository {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String sql = String.format("""
-                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, %s AS reading_time
+                SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time
                 FROM %s.flow_reading_table
                 WHERE created_by = ?
                   AND deleted_at IS NULL
@@ -1497,7 +1512,8 @@ public class TelemetryTenantRepository {
                         rs.getBigDecimal("confirmed_reading"),
                         rs.getString("image_url"),
                         rs.getObject("reading_date", LocalDate.class),
-                        rs.getObject("reading_time", LocalDateTime.class)
+                        rs.getObject("reading_time", LocalDateTime.class),
+                        rs.getString("channel")
                 ),
                 operatorId
         );

@@ -27,6 +27,10 @@ import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceReposito
 import org.arghyam.jalsoochak.analytics.repository.FactWaterQuantityRepository;
 import org.arghyam.jalsoochak.analytics.repository.SubmissionAttemptRepository;
 import org.arghyam.jalsoochak.analytics.service.FactService;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculator;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
+import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -42,6 +46,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.WeekFields;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -71,6 +76,8 @@ public class FactServiceImpl implements FactService {
     private final DimOperatorAttendanceRepository dimOperatorAttendanceRepository;
     // REPORTED-METRIC: persistence for pre-anomaly submission rejects.
     private final SubmissionAttemptRepository submissionAttemptRepository;
+    private final WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry;
+    private final MeterRegistry meterRegistry;
 
     @Override
     @Transactional
@@ -287,6 +294,19 @@ public class FactServiceImpl implements FactService {
             return;
         }
 
+        Optional<WaterQuantityCalculator> calculatorOpt = waterQuantityCalculatorRegistry.resolve(event.getChannel());
+        if (calculatorOpt.isEmpty()) {
+            log.warn("Skipping water quantity update; no calculator registered for channel={} (tenantId={}, schemeId={}, date={}). "
+                            + "Not falling back to BFM to avoid mis-deriving the reading with the wrong calculator.",
+                    event.getChannel(), event.getTenantId(), event.getSchemeId(), readingDate);
+            meterRegistry.counter("water_quantity.calculator.missing",
+                            "channel", String.valueOf(event.getChannel()),
+                            "tenantId", String.valueOf(event.getTenantId()),
+                            "schemeId", String.valueOf(event.getSchemeId()))
+                    .increment();
+            return;
+        }
+
         LocalDate previousDate = readingDate.minusDays(1);
         Integer previousReading = meterReadingRepository
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(
@@ -297,7 +317,15 @@ public class FactServiceImpl implements FactService {
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(0);
 
-        int waterQuantity = Math.max(0, currentReading - (previousReading != null ? previousReading : 0));
+        WaterQuantityContext context = WaterQuantityContext.builder()
+                .tenantId(event.getTenantId())
+                .schemeId(event.getSchemeId())
+                .readingDate(readingDate)
+                .currentReading(currentReading)
+                .previousReading(previousReading)
+                .channel(event.getChannel())
+                .build();
+        int waterQuantity = calculatorOpt.get().calculate(context);
         LocalDateTime now = LocalDateTime.now();
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(

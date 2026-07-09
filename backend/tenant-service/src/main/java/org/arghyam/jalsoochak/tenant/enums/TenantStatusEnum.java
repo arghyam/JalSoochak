@@ -10,7 +10,13 @@ public enum TenantStatusEnum {
     ACTIVE(3),
     SUSPENDED(4),
     DEGRADED(5),
-    ARCHIVED(6);
+    ARCHIVED(6),
+    /**
+     * Seeded tenant whose identity exists in {@code tenant_master_table} but which has
+     * not yet been onboarded/provisioned via the create-tenant API. Such tenants have no
+     * tenant schema and are hidden from all tenant listings and per-tenant iterations.
+     */
+    REGISTERED(7);
 
     private final int code;
 

@@ -165,11 +165,11 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             long poId = insertPumpOperator("919876540017", "PO Historic Reading");
             long schemeId = insertScheme("FPO-4");
             mapUserToScheme(poId, schemeId);
-            backdateUserCreatedAt(poId, 30);
-            insertReading(schemeId, poId, 150.0, LocalDate.of(2026, 3, 17));
+            backdateUserCreatedAt(poId, 90);
+            insertReading(schemeId, poId, 150.0, LocalDate.now().minusDays(200));
 
-            LocalDate startDate = LocalDate.of(2026, 6, 1);
-            LocalDate endDate = LocalDate.of(2026, 6, 15);
+            LocalDate startDate = LocalDate.now().minusDays(40);
+            LocalDate endDate = LocalDate.now().minusDays(26);
 
             PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, startDate, endDate);
 

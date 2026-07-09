@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -25,7 +27,6 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -40,6 +41,7 @@ public class BfmReadingService {
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
     private final GlificOperatorContextService glificOperatorContextService;
+    private final ReadingChannelResolver readingChannelResolver;
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
                                                String schemaName,
@@ -432,6 +434,10 @@ public class BfmReadingService {
                     .orElse(null);
         }
 
+        // ReadingChannelResolver.resolve never returns null (it falls back to DEFAULT/BFM).
+        ReadingChannel resolvedChannel = readingChannelResolver.resolve(tenantId, contactId);
+        Integer channel = resolvedChannel.getCode();
+        telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, resolvedChannel.name());
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
                 request.getSchemeId(),
@@ -441,7 +447,7 @@ public class BfmReadingService {
                 confidenceLevel,
                 request.getReadingUrl(),
                 readingAt,
-                null,
+                channel,
                 LocalDate.from(readingAt),
                 1,
                 0
@@ -578,11 +584,25 @@ public class BfmReadingService {
                 null,
                 reading.imageUrl(),
                 readingAt,
-                null,
+                channelCodeFromReading(reading),
                 readingDate,
                 1,
                 0
         );
+    }
+
+    /**
+     * Re-uses the channel persisted on the reading at submission so corrections keep the
+     * original channel (BFM/ELM/PDU...) and analytics does not recompute the water quantity
+     * with a different calculator. Returns {@code null} for legacy rows that never stored a
+     * channel, which analytics treats as the default (BFM).
+     */
+    private Integer channelCodeFromReading(TelemetryLatestFlowReadingRecord reading) {
+        String channelValue = reading.channel();
+        if (channelValue == null || channelValue.isBlank()) {
+            return null;
+        }
+        return ReadingChannel.fromChannelValue(channelValue).getCode();
     }
 
     @Transactional
@@ -617,7 +637,7 @@ public class BfmReadingService {
                 null,
                 latestReading.imageUrl(),
                 readingAt,
-                null,
+                channelCodeFromReading(latestReading),
                 readingDate,
                 1,
                 0

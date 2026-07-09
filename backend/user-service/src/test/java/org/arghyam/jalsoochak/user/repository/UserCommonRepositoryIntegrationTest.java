@@ -156,6 +156,21 @@ class UserCommonRepositoryIntegrationTest {
         void findSingleTenant() {
             assertThat(repo.findSingleTenant()).isPresent();
         }
+
+        @Test
+        @DisplayName("pre-seeded REGISTERED tenants are hidden from existence and enumeration")
+        void registeredTenantsAreHidden() {
+            jdbc.update(
+                    "INSERT INTO common_schema.tenant_master_table (id, state_code, title, status) "
+                            + "VALUES (?, ?, ?, 7)",
+                    900, "RG", "Registered State");
+            try {
+                assertThat(repo.existsTenantByStateCode("RG")).isFalse();
+                assertThat(repo.findAllTenantStateCodes()).doesNotContain("RG").contains("MP");
+            } finally {
+                jdbc.update("DELETE FROM common_schema.tenant_master_table WHERE id = ?", 900);
+            }
+        }
     }
 
     // ── User type lookups ─────────────────────────────────────────────────────

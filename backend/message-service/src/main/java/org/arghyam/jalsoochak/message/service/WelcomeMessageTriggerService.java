@@ -100,11 +100,13 @@ public class WelcomeMessageTriggerService {
     }
 
     private String resolveTenantCodeByPhone(String phone) {
+        // Excludes pre-seeded REGISTERED (7) tenants, which have no provisioned schema to probe.
         List<String> tenantCodes = jdbcTemplate.query(
                 """
                 SELECT lower(state_code)
                 FROM common_schema.tenant_master_table
                 WHERE state_code IS NOT NULL AND state_code <> ''
+                  AND status <> 7
                 ORDER BY id DESC
                 """,
                 (rs, n) -> rs.getString(1));
