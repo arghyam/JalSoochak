@@ -1358,6 +1358,8 @@ public class TelemetryTenantRepository {
                 SELECT id, correlation_id, created_by
                 FROM %s.flow_reading_table
                 WHERE %s
+                  AND deleted_at IS NULL
+                ORDER BY id DESC
                 LIMIT 1
                 """, schemaName, predicate);
         Object[] args = hasFlowVisionCorrelationId
@@ -2032,7 +2034,18 @@ public class TelemetryTenantRepository {
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
         boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
-        String flowVisionAssignment = hasFlowVisionCorrelationId ? "flowvision_correlation_id = ?," : "";
+        String correlationAssignment = String.format("""
+                            correlation_id = CASE
+                                WHEN correlation_id IS NULL
+                                  OR correlation_id = ''
+                                  OR correlation_id LIKE '%s%%'
+                                THEN COALESCE(?, correlation_id)
+                                ELSE correlation_id
+                            END,
+                """, SCHEME_SELECTION_CORRELATION_PREFIX);
+        String flowVisionAssignment = hasFlowVisionCorrelationId
+                ? "flowvision_correlation_id = COALESCE(?, flowvision_correlation_id),"
+                : "";
         String sql = hasPayloadJson
                 ? String.format("""
                         UPDATE %s.flow_reading_table
@@ -2041,28 +2054,28 @@ public class TelemetryTenantRepository {
                             extracted_reading = ?,
                             confirmed_reading = ?,
                             payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?),
-                            correlation_id = ?,
+                %s
                             %s
                             image_url = ?,
                             meter_change_reason = ?,
                             updated_by = ?,
                             updated_at = NOW()
                         WHERE id = ?
-                        """, schemaName, timeColumn, flowVisionAssignment)
+                        """, schemaName, timeColumn, correlationAssignment, flowVisionAssignment)
                 : String.format("""
                         UPDATE %s.flow_reading_table
                         SET %s = ?,
                             reading_date = ?,
                             extracted_reading = ?,
                             confirmed_reading = ?,
-                            correlation_id = ?,
+                %s
                             %s
                             image_url = ?,
                             meter_change_reason = ?,
                             updated_by = ?,
                             updated_at = NOW()
                         WHERE id = ?
-                        """, schemaName, timeColumn, flowVisionAssignment);
+                        """, schemaName, timeColumn, correlationAssignment, flowVisionAssignment);
         if (hasPayloadJson && hasFlowVisionCorrelationId) {
             jdbcTemplate.update(
                     sql,

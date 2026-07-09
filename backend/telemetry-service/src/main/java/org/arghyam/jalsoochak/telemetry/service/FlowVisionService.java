@@ -82,9 +82,10 @@ public class FlowVisionService {
 
             if (resultMap == null || !"SUCCESS".equals(resultMap.get("status"))) {
                 log.warn("FlowVision OCR not successful: {}", resultMap);
+                String responseRequestId = extractRequestId(responseBody, resultMap, requestId);
                 return FlowVisionResult.builder()
                         .rejectionReason(extractRejectionReason(resultMap))
-                        .requestId(requestId)
+                        .requestId(responseRequestId)
                         .correlationId(extractCorrelationId(resultMap))
                         .qualityStatus("REJECTED")
                         .build();
@@ -115,10 +116,11 @@ public class FlowVisionService {
                             "correlationId",
                             UUID.randomUUID().toString()
                     ).toString();
+            String responseRequestId = extractRequestId(responseBody, resultMap, requestId);
 
             FlowVisionResult result = FlowVisionResult.builder()
                     .adjustedReading(adjustedReading)
-                    .requestId(requestId)
+                    .requestId(responseRequestId)
                     .qualityStatus(qualityStatus)
                     .qualityConfidence(qualityConfidence)
                     .correlationId(correlationId)
@@ -198,6 +200,40 @@ public class FlowVisionService {
         return resultMap.getOrDefault("correlationId", UUID.randomUUID().toString()).toString();
     }
 
+    private String extractRequestId(Map<String, Object> responseBody, Map<String, Object> resultMap, String generatedRequestId) {
+        String responseRequestId = firstNonBlank(
+                valueAsString(resultMap, "id"),
+                valueAsString(responseBody, "id"),
+                generatedRequestId
+        );
+        if (!generatedRequestId.equals(responseRequestId)) {
+            log.warn("FlowVision echoed id differs from generated request id generatedId={} responseId={}",
+                    sanitizeLogValue(generatedRequestId),
+                    sanitizeLogValue(responseRequestId));
+        }
+        return responseRequestId;
+    }
+
+    private String valueAsString(Map<String, Object> map, String key) {
+        if (map == null) {
+            return null;
+        }
+        Object value = map.get(key);
+        if (value == null || value.toString().isBlank()) {
+            return null;
+        }
+        return value.toString();
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     private String extractRejectionReason(Map<String, Object> map) {
         if (map == null) {
             return null;
@@ -224,7 +260,7 @@ public class FlowVisionService {
         String errorMsg = extractFlowVisionErrorMsg(responseBody);
         return FlowVisionResult.builder()
                 .rejectionReason(errorMsg)
-                .requestId(requestId)
+                .requestId(extractRequestId(responseBody, null, requestId))
                 .qualityStatus("REJECTED")
                 .correlationId(extractCorrelationId(responseBody))
                 .build();

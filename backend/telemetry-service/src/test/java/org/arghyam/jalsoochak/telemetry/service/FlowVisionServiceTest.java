@@ -40,6 +40,21 @@ class FlowVisionServiceTest {
     }
 
     @Test
+    void extractReadingUsesReturnedIdAsRequestId() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("returned-id-123", "123.4", "black"), HttpStatus.OK));
+
+        FlowVisionService service = new FlowVisionService(restTemplate, FLOW_VISION_URL);
+
+        FlowVisionResult result = service.extractReading("https://image-url");
+
+        assertNotNull(result);
+        assertEquals("returned-id-123", result.getRequestId());
+        assertEquals("corr-123", result.getCorrelationId());
+        assertNotNull(restTemplate.getLastPayload().get("id"));
+    }
+
+    @Test
     void extractReadingTreatsRedLastDigitAsDecimal() {
         ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
         restTemplate.enqueue(new ResponseEntity<>(buildSuccessResponse("004983", "red"), HttpStatus.OK));
@@ -148,17 +163,24 @@ class FlowVisionServiceTest {
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> buildSuccessResponse(String meterReading, String lastDigitColor) {
+        return buildSuccessResponse(null, meterReading, lastDigitColor);
+    }
+
+    private static Map<String, Object> buildSuccessResponse(String id, String meterReading, String lastDigitColor) {
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("status", "SUCCESS");
+        result.put("correlationId", "corr-123");
+        if (id != null) {
+            result.put("id", id);
+        }
+        result.put("data", Map.of(
+                "meterReading", meterReading,
+                "lastDigitColor", lastDigitColor,
+                "qualityStatus", "GOOD",
+                "qualityConfidence", "0.95"
+        ));
         return Map.of(
-                "result", Map.of(
-                        "status", "SUCCESS",
-                        "correlationId", "corr-123",
-                        "data", Map.of(
-                                "meterReading", meterReading,
-                                "lastDigitColor", lastDigitColor,
-                                "qualityStatus", "GOOD",
-                                "qualityConfidence", "0.95"
-                        )
-                )
+                "result", result
         );
     }
 
