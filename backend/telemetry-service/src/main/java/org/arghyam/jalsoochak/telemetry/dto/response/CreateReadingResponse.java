@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 
@@ -15,6 +16,8 @@ public class CreateReadingResponse {
     private BigDecimal lastConfirmedReading;
 
     private boolean success;
+
+    @JsonProperty("error_code")
     private TelemetryErrorCode errorCode;
     private String message;
 }

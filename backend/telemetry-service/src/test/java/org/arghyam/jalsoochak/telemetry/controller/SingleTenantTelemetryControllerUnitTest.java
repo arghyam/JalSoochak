@@ -15,6 +15,7 @@ import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.server.ResponseStatusException;
@@ -140,7 +141,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
-                .andExpect(jsonPath("$.data.errorCode").value("validationFailed"))
+                .andExpect(jsonPath("$.data.error_code").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -168,7 +169,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
-                .andExpect(jsonPath("$.data.errorCode").value("validationFailed"))
+                .andExpect(jsonPath("$.data.error_code").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -220,7 +221,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
-                .andExpect(jsonPath("$.data.errorCode").value("validationFailed"))
+                .andExpect(jsonPath("$.data.error_code").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -411,6 +412,56 @@ class SingleTenantTelemetryControllerUnitTest {
                 .filter(event -> event.getLevel() == Level.DEBUG)
                 .anyMatch(event -> event.getFormattedMessage().contains("919999912345"));
         assertTrue(rawPhoneAtDebug, "Raw phone number should be available at DEBUG level");
+    }
+
+    @Test
+    void statusExceptionErrorCodeMappingsArePinned() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        assertEquals(
+                TelemetryErrorCode.INVALID_API_KEY,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.SERVER_ERROR,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.INVALID_API_KEY,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid API key")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.BAD_REQUEST,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid payload")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.REQUEST_FAILED,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, " ")
+                )
+        );
     }
 
     private static final class StubGlificWebhookService extends GlificWebhookService {

@@ -40,6 +40,7 @@ public class SingleTenantTelemetryController {
 
     private static final Logger log = LoggerFactory.getLogger(SingleTenantTelemetryController.class);
     private static final String TENANT_CODE_HEADER = "X-Tenant-Code";
+    private static final String API_KEY_TOKEN = "api key";
 
     private final GlificWebhookService glificWebhookService;
     private final TelemetryApiKeyService telemetryApiKeyService;
@@ -459,7 +460,7 @@ public class SingleTenantTelemetryController {
             return TelemetryErrorCode.REQUEST_FAILED;
         }
         String normalized = reason.toLowerCase();
-        if (normalized.contains("api key")) {
+        if (normalized.contains(API_KEY_TOKEN)) {
             return TelemetryErrorCode.INVALID_API_KEY;
         }
         return TelemetryErrorCode.BAD_REQUEST;
