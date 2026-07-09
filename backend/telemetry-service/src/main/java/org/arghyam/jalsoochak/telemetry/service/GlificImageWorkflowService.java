@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
@@ -27,6 +28,9 @@ import java.util.Optional;
 @Service
 @Slf4j
 public class GlificImageWorkflowService {
+    private static final String OPERATOR_TOKEN = "operator";
+    private static final String SCHEME_TOKEN = "scheme";
+    private static final String NOT_FOUND_TOKEN = "not found";
 
     private final GlificMediaService glificMediaService;
     private final BfmReadingService bfmReadingService;
@@ -122,6 +126,7 @@ public class GlificImageWorkflowService {
                     .success(false)
                     .message(descriptiveMessage)
                     .qualityStatus("REJECTED")
+                    .errorCode(errorCodeForException(e))
                     .correlationId(glificWebhookRequest.getContactId())
                     .build();
         }
@@ -245,9 +250,28 @@ public class GlificImageWorkflowService {
                     .success(false)
                     .message(descriptiveMessage)
                     .qualityStatus("REJECTED")
+                    .errorCode(errorCodeForException(e))
                     .correlationId(safeContactId)
                     .build();
         }
+    }
+
+    private TelemetryErrorCode errorCodeForException(Exception e) {
+        String message = e != null ? e.getMessage() : null;
+        if (message == null || message.isBlank()) {
+            return TelemetryErrorCode.PROCESSING_FAILED;
+        }
+        String normalized = message.toLowerCase();
+        if (normalized.contains(OPERATOR_TOKEN) && normalized.contains(SCHEME_TOKEN)) {
+            return TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME;
+        }
+        if (normalized.contains(SCHEME_TOKEN) && normalized.contains(NOT_FOUND_TOKEN)) {
+            return TelemetryErrorCode.SCHEME_NOT_FOUND;
+        }
+        if (normalized.contains(OPERATOR_TOKEN) && normalized.contains(NOT_FOUND_TOKEN)) {
+            return TelemetryErrorCode.OPERATOR_NOT_FOUND;
+        }
+        return TelemetryErrorCode.PROCESSING_FAILED;
     }
 
     // LENIENT-INGEST: result of scheme resolution — the scheme id to record against plus the

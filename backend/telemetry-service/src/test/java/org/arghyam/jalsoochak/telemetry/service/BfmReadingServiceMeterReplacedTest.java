@@ -92,6 +92,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 anyString(),
                 any(),
+                any(),
                 any()
         )).thenReturn(99L);
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
@@ -110,6 +111,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 any(BigDecimal.class),
                 anyString(),
+                any(),
                 any(),
                 any()
         );
@@ -174,6 +176,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 anyString(),
                 any(),
+                any(),
                 any()
         )).thenReturn(101L);
 
@@ -192,6 +195,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(),
                 any(),
                 anyString(),
+                any(),
                 any(),
                 any()
         );
@@ -230,6 +234,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 anyString(),
                 any(),
+                any(),
                 any()
         )).thenReturn(99L);
 
@@ -248,6 +253,7 @@ class BfmReadingServiceMeterReplacedTest {
                 any(BigDecimal.class),
                 any(BigDecimal.class),
                 anyString(),
+                any(),
                 any(),
                 any()
         );

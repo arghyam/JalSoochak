@@ -8,12 +8,14 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.server.ResponseStatusException;
@@ -45,6 +47,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
                 "js_valid_key",
+                null,
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .confirmedReading(new BigDecimal("123.4"))
@@ -73,6 +76,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
                 "js_invalid_key",
+                null,
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .phoneNumber("919999999999")
@@ -97,6 +101,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
                 "js_valid_key",
+                null,
                 AssamReadingRequest.builder()
                         .readingUrl("https://example.com/meter.jpg")
                         .phoneNumber("919999999999")
@@ -109,6 +114,7 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(false, response.getBody().isSuccess());
         assertNotNull(response.getBody().getData());
         assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
+        assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getBody().getData().getErrorCode());
         assertNull(response.getBody().getData().getCorrelationId());
     }
 
@@ -135,6 +141,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.error_code").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -162,6 +169,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.error_code").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -213,6 +221,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.data.error_code").value("validationFailed"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -252,6 +261,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
                 "js_valid_key",
+                null,
                 UpdateReadingRequest.builder()
                         .correlationId("corr-123")
                         .imageId("img-1")
@@ -274,6 +284,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
                 "js_invalid_key",
+                null,
                 UpdateReadingRequest.builder()
                         .correlationId("corr-123")
                         .confirmedReading(new BigDecimal("111"))
@@ -296,6 +307,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
                 "js_valid_key",
+                null,
                 UpdateReadingRequest.builder()
                         .phoneNumber("919999999999")
                         .confirmedReading(new BigDecimal("111"))
@@ -318,6 +330,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
                 "js_valid_key",
+                null,
                 UpdateReadingRequest.builder()
                         .correlationId("corr-123")
                         .phoneNumber("919999999999")
@@ -372,6 +385,7 @@ class SingleTenantTelemetryControllerUnitTest {
         try {
             controller.receiveAssamReading(
                     "js_valid_key",
+                    null,
                     AssamReadingRequest.builder()
                             .readingUrl("https://example.com/meter.jpg")
                             .confirmedReading(new BigDecimal("123.4"))
@@ -400,6 +414,56 @@ class SingleTenantTelemetryControllerUnitTest {
         assertTrue(rawPhoneAtDebug, "Raw phone number should be available at DEBUG level");
     }
 
+    @Test
+    void statusExceptionErrorCodeMappingsArePinned() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        assertEquals(
+                TelemetryErrorCode.INVALID_API_KEY,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.SERVER_ERROR,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.INVALID_API_KEY,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid API key")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.BAD_REQUEST,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid payload")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.REQUEST_FAILED,
+                ReflectionTestUtils.invokeMethod(
+                        controller,
+                        "errorCodeForStatusException",
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, " ")
+                )
+        );
+    }
+
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean rejected;
 
@@ -418,6 +482,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 return CreateReadingResponse.builder()
                         .success(false)
                         .qualityStatus("REJECTED")
+                        .errorCode(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME)
                         .message("Operator is not mapped to the provided state or centre scheme")
                         .correlationId("corr-rejected")
                         .build();

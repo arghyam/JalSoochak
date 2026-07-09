@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -110,9 +111,10 @@ public class BfmReadingService {
                     );
                     return CreateReadingResponse.builder()
                             .success(false)
-                            .message("Could not read meter value from image. Please retry with a clearer photo.")
+                            .message(unreadableImageMessage(ocrResult))
                             .correlationId(UUID.randomUUID().toString())
                             .qualityStatus("REJECTED")
+                            .errorCode(TelemetryErrorCode.UNREADABLE_IMAGE)
                             .build();
                 }
                 finalReading = ocrResult.getAdjustedReading();
@@ -156,6 +158,7 @@ public class BfmReadingService {
                         .message("OCR failed. Please try again with a clearer image.")
                         .correlationId(UUID.randomUUID().toString())
                         .qualityStatus("REJECTED")
+                        .errorCode(TelemetryErrorCode.FLOW_VISION_FAILED)
                         .build();
             }
         }
@@ -166,9 +169,18 @@ public class BfmReadingService {
                 || confidenceLevel.compareTo(BigDecimal.valueOf(0.7)) >= 0;
         boolean isValid = hasPositiveReading && hasAcceptableConfidence;
 
-        String correlationId = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getCorrelationId)
+        String storageCorrelationId = Optional.ofNullable(ocrResult)
+                .map(FlowVisionResult::getRequestId)
+                .filter(value -> !value.isBlank())
                 .orElse(UUID.randomUUID().toString());
+        String responseCorrelationId = Optional.ofNullable(ocrResult)
+                .map(FlowVisionResult::getCorrelationId)
+                .filter(value -> !value.isBlank())
+                .orElse(storageCorrelationId);
+        String flowVisionCorrelationId = Optional.ofNullable(ocrResult)
+                .map(FlowVisionResult::getCorrelationId)
+                .filter(value -> !value.isBlank())
+                .orElse(null);
         LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(LocalDateTime.now());
 
         BigDecimal extractedReading = Optional.ofNullable(ocrResult)
@@ -302,10 +314,11 @@ public class BfmReadingService {
             return CreateReadingResponse.builder()
                     .success(false)
                     .message("Duplicate image submission detected. The extracted reading matches the previous reading.")
-                    .correlationId(correlationId)
+                    .correlationId(responseCorrelationId)
                     .meterReading(confirmedReading)
                     .qualityConfidence(confidenceLevel)
                     .qualityStatus("REJECTED")
+                    .errorCode(TelemetryErrorCode.DUPLICATE_IMAGE)
                     .lastConfirmedReading(previousSnapshot.confirmedReading())
                     .build();
         }
@@ -329,7 +342,8 @@ public class BfmReadingService {
                     readingAt,
                     extractedReading,
                     effectiveConfirmedReading,
-                    correlationId,
+                    storageCorrelationId,
+                    flowVisionCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
                     request.getIngestionSource(),
@@ -344,7 +358,8 @@ public class BfmReadingService {
                     readingAt,
                     extractedReading,
                     effectiveConfirmedReading,
-                    correlationId,
+                    storageCorrelationId,
+                    flowVisionCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
                     operatorInRequest.id()
@@ -357,7 +372,8 @@ public class BfmReadingService {
                     readingAt,
                     extractedReading,
                     effectiveConfirmedReading,
-                    correlationId,
+                    storageCorrelationId,
+                    flowVisionCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason()
             );
@@ -414,7 +430,7 @@ public class BfmReadingService {
         return CreateReadingResponse.builder()
                 .success(hasPositiveReading)
                 .message(messageOverride(contactId, finalMessage))
-                .correlationId(correlationId)
+                .correlationId(responseCorrelationId)
                 .meterReading(finalReading)
                 .qualityConfidence(confidenceLevel)
                 .qualityStatus(ocrResult != null ? ocrResult.getQualityStatus() : (isValid ? "CONFIRMED" : "REVIEW"))
@@ -799,6 +815,17 @@ public class BfmReadingService {
                 result.getQualityConfidence(),
                 sanitizeLogValue(result.getCorrelationId())
         );
+    }
+
+    private String unreadableImageMessage(FlowVisionResult result) {
+        String rejectionReason = Optional.ofNullable(result)
+                .map(FlowVisionResult::getRejectionReason)
+                .filter(reason -> !reason.isBlank())
+                .orElse(null);
+        if (rejectionReason == null) {
+            return "Could not read meter value from image. Please retry with a clearer photo.";
+        }
+        return "Could not read meter value from image. " + rejectionReason;
     }
 
     private String imageUrlHash(String readingUrl) {
