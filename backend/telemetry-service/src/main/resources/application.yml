@@ -79,12 +79,6 @@ resilience4j:
         exponential-backoff-multiplier: ${FLOWVISION_READINGS_RETRY_BACKOFF_MULTIPLIER:2}
         enable-randomized-wait: true
         randomized-wait-factor: ${FLOWVISION_READINGS_RETRY_RANDOMIZED_WAIT_FACTOR:0.5}
-        retry-exceptions:
-          - org.springframework.web.client.ResourceAccessException
-          - org.springframework.web.client.HttpServerErrorException$BadGateway
-          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
-          - org.springframework.web.client.HttpServerErrorException$GatewayTimeout
-          - org.springframework.web.client.HttpClientErrorException$TooManyRequests
   circuitbreaker:
     instances:
       flowvisionReadings:
@@ -96,7 +90,7 @@ resilience4j:
   bulkhead:
     instances:
       flowvisionReadings:
-        max-concurrent-calls: ${FLOWVISION_READINGS_BULKHEAD_MAX_CONCURRENT_CALLS:100}
+        max-concurrent-calls: ${FLOWVISION_READINGS_BULKHEAD_MAX_CONCURRENT_CALLS:50}
         max-wait-duration: ${FLOWVISION_READINGS_BULKHEAD_MAX_WAIT_DURATION:0ms}
 
 media-download:

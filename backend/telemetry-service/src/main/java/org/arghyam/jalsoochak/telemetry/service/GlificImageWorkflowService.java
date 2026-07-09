@@ -107,7 +107,8 @@ public class GlificImageWorkflowService {
                     operatorWithSchema.schemaName(),
                     operatorWithSchema.operator(),
                     contactId,
-                    isMeterReplaced
+                    isMeterReplaced,
+                    FlowVisionRetryMode.RESILIENT
             );
             response.setMessage(localizationService.localizeMessage(response.getMessage(), languageKey));
             return response;
@@ -217,7 +218,7 @@ public class GlificImageWorkflowService {
                     operator,
                     contactId,
                     false,
-                    FlowVisionRetryMode.READINGS_API
+                    FlowVisionRetryMode.RESILIENT
             );
 
             applyGeolocationIfPresent(request, schemaName, operatorId, response.getCorrelationId());

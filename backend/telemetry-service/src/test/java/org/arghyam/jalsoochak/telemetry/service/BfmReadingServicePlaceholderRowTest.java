@@ -27,6 +27,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -119,6 +120,57 @@ class BfmReadingServicePlaceholderRowTest {
         );
         verify(telemetryTenantRepository, never()).createFlowReading(
                 anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
+        );
+    }
+
+    @Test
+    void readingsApiOutageDoesNotRecordUnreadableImageAnomaly() {
+        String schemaName = "tenant_test";
+        TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
+
+        CreateReadingRequest request = CreateReadingRequest.builder()
+                .schemeId(10L)
+                .operatorId(1L)
+                .readingUrl("http://example.com/img.jpg")
+                .build();
+
+        when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
+        when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
+        when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
+        when(flowVisionReadingsRetryService.extractReading("http://example.com/img.jpg"))
+                .thenThrow(new FlowVisionReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
+
+        CreateReadingResponse resp = service.createReading(
+                request,
+                schemaName,
+                operator,
+                "919999999999",
+                false,
+                FlowVisionRetryMode.RESILIENT
+        );
+
+        assertNotNull(resp);
+        assertEquals(false, resp.isSuccess());
+        assertEquals("Meter reading service is temporarily unavailable. Please try again shortly.", resp.getMessage());
+        assertEquals("RETRY", resp.getQualityStatus());
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
+                anyString(), anyLong(), anyLong(), anyInt(), anyString(), anyInt()
+        );
+        verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
+                any(),
+                anyInt(),
+                anyLong(),
+                anyLong(),
+                any(),
+                any(),
+                any(),
+                anyInt(),
+                any(),
+                any(),
+                anyInt(),
+                anyString(),
+                anyInt(),
+                anyString()
         );
     }
 

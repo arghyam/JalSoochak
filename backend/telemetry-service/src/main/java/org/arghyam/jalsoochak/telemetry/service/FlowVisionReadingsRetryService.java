@@ -9,12 +9,6 @@ import io.github.resilience4j.retry.RetryRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestClientException;
-
-import java.util.Set;
 import java.util.function.Supplier;
 
 @Service
@@ -22,13 +16,6 @@ import java.util.function.Supplier;
 public class FlowVisionReadingsRetryService {
 
     private static final String INSTANCE_NAME = "flowvisionReadings";
-    private static final Set<Class<?>> RETRIABLE_RESPONSE_EXCEPTIONS = Set.of(
-            HttpServerErrorException.BadGateway.class,
-            HttpServerErrorException.ServiceUnavailable.class,
-            HttpServerErrorException.GatewayTimeout.class,
-            HttpClientErrorException.TooManyRequests.class
-    );
-
     private final FlowVisionService flowVisionService;
     private final Retry retry;
     private final CircuitBreaker circuitBreaker;
@@ -54,32 +41,14 @@ public class FlowVisionReadingsRetryService {
         try {
             return resilientSupplier.get();
         } catch (Exception ex) {
-            if (isRetriableFlowVisionFailure(ex)) {
+            if (FlowVisionTransientFailures.isServiceUnavailable(ex)) {
                 log.warn("FlowVision /readings retry exhausted imageUrlHash={} reason={}",
                         imageUrlHash(readingUrl),
                         sanitizeLogValue(ex.getMessage()));
-                return null;
+                throw new FlowVisionReadingsUnavailableException("FlowVision readings service is temporarily unavailable", ex);
             }
             throw ex;
         }
-    }
-
-    private boolean isRetriableFlowVisionFailure(Throwable throwable) {
-        Throwable current = throwable;
-        while (current != null) {
-            if (current instanceof ResourceAccessException) {
-                return true;
-            }
-            if (current instanceof RestClientException) {
-                for (Class<?> retriableException : RETRIABLE_RESPONSE_EXCEPTIONS) {
-                    if (retriableException.isInstance(current)) {
-                        return true;
-                    }
-                }
-            }
-            current = current.getCause();
-        }
-        return false;
     }
 
     private String imageUrlHash(String readingUrl) {

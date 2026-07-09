@@ -7,16 +7,21 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.http.HttpHeaders;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -49,16 +54,29 @@ class FlowVisionReadingsRetryServiceTest {
     }
 
     @Test
-    void returnsNullAfterRetriableFailuresAreExhausted() {
+    void throwsServiceUnavailableAfterRetriableFailuresAreExhausted() {
         FlowVisionService flowVisionService = mock(FlowVisionService.class);
         when(flowVisionService.extractReadingOrThrow("https://example.com/img.jpg"))
                 .thenThrow(new ResourceAccessException("Read timed out"));
 
         FlowVisionReadingsRetryService service = newService(flowVisionService);
 
-        FlowVisionResult actual = service.extractReading("https://example.com/img.jpg");
+        assertThrows(FlowVisionReadingsUnavailableException.class,
+                () -> service.extractReading("https://example.com/img.jpg"));
+        verify(flowVisionService, times(3)).extractReadingOrThrow("https://example.com/img.jpg");
+    }
 
-        assertNull(actual);
+    @ParameterizedTest
+    @MethodSource("retriableHttpExceptions")
+    void retriesTransientHttpFailuresAndThrowsServiceUnavailable(RuntimeException transientException) {
+        FlowVisionService flowVisionService = mock(FlowVisionService.class);
+        when(flowVisionService.extractReadingOrThrow("https://example.com/img.jpg"))
+                .thenThrow(transientException);
+
+        FlowVisionReadingsRetryService service = newService(flowVisionService);
+
+        assertThrows(FlowVisionReadingsUnavailableException.class,
+                () -> service.extractReading("https://example.com/img.jpg"));
         verify(flowVisionService, times(3)).extractReadingOrThrow("https://example.com/img.jpg");
     }
 
@@ -78,17 +96,49 @@ class FlowVisionReadingsRetryServiceTest {
         RetryConfig retryConfig = RetryConfig.custom()
                 .maxAttempts(3)
                 .waitDuration(Duration.ZERO)
-                .retryExceptions(ResourceAccessException.class)
+                .retryExceptions(FlowVisionTransientFailures.retriableExceptions())
                 .build();
         BulkheadConfig bulkheadConfig = BulkheadConfig.custom()
                 .maxConcurrentCalls(10)
                 .maxWaitDuration(Duration.ZERO)
                 .build();
+        CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom()
+                .recordExceptions(FlowVisionTransientFailures.retriableExceptions())
+                .build();
         return new FlowVisionReadingsRetryService(
                 flowVisionService,
                 RetryRegistry.of(retryConfig),
-                CircuitBreakerRegistry.of(CircuitBreakerConfig.ofDefaults()),
+                CircuitBreakerRegistry.of(circuitBreakerConfig),
                 BulkheadRegistry.of(bulkheadConfig)
+        );
+    }
+
+    private static Stream<RuntimeException> retriableHttpExceptions() {
+        return Stream.of(
+                serverError(HttpStatus.BAD_GATEWAY),
+                serverError(HttpStatus.SERVICE_UNAVAILABLE),
+                serverError(HttpStatus.GATEWAY_TIMEOUT),
+                clientError(HttpStatus.TOO_MANY_REQUESTS)
+        );
+    }
+
+    private static HttpServerErrorException serverError(HttpStatus status) {
+        return (HttpServerErrorException) HttpServerErrorException.create(
+                status,
+                status.getReasonPhrase(),
+                HttpHeaders.EMPTY,
+                new byte[0],
+                StandardCharsets.UTF_8
+        );
+    }
+
+    private static HttpClientErrorException clientError(HttpStatus status) {
+        return (HttpClientErrorException) HttpClientErrorException.create(
+                status,
+                status.getReasonPhrase(),
+                HttpHeaders.EMPTY,
+                new byte[0],
+                StandardCharsets.UTF_8
         );
     }
 }

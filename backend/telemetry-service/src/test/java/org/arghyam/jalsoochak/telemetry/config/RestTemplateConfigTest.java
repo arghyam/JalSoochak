@@ -11,7 +11,7 @@ class RestTemplateConfigTest {
 
     @Test
     void restTemplateUsesHttpClientPoolingRequestFactory() {
-        RestTemplate restTemplate = new RestTemplateConfig().restTemplate();
+        RestTemplate restTemplate = new RestTemplateConfig(1234, 5678).restTemplate();
 
         assertNotNull(restTemplate);
         assertInstanceOf(HttpComponentsClientHttpRequestFactory.class, restTemplate.getRequestFactory());

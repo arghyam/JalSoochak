@@ -92,7 +92,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -106,7 +106,14 @@ class GlificImageWorkflowServiceAssamTest {
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
-        verify(bfmReadingService).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(
+                any(CreateReadingRequest.class),
+                anyString(),
+                any(),
+                anyString(),
+                anyBoolean(),
+                eq(FlowVisionRetryMode.RESILIENT)
+        );
     }
 
     @Test
@@ -130,7 +137,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -144,7 +151,14 @@ class GlificImageWorkflowServiceAssamTest {
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
-        verify(bfmReadingService).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(
+                any(CreateReadingRequest.class),
+                anyString(),
+                any(),
+                anyString(),
+                anyBoolean(),
+                eq(FlowVisionRetryMode.RESILIENT)
+        );
     }
 
     @Test
@@ -240,7 +254,7 @@ class GlificImageWorkflowServiceAssamTest {
                 any(),
                 anyString(),
                 anyBoolean(),
-                eq(FlowVisionRetryMode.READINGS_API)
+                eq(FlowVisionRetryMode.RESILIENT)
         );
         assertEquals(30244993L, requestCaptor.getValue().getSchemeId());
         assertEquals(new BigDecimal("123.4"), requestCaptor.getValue().getReadingValue());
