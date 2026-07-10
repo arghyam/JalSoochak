@@ -383,7 +383,7 @@ public class GlificSelectionService {
                     operatorWithSchema.schemaName(),
                     selectedScheme.id(),
                     operatorWithSchema.operator().id(),
-                    java.time.LocalDateTime.now()
+                    org.arghyam.jalsoochak.telemetry.util.ReadingTime.now()
             );
 
             String schemeName = selectedScheme.name();

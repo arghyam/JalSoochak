@@ -41,6 +41,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
@@ -65,6 +66,8 @@ public class FactServiceImpl implements FactService {
      * Maximum length for anomaly type strings before persisting to database.
      */
     private static final int MAX_ANOMALY_TYPE_LENGTH = 50;
+    /** reading_at/reading_date are stored on the IST calendar day; the parse fallbacks default to IST too. */
+    private static final ZoneId READING_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final FactMeterReadingRepository meterReadingRepository;
     private final FactWaterQuantityRepository waterQuantityRepository;
@@ -577,22 +580,22 @@ public class FactServiceImpl implements FactService {
     }
 
     private LocalDateTime parseTimestamp(String value) {
-        if (value == null || value.isBlank()) return LocalDateTime.now();
+        if (value == null || value.isBlank()) return LocalDateTime.now(READING_ZONE);
         try {
             return LocalDateTime.parse(value);
         } catch (Exception e) {
             log.warn("Could not parse timestamp '{}', falling back to now", value);
-            return LocalDateTime.now();
+            return LocalDateTime.now(READING_ZONE);
         }
     }
 
     private LocalDate parseDate(String value) {
-        if (value == null || value.isBlank()) return LocalDate.now();
+        if (value == null || value.isBlank()) return LocalDate.now(READING_ZONE);
         try {
             return LocalDate.parse(value);
         } catch (Exception e) {
             log.warn("Could not parse date '{}', falling back to today", value);
-            return LocalDate.now();
+            return LocalDate.now(READING_ZONE);
         }
     }
 

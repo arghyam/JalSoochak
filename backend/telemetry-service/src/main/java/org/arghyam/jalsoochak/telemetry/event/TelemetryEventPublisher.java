@@ -17,6 +17,7 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.UUID;
 
 @Component
@@ -52,7 +53,7 @@ public class TelemetryEventPublisher {
                 .submissionStatus(submissionStatus)
                 .outageReason(null)
                 .nonSubmissionReason(null)
-                .date((date != null ? date : LocalDate.now()).toString())
+                .date((date != null ? date : LocalDate.now(ReadingTime.ZONE)).toString())
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
@@ -83,7 +84,7 @@ public class TelemetryEventPublisher {
                 .submissionStatus(NOT_SUBMITTED_STATUS)
                 .outageReason(payload.outageReason)
                 .nonSubmissionReason(payload.nonSubmissionReason)
-                .date((date != null ? date : LocalDate.now()).toString())
+                .date((date != null ? date : LocalDate.now(ReadingTime.ZONE)).toString())
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
@@ -112,7 +113,7 @@ public class TelemetryEventPublisher {
                 .submissionStatus(NOT_SUBMITTED_STATUS)
                 .outageReason(null)
                 .nonSubmissionReason(meterChangeReason)
-                .date((date != null ? date : LocalDate.now()).toString())
+                .date((date != null ? date : LocalDate.now(ReadingTime.ZONE)).toString())
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);

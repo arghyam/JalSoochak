@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.LocalDate;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -181,7 +182,7 @@ public class TelemetryValidationExceptionHandler {
         if (telemetrySubmissionAuditService != null && target instanceof UpdateReadingRequest request) {
             return telemetrySubmissionAuditService.captureForPhoneAndScheme(request.getPhoneNumber(), null);
         }
-        return new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now());
+        return new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now(ReadingTime.ZONE));
     }
 
     private String validationMessage(MethodArgumentNotValidException ex) {

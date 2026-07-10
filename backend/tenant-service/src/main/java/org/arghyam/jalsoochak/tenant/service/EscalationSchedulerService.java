@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -70,7 +71,8 @@ public class EscalationSchedulerService {
         // Key = "LEVEL_<n>|<phone>" to keep level1 and level2 officers separate
         Map<String, OfficerGroup> officerGroups = new LinkedHashMap<>();
 
-        LocalDate processingDate = LocalDate.now();
+        // reading_date is stored on the IST calendar day, so "today"/missed-day math must be IST.
+        LocalDate processingDate = LocalDate.now(ZoneId.of("Asia/Kolkata"));
         int total = nudgeRepository.streamUsersWithMissedDays(schema, level1Days, processingDate, row -> {
             // days_since_last_upload is NULL when the operator has never uploaded
             Number daysSinceObj = (Number) row.get("days_since_last_upload");

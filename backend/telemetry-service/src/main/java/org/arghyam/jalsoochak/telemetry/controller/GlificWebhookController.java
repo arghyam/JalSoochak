@@ -606,7 +606,7 @@ public class GlificWebhookController {
         TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
                 telemetrySubmissionAuditService != null
                         ? telemetrySubmissionAuditService.captureForContact(contactId)
-                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, java.time.LocalDate.now());
+                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, java.time.LocalDate.now(org.arghyam.jalsoochak.telemetry.util.ReadingTime.ZONE));
 
         log.info(
                 "reading_submission api={} status={} phone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",

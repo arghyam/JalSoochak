@@ -1507,7 +1507,7 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND created_by = ?
-                  AND reading_date = CURRENT_DATE
+                  AND reading_date = (now() AT TIME ZONE 'Asia/Kolkata')::date
                   AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
@@ -1533,7 +1533,7 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND created_by = ?
-                  AND reading_date = (CURRENT_DATE - INTERVAL '1 day')::date
+                  AND reading_date = ((now() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '1 day')::date
                   AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL

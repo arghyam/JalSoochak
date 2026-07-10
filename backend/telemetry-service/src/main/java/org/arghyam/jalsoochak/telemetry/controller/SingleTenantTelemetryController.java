@@ -33,6 +33,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 
 @RestController
 @RequestMapping("/api/v1/telemetry")
@@ -470,7 +471,7 @@ public class SingleTenantTelemetryController {
         TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
                 telemetrySubmissionAuditService != null
                         ? telemetrySubmissionAuditService.captureForPhoneAndScheme(phoneNumber, schemeId)
-                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", schemeId, 0, LocalDate.now());
+                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", schemeId, 0, LocalDate.now(ReadingTime.ZONE));
 
         log.info(
                 "reading_submission api={} status={} phone={} submittedPhone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",
@@ -490,7 +491,7 @@ public class SingleTenantTelemetryController {
         TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
                 telemetrySubmissionAuditService != null
                         ? telemetrySubmissionAuditService.captureForAssamReading(request, tenantId)
-                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now());
+                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now(ReadingTime.ZONE));
 
         String submittedPhone = request != null ? request.getPhoneNumber() : null;
         log.info(
@@ -514,7 +515,7 @@ public class SingleTenantTelemetryController {
                         request != null ? request.getPhoneNumber() : null,
                         null
                 )
-                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now());
+                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now(ReadingTime.ZONE));
 
         String submittedPhone = request != null ? request.getPhoneNumber() : null;
         log.info(
