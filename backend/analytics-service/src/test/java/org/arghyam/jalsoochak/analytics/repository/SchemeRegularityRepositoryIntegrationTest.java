@@ -623,7 +623,8 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 7));
         assertThat(weekOne.schemeCount()).isEqualTo(2);
         assertThat(weekOne.totalSupplyDays()).isEqualTo(2);
-        assertThat(weekOne.totalWaterQuantity()).isEqualTo(15L);
+        // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL only): only D2 (200) qualifies.
+        assertThat(weekOne.totalWaterQuantity()).isEqualTo(200L);
 
         SchemeRegularityRepository.PeriodicSchemeRegularityMetrics weekTwo = rows.get(1);
         assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 8));
@@ -643,7 +644,8 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(rows.get(0).periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 31));
         assertThat(rows.get(0).schemeCount()).isEqualTo(2);
         assertThat(rows.get(0).totalSupplyDays()).isEqualTo(2);
-        assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(15L);
+        // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL only): only D2 (200) qualifies.
+        assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(200L);
     }
 
     @Test
@@ -1050,6 +1052,43 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(byDept.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
         assertThat(byDept.get(1).totalWaterSuppliedLiters()).isEqualTo(0L);
+    }
+
+    @Test
+    void suppliedWater_countsNullSubmissionStatusRows() {
+        // Legacy/direct-event water can persist submission_status = NULL; with a positive volume it must
+        // count as supplied (exercises the "submission_status = SUBMITTED OR submission_status IS NULL" branch).
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 1, 1, 11, 40, D3, null, null, null);
+
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics scheme1 =
+                repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3).stream()
+                        .filter(r -> r.schemeId().equals(1)).findFirst().orElseThrow();
+
+        // D2 SUBMITTED (200) + D3 NULL-status (40) = 240; D1 NOT_SUBMITTED (100) stays excluded.
+        assertThat(scheme1.totalWaterSuppliedLiters()).isEqualTo(240L);
+    }
+
+    @Test
+    void suppliedWater_deduplicatesToLatestRowPerSchemeAndDate() {
+        // fact_water_quantity_table has no uniqueness on (tenant, scheme, date). Insert a stray *newer*
+        // duplicate for (tenant1, scheme1, D2): summing both rows would give 700, so the query must instead
+        // take only the latest row per (tenant, scheme, date) — mirroring ingestion's updated_at DESC, id DESC.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW() + INTERVAL '1 hour', ?, ?, ?)
+                """, 1, 1, 11, 500, D2, SubmissionStatus.SUBMITTED.getCode(), null, null);
+
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics scheme1 =
+                repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3).stream()
+                        .filter(r -> r.schemeId().equals(1)).findFirst().orElseThrow();
+
+        // Latest D2 row wins (500) — not summed with the seeded 200 (=700) and not the stale 200.
+        assertThat(scheme1.totalWaterSuppliedLiters()).isEqualTo(500L);
     }
 
     @Test
