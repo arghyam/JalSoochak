@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -88,6 +89,7 @@ class BfmReadingServicePlaceholderRowTest {
 
         when(flowVisionService.extractReading("http://example.com/img.jpg")).thenReturn(
                 FlowVisionResult.builder()
+                        .requestId("request-1")
                         .correlationId("corr-1")
                         .qualityStatus("GOOD")
                         .qualityConfidence(new BigDecimal("0.95"))
@@ -120,6 +122,7 @@ class BfmReadingServicePlaceholderRowTest {
                 any(BigDecimal.class),
                 any(BigDecimal.class),
                 anyString(),
+                eq("corr-1"),
                 anyString(),
                 any(),
                 anyLong()

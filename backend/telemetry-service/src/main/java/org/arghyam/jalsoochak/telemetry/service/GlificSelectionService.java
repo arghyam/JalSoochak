@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserLanguagePreferenceRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -383,7 +384,7 @@ public class GlificSelectionService {
                     operatorWithSchema.schemaName(),
                     selectedScheme.id(),
                     operatorWithSchema.operator().id(),
-                    java.time.LocalDateTime.now()
+                    ReadingTime.now()
             );
 
             String schemeName = selectedScheme.name();

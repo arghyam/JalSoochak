@@ -10,6 +10,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -115,6 +117,51 @@ class TelemetryTenantRepositorySchemesQueryTest {
         Long id = repository.getOrCreatePlaceholderScheme("tenant_as", "99999999", "88888888");
 
         assertEquals(77L, id);
+    }
+
+    @Test
+    void updateFlowReadingFromIngestionPreservesExistingCorrelationIds() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+        when(jdbcTemplate.queryForObject(
+                anyString(),
+                eq(Boolean.class),
+                eq("tenant_as"),
+                eq("flow_reading_table"),
+                anyString()
+        )).thenAnswer(invocation -> "flowvision_correlation_id".equals(invocation.getArgument(4)));
+
+        repository.updateFlowReadingFromIngestion(
+                "tenant_as",
+                99L,
+                LocalDateTime.parse("2026-07-09T11:00:00"),
+                new BigDecimal("123"),
+                new BigDecimal("123"),
+                "new-request-id",
+                null,
+                "https://example.com/meter.jpg",
+                null,
+                1L
+        );
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).update(
+                sqlCaptor.capture(),
+                any(),
+                any(),
+                any(),
+                any(),
+                eq("new-request-id"),
+                eq(null),
+                eq("https://example.com/meter.jpg"),
+                eq(null),
+                eq(1L),
+                eq(99L)
+        );
+        String sql = sqlCaptor.getValue();
+        assertTrue(sql.contains("correlation_id = CASE"));
+        assertTrue(sql.contains("correlation_id LIKE 'scheme-selection-%'"));
+        assertTrue(sql.contains("THEN COALESCE(?, correlation_id)"));
+        assertTrue(sql.contains("flowvision_correlation_id = COALESCE(?, flowvision_correlation_id)"));
     }
 
     // SCHEME-ID-MISMATCH: after a reading resolves on one id, the other submitted id is cross-checked

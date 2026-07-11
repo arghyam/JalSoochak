@@ -664,14 +664,35 @@ public class TelemetryTenantRepository {
                                                String submittedStateSchemeId,
                                                String submittedCentreSchemeId,
                                                String submittedPhoneHash) {
+        return persistFlowReadingWithTracking(schemaName, existingReadingId, schemeId, operatorId, readingAt,
+                extractedReading, confirmedReading, correlationId, null, imageUrl, meterChangeReason, ingestionSource,
+                submittedStateSchemeId, submittedCentreSchemeId, submittedPhoneHash);
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public Long persistFlowReadingWithTracking(String schemaName,
+                                               Long existingReadingId,
+                                               Long schemeId,
+                                               Long operatorId,
+                                               LocalDateTime readingAt,
+                                               BigDecimal extractedReading,
+                                               BigDecimal confirmedReading,
+                                               String correlationId,
+                                               String flowVisionCorrelationId,
+                                               String imageUrl,
+                                               String meterChangeReason,
+                                               int ingestionSource,
+                                               String submittedStateSchemeId,
+                                               String submittedCentreSchemeId,
+                                               String submittedPhoneHash) {
         Long readingId;
         if (existingReadingId != null) {
             readingId = existingReadingId;
             updateFlowReadingFromIngestion(schemaName, readingId, readingAt, extractedReading,
-                    confirmedReading, correlationId, imageUrl, meterChangeReason, operatorId);
+                    confirmedReading, correlationId, flowVisionCorrelationId, imageUrl, meterChangeReason, operatorId);
         } else {
             readingId = createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading,
-                    confirmedReading, correlationId, imageUrl, meterChangeReason);
+                    confirmedReading, correlationId, flowVisionCorrelationId, imageUrl, meterChangeReason);
         }
         applyIngestionTracking(schemaName, readingId, ingestionSource, submittedStateSchemeId,
                 submittedCentreSchemeId, submittedPhoneHash);
@@ -723,27 +744,44 @@ public class TelemetryTenantRepository {
                                   String correlationId,
                                   String imageUrl,
                                   String meterChangeReason) {
+        return createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading, confirmedReading,
+                correlationId, null, imageUrl, meterChangeReason);
+    }
+
+    public Long createFlowReading(String schemaName,
+                                  Long schemeId,
+                                  Long operatorId,
+                                  LocalDateTime readingAt,
+                                  BigDecimal extractedReading,
+                                  BigDecimal confirmedReading,
+                                  String correlationId,
+                                  String flowVisionCorrelationId,
+                                  String imageUrl,
+                                  String meterChangeReason) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
+        boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
+        String flowVisionColumn = hasFlowVisionCorrelationId ? ", flowvision_correlation_id" : "";
+        String flowVisionPlaceholder = hasFlowVisionCorrelationId ? ", ?" : "";
         String sql = hasPayloadJson
                 ? String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading, payload_json,
-                             correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, ?, ?, jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?), ?, 0, NULL, ?, NULL, ?, ?, NOW(), ?, NOW())
+                             correlation_id%s, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
+                        VALUES (?, ?, ?, ?, ?, jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?), ?%s, 0, NULL, ?, NULL, ?, ?, NOW(), ?, NOW())
                         RETURNING id
-                        """, schemaName, timeColumn)
+                        """, schemaName, timeColumn, flowVisionColumn, flowVisionPlaceholder)
                 : String.format("""
                         INSERT INTO %s.flow_reading_table
                             (scheme_id, %s, reading_date, extracted_reading, confirmed_reading,
-                             correlation_id, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, NULL, ?, ?, NOW(), ?, NOW())
+                             correlation_id%s, quantity, channel, meter_change_reason, issue_report_reason, image_url, created_by, created_at, updated_by, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?%s, 0, NULL, ?, NULL, ?, ?, NOW(), ?, NOW())
                         RETURNING id
-                        """, schemaName, timeColumn);
+                        """, schemaName, timeColumn, flowVisionColumn, flowVisionPlaceholder);
 
         Number id;
-        if (hasPayloadJson) {
+        if (hasPayloadJson && hasFlowVisionCorrelationId) {
             id = jdbcTemplate.queryForObject(
                     sql,
                     Number.class,
@@ -755,6 +793,40 @@ public class TelemetryTenantRepository {
                     confirmedReading,
                     extractedReading,
                     correlationId,
+                    flowVisionCorrelationId,
+                    meterChangeReason,
+                    imageUrl != null ? imageUrl : "",
+                    operatorId,
+                    operatorId
+            );
+        } else if (hasPayloadJson) {
+            id = jdbcTemplate.queryForObject(
+                    sql,
+                    Number.class,
+                    schemeId,
+                    readingAt,
+                    LocalDate.from(readingAt),
+                    extractedReading,
+                    confirmedReading,
+                    confirmedReading,
+                    extractedReading,
+                    correlationId,
+                    meterChangeReason,
+                    imageUrl != null ? imageUrl : "",
+                    operatorId,
+                    operatorId
+            );
+        } else if (hasFlowVisionCorrelationId) {
+            id = jdbcTemplate.queryForObject(
+                    sql,
+                    Number.class,
+                    schemeId,
+                    readingAt,
+                    LocalDate.from(readingAt),
+                    extractedReading,
+                    confirmedReading,
+                    correlationId,
+                    flowVisionCorrelationId,
                     meterChangeReason,
                     imageUrl != null ? imageUrl : "",
                     operatorId,
@@ -1336,18 +1408,27 @@ public class TelemetryTenantRepository {
 
     public Optional<TelemetryReadingRecord> findReadingByCorrelationId(String schemaName, String correlationId) {
         validateSchemaName(schemaName);
+        boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
+        String predicate = hasFlowVisionCorrelationId
+                ? "(correlation_id = ? OR flowvision_correlation_id = ?)"
+                : "correlation_id = ?";
         String sql = String.format("""
                 SELECT id, correlation_id, created_by
                 FROM %s.flow_reading_table
-                WHERE correlation_id = ?
+                WHERE %s
+                  AND deleted_at IS NULL
+                ORDER BY id DESC
                 LIMIT 1
-                """, schemaName);
+                """, schemaName, predicate);
+        Object[] args = hasFlowVisionCorrelationId
+                ? new Object[]{correlationId, correlationId}
+                : new Object[]{correlationId};
         List<TelemetryReadingRecord> rows = jdbcTemplate.query(sql, (rs, n) ->
                 new TelemetryReadingRecord(
                         toLong(rs.getObject("id")),
                         rs.getString("correlation_id"),
                         toLong(rs.getObject("created_by"))
-                ), correlationId);
+                ), args);
         return rows.stream().findFirst();
     }
 
@@ -1355,14 +1436,21 @@ public class TelemetryTenantRepository {
                                                                                             String correlationId) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
+        String predicate = hasFlowVisionCorrelationId
+                ? "(correlation_id = ? OR flowvision_correlation_id = ?)"
+                : "correlation_id = ?";
         String sql = String.format("""
                 SELECT id, scheme_id, created_by, correlation_id, extracted_reading, confirmed_reading, image_url, reading_date, channel, %s AS reading_time
                 FROM %s.flow_reading_table
-                WHERE correlation_id = ?
+                WHERE %s
                   AND deleted_at IS NULL
                 ORDER BY reading_date DESC, %s DESC NULLS LAST, id DESC
                 LIMIT 1
-                """, timeColumn, schemaName, timeColumn);
+                """, timeColumn, schemaName, predicate, timeColumn);
+        Object[] args = hasFlowVisionCorrelationId
+                ? new Object[]{correlationId, correlationId}
+                : new Object[]{correlationId};
         List<TelemetryLatestFlowReadingRecord> rows = jdbcTemplate.query(
                 sql,
                 (rs, n) -> new TelemetryLatestFlowReadingRecord(
@@ -1377,7 +1465,7 @@ public class TelemetryTenantRepository {
                         rs.getObject("reading_time", LocalDateTime.class),
                         rs.getString("channel")
                 ),
-                correlationId
+                args
         );
         return rows.stream().findFirst();
     }
@@ -1419,7 +1507,7 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND created_by = ?
-                  AND reading_date = CURRENT_DATE
+                  AND reading_date = (now() AT TIME ZONE 'Asia/Kolkata')::date
                   AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
@@ -1445,7 +1533,7 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND created_by = ?
-                  AND reading_date = (CURRENT_DATE - INTERVAL '1 day')::date
+                  AND reading_date = ((now() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '1 day')::date
                   AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
@@ -1986,9 +2074,36 @@ public class TelemetryTenantRepository {
                                                String imageUrl,
                                                String meterChangeReason,
                                                Long updatedBy) {
+        updateFlowReadingFromIngestion(schemaName, readingId, readingAt, extractedReading, confirmedReading,
+                correlationId, null, imageUrl, meterChangeReason, updatedBy);
+    }
+
+    public void updateFlowReadingFromIngestion(String schemaName,
+                                               Long readingId,
+                                               LocalDateTime readingAt,
+                                               BigDecimal extractedReading,
+                                               BigDecimal confirmedReading,
+                                               String correlationId,
+                                               String flowVisionCorrelationId,
+                                               String imageUrl,
+                                               String meterChangeReason,
+                                               Long updatedBy) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
+        boolean hasFlowVisionCorrelationId = columnExists(schemaName, "flow_reading_table", "flowvision_correlation_id");
+        String correlationAssignment = String.format("""
+                            correlation_id = CASE
+                                WHEN correlation_id IS NULL
+                                  OR correlation_id = ''
+                                  OR correlation_id LIKE '%s%%'
+                                THEN COALESCE(?, correlation_id)
+                                ELSE correlation_id
+                            END,
+                """, SCHEME_SELECTION_CORRELATION_PREFIX);
+        String flowVisionAssignment = hasFlowVisionCorrelationId
+                ? "flowvision_correlation_id = COALESCE(?, flowvision_correlation_id),"
+                : "";
         String sql = hasPayloadJson
                 ? String.format("""
                         UPDATE %s.flow_reading_table
@@ -1997,27 +2112,29 @@ public class TelemetryTenantRepository {
                             extracted_reading = ?,
                             confirmed_reading = ?,
                             payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', ?),
-                            correlation_id = ?,
+                %s
+                            %s
                             image_url = ?,
                             meter_change_reason = ?,
                             updated_by = ?,
                             updated_at = NOW()
                         WHERE id = ?
-                        """, schemaName, timeColumn)
+                        """, schemaName, timeColumn, correlationAssignment, flowVisionAssignment)
                 : String.format("""
                         UPDATE %s.flow_reading_table
                         SET %s = ?,
                             reading_date = ?,
                             extracted_reading = ?,
                             confirmed_reading = ?,
-                            correlation_id = ?,
+                %s
+                            %s
                             image_url = ?,
                             meter_change_reason = ?,
                             updated_by = ?,
                             updated_at = NOW()
                         WHERE id = ?
-                        """, schemaName, timeColumn);
-        if (hasPayloadJson) {
+                        """, schemaName, timeColumn, correlationAssignment, flowVisionAssignment);
+        if (hasPayloadJson && hasFlowVisionCorrelationId) {
             jdbcTemplate.update(
                     sql,
                     readingAt,
@@ -2027,6 +2144,36 @@ public class TelemetryTenantRepository {
                     confirmedReading,
                     extractedReading,
                     correlationId,
+                    flowVisionCorrelationId,
+                    imageUrl != null ? imageUrl : "",
+                    meterChangeReason,
+                    updatedBy,
+                    readingId
+            );
+        } else if (hasPayloadJson) {
+            jdbcTemplate.update(
+                    sql,
+                    readingAt,
+                    LocalDate.from(readingAt),
+                    extractedReading,
+                    confirmedReading,
+                    confirmedReading,
+                    extractedReading,
+                    correlationId,
+                    imageUrl != null ? imageUrl : "",
+                    meterChangeReason,
+                    updatedBy,
+                    readingId
+            );
+        } else if (hasFlowVisionCorrelationId) {
+            jdbcTemplate.update(
+                    sql,
+                    readingAt,
+                    LocalDate.from(readingAt),
+                    extractedReading,
+                    confirmedReading,
+                    correlationId,
+                    flowVisionCorrelationId,
                     imageUrl != null ? imageUrl : "",
                     meterChangeReason,
                     updatedBy,

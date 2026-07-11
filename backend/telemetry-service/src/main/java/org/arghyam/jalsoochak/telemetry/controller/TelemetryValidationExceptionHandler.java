@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsDataResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.springframework.http.HttpStatus;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.LocalDate;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -50,6 +52,7 @@ public class TelemetryValidationExceptionHandler {
                             .data(ReadingsDataResponse.builder()
                                     .message(message)
                                     .qualityStatus("REJECTED")
+                                    .errorCode(TelemetryErrorCode.VALIDATION_FAILED)
                                     .build())
                             .build()
             );
@@ -77,6 +80,7 @@ public class TelemetryValidationExceptionHandler {
                             .data(ReadingsDataResponse.builder()
                                     .message(message)
                                     .qualityStatus("REJECTED")
+                                    .errorCode(TelemetryErrorCode.MALFORMED_REQUEST)
                                     .build())
                             .build()
             );
@@ -178,7 +182,7 @@ public class TelemetryValidationExceptionHandler {
         if (telemetrySubmissionAuditService != null && target instanceof UpdateReadingRequest request) {
             return telemetrySubmissionAuditService.captureForPhoneAndScheme(request.getPhoneNumber(), null);
         }
-        return new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now());
+        return new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now(ReadingTime.ZONE));
     }
 
     private String validationMessage(MethodArgumentNotValidException ex) {

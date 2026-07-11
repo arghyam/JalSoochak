@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
@@ -680,8 +681,45 @@ class GlificImageWorkflowServiceAssamTest {
         assertNotNull(response);
         assertFalse(response.isSuccess());
         assertEquals("REJECTED", response.getQualityStatus());
+        assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getErrorCode());
         verify(telemetryTenantRepository, never()).getOrCreatePlaceholderScheme(anyString(), any(), any());
         verify(bfmReadingService, never()).createReading(any(), anyString(), any(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void exceptionErrorCodeMappingsArePinned() {
+        assertEquals(
+                TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME,
+                ReflectionTestUtils.invokeMethod(
+                        service,
+                        "errorCodeForException",
+                        new IllegalStateException("Operator is not mapped to the submitted scheme")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.SCHEME_NOT_FOUND,
+                ReflectionTestUtils.invokeMethod(
+                        service,
+                        "errorCodeForException",
+                        new IllegalStateException("Scheme not found")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.OPERATOR_NOT_FOUND,
+                ReflectionTestUtils.invokeMethod(
+                        service,
+                        "errorCodeForException",
+                        new IllegalStateException("Operator not found")
+                )
+        );
+        assertEquals(
+                TelemetryErrorCode.PROCESSING_FAILED,
+                ReflectionTestUtils.invokeMethod(
+                        service,
+                        "errorCodeForException",
+                        new IllegalStateException("Unexpected workflow failure")
+                )
+        );
     }
 
     private ListAppender<ILoggingEvent> attachAppender() {

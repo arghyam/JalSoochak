@@ -241,7 +241,7 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
         verify(waterQuantityRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getDate()).isEqualTo(LocalDate.now());
+        assertThat(captor.getValue().getDate()).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
         assertThat(captor.getValue().getOutageReason()).isEqualTo("no_electricity");
     }
 
@@ -706,6 +706,6 @@ class FactServiceImplTest {
         ArgumentCaptor<FactSchemePerformance> captor = ArgumentCaptor.forClass(FactSchemePerformance.class);
         verify(schemePerformanceRepository, times(1)).save(captor.capture());
         assertThat(captor.getValue().getPerformanceScore()).isEqualByComparingTo(BigDecimal.valueOf(88));
-        assertThat(captor.getValue().getLastWaterSupplyDate()).isEqualTo(LocalDate.now());
+        assertThat(captor.getValue().getLastWaterSupplyDate()).isEqualTo(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
     }
 }
