@@ -27,6 +27,7 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -181,7 +182,7 @@ public class BfmReadingService {
                 .map(FlowVisionResult::getCorrelationId)
                 .filter(value -> !value.isBlank())
                 .orElse(null);
-        LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(LocalDateTime.now());
+        LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
 
         BigDecimal extractedReading = Optional.ofNullable(ocrResult)
                 .map(FlowVisionResult::getAdjustedReading)
@@ -527,7 +528,7 @@ public class BfmReadingService {
     private void publishConfirmedReadingUpdate(Integer tenantId,
                                                TelemetryLatestFlowReadingRecord reading,
                                                BigDecimal confirmedReading) {
-        LocalDateTime readingAt = reading.readingAt() != null ? reading.readingAt() : LocalDateTime.now();
+        LocalDateTime readingAt = reading.readingAt() != null ? reading.readingAt() : ReadingTime.now();
         LocalDate readingDate = reading.readingDate() != null ? reading.readingDate() : readingAt.toLocalDate();
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
@@ -580,7 +581,7 @@ public class BfmReadingService {
                 operator.id()
         );
 
-        LocalDateTime readingAt = latestReading.readingAt() != null ? latestReading.readingAt() : LocalDateTime.now();
+        LocalDateTime readingAt = latestReading.readingAt() != null ? latestReading.readingAt() : ReadingTime.now();
         LocalDate readingDate = latestReading.readingDate() != null ? latestReading.readingDate() : readingAt.toLocalDate();
         telemetryEventPublisher.publishMeterReadingRecorded(
                 operator.tenantId(),

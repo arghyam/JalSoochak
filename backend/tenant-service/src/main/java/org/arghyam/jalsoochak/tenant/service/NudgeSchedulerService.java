@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Map;
 
 /**
@@ -26,13 +27,15 @@ import java.util.Map;
 public class NudgeSchedulerService {
 
     private static final String COMMON_TOPIC = "common-topic";
+    /** reading_date is stored on the IST calendar day, so "today" must be evaluated in IST. */
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     private final TenantCommonRepository tenantCommonRepository;
     private final NudgeRepository nudgeRepository;
     private final KafkaProducer kafkaProducer;
 
     public void processNudgesForTenant(String schema, int tenantId) {
-        int total = nudgeRepository.streamUsersWithNoUploadToday(schema, LocalDate.now(), row -> {
+        int total = nudgeRepository.streamUsersWithNoUploadToday(schema, LocalDate.now(IST), row -> {
             String phone = (String) row.get("phone_number");
             long whatsappId = row.get("whatsapp_connection_id") != null
                     ? ((Number) row.get("whatsapp_connection_id")).longValue() : 0L;

@@ -21,7 +21,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -87,7 +87,7 @@ public class GlificImageWorkflowService {
                     .findLatestPendingSchemeSelectionForDate(
                             operatorWithSchema.schemaName(),
                             operatorWithSchema.operator().id(),
-                            LocalDate.now()
+                            LocalDate.now(ReadingTime.ZONE)
                     )
                     .map(TelemetrySchemeSelectionRecord::schemeId)
                     .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
@@ -196,9 +196,8 @@ public class GlificImageWorkflowService {
                         request.getCentreSchemeId());
             }
 
-            LocalDateTime readingTime = request.getReadingDateTime() != null
-                    ? request.getReadingDateTime().atZoneSameInstant(ZoneOffset.UTC).toLocalDateTime()
-                    : null;
+            // reading_at/reading_date are stored in IST (see ReadingTime); other columns stay UTC.
+            LocalDateTime readingTime = ReadingTime.fromClient(request.getReadingDateTime());
 
             boolean lenient = ingestionSource != IngestionSource.NORMAL;
             CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
