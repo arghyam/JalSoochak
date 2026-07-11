@@ -499,7 +499,7 @@ public class GlificMeterWorkflowService {
                     tenantId,
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDate.now(ReadingTime.ZONE),
+                    ReadingTime.today(),
                     selectedReason
             );
 
@@ -635,7 +635,7 @@ public class GlificMeterWorkflowService {
                         tenantId,
                         schemeId,
                         operatorWithSchema.operator().id(),
-                        LocalDate.now(ReadingTime.ZONE),
+                        ReadingTime.today(),
                         anomalyType,
                         resolvedIssueReason
                 );
@@ -851,7 +851,7 @@ public class GlificMeterWorkflowService {
                     tenantId,
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDate.now(ReadingTime.ZONE),
+                    ReadingTime.today(),
                     anomalyType,
                     resolvedIssueReason
             );
@@ -942,7 +942,7 @@ public class GlificMeterWorkflowService {
                     tenantId,
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDate.now(ReadingTime.ZONE),
+                    ReadingTime.today(),
                     AnomalyConstants.TYPE_NO_SUBMISSION,
                     issueReason
             );
@@ -1009,7 +1009,7 @@ public class GlificMeterWorkflowService {
                     .findLatestPendingSchemeSelectionForDate(
                             operatorWithSchema.schemaName(),
                             operatorWithSchema.operator().id(),
-                            LocalDate.now(ReadingTime.ZONE)
+                            ReadingTime.today()
                     )
                     .map(TelemetrySchemeSelectionRecord::schemeId)
                     .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
@@ -1036,7 +1036,7 @@ public class GlificMeterWorkflowService {
             // - If the meter is not replaced, compare against the most recent confirmed reading by default.
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
-            LocalDate today = LocalDate.now(ReadingTime.ZONE);
+            LocalDate today = ReadingTime.today();
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt = isMeterReplaced
                     ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(operatorWithSchema.schemaName(), schemeId, null)
@@ -1308,7 +1308,7 @@ public class GlificMeterWorkflowService {
                             AnomalyConstants.TYPE_MANUAL_OVERRIDE,
                             10
                     ),
-                    LocalDate.now(ReadingTime.ZONE)
+                    ReadingTime.today()
             );
 
             if (consecutiveOverrideDays >= 5) {
@@ -1404,7 +1404,7 @@ public class GlificMeterWorkflowService {
                     operatorWithSchema.schemaName(),
                     schemeId,
                     operatorId,
-                    LocalDate.now(ReadingTime.ZONE)
+                    ReadingTime.today()
             );
             if (today.isPresent()) {
                 readingId = today.get().id();
@@ -1485,7 +1485,7 @@ public class GlificMeterWorkflowService {
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId)
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
-            LocalDate today = LocalDate.now(ReadingTime.ZONE);
+            LocalDate today = ReadingTime.today();
 
             Optional<TelemetryCompletedFlowReading> targetDayRecordOpt = telemetryTenantRepository
                     .findLatestCompletedFlowReadingBeforeDate(operatorWithSchema.schemaName(), schemeId, operatorId, today);

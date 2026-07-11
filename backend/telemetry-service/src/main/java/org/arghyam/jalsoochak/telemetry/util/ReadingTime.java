@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.util;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -34,5 +35,10 @@ public final class ReadingTime {
     /** Current reading instant as an IST wall-clock timestamp (fallback when the client sends none). */
     public static LocalDateTime now() {
         return LocalDateTime.now(ZONE);
+    }
+
+    /** Current IST calendar day — the {@code reading_date} bucket a reading taken "now" belongs to. */
+    public static LocalDate today() {
+        return LocalDate.now(ZONE);
     }
 }

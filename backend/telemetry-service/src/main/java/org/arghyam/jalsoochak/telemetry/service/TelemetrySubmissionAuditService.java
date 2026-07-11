@@ -76,7 +76,7 @@ public class TelemetrySubmissionAuditService {
     }
 
     private SubmissionAuditSnapshot snapshot(String maskedPhone, Long schemeId, String uniqueKey) {
-        LocalDate today = LocalDate.now(ReadingTime.ZONE);
+        LocalDate today = ReadingTime.today();
         int uniqueCount = recordUniqueSubmitter(today, uniqueKey);
         return new SubmissionAuditSnapshot(maskedPhone, schemeId, uniqueCount, today);
     }
@@ -92,7 +92,7 @@ public class TelemetrySubmissionAuditService {
         return telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(
                         operatorWithSchema.schemaName(),
                         operatorWithSchema.operator().id(),
-                        LocalDate.now(ReadingTime.ZONE)
+                        ReadingTime.today()
                 )
                 .map(TelemetrySchemeSelectionRecord::schemeId)
                 .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
@@ -134,7 +134,7 @@ public class TelemetrySubmissionAuditService {
     }
 
     private void cleanupOldDates() {
-        LocalDate today = LocalDate.now(ReadingTime.ZONE);
+        LocalDate today = ReadingTime.today();
         dailyUniqueSubmitters.keySet().removeIf(date -> !today.equals(date));
     }
 

@@ -124,7 +124,7 @@ public class FactServiceImpl implements FactService {
                 event.getTenantId(), event.getSubmittedStateSchemeId(), event.getSubmittedCentreSchemeId());
         Integer schemeId = resolved.map(a -> a[0]).orElse(null);
         Integer tenantId = resolved.map(a -> a[1]).orElse(event.getTenantId());
-        LocalDateTime attemptedAt = parseTimestamp(event.getAttemptedAt());
+        LocalDateTime attemptedAt = parseTimestampUtc(event.getAttemptedAt());
         submissionAttemptRepository.insert(
                 tenantId,
                 schemeId,
@@ -132,7 +132,7 @@ public class FactServiceImpl implements FactService {
                 event.getSubmittedCentreSchemeId(),
                 event.getSubmittedPhoneHash(),
                 event.getReason(),
-                attemptedAt != null ? attemptedAt : LocalDateTime.now());
+                attemptedAt);
         log.info("Ingested submission_attempt_table scheme={} tenant={} reason={}", schemeId, tenantId, event.getReason());
     }
 
@@ -586,6 +586,18 @@ public class FactServiceImpl implements FactService {
         } catch (Exception e) {
             log.warn("Could not parse timestamp '{}', falling back to now", value);
             return LocalDateTime.now(READING_ZONE);
+        }
+    }
+
+    // UTC-fallback variant for audit columns that stay UTC (e.g. submission_attempt.attempted_at,
+    // which analytics later shifts by +5:30 to align with the IST reading_date). Never returns null.
+    private LocalDateTime parseTimestampUtc(String value) {
+        if (value == null || value.isBlank()) return LocalDateTime.now(java.time.ZoneOffset.UTC);
+        try {
+            return LocalDateTime.parse(value);
+        } catch (Exception e) {
+            log.warn("Could not parse timestamp '{}', falling back to now (UTC)", value);
+            return LocalDateTime.now(java.time.ZoneOffset.UTC);
         }
     }
 

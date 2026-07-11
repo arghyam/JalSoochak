@@ -22,6 +22,7 @@ import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.GlificReadingsAsyncService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetrySubmissionAuditService;
 import org.arghyam.jalsoochak.telemetry.service.WelcomeMessageService;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @RestController
@@ -606,7 +608,7 @@ public class GlificWebhookController {
         TelemetrySubmissionAuditService.SubmissionAuditSnapshot audit =
                 telemetrySubmissionAuditService != null
                         ? telemetrySubmissionAuditService.captureForContact(contactId)
-                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, java.time.LocalDate.now(org.arghyam.jalsoochak.telemetry.util.ReadingTime.ZONE));
+                        : new TelemetrySubmissionAuditService.SubmissionAuditSnapshot("unknown", null, 0, LocalDate.now(ReadingTime.ZONE));
 
         log.info(
                 "reading_submission api={} status={} phone={} schemeId={} dailyUniqueUserCount={} date={} message=\"{}\"",

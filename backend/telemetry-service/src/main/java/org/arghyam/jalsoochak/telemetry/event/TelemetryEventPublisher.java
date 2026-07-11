@@ -53,7 +53,7 @@ public class TelemetryEventPublisher {
                 .submissionStatus(submissionStatus)
                 .outageReason(null)
                 .nonSubmissionReason(null)
-                .date((date != null ? date : LocalDate.now(ReadingTime.ZONE)).toString())
+                .date((date != null ? date : ReadingTime.today()).toString())
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
@@ -84,7 +84,7 @@ public class TelemetryEventPublisher {
                 .submissionStatus(NOT_SUBMITTED_STATUS)
                 .outageReason(payload.outageReason)
                 .nonSubmissionReason(payload.nonSubmissionReason)
-                .date((date != null ? date : LocalDate.now(ReadingTime.ZONE)).toString())
+                .date((date != null ? date : ReadingTime.today()).toString())
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
@@ -113,7 +113,7 @@ public class TelemetryEventPublisher {
                 .submissionStatus(NOT_SUBMITTED_STATUS)
                 .outageReason(null)
                 .nonSubmissionReason(meterChangeReason)
-                .date((date != null ? date : LocalDate.now(ReadingTime.ZONE)).toString())
+                .date((date != null ? date : ReadingTime.today()).toString())
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
