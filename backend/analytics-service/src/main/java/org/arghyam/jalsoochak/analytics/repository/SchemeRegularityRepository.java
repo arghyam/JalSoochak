@@ -5269,7 +5269,7 @@ public class SchemeRegularityRepository {
 
     public List<Level2WaterSupplyMetrics> getLgdLevel2WiseWaterSupplyMetricsForNation(
             LocalDate startDate, LocalDate endDate) {
-        String sql = withWaterFragments("""
+        String sql = withDashboardFragments("""
                 WITH water_by_scheme AS (
                     SELECT
                         f.tenant_id,
@@ -5299,7 +5299,8 @@ public class SchemeRegularityRepository {
                 FROM (
                     SELECT DISTINCT ON (tenant_id, scheme_id, level_2_lgd_id) tenant_id, scheme_id, level_2_lgd_id,
                            house_hold_count, fhtc_count, planned_fhtc
-                    FROM analytics_schema.dim_scheme_table
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{WS}}
                     ORDER BY tenant_id, scheme_id, level_2_lgd_id, fhtc_count DESC NULLS LAST, house_hold_count DESC NULLS LAST, planned_fhtc DESC NULLS LAST
                 ) s
                 JOIN analytics_schema.dim_tenant_table t
