@@ -578,6 +578,46 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(TelemetryErrorCode.PROCESSING_FAILED, response.getBody().getData().getErrorCode());
     }
 
+    @Test
+    void resetLatestReadingSetsBadRequestErrorCodeWhenContactIdMissing() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                null,
+                ResetLatestReadingRequest.builder().build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.BAD_REQUEST, response.getBody().getData().getErrorCode());
+    }
+
+    @Test
+    void resetLatestReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null) {
+            @Override
+            public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+                throw new IllegalStateException("boom");
+            }
+        };
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                failing
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                null,
+                ResetLatestReadingRequest.builder().contactId("919999999999").build()
+        );
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.PROCESSING_FAILED, response.getBody().getData().getErrorCode());
+    }
+
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean rejected;
 
