@@ -45,7 +45,7 @@ the ELM/PDU calculators land, otherwise the input semantics stay implicit and lo
 - Designed now-deferred (rather than done speculatively) so the per-channel types match the first
   real non-BFM channel; it is a prerequisite, not optional.
 
-### 1. Widen the calculator seam 
+### 1. Widen the calculator seam
 
 - New value object `service/water/WaterQuantityContext.java`: `tenantId, schemeId, readingDate, currentReading, previousReading, channelCode` (all that a calculator may need; immutable, `@Builder`).
 - `WaterQuantityCalculator.calculate(...)` → `int calculate(WaterQuantityContext ctx)`. Keep `ReadingChannel channel()`.
