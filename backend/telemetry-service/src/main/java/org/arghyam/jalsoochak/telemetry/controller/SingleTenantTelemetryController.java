@@ -355,6 +355,7 @@ public class SingleTenantTelemetryController {
                             .data(ReadingsDataResponse.builder()
                                     .message(e.getReason())
                                     .qualityStatus("REJECTED")
+                                    .errorCode(errorCodeForStatusException(e))
                                     .build())
                             .build()
             );
@@ -376,6 +377,7 @@ public class SingleTenantTelemetryController {
                             .success(false)
                             .data(ReadingsDataResponse.builder()
                                     .qualityStatus("REJECTED")
+                                    .errorCode(TelemetryErrorCode.PROCESSING_FAILED)
                                     .message("Failed to update reading")
                                     .build())
                             .build()

@@ -464,6 +464,120 @@ class SingleTenantTelemetryControllerUnitTest {
         );
     }
 
+    @Test
+    void updateReadingSetsInvalidApiKeyErrorCodeWhenApiKeyInvalid() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.empty()),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_invalid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .phoneNumber("919999999999")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.INVALID_API_KEY, response.getBody().getData().getErrorCode());
+    }
+
+    @Test
+    void updateReadingSetsBadRequestErrorCodeWhenPhoneNumberMissing() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.BAD_REQUEST, response.getBody().getData().getErrorCode());
+    }
+
+    @Test
+    void updateReadingSetsBadRequestErrorCodeWhenConfirmedReadingMissing() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .phoneNumber("919999999999")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.BAD_REQUEST, response.getBody().getData().getErrorCode());
+    }
+
+    @Test
+    void updateReadingSetsBadRequestErrorCodeWhenServiceRejects() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(true)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .phoneNumber("919999999999")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.BAD_REQUEST, response.getBody().getData().getErrorCode());
+    }
+
+    @Test
+    void updateReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null) {
+            @Override
+            public CreateReadingResponse updateConfirmedReading(String correlationId, String phoneNumber, BigDecimal confirmedReading) {
+                throw new IllegalStateException("boom");
+            }
+        };
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                failing
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .phoneNumber("919999999999")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.PROCESSING_FAILED, response.getBody().getData().getErrorCode());
+    }
+
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean rejected;
 
