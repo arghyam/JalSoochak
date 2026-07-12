@@ -65,6 +65,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 tenantConfigRepository,
                 new ObjectMapper(),
                 glificOperatorContextService,
+                null,
                 readingChannelResolver
         );
     }

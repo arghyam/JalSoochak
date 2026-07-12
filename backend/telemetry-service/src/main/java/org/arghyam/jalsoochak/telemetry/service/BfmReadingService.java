@@ -42,6 +42,7 @@ public class BfmReadingService {
     private final TenantConfigRepository tenantConfigRepository;
     private final ObjectMapper objectMapper;
     private final GlificOperatorContextService glificOperatorContextService;
+    private final FlowVisionReadingsRetryService flowVisionReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
@@ -49,6 +50,15 @@ public class BfmReadingService {
                                                TelemetryOperator operator,
                                                String contactId,
                                                boolean isMeterReplaced) {
+        return createReading(request, schemaName, operator, contactId, isMeterReplaced, FlowVisionRetryMode.NONE);
+    }
+
+    public CreateReadingResponse createReading(CreateReadingRequest request,
+                                               String schemaName,
+                                               TelemetryOperator operator,
+                                               String contactId,
+                                               boolean isMeterReplaced,
+                                               FlowVisionRetryMode flowVisionRetryMode) {
         if (!telemetryTenantRepository.existsSchemeById(schemaName, request.getSchemeId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "State scheme not found");
         }
@@ -81,7 +91,7 @@ public class BfmReadingService {
             }
 
             try {
-                ocrResult = flowVisionService.extractReading(request.getReadingUrl());
+                ocrResult = extractReading(request.getReadingUrl(), flowVisionRetryMode);
                 log.info("readings_glific flowvision_result operatorId={} schemeId={} imageUrlHash={} result={}",
                         operatorInRequest.id(),
                         request.getSchemeId(),
@@ -127,6 +137,16 @@ public class BfmReadingService {
                         finalReading,
                         confidenceLevel,
                         sanitizeLogValue(ocrResult.getQualityStatus()));
+            } catch (FlowVisionReadingsUnavailableException ex) {
+                log.warn("FlowVision OCR temporarily unavailable for imageUrlHash={}: {}",
+                        imageUrlHash(request.getReadingUrl()),
+                        ex.getMessage());
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message("Meter reading service is temporarily unavailable. Please try again shortly.")
+                        .correlationId(UUID.randomUUID().toString())
+                        .qualityStatus("RETRY")
+                        .build();
             } catch (Exception ex) {
                 log.error("FlowVision OCR failed for imageUrlHash={}: {}", imageUrlHash(request.getReadingUrl()), ex.getMessage(), ex);
                 if (log.isDebugEnabled()) {
@@ -156,7 +176,7 @@ public class BfmReadingService {
                 );
                 return CreateReadingResponse.builder()
                         .success(false)
-                        .message("OCR failed. Please try again with a clearer image.")
+                        .message("Could not read meter value from image. Please retry with a clearer photo.")
                         .correlationId(UUID.randomUUID().toString())
                         .qualityStatus("REJECTED")
                         .errorCode(TelemetryErrorCode.FLOW_VISION_FAILED)
@@ -437,6 +457,16 @@ public class BfmReadingService {
                 .qualityStatus(ocrResult != null ? ocrResult.getQualityStatus() : (isValid ? "CONFIRMED" : "REVIEW"))
                 .lastConfirmedReading(lastConfirmedReading)
                 .build();
+    }
+
+    private FlowVisionResult extractReading(String readingUrl, FlowVisionRetryMode flowVisionRetryMode) {
+        if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT && flowVisionReadingsRetryService != null) {
+            return flowVisionReadingsRetryService.extractReading(readingUrl);
+        }
+        if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT) {
+            log.warn("FlowVision readings retry service is not available; using direct OCR path");
+        }
+        return flowVisionService.extractReading(readingUrl);
     }
 
     @Transactional

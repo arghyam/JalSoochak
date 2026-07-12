@@ -37,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -92,7 +93,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -106,7 +107,14 @@ class GlificImageWorkflowServiceAssamTest {
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
-        verify(bfmReadingService).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(
+                any(CreateReadingRequest.class),
+                anyString(),
+                any(),
+                anyString(),
+                anyBoolean(),
+                eq(FlowVisionRetryMode.RESILIENT)
+        );
     }
 
     @Test
@@ -130,7 +138,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findLatestPendingSchemeSelectionForDate("tenant_test", 11L, java.time.LocalDate.now()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 11L)).thenReturn(Optional.of(101L));
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -144,7 +152,14 @@ class GlificImageWorkflowServiceAssamTest {
 
         assertNotNull(response);
         assertEquals(true, response.isSuccess());
-        verify(bfmReadingService).createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(
+                any(CreateReadingRequest.class),
+                anyString(),
+                any(),
+                anyString(),
+                anyBoolean(),
+                eq(FlowVisionRetryMode.RESILIENT)
+        );
     }
 
     @Test
@@ -172,7 +187,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -214,7 +229,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -261,7 +276,7 @@ class GlificImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.getOrCreatePlaceholderScheme("tenant_assam", "99999999", "88888888"))
                 .thenReturn(55555L);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -308,7 +323,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
                 .thenReturn(Optional.of(30244993L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -324,7 +339,14 @@ class GlificImageWorkflowServiceAssamTest {
         assertEquals(true, response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(
+                requestCaptor.capture(),
+                anyString(),
+                any(),
+                anyString(),
+                anyBoolean(),
+                eq(FlowVisionRetryMode.RESILIENT)
+        );
         assertEquals(30244993L, requestCaptor.getValue().getSchemeId());
         assertEquals(new BigDecimal("123.4"), requestCaptor.getValue().getReadingValue());
 
@@ -361,7 +383,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -375,7 +397,7 @@ class GlificImageWorkflowServiceAssamTest {
         assertEquals(true, response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
         assertNull(requestCaptor.getValue().getReadingUrl());
         assertEquals(new BigDecimal("123.4"), requestCaptor.getValue().getReadingValue());
     }
@@ -404,7 +426,7 @@ class GlificImageWorkflowServiceAssamTest {
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30178236L)).thenReturn(true);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -418,7 +440,7 @@ class GlificImageWorkflowServiceAssamTest {
         assertEquals(true, response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
         assertNull(requestCaptor.getValue().getReadingTime());
     }
 
@@ -451,7 +473,7 @@ class GlificImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.getOrCreatePlaceholderScheme("tenant_assam", "99999999", "88888888"))
                 .thenReturn(55555L);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -473,7 +495,7 @@ class GlificImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertEquals(55555L, captured.getSchemeId());
         assertNotNull(captured.getIngestionSource());
@@ -514,7 +536,7 @@ class GlificImageWorkflowServiceAssamTest {
                 .thenReturn(false);
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
                 .thenReturn(Optional.empty());
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -536,7 +558,7 @@ class GlificImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertEquals(30178236L, captured.getSchemeId());
         assertNotNull(captured.getIngestionSource());
@@ -577,7 +599,7 @@ class GlificImageWorkflowServiceAssamTest {
                 .thenReturn(Optional.of(30178236L));
         when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 999L, 30178236L))
                 .thenReturn(false);
-        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean()))
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
                 .thenReturn(CreateReadingResponse.builder()
                         .success(true)
                         .message("Reading created successfully")
@@ -607,7 +629,7 @@ class GlificImageWorkflowServiceAssamTest {
         assertTrue(response.isSuccess());
 
         ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
-        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean());
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(), anyBoolean(), any(FlowVisionRetryMode.class));
         CreateReadingRequest captured = requestCaptor.getValue();
         assertTrue((captured.getIngestionSource() & IngestionSource.UNKNOWN_OPERATOR) != 0,
                 "Reading should be tagged UNKNOWN_OPERATOR");
