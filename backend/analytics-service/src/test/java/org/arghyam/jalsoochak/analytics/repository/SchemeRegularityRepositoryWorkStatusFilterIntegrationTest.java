@@ -231,9 +231,11 @@ class SchemeRegularityRepositoryWorkStatusFilterIntegrationTest {
         SchemeRegularityRepository.ChildRegionWaterQuantityMetrics child102 =
                 byLgd.stream().filter(r -> r.lgdId() == 102).findFirst().orElseThrow();
 
-        // 101: only Scheme 1 counts (Scheme 3 NULL excluded) -> household 10, eWater = 100 + 200 = 300.
+        // 101: only Scheme 1 counts (Scheme 3 NULL excluded) -> household 10. Water is now unified on the
+        // canonical supplied-volume definition ({{SWS}}): only the SUBMITTED D2 row (200) counts; the
+        // NOT_SUBMITTED D1 row (100) is excluded (H1). eWater = 200.
         assertThat(child101.householdCount()).isEqualTo(10L);
-        assertThat(child101.waterQuantity()).isEqualTo(300L);
+        assertThat(child101.waterQuantity()).isEqualTo(200L);
         // 102: Scheme 2 excluded entirely.
         assertThat(child102.householdCount()).isEqualTo(0L);
         assertThat(child102.waterQuantity()).isEqualTo(0L);

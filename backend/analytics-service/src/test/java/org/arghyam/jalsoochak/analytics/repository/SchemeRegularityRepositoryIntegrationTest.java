@@ -373,13 +373,15 @@ class SchemeRegularityRepositoryIntegrationTest {
                 WHERE tenant_id = 1
                 """);
 
-        // Baseline (single mapping row): Scheme A daily eWater = D1:100, D2:200, D8:300 -> only D1 hits [100,100].
+        // Baseline (single mapping row): Scheme A daily eWater = D1:100, D2:200, D8:300 -> only D1 hits [100,100]
+        // for the efficient-range band (which uses raw daily volume, dedup-only). The headline waterQuantity
+        // total is now the canonical supplied volume ({{SWS}}): only the SUBMITTED D2 row (200) counts.
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> baseline =
                 repository.getRegionWiseWaterQuantityByLgd(1, 100, D1, D10);
         assertThat(baseline.get(0).lgdId()).isEqualTo(101);
         assertThat(baseline.get(0).supplyDaysInEfficientRange()).isEqualTo(1L);
         assertThat(baseline.get(0).householdCount()).isEqualTo(10L);
-        assertThat(baseline.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(baseline.get(0).waterQuantity()).isEqualTo(200L);
 
         // Second mapping row for Scheme A in the SAME child region (level_2=101), differing planned_fhtc
         // and a different parent_department to satisfy the V24 unique key. fhtc stays 10 (threshold unchanged).
@@ -397,11 +399,11 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> withDup =
                 repository.getRegionWiseWaterQuantityByLgd(1, 100, D1, D10);
-        // Must NOT inflate: efficient days stay 1, household stays 10, water stays 600 (not 2 / 20 / 1200).
+        // Must NOT inflate: efficient days stay 1, household stays 10, water stays 200 (not 400).
         assertThat(withDup.get(0).lgdId()).isEqualTo(101);
         assertThat(withDup.get(0).supplyDaysInEfficientRange()).isEqualTo(1L);
         assertThat(withDup.get(0).householdCount()).isEqualTo(10L);
-        assertThat(withDup.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(withDup.get(0).waterQuantity()).isEqualTo(200L);
     }
 
     @Test
@@ -1102,19 +1104,23 @@ class SchemeRegularityRepositoryIntegrationTest {
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> byDept =
                 repository.getRegionWiseWaterQuantityByDepartment(200, D1, D10);
 
+        // Region-wise water is now unified on the canonical supplied-volume definition ({{SWS}}): only
+        // SUBMITTED/legacy-NULL rows with positive delta count (H1). Scheme 1 (child 101/dept 201) supplied
+        // only on D2 (200; D1/D8 are NOT_SUBMITTED). Scheme 2 (child 102/dept 202) has only NOT_SUBMITTED
+        // rows -> 0. This now reconciles with the headline getRegionOwnWaterSupply / average-per-region.
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
         assertThat(byLgd.get(0).householdCount()).isEqualTo(10);
-        assertThat(byLgd.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(byLgd.get(0).waterQuantity()).isEqualTo(200L);
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).householdCount()).isEqualTo(20);
-        assertThat(byLgd.get(1).waterQuantity()).isEqualTo(120L);
+        assertThat(byLgd.get(1).waterQuantity()).isEqualTo(0L);
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
-        assertThat(byDept.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(byDept.get(0).waterQuantity()).isEqualTo(200L);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
-        assertThat(byDept.get(1).waterQuantity()).isEqualTo(120L);
+        assertThat(byDept.get(1).waterQuantity()).isEqualTo(0L);
     }
 
     private void truncateAll() {
