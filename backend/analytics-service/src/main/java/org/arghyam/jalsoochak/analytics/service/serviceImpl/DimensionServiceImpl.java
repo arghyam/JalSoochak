@@ -169,6 +169,7 @@ public class DimensionServiceImpl implements DimensionService {
         scheme.setLevel6DeptId(event.getLevel6DeptId());
 
         scheme.setOperatingStatus(event.getStatus());
+        scheme.setWorkStatus(event.getWorkStatus());
         scheme.setUpdatedAt(LocalDateTime.now());
 
         dimSchemeRepository.save(scheme);
