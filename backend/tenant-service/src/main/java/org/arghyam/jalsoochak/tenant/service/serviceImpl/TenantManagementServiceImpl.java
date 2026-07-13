@@ -26,6 +26,7 @@ import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
@@ -57,6 +58,7 @@ import org.arghyam.jalsoochak.tenant.event.TenantDeactivatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantConfigUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.ConfigurationException;
@@ -447,6 +449,15 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                     }
                 }
             }
+        }
+
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES)) {
+            IncludedWorkStatusesConfigDTO dto =
+                    (IncludedWorkStatusesConfigDTO) results.get(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES);
+            // Enforced validation for JsonNode-bound configs (bean validation does not run on treeToValue).
+            List<Integer> workStatuses = dto.validatedWorkStatuses();
+            eventPublisher.publishEvent(
+                    new IncludedWorkStatusesUpdatedEvent(tenantId, tenant.getStateCode(), workStatuses));
         }
 
         return TenantConfigResponseDTO.builder()

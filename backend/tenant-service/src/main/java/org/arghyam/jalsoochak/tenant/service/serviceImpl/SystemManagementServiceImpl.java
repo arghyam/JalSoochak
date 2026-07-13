@@ -5,9 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetSystemConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.SystemConfigResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.SystemConfigKeyEnum;
+import org.arghyam.jalsoochak.tenant.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigKeyException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
@@ -15,6 +17,7 @@ import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.service.SystemManagementService;
 import org.arghyam.jalsoochak.tenant.util.SecurityUtils;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,8 +37,12 @@ import java.util.Set;
 @Slf4j
 public class SystemManagementServiceImpl implements SystemManagementService {
 
+    /** Sentinel stateCode carried on national-default (tenant-0) events; stateCode is informational only. */
+    private static final String NATIONAL_STATE_CODE = "NATIONAL";
+
     private final TenantCommonRepository tenantCommonRepository;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public SystemConfigResponseDTO getSystemConfigs(Set<SystemConfigKeyEnum> keys) {
@@ -109,6 +116,15 @@ public class SystemManagementServiceImpl implements SystemManagementService {
                 throw new InvalidConfigValueException(
                         "Malformed saved config value for key: " + key, e);
             }
+        }
+
+        if (request.getConfigs().containsKey(SystemConfigKeyEnum.INCLUDED_WORK_STATUSES)) {
+            IncludedWorkStatusesConfigDTO dto =
+                    (IncludedWorkStatusesConfigDTO) results.get(SystemConfigKeyEnum.INCLUDED_WORK_STATUSES);
+            // Enforced validation for JsonNode-bound configs (bean validation does not run on treeToValue).
+            List<Integer> workStatuses = dto.validatedWorkStatuses();
+            eventPublisher.publishEvent(new IncludedWorkStatusesUpdatedEvent(
+                    TenantConstants.SYSTEM_TENANT_ID, NATIONAL_STATE_CODE, workStatuses));
         }
 
         return SystemConfigResponseDTO.builder().configs(results).build();
