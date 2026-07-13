@@ -40,7 +40,8 @@ class TenantConfigKeyEnumTest {
                     TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_3,
                     TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_4,
                     TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_5,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_6
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_6,
+                    TenantConfigKeyEnum.INCLUDED_WORK_STATUSES
             );
         }
 
