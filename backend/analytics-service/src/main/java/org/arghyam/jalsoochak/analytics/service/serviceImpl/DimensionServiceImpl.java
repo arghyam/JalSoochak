@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
@@ -239,6 +240,19 @@ public class DimensionServiceImpl implements DimensionService {
         dimTenantRepository.save(tenant);
         log.info("Updated dim_tenant_table.required_lpcd={} [tenantId={}]",
                 event.getWaterNorm(), event.getTenantId());
+    }
+
+    @Override
+    @Transactional
+    public void updateIncludedWorkStatuses(IncludedWorkStatusesUpdatedEvent event) {
+        DimTenant tenant = dimTenantRepository.findById(event.getTenantId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "No dim_tenant_table row for tenantId=" + event.getTenantId()));
+        tenant.setIncludedWorkStatuses(event.getWorkStatuses());
+        tenant.setUpdatedAt(LocalDateTime.now());
+        dimTenantRepository.save(tenant);
+        log.info("Updated dim_tenant_table.included_work_statuses={} [tenantId={}]",
+                event.getWorkStatuses(), event.getTenantId());
     }
 
     @Override
