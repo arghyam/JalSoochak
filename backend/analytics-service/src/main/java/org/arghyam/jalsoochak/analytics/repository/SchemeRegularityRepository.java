@@ -75,22 +75,35 @@ public class SchemeRegularityRepository {
                     + "AND f.water_quantity > 0 THEN f.water_quantity ELSE 0 END), 0)::bigint",
             SUBMITTED_STATUS);
 
-    /** Applies the shared {@code {{LWQ}}} / {@code {{SWS}}} token substitutions to a built SQL string. */
+    /**
+     * Applies the shared {@code {{LWQ}}} / {@code {{SWS}}} water token substitutions to a built SQL
+     * string, then fails fast (M1) if any {@code {{...}}} token remains unreplaced — a mismatched or
+     * misspelled token would otherwise silently produce a syntactically invalid or, worse, an
+     * unfiltered query. All fragment substitution funnels through here, so this is the single guard.
+     */
     private static String withWaterFragments(String sql) {
-        return sql
+        String out = sql
                 .replace("{{SWS}}", SUPPLIED_WATER_QUANTITY_SUM)
                 .replace("{{LWQ}}", LATEST_WATER_QUANTITY);
+        if (out.contains("{{")) {
+            throw new IllegalStateException("Unreplaced SQL token in query: " + out);
+        }
+        return out;
     }
 
     /**
-     * Applies the dashboard SQL fragments to a built query: the water tokens plus the
-     * {@code {{WS}}} work_status filter (aliased {@code s}). Every dashboard scheme-selection CTE
-     * that must honour the handed-over restriction places {@code {{WS}}} immediately after its
-     * {@code WHERE s.<...>} predicate and routes its SQL through this method. Queries with no
-     * {@code {{WS}}}/water tokens are returned unchanged, so this is safe to apply uniformly.
+     * Applies the dashboard SQL fragments to a built query: the two work_status tokens plus the water
+     * tokens. {@code {{WS}}} is the tenant-scoped filter (own tenant → tenant-0 → env default) and
+     * {@code {{NWS}}} is the national filter (tenant-0 → env default); both are rendered against the
+     * {@code dim_scheme_table} alias {@code s}. Every dashboard scheme-selection CTE places the correct
+     * token immediately after its {@code WHERE s.<...>}/{@code ON ...} predicate and routes its SQL
+     * through this method. The work_status tokens are replaced <em>before</em> the water tokens so the
+     * generated predicate is itself scrubbed by the M1 guard in {@link #withWaterFragments(String)}.
      */
     private String withDashboardFragments(String sql) {
-        return withWaterFragments(sql).replace("{{WS}}", workStatusFilter.andPredicate("s"));
+        return withWaterFragments(sql
+                .replace("{{WS}}", workStatusFilter.andPredicate("s"))
+                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
     }
 
     private String resolveDashboardSortDirection(String sortDir) {
