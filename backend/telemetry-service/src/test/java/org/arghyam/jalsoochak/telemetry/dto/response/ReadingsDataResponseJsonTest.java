@@ -25,7 +25,7 @@ class ReadingsDataResponseJsonTest {
         assertEquals("corr-123", json.get("correlationId").asText());
         assertFalse(json.has("correlation_id"));
         assertFalse(json.has("errorCode"));
-        assertEquals("unreadableImage", json.get("error_code").asText());
+        assertEquals("UNREADABLE_IMAGE", json.get("error_code").asText());
     }
 
     @Test
@@ -38,6 +38,6 @@ class ReadingsDataResponseJsonTest {
 
         JsonNode json = OBJECT_MAPPER.readTree(OBJECT_MAPPER.writeValueAsString(response));
         assertFalse(json.has("errorCode"));
-        assertEquals("flowVisionFailed", json.get("error_code").asText());
+        assertEquals("FLOW_VISION_FAILED", json.get("error_code").asText());
     }
 }
