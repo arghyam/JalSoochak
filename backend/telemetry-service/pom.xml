@@ -24,7 +24,7 @@
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.32</lombok.version>
         <springdoc.version>2.5.0</springdoc.version>
-        <resilience4j.version>2.2.0</resilience4j.version>
+        <resilience4j.version>2.1.0</resilience4j.version>
         <sonar.coverage.exclusions>
             **/org/arghyam/jalsoochak/telemetry/dto/**,
             **/org/arghyam/jalsoochak/telemetry/entity/**,
