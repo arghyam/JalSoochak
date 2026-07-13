@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.GlificMessagesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.MessageBrokerConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.StateITSystemConfigDTO;
@@ -236,7 +237,14 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Display map for LGD level 6.
      * TRUE or FALSE. Default: TRUE.
      */
-    DISPLAY_MAP_LGD_LEVEL_6(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false);
+    DISPLAY_MAP_LGD_LEVEL_6(ConfigType.GENERIC, SimpleConfigValueDTO.class, true, false, false),
+
+    /**
+     * Scheme work statuses whose schemes are counted in this tenant's analytics dashboards.
+     * Codes: 1=Ongoing, 2=Completed, 3=Not Started, 4=Handed Over. Example: [4] restricts dashboards
+     * to handed-over schemes. Published to analytics via INCLUDED_WORK_STATUSES_UPDATED.
+     */
+    INCLUDED_WORK_STATUSES(ConfigType.GENERIC, IncludedWorkStatusesConfigDTO.class, true, false, false);
 
     private final ConfigType type;
     private final Class<? extends ConfigValueDTO> dtoClass;
