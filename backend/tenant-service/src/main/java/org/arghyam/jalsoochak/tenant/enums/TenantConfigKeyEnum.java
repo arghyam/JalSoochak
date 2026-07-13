@@ -244,7 +244,7 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Codes: 1=Ongoing, 2=Completed, 3=Not Started, 4=Handed Over. Example: [4] restricts dashboards
      * to handed-over schemes. Published to analytics via INCLUDED_WORK_STATUSES_UPDATED.
      */
-    INCLUDED_WORK_STATUSES(ConfigType.GENERIC, IncludedWorkStatusesConfigDTO.class, true, false, false);
+    INCLUDED_WORK_STATUSES(ConfigType.GENERIC, IncludedWorkStatusesConfigDTO.class, false, false, false);
 
     private final ConfigType type;
     private final Class<? extends ConfigValueDTO> dtoClass;

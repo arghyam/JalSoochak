@@ -40,8 +40,7 @@ class TenantConfigKeyEnumTest {
                     TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_3,
                     TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_4,
                     TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_5,
-                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_6,
-                    TenantConfigKeyEnum.INCLUDED_WORK_STATUSES
+                    TenantConfigKeyEnum.DISPLAY_DEPARTMENT_MAP_LEVEL_6
             );
         }
 
@@ -64,6 +63,7 @@ class TenantConfigKeyEnumTest {
             assertThat(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS.isPublic()).isFalse();
             assertThat(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.isPublic()).isFalse();
             assertThat(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.isPublic()).isFalse();
+            assertThat(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES.isPublic()).isFalse();
         }
     }
 
