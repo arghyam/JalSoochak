@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -27,8 +29,10 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -51,8 +55,14 @@ class BfmReadingServicePlaceholderRowTest {
     @Mock
     private GlificOperatorContextService glificOperatorContextService;
 
+    @Mock
+    private FlowVisionReadingsRetryService flowVisionReadingsRetryService;
+
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
+
+    @Mock
+    private ReadingChannelResolver readingChannelResolver;
 
     @InjectMocks
     private BfmReadingService service;
@@ -79,6 +89,7 @@ class BfmReadingServicePlaceholderRowTest {
 
         when(flowVisionService.extractReading("http://example.com/img.jpg")).thenReturn(
                 FlowVisionResult.builder()
+                        .requestId("request-1")
                         .correlationId("corr-1")
                         .qualityStatus("GOOD")
                         .qualityConfidence(new BigDecimal("0.95"))
@@ -95,6 +106,7 @@ class BfmReadingServicePlaceholderRowTest {
                 1L,
                 LocalDate.now()
         )).thenReturn(Optional.of(99L));
+        when(readingChannelResolver.resolve(1, "919999999999")).thenReturn(ReadingChannel.BFM);
 
         CreateReadingResponse resp = service.createReading(request, schemaName, operator, "919999999999", false);
 
@@ -110,12 +122,66 @@ class BfmReadingServicePlaceholderRowTest {
                 any(BigDecimal.class),
                 any(BigDecimal.class),
                 anyString(),
+                eq("corr-1"),
                 anyString(),
                 any(),
                 anyLong()
         );
+        // The resolved channel is persisted onto the reading row by its short code.
+        verify(telemetryTenantRepository).updateFlowReadingChannel(schemaName, 99L, ReadingChannel.BFM.name());
         verify(telemetryTenantRepository, never()).createFlowReading(
                 anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any()
+        );
+    }
+
+    @Test
+    void readingsApiOutageDoesNotRecordUnreadableImageAnomaly() {
+        String schemaName = "tenant_test";
+        TelemetryOperator operator = new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null);
+
+        CreateReadingRequest request = CreateReadingRequest.builder()
+                .schemeId(10L)
+                .operatorId(1L)
+                .readingUrl("http://example.com/img.jpg")
+                .build();
+
+        when(telemetryTenantRepository.existsSchemeById(schemaName, 10L)).thenReturn(true);
+        when(telemetryTenantRepository.findOperatorById(schemaName, 1L)).thenReturn(Optional.of(operator));
+        when(telemetryTenantRepository.isOperatorMappedToScheme(schemaName, 1L, 10L)).thenReturn(true);
+        when(flowVisionReadingsRetryService.extractReading("http://example.com/img.jpg"))
+                .thenThrow(new FlowVisionReadingsUnavailableException("temporarily unavailable", new RuntimeException("timeout")));
+
+        CreateReadingResponse resp = service.createReading(
+                request,
+                schemaName,
+                operator,
+                "919999999999",
+                false,
+                FlowVisionRetryMode.RESILIENT
+        );
+
+        assertNotNull(resp);
+        assertEquals(false, resp.isSuccess());
+        assertEquals("Meter reading service is temporarily unavailable. Please try again shortly.", resp.getMessage());
+        assertEquals("RETRY", resp.getQualityStatus());
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
+                anyString(), anyLong(), anyLong(), anyInt(), anyString(), anyInt()
+        );
+        verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
+                any(),
+                anyInt(),
+                anyLong(),
+                anyLong(),
+                any(),
+                any(),
+                any(),
+                anyInt(),
+                any(),
+                any(),
+                anyInt(),
+                anyString(),
+                anyInt(),
+                anyString()
         );
     }
 
@@ -134,7 +200,8 @@ class BfmReadingServicePlaceholderRowTest {
                 new BigDecimal("100"),
                 "http://example.com/img.jpg",
                 readingDate,
-                readingAt
+                readingAt,
+                "BFM"
         );
 
         when(glificOperatorContextService.resolveOperatorWithSchema("919999999999"))
@@ -158,7 +225,7 @@ class BfmReadingServicePlaceholderRowTest {
                 null,
                 "http://example.com/img.jpg",
                 readingAt,
-                null,
+                ReadingChannel.BFM.getCode(),
                 readingDate,
                 1,
                 0
@@ -181,7 +248,8 @@ class BfmReadingServicePlaceholderRowTest {
                 new BigDecimal("100"),
                 "http://example.com/img.jpg",
                 readingDate,
-                readingAt
+                readingAt,
+                "BFM"
         );
 
         when(telemetryTenantRepository.findFlowReadingDetailsByCorrelationId(schemaName, "corr-1"))
@@ -204,7 +272,7 @@ class BfmReadingServicePlaceholderRowTest {
                 null,
                 "http://example.com/img.jpg",
                 readingAt,
-                null,
+                ReadingChannel.BFM.getCode(),
                 readingDate,
                 1,
                 0

@@ -7,6 +7,7 @@ import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
@@ -15,11 +16,20 @@ import org.springframework.web.client.RestTemplate;
 @Configuration
 public class RestTemplateConfig {
 
-    private static final int CONNECT_TIMEOUT_MS = 5000;
-    private static final int READ_TIMEOUT_MS = 10000;
     private static final int CONNECTION_REQUEST_TIMEOUT_MS = 2000;
     private static final int MAX_TOTAL_CONNECTIONS = 200;
     private static final int MAX_CONNECTIONS_PER_ROUTE = 50;
+
+    private final int connectTimeoutMs;
+    private final int readTimeoutMs;
+
+    public RestTemplateConfig(
+            @Value("${flowvision.http.connect-timeout-ms:5000}") int connectTimeoutMs,
+            @Value("${flowvision.http.read-timeout-ms:10000}") int readTimeoutMs
+    ) {
+        this.connectTimeoutMs = connectTimeoutMs;
+        this.readTimeoutMs = readTimeoutMs;
+    }
 
     @Bean
     public RestTemplate restTemplate() {
@@ -30,8 +40,8 @@ public class RestTemplateConfig {
 
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectionRequestTimeout(Timeout.ofMilliseconds(CONNECTION_REQUEST_TIMEOUT_MS))
-                .setConnectTimeout(Timeout.ofMilliseconds(CONNECT_TIMEOUT_MS))
-                .setResponseTimeout(Timeout.ofMilliseconds(READ_TIMEOUT_MS))
+                .setConnectTimeout(Timeout.ofMilliseconds(connectTimeoutMs))
+                .setResponseTimeout(Timeout.ofMilliseconds(readTimeoutMs))
                 .build();
 
         CloseableHttpClient httpClient = HttpClients.custom()

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +32,9 @@ import java.util.UUID;
 public class EscalationSchedulerService {
 
     private static final String COMMON_TOPIC = "common-topic";
+
+    /** reading_date is stored on the IST calendar day, so "today"/missed-day math must be IST. */
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     /**
      * Sentinel string set on OperatorEscalationDetail.lastRecordedBfmDate when an operator
@@ -70,7 +74,7 @@ public class EscalationSchedulerService {
         // Key = "LEVEL_<n>|<phone>" to keep level1 and level2 officers separate
         Map<String, OfficerGroup> officerGroups = new LinkedHashMap<>();
 
-        LocalDate processingDate = LocalDate.now();
+        LocalDate processingDate = LocalDate.now(IST);
         int total = nudgeRepository.streamUsersWithMissedDays(schema, level1Days, processingDate, row -> {
             // days_since_last_upload is NULL when the operator has never uploaded
             Number daysSinceObj = (Number) row.get("days_since_last_upload");

@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -75,7 +76,7 @@ public class TelemetrySubmissionAuditService {
     }
 
     private SubmissionAuditSnapshot snapshot(String maskedPhone, Long schemeId, String uniqueKey) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = ReadingTime.today();
         int uniqueCount = recordUniqueSubmitter(today, uniqueKey);
         return new SubmissionAuditSnapshot(maskedPhone, schemeId, uniqueCount, today);
     }
@@ -91,7 +92,7 @@ public class TelemetrySubmissionAuditService {
         return telemetryTenantRepository.findLatestPendingSchemeSelectionForDate(
                         operatorWithSchema.schemaName(),
                         operatorWithSchema.operator().id(),
-                        LocalDate.now()
+                        ReadingTime.today()
                 )
                 .map(TelemetrySchemeSelectionRecord::schemeId)
                 .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
@@ -133,7 +134,7 @@ public class TelemetrySubmissionAuditService {
     }
 
     private void cleanupOldDates() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = ReadingTime.today();
         dailyUniqueSubmitters.keySet().removeIf(date -> !today.equals(date));
     }
 

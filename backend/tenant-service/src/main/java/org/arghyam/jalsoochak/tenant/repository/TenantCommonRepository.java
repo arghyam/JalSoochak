@@ -86,8 +86,8 @@ public class TenantCommonRepository {
     public Optional<TenantResponseDTO> createTenant(CreateTenantRequestDTO request, Integer currentUserId) {
         String sql = """
                 INSERT INTO common_schema.tenant_master_table
-                    (state_code, lgd_code, title, created_by, status, created_at)
-                VALUES (?, ?, ?, ?, ?, NOW())
+                    (state_code, lgd_code, title, created_by, status, created_at, onboarded_at)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
                 RETURNING *
                 """;
 
@@ -97,6 +97,34 @@ public class TenantCommonRepository {
                 request.getName(),
                 currentUserId,
                 TenantStatusEnum.ONBOARDED.getCode());
+        return results.stream().findFirst();
+    }
+
+    /**
+     * Onboards an existing pre-seeded ({@link TenantStatusEnum#REGISTERED}) tenant: overwrites
+     * the seeded {@code title}/{@code lgd_code} with the request values (request is trusted),
+     * flips the status to {@link TenantStatusEnum#ONBOARDED}, and stamps {@code onboarded_at}.
+     *
+     * <p>The {@code WHERE status = REGISTERED} predicate makes this a no-op (empty result) for
+     * rows that are already onboarded, so the caller can distinguish onboard from conflict.
+     * The tenant {@code id} is intentionally left untouched so it stays aligned with the
+     * pre-seeded {@code analytics_schema.dim_tenant_table.tenant_id}.
+     */
+    public Optional<TenantResponseDTO> onboardTenant(String stateCode, CreateTenantRequestDTO request,
+            Integer currentUserId) {
+        String sql = """
+                UPDATE common_schema.tenant_master_table
+                SET title = ?, lgd_code = ?, status = ?, onboarded_at = NOW(), updated_at = NOW(), updated_by = ?
+                WHERE state_code = ? AND status = ? AND deleted_at IS NULL
+                RETURNING *
+                """;
+        List<TenantResponseDTO> results = jdbcTemplate.query(sql, TENANT_ROW_MAPPER,
+                request.getName(),
+                request.getLgdCode(),
+                TenantStatusEnum.ONBOARDED.getCode(),
+                currentUserId,
+                stateCode,
+                TenantStatusEnum.REGISTERED.getCode());
         return results.stream().findFirst();
     }
 
@@ -210,7 +238,9 @@ public class TenantCommonRepository {
 
     private FilterClause buildTenantFilterClause(TenantStatusEnum status, String search) {
         List<Object> params = new ArrayList<>();
-        StringBuilder where = new StringBuilder("WHERE id != 0 AND deleted_at IS NULL");
+        // Exclude pre-seeded, not-yet-onboarded tenants from all listings.
+        StringBuilder where = new StringBuilder("WHERE id != 0 AND deleted_at IS NULL AND status <> ?");
+        params.add(TenantStatusEnum.REGISTERED.getCode());
         if (status != null) {
             where.append(" AND status = ?");
             params.add(status.getCode());
@@ -242,7 +272,7 @@ public class TenantCommonRepository {
                     COUNT(*) FILTER (WHERE status = ?)            AS degraded,
                     COUNT(*) FILTER (WHERE status = ?)            AS archived
                 FROM common_schema.tenant_master_table
-                WHERE id != 0 AND deleted_at IS NULL
+                WHERE id != 0 AND deleted_at IS NULL AND status <> ?
                 """;
         return jdbcTemplate.queryForObject(sql,
                 (rs, rn) -> TenantSummaryResponseDTO.builder()
@@ -261,7 +291,8 @@ public class TenantCommonRepository {
                 TenantStatusEnum.INACTIVE.getCode(),
                 TenantStatusEnum.SUSPENDED.getCode(),
                 TenantStatusEnum.DEGRADED.getCode(),
-                TenantStatusEnum.ARCHIVED.getCode());
+                TenantStatusEnum.ARCHIVED.getCode(),
+                TenantStatusEnum.REGISTERED.getCode());
     }
 
     /**
@@ -433,14 +464,17 @@ public class TenantCommonRepository {
     }
 
     /**
-     * Counts the total number of non-deleted tenants (excluding the system tenant).
+     * Counts the number of onboarded tenants (excluding the system tenant, soft-deleted rows,
+     * and pre-seeded {@link TenantStatusEnum#REGISTERED} tenants that have not yet been onboarded).
      * Used for single-tenant mode enforcement.
      *
-     * @return the count of non-deleted, non-system tenants
+     * @return the count of onboarded, non-system tenants
      */
-    public int countNonDeletedTenants() {
-        String sql = "SELECT COUNT(*) FROM common_schema.tenant_master_table WHERE id != ? AND deleted_at IS NULL";
-        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, TenantConstants.SYSTEM_TENANT_ID);
+    public int countOnboardedTenants() {
+        String sql = "SELECT COUNT(*) FROM common_schema.tenant_master_table "
+                + "WHERE id != ? AND deleted_at IS NULL AND status <> ?";
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class,
+                TenantConstants.SYSTEM_TENANT_ID, TenantStatusEnum.REGISTERED.getCode());
         return count != null ? count : 0;
     }
 

@@ -48,7 +48,7 @@ public class SchemeRegularityRepository {
                     ? "LOWER(COALESCE(NULLIF(pl.title, ''), pl.lgd_c_name, ''))"
                     : "LOWER(COALESCE(NULLIF(pd.title, ''), pd.department_c_name, ''))";
             case "reportingrate" -> "(COALESCE(sd.submission_days, 0)::numeric / " + daysInRange + ")";
-            case "totalwatersupplied" -> "COALESCE(sd.total_water_supplied, 0)";
+            case "totalwatersupplied" -> "COALESCE(sw.total_water_supplied, 0)";
             default -> throw new IllegalArgumentException("Unsupported sort_by: " + sortBy);
         };
         return expression + " " + direction + ", ss.scheme_id ASC";
@@ -3570,22 +3570,36 @@ public class SchemeRegularityRepository {
                 scheme_submission_days AS (
                     SELECT
                         m.scheme_id,
-                        COUNT(DISTINCT m.reading_date)::int AS submission_days,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
-                            AS total_water_supplied
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope ss
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading >= 0
                     GROUP BY m.scheme_id
+                ),
+                scheme_water AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
-                    COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
+                    COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     ss.immediate_parent_lgd_id,
                     pl.lgd_c_name AS immediate_parent_lgd_c_name,
                     pl.title AS immediate_parent_lgd_title,
@@ -3613,6 +3627,8 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN scheme_water sw
+                    ON sw.scheme_id = ss.scheme_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table pl
                     ON pl.lgd_id = ss.immediate_parent_lgd_id
                 ORDER BY
@@ -3654,6 +3670,8 @@ public class SchemeRegularityRepository {
                         List.of(),
                         List.of()),
                 parentLgdId,
+                startDate,
+                endDate,
                 startDate,
                 endDate,
                 ChronoUnit.DAYS.between(startDate, endDate) + 1,
@@ -3761,9 +3779,7 @@ public class SchemeRegularityRepository {
                 scheme_submission_days AS (
                     SELECT
                         m.scheme_id,
-                        COUNT(DISTINCT m.reading_date)::int AS submission_days,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
-                            AS total_water_supplied
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope ss
                         ON ss.scheme_id = m.scheme_id
@@ -3771,13 +3787,30 @@ public class SchemeRegularityRepository {
                       AND m.confirmed_reading >= 0
                       AND m.tenant_id = ?
                     GROUP BY m.scheme_id
+                ),
+                scheme_water AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
-                    COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
+                    COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     fsl.supplied_lgd_location_id AS immediate_parent_lgd_id,
                     pl.lgd_c_name AS immediate_parent_lgd_c_name,
                     pl.title AS immediate_parent_lgd_title,
@@ -3805,6 +3838,8 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN scheme_water sw
+                    ON sw.scheme_id = ss.scheme_id
                 LEFT JOIN first_supplied_lgd_location fsl
                     ON fsl.scheme_id = ss.scheme_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table pl
@@ -3822,6 +3857,9 @@ public class SchemeRegularityRepository {
                 (rs, rowNum) -> mapSchemeSubmissionMetrics(rs),
                 parentLgdId,
                 tenantId,
+                tenantId,
+                startDate,
+                endDate,
                 tenantId,
                 startDate,
                 endDate,
@@ -3881,9 +3919,7 @@ public class SchemeRegularityRepository {
                 scheme_submission_days AS (
                     SELECT
                         m.scheme_id,
-                        COUNT(DISTINCT m.reading_date)::int AS submission_days,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
-                            AS total_water_supplied
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope ss
                         ON ss.scheme_id = m.scheme_id
@@ -3891,13 +3927,30 @@ public class SchemeRegularityRepository {
                       AND m.confirmed_reading >= 0
                       AND m.tenant_id = ?
                     GROUP BY m.scheme_id
+                ),
+                scheme_water AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
-                    COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
+                    COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     ss.immediate_parent_lgd_id,
                     pl.lgd_c_name AS immediate_parent_lgd_c_name,
                     pl.title AS immediate_parent_lgd_title,
@@ -3925,6 +3978,8 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN scheme_water sw
+                    ON sw.scheme_id = ss.scheme_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table pl
                     ON pl.lgd_id = ss.immediate_parent_lgd_id
                    AND pl.tenant_id = ?
@@ -3936,6 +3991,9 @@ public class SchemeRegularityRepository {
             ps.setFetchSize(EXPORT_FETCH_SIZE);
             int i = 1;
             ps.setInt(i++, parentLgdId);
+            ps.setInt(i++, tenantId);
+            ps.setObject(i++, startDate);
+            ps.setObject(i++, endDate);
             ps.setInt(i++, tenantId);
             ps.setObject(i++, startDate);
             ps.setObject(i++, endDate);
@@ -3987,22 +4045,36 @@ public class SchemeRegularityRepository {
                 scheme_submission_days AS (
                     SELECT
                         m.scheme_id,
-                        COUNT(DISTINCT m.reading_date)::int AS submission_days,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
-                            AS total_water_supplied
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope ss
                         ON ss.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                       AND m.confirmed_reading >= 0
                     GROUP BY m.scheme_id
+                ),
+                scheme_water AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
-                    COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
+                    COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     NULL::int AS immediate_parent_lgd_id,
                     NULL::varchar AS immediate_parent_lgd_c_name,
                     NULL::varchar AS immediate_parent_lgd_title,
@@ -4030,6 +4102,8 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN scheme_water sw
+                    ON sw.scheme_id = ss.scheme_id
                 LEFT JOIN analytics_schema.dim_department_location_table pd
                     ON pd.department_id = ss.immediate_parent_department_id
                 ORDER BY
@@ -4071,6 +4145,8 @@ public class SchemeRegularityRepository {
                         List.of(),
                         List.of()),
                 parentDepartmentId,
+                startDate,
+                endDate,
                 startDate,
                 endDate,
                 ChronoUnit.DAYS.between(startDate, endDate) + 1,
@@ -4129,9 +4205,7 @@ public class SchemeRegularityRepository {
                 scheme_submission_days AS (
                     SELECT
                         m.scheme_id,
-                        COUNT(DISTINCT m.reading_date)::int AS submission_days,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
-                            AS total_water_supplied
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope ss
                         ON ss.scheme_id = m.scheme_id
@@ -4139,13 +4213,30 @@ public class SchemeRegularityRepository {
                       AND m.confirmed_reading >= 0
                       AND m.tenant_id = ?
                     GROUP BY m.scheme_id
+                ),
+                scheme_water AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
-                    COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
+                    COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     NULL::int AS immediate_parent_lgd_id,
                     NULL::varchar AS immediate_parent_lgd_c_name,
                     NULL::varchar AS immediate_parent_lgd_title,
@@ -4173,6 +4264,8 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN scheme_water sw
+                    ON sw.scheme_id = ss.scheme_id
                 LEFT JOIN analytics_schema.dim_department_location_table pd
                     ON pd.department_id = ss.immediate_parent_department_id
                    AND pd.tenant_id = ?
@@ -4185,6 +4278,9 @@ public class SchemeRegularityRepository {
                 sql,
                 (rs, rowNum) -> mapSchemeSubmissionMetrics(rs),
                 parentDepartmentId,
+                tenantId,
+                startDate,
+                endDate,
                 tenantId,
                 startDate,
                 endDate,
@@ -4245,9 +4341,7 @@ public class SchemeRegularityRepository {
                 scheme_submission_days AS (
                     SELECT
                         m.scheme_id,
-                        COUNT(DISTINCT m.reading_date)::int AS submission_days,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
-                            AS total_water_supplied
+                        COUNT(DISTINCT m.reading_date)::int AS submission_days
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope ss
                         ON ss.scheme_id = m.scheme_id
@@ -4255,13 +4349,30 @@ public class SchemeRegularityRepository {
                       AND m.confirmed_reading >= 0
                       AND m.tenant_id = ?
                     GROUP BY m.scheme_id
+                ),
+                scheme_water AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
-                    COALESCE(sd.total_water_supplied, 0)::bigint AS total_water_supplied,
+                    COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     NULL::int AS immediate_parent_lgd_id,
                     NULL::varchar AS immediate_parent_lgd_c_name,
                     NULL::varchar AS immediate_parent_lgd_title,
@@ -4289,6 +4400,8 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_submission_days sd
                     ON sd.scheme_id = ss.scheme_id
+                LEFT JOIN scheme_water sw
+                    ON sw.scheme_id = ss.scheme_id
                 LEFT JOIN analytics_schema.dim_department_location_table pd
                     ON pd.department_id = ss.immediate_parent_department_id
                    AND pd.tenant_id = ?
@@ -4300,6 +4413,9 @@ public class SchemeRegularityRepository {
             ps.setFetchSize(EXPORT_FETCH_SIZE);
             int i = 1;
             ps.setInt(i++, parentDepartmentId);
+            ps.setInt(i++, tenantId);
+            ps.setObject(i++, startDate);
+            ps.setObject(i++, endDate);
             ps.setInt(i++, tenantId);
             ps.setObject(i++, startDate);
             ps.setObject(i++, endDate);
@@ -4726,6 +4842,23 @@ public class SchemeRegularityRepository {
                       AND s.house_hold_count IS NOT NULL
                       AND s.house_hold_count > 0
                     ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, s.house_hold_count DESC, COALESCE(s.planned_fhtc, 0) DESC
+                ),
+                water_by_scheme AS (
+                    SELECT
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint AS total_water_supplied_liters
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.tenant_id = ?
+                      AND f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_tenant)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     s.scheme_id,
@@ -4733,7 +4866,7 @@ public class SchemeRegularityRepository {
                     s.house_hold_count,
                     s.fhtc_count,
                     s.planned_fhtc,
-                    COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
+                    COALESCE(w.total_water_supplied_liters, 0)::bigint
                         AS total_water_supplied_liters,
                     COALESCE(COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END), 0)::int
                         AS supply_days
@@ -4742,7 +4875,9 @@ public class SchemeRegularityRepository {
                     ON m.scheme_id = s.scheme_id
                     AND m.tenant_id = ?
                     AND m.reading_date BETWEEN ? AND ?
-                GROUP BY s.scheme_id, s.scheme_name, s.house_hold_count, s.fhtc_count, s.planned_fhtc
+                LEFT JOIN water_by_scheme w
+                    ON w.scheme_id = s.scheme_id
+                GROUP BY s.scheme_id, s.scheme_name, s.house_hold_count, s.fhtc_count, s.planned_fhtc, w.total_water_supplied_liters
                 ORDER BY s.scheme_id
                 """;
 
@@ -4762,6 +4897,9 @@ public class SchemeRegularityRepository {
                                         4,
                                         java.math.RoundingMode.HALF_UP)),
                 tenantId,
+                tenantId,
+                startDate,
+                endDate,
                 tenantId,
                 startDate,
                 endDate);
@@ -5434,13 +5572,21 @@ public class SchemeRegularityRepository {
                 ),
                 water_by_scheme AS (
                     SELECT
-                        m.scheme_id,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint
                             AS total_water_supplied_liters
-                    FROM analytics_schema.fact_meter_reading_table m
-                    WHERE m.tenant_id = ?
-                      AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.tenant_id = ?
+                      AND f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     c.child_lgd_id AS lgd_id,
@@ -5528,13 +5674,21 @@ public class SchemeRegularityRepository {
                 ),
                 water_by_scheme AS (
                     SELECT
-                        m.scheme_id,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint
                             AS total_water_supplied_liters
-                    FROM analytics_schema.fact_meter_reading_table m
-                    WHERE m.tenant_id = ?
-                      AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.tenant_id = ?
+                      AND f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     c.child_department_id AS department_id,
@@ -5635,13 +5789,21 @@ public class SchemeRegularityRepository {
                 ),
                 water_by_scheme AS (
                     SELECT
-                        m.scheme_id,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint
+                        f.scheme_id,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
+                                     AND f.water_quantity > 0
+                                    THEN f.water_quantity
+                                ELSE 0
+                            END
+                        ), 0)::bigint
                             AS total_water_supplied_liters
-                    FROM analytics_schema.fact_meter_reading_table m
-                    WHERE m.tenant_id = ?
-                      AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                    FROM analytics_schema.fact_water_quantity_table f
+                    WHERE f.tenant_id = ?
+                      AND f.date BETWEEN ? AND ?
+                      AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
+                    GROUP BY f.scheme_id
                 )
                 SELECT
                     COALESCE(SUM(s.house_hold_count), 0)::bigint AS total_household_count,

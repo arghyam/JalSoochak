@@ -68,9 +68,30 @@ flowvision:
   http:
     connect-timeout-ms: ${FLOWVISION_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${FLOWVISION_READ_TIMEOUT_MS:10000}
+
+resilience4j:
   retry:
-    max-attempts: ${FLOWVISION_RETRY_MAX_ATTEMPTS:3}
-    initial-backoff-ms: ${FLOWVISION_RETRY_INITIAL_BACKOFF_MS:300}
+    instances:
+      flowvisionReadings:
+        max-attempts: ${FLOWVISION_READINGS_RETRY_MAX_ATTEMPTS:3}
+        wait-duration: ${FLOWVISION_READINGS_RETRY_WAIT_DURATION:300ms}
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: ${FLOWVISION_READINGS_RETRY_BACKOFF_MULTIPLIER:2}
+        enable-randomized-wait: true
+        randomized-wait-factor: ${FLOWVISION_READINGS_RETRY_RANDOMIZED_WAIT_FACTOR:0.5}
+  circuitbreaker:
+    instances:
+      flowvisionReadings:
+        sliding-window-size: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_WINDOW_SIZE:100}
+        minimum-number-of-calls: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_MIN_CALLS:20}
+        failure-rate-threshold: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_FAILURE_RATE:50}
+        wait-duration-in-open-state: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_OPEN_WAIT:30s}
+        permitted-number-of-calls-in-half-open-state: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_HALF_OPEN_CALLS:10}
+  bulkhead:
+    instances:
+      flowvisionReadings:
+        max-concurrent-calls: ${FLOWVISION_READINGS_BULKHEAD_MAX_CONCURRENT_CALLS:50}
+        max-wait-duration: ${FLOWVISION_READINGS_BULKHEAD_MAX_WAIT_DURATION:0ms}
 
 media-download:
   retry:
