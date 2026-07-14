@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.EscalationEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
@@ -75,6 +76,51 @@ class AnalyticsKafkaConsumerTest {
         assertThat(readField(event, "tenantId")).isEqualTo(1);
         assertThat(readField(event, "waterNorm")).isEqualTo(70);
         assertThat(readField(event, "stateCode")).isEqualTo("MP");
+    }
+
+    @Test
+    void consumeTenantEvents_includedWorkStatusesUpdated_routesToUpdateIncludedWorkStatuses() {
+        String message = """
+                {"eventType":"INCLUDED_WORK_STATUSES_UPDATED","tenantId":1,"stateCode":"MP","workStatuses":[1,4]}
+                """;
+
+        consumer.consumeTenantEvents(message);
+
+        ArgumentCaptor<IncludedWorkStatusesUpdatedEvent> captor =
+                ArgumentCaptor.forClass(IncludedWorkStatusesUpdatedEvent.class);
+        verify(dimensionService).updateIncludedWorkStatuses(captor.capture());
+        IncludedWorkStatusesUpdatedEvent event = captor.getValue();
+        assertThat(event.getTenantId()).isEqualTo(1);
+        assertThat(event.getWorkStatuses()).containsExactly(1, 4);
+    }
+
+    @Test
+    void consumeTenantEvents_includedWorkStatusesUpdated_nationalTenantZero_routesWithNationalSentinel() {
+        String message = """
+                {"eventType":"INCLUDED_WORK_STATUSES_UPDATED","tenantId":0,"stateCode":"NATIONAL","workStatuses":[1]}
+                """;
+
+        consumer.consumeTenantEvents(message);
+
+        ArgumentCaptor<IncludedWorkStatusesUpdatedEvent> captor =
+                ArgumentCaptor.forClass(IncludedWorkStatusesUpdatedEvent.class);
+        verify(dimensionService).updateIncludedWorkStatuses(captor.capture());
+        assertThat(captor.getValue().getTenantId()).isZero();
+        assertThat(captor.getValue().getWorkStatuses()).containsExactly(1);
+    }
+
+    @Test
+    void consumeSchemeEvents_schemeUpdated_deserializesSnakeCaseWorkStatus() {
+        // Producer sends snake_case; @JsonProperty("work_status") must bind it onto SchemeEvent.
+        String message = """
+                {"eventType":"SCHEME_UPDATED","schemeId":1001,"tenantId":1,"work_status":4}
+                """;
+
+        consumer.consumeSchemeEvents(message);
+
+        ArgumentCaptor<SchemeEvent> captor = ArgumentCaptor.forClass(SchemeEvent.class);
+        verify(dimensionService).upsertScheme(captor.capture());
+        assertThat(captor.getValue().getWorkStatus()).isEqualTo(4);
     }
 
     @Test

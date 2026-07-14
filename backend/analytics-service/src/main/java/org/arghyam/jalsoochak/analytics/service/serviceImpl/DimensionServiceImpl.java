@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
@@ -38,6 +39,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class DimensionServiceImpl implements DimensionService {
+
+    /** The national-default tenant: a config-only singleton, never created by TENANT_CREATED. */
+    private static final Integer NATIONAL_TENANT_ID = 0;
+    /** Status stamped on the synthetic national-default row (excluded from tenant enumerations). */
+    private static final int NATIONAL_TENANT_STATUS = 1;
 
     private final DimTenantRepository dimTenantRepository;
     private final DimUserRepository dimUserRepository;
@@ -169,6 +175,7 @@ public class DimensionServiceImpl implements DimensionService {
         scheme.setLevel6DeptId(event.getLevel6DeptId());
 
         scheme.setOperatingStatus(event.getStatus());
+        scheme.setWorkStatus(event.getWorkStatus());
         scheme.setUpdatedAt(LocalDateTime.now());
 
         dimSchemeRepository.save(scheme);
@@ -238,6 +245,33 @@ public class DimensionServiceImpl implements DimensionService {
         dimTenantRepository.save(tenant);
         log.info("Updated dim_tenant_table.required_lpcd={} [tenantId={}]",
                 event.getWaterNorm(), event.getTenantId());
+    }
+
+    @Override
+    @Transactional
+    public void updateIncludedWorkStatuses(IncludedWorkStatusesUpdatedEvent event) {
+        // The national default (tenantId=0) is a config-only singleton: no TENANT_CREATED event ever
+        // creates it, so it must be materialised on first write instead of throwing. Real tenants still
+        // require an existing row (TENANT_CREATED precedes any config change on the same ordered topic).
+        DimTenant tenant = dimTenantRepository.findById(event.getTenantId())
+                .orElseGet(() -> {
+                    if (!NATIONAL_TENANT_ID.equals(event.getTenantId())) {
+                        throw new IllegalStateException(
+                                "No dim_tenant_table row for tenantId=" + event.getTenantId());
+                    }
+                    return DimTenant.builder()
+                            .tenantId(event.getTenantId())
+                            .stateCode(event.getStateCode())
+                            .title(event.getStateCode())
+                            .status(NATIONAL_TENANT_STATUS)
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                });
+        tenant.setIncludedWorkStatuses(event.getWorkStatuses());
+        tenant.setUpdatedAt(LocalDateTime.now());
+        dimTenantRepository.save(tenant);
+        log.info("Updated dim_tenant_table.included_work_statuses={} [tenantId={}]",
+                event.getWorkStatuses(), event.getTenantId());
     }
 
     @Override

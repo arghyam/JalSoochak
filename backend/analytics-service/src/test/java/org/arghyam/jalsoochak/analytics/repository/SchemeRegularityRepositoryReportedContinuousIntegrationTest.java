@@ -49,6 +49,10 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("spring.flyway.schemas", () -> "analytics_schema");
+        // Aggregation-focused IT: disable the dashboard work_status filter so seeded schemes
+        // (which do not all carry the handed-over work_status) are included. Filter behaviour is
+        // covered separately by SchemeRegularityRepositoryWorkStatusFilterIntegrationTest.
+        registry.add("analytics.dashboard.included-work-statuses", () -> "");
     }
 
     @org.springframework.beans.factory.annotation.Autowired

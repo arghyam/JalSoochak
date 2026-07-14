@@ -54,6 +54,8 @@ class AnalyticsJpaRepositoriesIntegrationTest {
     private DimLgdLocationRepository dimLgdLocationRepository;
     @Autowired
     private DimDepartmentLocationRepository dimDepartmentLocationRepository;
+    @Autowired
+    private SchemePerformanceSchedulerRepository schedulerRepository;
 
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D2 = LocalDate.of(2026, 1, 2);
@@ -91,6 +93,33 @@ class AnalyticsJpaRepositoriesIntegrationTest {
         assertThat(dimSchemeRepository.findByTenantId(2)).hasSize(1);
         assertThat(dimLgdLocationRepository.findByTenantId(1)).hasSize(3);
         assertThat(dimDepartmentLocationRepository.findByTenantId(1)).hasSize(3);
+    }
+
+    @Test
+    void insertDailySchemePerformanceScores_deduplicatesWaterPerSchemeAndDate() {
+        // Performance threshold for scheme 1 = fhtc(10) * house_hold(10) * 5 * required_lpcd(2) = 1000.
+        jdbcTemplate.update("UPDATE analytics_schema.dim_tenant_table SET required_lpcd = 2 WHERE tenant_id = 1");
+
+        // Seed already holds one D2 row for (tenant 1, scheme 1) = 200 (updated_at NOW()). Add an *older*
+        // stray duplicate = 900. De-duplicating to the latest row keeps 200 (< 1000 -> score 0.5); summing
+        // both rows (1100) would cross the threshold and wrongly yield 1.0.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason)
+                VALUES (1, 1, 11, 900, ?, NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour', 1, NULL)
+                """, D2);
+
+        // scheme 1 has an existing performance row only for D1, so D2 is eligible.
+        int inserted = schedulerRepository.insertDailySchemePerformanceScores(D2);
+        assertThat(inserted).isGreaterThanOrEqualTo(1);
+
+        java.math.BigDecimal score = jdbcTemplate.queryForObject("""
+                SELECT performance_score
+                FROM analytics_schema.fact_scheme_performance_table
+                WHERE tenant_id = 1 AND scheme_id = 1 AND last_water_supply_date = ?
+                """, java.math.BigDecimal.class, D2);
+
+        assertThat(score).isEqualByComparingTo("0.5");
     }
 
     private void seedDimensions() {

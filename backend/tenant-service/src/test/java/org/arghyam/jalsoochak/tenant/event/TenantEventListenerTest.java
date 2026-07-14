@@ -88,6 +88,60 @@ class TenantEventListenerTest {
     }
 
     @Test
+    void handleIncludedWorkStatusesUpdated_publishesCorrectPayload() {
+        IncludedWorkStatusesUpdatedEvent event =
+                new IncludedWorkStatusesUpdatedEvent(2, "TR", List.of(1, 4));
+
+        listener.handleIncludedWorkStatusesUpdated(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(kafkaProducer).publishJson(eq("tenant-service-topic"), captor.capture());
+        Map<String, Object> payload = captor.getValue();
+        assertThat(payload.get("eventType")).isEqualTo("INCLUDED_WORK_STATUSES_UPDATED");
+        assertThat(payload.get("tenantId")).isEqualTo(2);
+        assertThat(payload.get("stateCode")).isEqualTo("TR");
+        assertThat(payload.get("workStatuses")).isEqualTo(List.of(1, 4));
+    }
+
+    @Test
+    void handleIncludedWorkStatusesUpdated_nationalTenantZero_publishes() {
+        // tenant-0 (national default) uses the "NATIONAL" sentinel state code and must still publish.
+        IncludedWorkStatusesUpdatedEvent event =
+                new IncludedWorkStatusesUpdatedEvent(0, "NATIONAL", List.of(1));
+
+        listener.handleIncludedWorkStatusesUpdated(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(kafkaProducer).publishJson(eq("tenant-service-topic"), captor.capture());
+        Map<String, Object> payload = captor.getValue();
+        assertThat(payload.get("tenantId")).isEqualTo(0);
+        assertThat(payload.get("stateCode")).isEqualTo("NATIONAL");
+        assertThat(payload.get("workStatuses")).isEqualTo(List.of(1));
+    }
+
+    @Test
+    void handleIncludedWorkStatusesUpdated_skipsKafka_whenTenantIdIsNull() {
+        IncludedWorkStatusesUpdatedEvent event =
+                new IncludedWorkStatusesUpdatedEvent(null, "TR", List.of(4));
+
+        listener.handleIncludedWorkStatusesUpdated(event);
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleIncludedWorkStatusesUpdated_skipsKafka_whenWorkStatusesNullOrEmpty() {
+        listener.handleIncludedWorkStatusesUpdated(
+                new IncludedWorkStatusesUpdatedEvent(1, "TR", null));
+        listener.handleIncludedWorkStatusesUpdated(
+                new IncludedWorkStatusesUpdatedEvent(1, "TR", List.of()));
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
     void handleLocationHierarchyUpdated_publishesCorrectPayload() {
         LocationLevelNameDTO name = LocationLevelNameDTO.builder().languageId(1).title("District").build();
         LocationLevelConfigDTO level = LocationLevelConfigDTO.builder()

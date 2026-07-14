@@ -44,6 +44,10 @@ class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("spring.flyway.schemas", () -> "analytics_schema");
+        // Aggregation-focused IT: disable the dashboard work_status filter so seeded schemes
+        // (which do not all carry the handed-over work_status) are included. Filter behaviour is
+        // covered separately by SchemeRegularityRepositoryWorkStatusFilterIntegrationTest.
+        registry.add("analytics.dashboard.included-work-statuses", () -> "");
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -132,7 +136,8 @@ class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
         assertThat(rows.get(2).periodEndDate()).isEqualTo(D3);
         assertThat(rows.get(2).schemeCount()).isEqualTo(4);
         assertThat(rows.get(2).totalSupplyDays()).isEqualTo(1);
-        assertThat(rows.get(2).totalWaterQuantity()).isEqualTo(5L);
+        // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL): D3 tenant1 scheme1 SUBMITTED = 20.
+        assertThat(rows.get(2).totalWaterQuantity()).isEqualTo(20L);
     }
 
     private void truncateAnalytics() {

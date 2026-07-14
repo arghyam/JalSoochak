@@ -1,8 +1,9 @@
 package org.arghyam.jalsoochak.analytics.repository;
 
-import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
+import org.arghyam.jalsoochak.analytics.helper.DashboardWorkStatusFilter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
@@ -21,12 +22,89 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 @Repository
-@RequiredArgsConstructor
 public class SchemeRegularityRepository {
 
     private final JdbcTemplate jdbcTemplate;
+
+    /**
+     * Restricts dashboard calculations to schemes with the configured {@code work_status} values.
+     * Injected via the {@code {{WS}}} token (aliased {@code s}) into every dashboard scheme-selection
+     * CTE; see {@link #withDashboardFragments(String)}. Regularity/reading-submission queries are
+     * intentionally left unfiltered.
+     */
+    private final DashboardWorkStatusFilter workStatusFilter;
+
+    public SchemeRegularityRepository(
+            JdbcTemplate jdbcTemplate,
+            @Value("${analytics.dashboard.included-work-statuses:4}") String includedWorkStatusesCsv) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.workStatusFilter = new DashboardWorkStatusFilter(includedWorkStatusesCsv);
+    }
+
     private static final int NOT_SUBMITTED_STATUS = SubmissionStatus.NOT_SUBMITTED.getCode();
+    private static final int SUBMITTED_STATUS = SubmissionStatus.SUBMITTED.getCode();
     private static final int EXPORT_FETCH_SIZE = 1_000;
+
+    /**
+     * De-duplicated water source: the latest fact_water_quantity row per (tenant_id, scheme_id, date).
+     *
+     * <p>{@code fact_water_quantity_table} has no uniqueness constraint on (tenant_id, scheme_id, date).
+     * Ingestion keeps the "current" row for a day via find-latest-and-update, ordered by
+     * {@code updated_at DESC, id DESC} (see {@code FactServiceImpl#ingestWaterQuantity} /
+     * {@code FactWaterQuantityRepository}). Prod data currently has no duplicates, but should a stray
+     * duplicate ever be written (e.g. a concurrent replay), summing every row would double-count that
+     * day's volume. Every per-day water aggregation therefore reads through this {@code DISTINCT ON}
+     * de-duplication, mirroring the {@code scheme_fhtc_totals} DISTINCT ON pattern already used in this
+     * repository. Injected into query text via the {@code {{LWQ}}} token (aliased {@code f} by callers)
+     * so existing {@code ?} placeholder positions are unaffected.</p>
+     */
+    private static final String LATEST_WATER_QUANTITY = """
+            (SELECT DISTINCT ON (fwq.tenant_id, fwq.scheme_id, fwq.date) fwq.*
+                     FROM analytics_schema.fact_water_quantity_table fwq
+                     ORDER BY fwq.tenant_id, fwq.scheme_id, fwq.date, fwq.updated_at DESC, fwq.id DESC)""";
+
+    /**
+     * Canonical "water supplied" volume over the de-duplicated water source (alias {@code f}): sums the
+     * per-day delta for SUBMITTED rows (or legacy direct-event rows whose status is NULL) with a positive
+     * delta, excluding NOT_SUBMITTED/outage days. Single definition shared by every dashboard/region
+     * aggregation so they cannot drift. Injected via the {@code {{SWS}}} token; callers append their own
+     * {@code AS <column>} alias.
+     */
+    private static final String SUPPLIED_WATER_QUANTITY_SUM = String.format(
+            "COALESCE(SUM(CASE WHEN (f.submission_status = %d OR f.submission_status IS NULL) "
+                    + "AND f.water_quantity > 0 THEN f.water_quantity ELSE 0 END), 0)::bigint",
+            SUBMITTED_STATUS);
+
+    /**
+     * Applies the shared {@code {{LWQ}}} / {@code {{SWS}}} water token substitutions to a built SQL
+     * string, then fails fast (M1) if any {@code {{...}}} token remains unreplaced — a mismatched or
+     * misspelled token would otherwise silently produce a syntactically invalid or, worse, an
+     * unfiltered query. All fragment substitution funnels through here, so this is the single guard.
+     */
+    private static String withWaterFragments(String sql) {
+        String out = sql
+                .replace("{{SWS}}", SUPPLIED_WATER_QUANTITY_SUM)
+                .replace("{{LWQ}}", LATEST_WATER_QUANTITY);
+        if (out.contains("{{")) {
+            throw new IllegalStateException("Unreplaced SQL token in query: " + out);
+        }
+        return out;
+    }
+
+    /**
+     * Applies the dashboard SQL fragments to a built query: the two work_status tokens plus the water
+     * tokens. {@code {{WS}}} is the tenant-scoped filter (own tenant → tenant-0 → env default) and
+     * {@code {{NWS}}} is the national filter (tenant-0 → env default); both are rendered against the
+     * {@code dim_scheme_table} alias {@code s}. Every dashboard scheme-selection CTE places the correct
+     * token immediately after its {@code WHERE s.<...>}/{@code ON ...} predicate and routes its SQL
+     * through this method. The work_status tokens are replaced <em>before</em> the water tokens so the
+     * generated predicate is itself scrubbed by the M1 guard in {@link #withWaterFragments(String)}.
+     */
+    private String withDashboardFragments(String sql) {
+        return withWaterFragments(sql
+                .replace("{{WS}}", workStatusFilter.andPredicate("s"))
+                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
+    }
 
     private String resolveDashboardSortDirection(String sortDir) {
         if (sortDir == null || sortDir.isBlank()) {
@@ -128,17 +206,16 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 scheme_day AS (
                     SELECT
                         m.scheme_id,
                         m.reading_date::date AS reading_date,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity,
                         MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_lgd sl
@@ -156,7 +233,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
                     COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, startDate, endDate);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -173,18 +250,17 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_day AS (
                     SELECT
                         m.scheme_id,
                         m.reading_date::date AS reading_date,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity,
                         MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_lgd sl
@@ -203,7 +279,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
                     COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, tenantId, startDate, endDate, tenantId);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -219,11 +295,11 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 scheme_day AS (
                     SELECT
@@ -246,7 +322,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
                     COALESCE((SELECT SUM(submission_days)::int FROM scheme_submission_days), 0) AS total_supply_days
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, startDate, endDate);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -263,12 +339,12 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_day AS (
                     SELECT
@@ -292,7 +368,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
                     COALESCE((SELECT SUM(submission_days)::int FROM scheme_submission_days), 0) AS total_supply_days
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, tenantId, startDate, endDate, tenantId);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -310,17 +386,16 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 scheme_day AS (
                     SELECT
                         m.scheme_id,
                         m.reading_date::date AS reading_date,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity,
                         MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_department sd
@@ -338,7 +413,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
                     COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentDepartmentId, startDate, endDate);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -356,18 +431,17 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_day AS (
                     SELECT
                         m.scheme_id,
                         m.reading_date::date AS reading_date,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity,
                         MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_department sd
@@ -386,7 +460,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
                     COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         Map<String, Object> result =
                 jdbcTemplate.queryForMap(sql, parentDepartmentId, tenantId, startDate, endDate, tenantId);
@@ -405,11 +479,11 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 scheme_day AS (
                     SELECT
@@ -432,7 +506,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
                     COALESCE((SELECT SUM(submission_days)::int FROM scheme_submission_days), 0) AS total_supply_days
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentDepartmentId, startDate, endDate);
         int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -450,12 +524,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_day AS (
                     SELECT
@@ -479,7 +553,7 @@ public class SchemeRegularityRepository {
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
                     COALESCE((SELECT SUM(submission_days)::int FROM scheme_submission_days), 0) AS total_supply_days
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         Map<String, Object> result =
                 jdbcTemplate.queryForMap(sql, parentDepartmentId, tenantId, startDate, endDate, tenantId);
@@ -514,11 +588,11 @@ public class SchemeRegularityRepository {
     private BigDecimal getAveragePerformanceScoreByScopeColumn(
             String schemeScopeColumn, Integer scopeId, LocalDate startDate, LocalDate endDate) {
         // Build a scope-specific scheme list first so aggregation stays limited to the selected boundary.
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 )
                 SELECT
                     COALESCE(AVG(fp.performance_score), 0)::numeric AS average_performance_score
@@ -526,7 +600,7 @@ public class SchemeRegularityRepository {
                 JOIN schemes_in_scope ss
                     ON ss.scheme_id = fp.scheme_id
                 WHERE fp.last_water_supply_date BETWEEN ? AND ?
-                """, schemeScopeColumn);
+                """, schemeScopeColumn));
 
         // Average across all scheme-day records in the requested period (0 when no rows exist).
         BigDecimal averagePerformanceScore = jdbcTemplate.queryForObject(
@@ -549,7 +623,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id
@@ -562,7 +636,7 @@ public class SchemeRegularityRepository {
                         s.scheme_id,
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%3$s = ?
+                    WHERE s.%3$s = ?{{WS}}
                 )
                 SELECT
                     c.child_lgd_id AS lgd_id,
@@ -575,7 +649,7 @@ public class SchemeRegularityRepository {
                     AND fp.last_water_supply_date BETWEEN ? AND ?
                 GROUP BY c.child_lgd_id
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -606,7 +680,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         d.department_id AS child_department_id
@@ -619,7 +693,7 @@ public class SchemeRegularityRepository {
                         s.scheme_id,
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%3$s = ?
+                    WHERE s.%3$s = ?{{WS}}
                 )
                 SELECT
                     c.child_department_id AS department_id,
@@ -632,7 +706,7 @@ public class SchemeRegularityRepository {
                     AND fp.last_water_supply_date BETWEEN ? AND ?
                 GROUP BY c.child_department_id
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -666,7 +740,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id,
@@ -680,7 +754,7 @@ public class SchemeRegularityRepository {
                         s.scheme_id,
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%3$s = ?
+                    WHERE s.%3$s = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
@@ -703,7 +777,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_lgd_id, c.title
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -749,7 +823,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id,
@@ -765,7 +839,7 @@ public class SchemeRegularityRepository {
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
@@ -789,7 +863,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_lgd_id, c.title
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -839,7 +913,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         d.department_id AS child_department_id,
@@ -853,7 +927,7 @@ public class SchemeRegularityRepository {
                         s.scheme_id,
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%3$s = ?
+                    WHERE s.%3$s = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
@@ -876,7 +950,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_department_id, c.title
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -923,7 +997,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         d.department_id AS child_department_id,
@@ -939,7 +1013,7 @@ public class SchemeRegularityRepository {
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS submission_days
@@ -963,7 +1037,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_department_id, c.title
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1012,7 +1086,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id,
@@ -1026,7 +1100,7 @@ public class SchemeRegularityRepository {
                         s.scheme_id,
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%3$s = ?
+                    WHERE s.%3$s = ?{{WS}}
                 ),
                 scheme_supply_days AS (
                     SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
@@ -1049,7 +1123,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_lgd_id, c.title
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1095,7 +1169,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id,
@@ -1111,7 +1185,7 @@ public class SchemeRegularityRepository {
                         s.%2$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_supply_days AS (
                     SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
@@ -1135,7 +1209,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_lgd_id, c.title
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1185,7 +1259,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         d.department_id AS child_department_id,
@@ -1199,7 +1273,7 @@ public class SchemeRegularityRepository {
                         s.scheme_id,
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%3$s = ?
+                    WHERE s.%3$s = ?{{WS}}
                 ),
                 scheme_supply_days AS (
                     SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
@@ -1222,7 +1296,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_department_id, c.title
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1269,7 +1343,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         d.department_id AS child_department_id,
@@ -1285,7 +1359,7 @@ public class SchemeRegularityRepository {
                         s.%2$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_supply_days AS (
                     SELECT m.scheme_id, COUNT(DISTINCT m.reading_date)::int AS supply_days
@@ -1309,7 +1383,7 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_department_id, c.title
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1347,11 +1421,11 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 )
                 SELECT
                     f.outage_reason,
@@ -1363,7 +1437,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1383,12 +1457,12 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     f.outage_reason,
@@ -1401,7 +1475,7 @@ public class SchemeRegularityRepository {
                   AND f.tenant_id = ?
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1423,11 +1497,11 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 )
                 SELECT
                     f.outage_reason,
@@ -1439,7 +1513,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1459,12 +1533,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     f.outage_reason,
@@ -1477,7 +1551,7 @@ public class SchemeRegularityRepository {
                   AND f.tenant_id = ?
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1493,14 +1567,14 @@ public class SchemeRegularityRepository {
 
     public List<OutageReasonSchemeCount> getOutageReasonSchemeCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     f.outage_reason,
@@ -1513,7 +1587,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -1529,14 +1603,14 @@ public class SchemeRegularityRepository {
 
     public List<DailyOutageReasonSchemeCount> getDailyOutageReasonSchemeCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     f.date,
@@ -1550,7 +1624,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.date, f.outage_reason
                 ORDER BY f.date, f.outage_reason
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -1573,11 +1647,11 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 )
                 SELECT
                     f.non_submission_reason,
@@ -1590,7 +1664,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.non_submission_reason
                 ORDER BY f.non_submission_reason
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1611,12 +1685,12 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     f.non_submission_reason,
@@ -1630,7 +1704,7 @@ public class SchemeRegularityRepository {
                   AND f.tenant_id = ?
                 GROUP BY f.non_submission_reason
                 ORDER BY f.non_submission_reason
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1653,11 +1727,11 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 )
                 SELECT
                     f.non_submission_reason,
@@ -1670,7 +1744,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.non_submission_reason
                 ORDER BY f.non_submission_reason
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1691,12 +1765,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     f.non_submission_reason,
@@ -1710,7 +1784,7 @@ public class SchemeRegularityRepository {
                   AND f.tenant_id = ?
                 GROUP BY f.non_submission_reason
                 ORDER BY f.non_submission_reason
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -1727,14 +1801,14 @@ public class SchemeRegularityRepository {
 
     public List<NonSubmissionReasonSchemeCount> getNonSubmissionReasonSchemeCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     f.non_submission_reason,
@@ -1748,7 +1822,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.non_submission_reason
                 ORDER BY f.non_submission_reason
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -1765,14 +1839,14 @@ public class SchemeRegularityRepository {
 
     public List<DailyNonSubmissionReasonSchemeCount> getDailyNonSubmissionReasonSchemeCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     f.date,
@@ -1787,7 +1861,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY f.date, f.non_submission_reason
                 ORDER BY f.date, f.non_submission_reason
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -1804,31 +1878,37 @@ public class SchemeRegularityRepository {
     }
 
     public Integer getSchemeCountByUser(Integer tenantId, Integer userId) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 SELECT COALESCE(COUNT(DISTINCT usm.scheme_id), 0)::int AS scheme_count
                 FROM analytics_schema.dim_user_scheme_mapping_table usm
+                JOIN analytics_schema.dim_scheme_table s
+                    ON s.scheme_id = usm.scheme_id
+                    AND s.tenant_id = usm.tenant_id
                 WHERE usm.user_id = ?
-                  AND usm.tenant_id = ?
-                """;
+                  AND usm.tenant_id = ?{{WS}}
+                """);
 
         return jdbcTemplate.queryForObject(sql, Integer.class, userId, tenantId);
     }
 
     public long getTotalWaterSuppliedByUserSchemes(Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
+                        AND s.tenant_id = usm.tenant_id
                     WHERE usm.user_id = ?
-                      AND usm.tenant_id = ?
+                      AND usm.tenant_id = ?{{WS}}
                 )
-                SELECT COALESCE(SUM(f.water_quantity), 0)::bigint AS total_water_supplied
-                FROM analytics_schema.fact_water_quantity_table f
+                SELECT {{SWS}} AS total_water_supplied
+                FROM {{LWQ}} f
                 JOIN user_schemes us
                     ON us.scheme_id = f.scheme_id
                 WHERE f.tenant_id = ?
                   AND f.date BETWEEN ? AND ?
-                """;
+                """);
 
         Long value = jdbcTemplate.queryForObject(sql, Long.class, userId, tenantId, tenantId, startDate, endDate);
         return value != null ? value : 0L;
@@ -1836,12 +1916,15 @@ public class SchemeRegularityRepository {
 
     public SubmissionStatusCount getSubmissionStatusCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    JOIN analytics_schema.dim_scheme_table s
+                        ON s.scheme_id = usm.scheme_id
+                        AND s.tenant_id = usm.tenant_id
                     WHERE usm.user_id = ?
-                      AND usm.tenant_id = ?
+                      AND usm.tenant_id = ?{{WS}}
                 )
                 SELECT
                     COALESCE(
@@ -1863,7 +1946,7 @@ public class SchemeRegularityRepository {
                     ON us.scheme_id = m.scheme_id
                 WHERE m.tenant_id = ?
                   AND m.reading_date BETWEEN ? AND ?
-                """;
+                """);
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, userId, tenantId, tenantId, startDate, endDate);
         int compliantSubmissionCount =
@@ -1880,11 +1963,11 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count
                 FROM analytics_schema.dim_scheme_table s
-                WHERE s.%1$s = ?
-                """, schemeLgdColumn);
+                WHERE s.%1$s = ?{{WS}}
+                """, schemeLgdColumn));
 
         return jdbcTemplate.queryForObject(sql, Integer.class, lgdId);
     }
@@ -1896,12 +1979,12 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
-                  AND s.tenant_id = ?
-                """, schemeLgdColumn);
+                  AND s.tenant_id = ?{{WS}}
+                """, schemeLgdColumn));
 
         return jdbcTemplate.queryForObject(sql, Integer.class, lgdId, tenantId);
     }
@@ -1913,11 +1996,11 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count
                 FROM analytics_schema.dim_scheme_table s
-                WHERE s.%1$s = ?
-                """, schemeDepartmentColumn);
+                WHERE s.%1$s = ?{{WS}}
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.queryForObject(sql, Integer.class, departmentId);
     }
@@ -1929,12 +2012,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
-                  AND s.tenant_id = ?
-                """, schemeDepartmentColumn);
+                  AND s.tenant_id = ?{{WS}}
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.queryForObject(sql, Integer.class, departmentId, tenantId);
     }
@@ -1947,11 +2030,11 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 )
                 SELECT
                     COALESCE(
@@ -1972,7 +2055,7 @@ public class SchemeRegularityRepository {
                 JOIN schemes_in_scope ss
                     ON ss.scheme_id = m.scheme_id
                 WHERE m.reading_date BETWEEN ? AND ?
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId, startDate, endDate);
         int compliantSubmissionCount =
@@ -1990,12 +2073,12 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     COALESCE(
@@ -2017,7 +2100,7 @@ public class SchemeRegularityRepository {
                     ON ss.scheme_id = m.scheme_id
                 WHERE m.reading_date BETWEEN ? AND ?
                   AND m.tenant_id = ?
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId, tenantId, startDate, endDate, tenantId);
         int compliantSubmissionCount =
@@ -2035,11 +2118,11 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 )
                 SELECT
                     COALESCE(
@@ -2060,7 +2143,7 @@ public class SchemeRegularityRepository {
                 JOIN schemes_in_scope ss
                     ON ss.scheme_id = m.scheme_id
                 WHERE m.reading_date BETWEEN ? AND ?
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, startDate, endDate);
         int compliantSubmissionCount =
@@ -2078,12 +2161,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     COALESCE(
@@ -2105,7 +2188,7 @@ public class SchemeRegularityRepository {
                     ON ss.scheme_id = m.scheme_id
                 WHERE m.reading_date BETWEEN ? AND ?
                   AND m.tenant_id = ?
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, tenantId, startDate, endDate, tenantId);
         int compliantSubmissionCount =
@@ -2117,14 +2200,14 @@ public class SchemeRegularityRepository {
 
     public List<DailySubmissionSchemeCount> getDailySubmissionSchemeCountByUser(
             Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     m.reading_date AS date,
@@ -2137,7 +2220,7 @@ public class SchemeRegularityRepository {
                   AND m.reading_date BETWEEN ? AND ?
                 GROUP BY m.reading_date
                 ORDER BY m.reading_date
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -2284,13 +2367,13 @@ public class SchemeRegularityRepository {
         String parentSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
         String childSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel + 1);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%2$s = ?
+                    WHERE s.%2$s = ?{{WS}}
                 )
                 SELECT
                     ss.child_lgd_id AS lgd_id,
@@ -2303,7 +2386,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY ss.child_lgd_id, f.outage_reason
                 ORDER BY ss.child_lgd_id, f.outage_reason
-                """, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -2330,14 +2413,14 @@ public class SchemeRegularityRepository {
         String parentSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
         String childSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel + 1);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%2$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     ss.child_lgd_id AS lgd_id,
@@ -2351,7 +2434,7 @@ public class SchemeRegularityRepository {
                   AND f.tenant_id = ?
                 GROUP BY ss.child_lgd_id, f.outage_reason
                 ORDER BY ss.child_lgd_id, f.outage_reason
-                """, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -2380,13 +2463,13 @@ public class SchemeRegularityRepository {
         String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel + 1);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%2$s = ?
+                    WHERE s.%2$s = ?{{WS}}
                 )
                 SELECT
                     ss.child_department_id AS department_id,
@@ -2399,7 +2482,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY ss.child_department_id, f.outage_reason
                 ORDER BY ss.child_department_id, f.outage_reason
-                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -2426,14 +2509,14 @@ public class SchemeRegularityRepository {
         String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel + 1);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%2$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     ss.child_department_id AS department_id,
@@ -2447,7 +2530,7 @@ public class SchemeRegularityRepository {
                   AND f.tenant_id = ?
                 GROUP BY ss.child_department_id, f.outage_reason
                 ORDER BY ss.child_department_id, f.outage_reason
-                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -2476,13 +2559,13 @@ public class SchemeRegularityRepository {
         String parentSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
         String childSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel + 1);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%2$s = ?
+                    WHERE s.%2$s = ?{{WS}}
                 )
                 SELECT
                     ss.child_lgd_id AS lgd_id,
@@ -2496,7 +2579,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY ss.child_lgd_id, f.non_submission_reason
                 ORDER BY ss.child_lgd_id, f.non_submission_reason
-                """, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -2524,14 +2607,14 @@ public class SchemeRegularityRepository {
         String parentSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
         String childSchemeLgdColumn = resolveSchemeLgdColumn(lgdLevel + 1);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_lgd_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%2$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     ss.child_lgd_id AS lgd_id,
@@ -2546,7 +2629,7 @@ public class SchemeRegularityRepository {
                   AND f.tenant_id = ?
                 GROUP BY ss.child_lgd_id, f.non_submission_reason
                 ORDER BY ss.child_lgd_id, f.non_submission_reason
-                """, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -2576,13 +2659,13 @@ public class SchemeRegularityRepository {
         String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel + 1);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%2$s = ?
+                    WHERE s.%2$s = ?{{WS}}
                 )
                 SELECT
                     ss.child_department_id AS department_id,
@@ -2596,7 +2679,7 @@ public class SchemeRegularityRepository {
                   AND f.date BETWEEN ? AND ?
                 GROUP BY ss.child_department_id, f.non_submission_reason
                 ORDER BY ss.child_department_id, f.non_submission_reason
-                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -2624,14 +2707,14 @@ public class SchemeRegularityRepository {
         String parentSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel + 1);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
                         s.%1$s AS child_department_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%2$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 )
                 SELECT
                     ss.child_department_id AS department_id,
@@ -2646,7 +2729,7 @@ public class SchemeRegularityRepository {
                   AND f.tenant_id = ?
                 GROUP BY ss.child_department_id, f.non_submission_reason
                 ORDER BY ss.child_department_id, f.non_submission_reason
-                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -2670,13 +2753,13 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT
                     COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
                     COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
-                WHERE s.%1$s = ?
-                """, schemeLgdColumn);
+                WHERE s.%1$s = ?{{WS}}
+                """, schemeLgdColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId);
         int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -2692,14 +2775,14 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT
                     COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
                     COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
-                  AND s.tenant_id = ?
-                """, schemeLgdColumn);
+                  AND s.tenant_id = ?{{WS}}
+                """, schemeLgdColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId, tenantId);
         int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -2715,13 +2798,13 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT
                     COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
                     COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
-                WHERE s.%1$s = ?
-                """, schemeDepartmentColumn);
+                WHERE s.%1$s = ?{{WS}}
+                """, schemeDepartmentColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId);
         int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -2737,14 +2820,14 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT
                     COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
                     COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
-                  AND s.tenant_id = ?
-                """, schemeDepartmentColumn);
+                  AND s.tenant_id = ?{{WS}}
+                """, schemeDepartmentColumn));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, tenantId);
         int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
@@ -2760,12 +2843,12 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 last_supply AS (
                     SELECT
@@ -2784,7 +2867,7 @@ public class SchemeRegularityRepository {
                   ON ls.scheme_id = ss.scheme_id
                 WHERE ls.last_supplied_date IS NULL
                    OR ls.last_supplied_date < ?
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
@@ -2804,12 +2887,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 last_supply AS (
                     SELECT
@@ -2828,7 +2911,7 @@ public class SchemeRegularityRepository {
                   ON ls.scheme_id = ss.scheme_id
                 WHERE ls.last_supplied_date IS NULL
                    OR ls.last_supplied_date < ?
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
@@ -2842,14 +2925,14 @@ public class SchemeRegularityRepository {
     }
 
     public long getCriticalSchemeCountByUserSchemes(Integer tenantId, Integer userId, LocalDate cutoffDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 last_supply AS (
                     SELECT
@@ -2868,7 +2951,7 @@ public class SchemeRegularityRepository {
                   ON ls.scheme_id = us.scheme_id
                 WHERE ls.last_supplied_date IS NULL
                    OR ls.last_supplied_date < ?
-                """;
+                """);
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
@@ -2888,14 +2971,14 @@ public class SchemeRegularityRepository {
             Integer limit,
             Integer offset
     ) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_details AS (
                     SELECT DISTINCT
@@ -2933,7 +3016,7 @@ public class SchemeRegularityRepository {
                 ORDER BY ls.last_supplied_date ASC NULLS FIRST, sd.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -2967,12 +3050,12 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name, s.state_scheme_id, s.centre_scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 last_supply AS (
                     SELECT
@@ -2999,7 +3082,7 @@ public class SchemeRegularityRepository {
                 ORDER BY ls.last_supplied_date ASC NULLS FIRST, ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -3032,12 +3115,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name, s.state_scheme_id, s.centre_scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 last_supply AS (
                     SELECT
@@ -3064,7 +3147,7 @@ public class SchemeRegularityRepository {
                 ORDER BY ls.last_supplied_date ASC NULLS FIRST, ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -3107,12 +3190,12 @@ public class SchemeRegularityRepository {
         // to line up with the reading_date IST day boundary. Both are plain TIMESTAMP storing UTC (anomaly
         // is normalized by migration V41; attempt is written UTC by telemetry), so "+ 5:30" is
         // session-timezone-independent — do NOT switch to AT TIME ZONE unless a column becomes timestamptz.
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 reported_events AS (
                     -- (A) readings in fact.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
@@ -3152,7 +3235,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN reported_days rd
                   ON rd.scheme_id = ss.scheme_id
                 WHERE COALESCE(rd.reported_days, 0) = ?
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
@@ -3186,12 +3269,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 supply_days AS (
                     SELECT
@@ -3209,7 +3292,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN supply_days sd
                   ON sd.scheme_id = ss.scheme_id
                 WHERE COALESCE(sd.supply_days, 0) = ?
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
@@ -3231,14 +3314,14 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             int daysInRange
     ) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 supply_days AS (
                     SELECT
@@ -3256,7 +3339,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN supply_days sd
                   ON sd.scheme_id = us.scheme_id
                 WHERE COALESCE(sd.supply_days, 0) = ?
-                """;
+                """);
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
@@ -3288,12 +3371,12 @@ public class SchemeRegularityRepository {
 
         // REPORTED-METRIC: must use the SAME "reported day" definition as getContinuousSchemeCountByLgd so
         // the count (list=false) and the list (list=true) agree. Levers A/B/C mirror the count method.
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 reported_events AS (
                     -- (A) readings.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
@@ -3338,7 +3421,7 @@ public class SchemeRegularityRepository {
                 ORDER BY ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -3372,14 +3455,14 @@ public class SchemeRegularityRepository {
             Integer limit,
             Integer offset
     ) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     JOIN analytics_schema.dim_scheme_table s
                         ON s.scheme_id = usm.scheme_id
                     WHERE usm.user_id = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_details AS (
                     SELECT DISTINCT
@@ -3411,7 +3494,7 @@ public class SchemeRegularityRepository {
                 ORDER BY sd.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -3446,12 +3529,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 supply_days AS (
                     SELECT
@@ -3474,7 +3557,7 @@ public class SchemeRegularityRepository {
                 ORDER BY ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -3500,12 +3583,12 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT COUNT(DISTINCT s.scheme_id)::bigint AS total_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
-                  AND s.tenant_id = ?
-                """, schemeLgdColumn);
+                  AND s.tenant_id = ?{{WS}}
+                """, schemeLgdColumn));
 
         Long count = jdbcTemplate.queryForObject(sql, Long.class, lgdId, tenantId);
         return count == null ? 0L : count;
@@ -3518,12 +3601,12 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 SELECT COUNT(DISTINCT s.scheme_id)::bigint AS total_count
                 FROM analytics_schema.dim_scheme_table s
                 WHERE s.%1$s = ?
-                  AND s.tenant_id = ?
-                """, schemeDepartmentColumn);
+                  AND s.tenant_id = ?{{WS}}
+                """, schemeDepartmentColumn));
 
         Long count = jdbcTemplate.queryForObject(sql, Long.class, departmentId, tenantId);
         return count == null ? 0L : count;
@@ -3537,7 +3620,7 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -3565,7 +3648,7 @@ public class SchemeRegularityRepository {
                             ELSE NULL
                         END AS immediate_parent_lgd_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -3581,15 +3664,8 @@ public class SchemeRegularityRepository {
                 scheme_water AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
@@ -3635,7 +3711,7 @@ public class SchemeRegularityRepository {
                     (COALESCE(sd.submission_days, 0)::numeric / ?) DESC,
                     ss.scheme_id ASC
                 LIMIT ?
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -3696,7 +3772,7 @@ public class SchemeRegularityRepository {
         long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
         String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, true, daysInRange);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH scheme_rows_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -3717,7 +3793,7 @@ public class SchemeRegularityRepository {
                         s.%2$s AS supplied_lgd_location_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 schemes_in_scope AS (
                     SELECT DISTINCT ON (scheme_id)
@@ -3791,15 +3867,8 @@ public class SchemeRegularityRepository {
                 scheme_water AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
@@ -3850,7 +3919,7 @@ public class SchemeRegularityRepository {
                 ORDER BY %3$s
                 LIMIT ?
                 OFFSET ?
-                """, schemeLgdColumn, childSchemeLgdColumn, orderByClause);
+                """, schemeLgdColumn, childSchemeLgdColumn, orderByClause));
 
         return jdbcTemplate.query(
                 sql,
@@ -3885,7 +3954,7 @@ public class SchemeRegularityRepository {
         long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
         String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, true, daysInRange);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -3914,7 +3983,7 @@ public class SchemeRegularityRepository {
                         END AS immediate_parent_lgd_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -3931,15 +4000,8 @@ public class SchemeRegularityRepository {
                 scheme_water AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
@@ -3984,7 +4046,7 @@ public class SchemeRegularityRepository {
                     ON pl.lgd_id = ss.immediate_parent_lgd_id
                    AND pl.tenant_id = ?
                 ORDER BY %2$s
-                """, schemeLgdColumn, orderByClause);
+                """, schemeLgdColumn, orderByClause));
 
         jdbcTemplate.query(con -> {
             PreparedStatement ps = con.prepareStatement(sql);
@@ -4012,7 +4074,7 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4040,7 +4102,7 @@ public class SchemeRegularityRepository {
                             ELSE NULL
                         END AS immediate_parent_department_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4056,15 +4118,8 @@ public class SchemeRegularityRepository {
                 scheme_water AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
                     GROUP BY f.scheme_id
@@ -4110,7 +4165,7 @@ public class SchemeRegularityRepository {
                     (COALESCE(sd.submission_days, 0)::numeric / ?) DESC,
                     ss.scheme_id ASC
                 LIMIT ?
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -4171,7 +4226,7 @@ public class SchemeRegularityRepository {
         long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
         String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, false, daysInRange);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4200,7 +4255,7 @@ public class SchemeRegularityRepository {
                         END AS immediate_parent_department_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4217,15 +4272,8 @@ public class SchemeRegularityRepository {
                 scheme_water AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
@@ -4272,7 +4320,7 @@ public class SchemeRegularityRepository {
                 ORDER BY %2$s
                 LIMIT ?
                 OFFSET ?
-                """, schemeDepartmentColumn, orderByClause);
+                """, schemeDepartmentColumn, orderByClause));
 
         return jdbcTemplate.query(
                 sql,
@@ -4307,7 +4355,7 @@ public class SchemeRegularityRepository {
         long daysInRange = ChronoUnit.DAYS.between(startDate, endDate) + 1;
         String orderByClause = resolveDashboardOrderBy(sortBy, sortDir, false, daysInRange);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4336,7 +4384,7 @@ public class SchemeRegularityRepository {
                         END AS immediate_parent_department_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4353,15 +4401,8 @@ public class SchemeRegularityRepository {
                 scheme_water AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
@@ -4406,7 +4447,7 @@ public class SchemeRegularityRepository {
                     ON pd.department_id = ss.immediate_parent_department_id
                    AND pd.tenant_id = ?
                 ORDER BY %2$s
-                """, schemeDepartmentColumn, orderByClause);
+                """, schemeDepartmentColumn, orderByClause));
 
         jdbcTemplate.query(con -> {
             PreparedStatement ps = con.prepareStatement(sql);
@@ -4433,7 +4474,7 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4442,7 +4483,7 @@ public class SchemeRegularityRepository {
                         s.centre_scheme_id,
                         s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 scheme_days AS (
                     SELECT
@@ -4467,7 +4508,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN scheme_days sd
                     ON sd.scheme_id = ss.scheme_id
                 ORDER BY ss.scheme_id
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -4492,7 +4533,7 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4502,7 +4543,7 @@ public class SchemeRegularityRepository {
                         s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_days AS (
                     SELECT
@@ -4528,7 +4569,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN scheme_days sd
                     ON sd.scheme_id = ss.scheme_id
                 ORDER BY ss.scheme_id
-                """, schemeLgdColumn);
+                """, schemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -4556,7 +4597,7 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4565,7 +4606,7 @@ public class SchemeRegularityRepository {
                         s.centre_scheme_id,
                         s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 scheme_days AS (
                     SELECT
@@ -4590,7 +4631,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN scheme_days sd
                     ON sd.scheme_id = ss.scheme_id
                 ORDER BY ss.scheme_id
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -4616,7 +4657,7 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4626,7 +4667,7 @@ public class SchemeRegularityRepository {
                         s.operating_status AS operating_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 scheme_days AS (
                     SELECT
@@ -4652,7 +4693,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN scheme_days sd
                     ON sd.scheme_id = ss.scheme_id
                 ORDER BY ss.scheme_id
-                """, schemeDepartmentColumn);
+                """, schemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -4829,7 +4870,7 @@ public class SchemeRegularityRepository {
         if (daysInRange <= 0) {
             return List.of();
         }
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH schemes_in_tenant AS (
                     SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
@@ -4840,21 +4881,14 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id = ?
                       AND s.house_hold_count IS NOT NULL
-                      AND s.house_hold_count > 0
+                      AND s.house_hold_count > 0{{WS}}
                     ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, s.house_hold_count DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 water_by_scheme AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied_liters
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied_liters
+                    FROM {{LWQ}} f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_tenant)
@@ -4879,7 +4913,7 @@ public class SchemeRegularityRepository {
                     ON w.scheme_id = s.scheme_id
                 GROUP BY s.scheme_id, s.scheme_name, s.house_hold_count, s.fhtc_count, s.planned_fhtc, w.total_water_supplied_liters
                 ORDER BY s.scheme_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -4907,20 +4941,13 @@ public class SchemeRegularityRepository {
 
     public List<ChildRegionWaterSupplyMetrics> getAverageWaterSupplyPerNation(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH water_by_scheme AS (
                     SELECT
                         f.tenant_id,
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied_liters
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied_liters
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.tenant_id, f.scheme_id
                 )
@@ -4941,7 +4968,8 @@ public class SchemeRegularityRepository {
                 FROM analytics_schema.dim_tenant_table t
                 LEFT JOIN (
                     SELECT DISTINCT ON (tenant_id, scheme_id) tenant_id, scheme_id, house_hold_count, fhtc_count, planned_fhtc
-                    FROM analytics_schema.dim_scheme_table
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{NWS}}
                     ORDER BY tenant_id, scheme_id, fhtc_count DESC NULLS LAST, house_hold_count DESC NULLS LAST, planned_fhtc DESC NULLS LAST
                 ) s
                     ON s.tenant_id = t.tenant_id
@@ -4951,7 +4979,7 @@ public class SchemeRegularityRepository {
                 WHERE t.tenant_id > 0
                 GROUP BY t.tenant_id, t.state_code, t.title
                 ORDER BY t.tenant_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -4973,7 +5001,7 @@ public class SchemeRegularityRepository {
 
     public List<TenantSupplyDaysInEfficientRange> getTenantWiseSupplyDaysInEfficientRange(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH tenant_cfg AS (
                     SELECT
                         t.tenant_id,
@@ -4990,7 +5018,7 @@ public class SchemeRegularityRepository {
                         s.scheme_id,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.tenant_id > 0
+                    WHERE s.tenant_id > 0{{NWS}}
                     ORDER BY s.tenant_id, s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
                 ),
                 dates_in_range AS (
@@ -5004,7 +5032,7 @@ public class SchemeRegularityRepository {
                         f.scheme_id,
                         f.date,
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.tenant_id, f.scheme_id, f.date
                 ),
@@ -5045,7 +5073,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN tenant_supply_days tsd
                     ON tsd.tenant_id = tc.tenant_id
                 ORDER BY tc.tenant_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -5167,7 +5195,7 @@ public class SchemeRegularityRepository {
 
     public List<StateSchemeRegularityMetrics> getStateWiseRegularityMetrics(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH supply_days_by_scheme AS (
                     SELECT
                         m.tenant_id,
@@ -5186,8 +5214,9 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
                 FROM analytics_schema.dim_tenant_table t
                 LEFT JOIN (
-                    SELECT DISTINCT tenant_id, scheme_id
-                    FROM analytics_schema.dim_scheme_table
+                    SELECT DISTINCT s.tenant_id, s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{NWS}}
                 ) s
                     ON s.tenant_id = t.tenant_id
                 LEFT JOIN supply_days_by_scheme sd
@@ -5196,7 +5225,7 @@ public class SchemeRegularityRepository {
                 WHERE t.tenant_id > 0
                 GROUP BY t.tenant_id, t.state_code, t.title
                 ORDER BY t.tenant_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -5212,7 +5241,7 @@ public class SchemeRegularityRepository {
 
     public List<StateReadingSubmissionMetrics> getStateWiseReadingSubmissionMetrics(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH submission_days_by_scheme AS (
                     SELECT
                         m.tenant_id,
@@ -5231,8 +5260,9 @@ public class SchemeRegularityRepository {
                     COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
                 FROM analytics_schema.dim_tenant_table t
                 LEFT JOIN (
-                    SELECT DISTINCT tenant_id, scheme_id
-                    FROM analytics_schema.dim_scheme_table
+                    SELECT DISTINCT s.tenant_id, s.scheme_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{NWS}}
                 ) s
                     ON s.tenant_id = t.tenant_id
                 LEFT JOIN submission_days_by_scheme sd
@@ -5241,7 +5271,7 @@ public class SchemeRegularityRepository {
                 WHERE t.tenant_id > 0
                 GROUP BY t.tenant_id, t.state_code, t.title
                 ORDER BY t.tenant_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -5257,20 +5287,13 @@ public class SchemeRegularityRepository {
 
     public List<Level2WaterSupplyMetrics> getLgdLevel2WiseWaterSupplyMetricsForNation(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH water_by_scheme AS (
                     SELECT
                         f.tenant_id,
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint AS total_water_supplied_liters
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_water_supplied_liters
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.tenant_id, f.scheme_id
                 )
@@ -5294,7 +5317,8 @@ public class SchemeRegularityRepository {
                 FROM (
                     SELECT DISTINCT ON (tenant_id, scheme_id, level_2_lgd_id) tenant_id, scheme_id, level_2_lgd_id,
                            house_hold_count, fhtc_count, planned_fhtc
-                    FROM analytics_schema.dim_scheme_table
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{NWS}}
                     ORDER BY tenant_id, scheme_id, level_2_lgd_id, fhtc_count DESC NULLS LAST, house_hold_count DESC NULLS LAST, planned_fhtc DESC NULLS LAST
                 ) s
                 JOIN analytics_schema.dim_tenant_table t
@@ -5316,7 +5340,7 @@ public class SchemeRegularityRepository {
                     s.level_2_lgd_id,
                     l.title
                 ORDER BY t.tenant_id, s.level_2_lgd_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -5339,7 +5363,7 @@ public class SchemeRegularityRepository {
 
     public List<Level2SupplyDaysInEfficientRange> getLgdLevel2WiseSupplyDaysInEfficientRangeForNation(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH tenant_cfg AS (
                     SELECT
                         t.tenant_id,
@@ -5358,7 +5382,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id > 0
-                      AND s.level_2_lgd_id IS NOT NULL
+                      AND s.level_2_lgd_id IS NOT NULL{{NWS}}
                     ORDER BY s.tenant_id, s.scheme_id, s.level_2_lgd_id, COALESCE(s.fhtc_count, 0) DESC
                 ),
                 dates_in_range AS (
@@ -5372,7 +5396,7 @@ public class SchemeRegularityRepository {
                         f.scheme_id,
                         f.date,
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.tenant_id, f.scheme_id, f.date
                 ),
@@ -5413,7 +5437,7 @@ public class SchemeRegularityRepository {
                     supply_days_in_efficient_range
                 FROM level2_supply_days
                 ORDER BY tenant_id, lgd_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -5429,7 +5453,7 @@ public class SchemeRegularityRepository {
 
     public List<Level2RegularityMetrics> getLgdLevel2WiseRegularityMetricsForNation(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH supply_days_by_scheme AS (
                     SELECT
                         m.tenant_id,
@@ -5446,8 +5470,9 @@ public class SchemeRegularityRepository {
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
                 FROM (
-                    SELECT DISTINCT tenant_id, scheme_id, level_2_lgd_id
-                    FROM analytics_schema.dim_scheme_table
+                    SELECT DISTINCT s.tenant_id, s.scheme_id, s.level_2_lgd_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{NWS}}
                 ) s
                 LEFT JOIN supply_days_by_scheme sd
                     ON sd.tenant_id = s.tenant_id
@@ -5456,7 +5481,7 @@ public class SchemeRegularityRepository {
                   AND s.level_2_lgd_id IS NOT NULL
                 GROUP BY s.tenant_id, s.level_2_lgd_id
                 ORDER BY s.tenant_id, s.level_2_lgd_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -5471,7 +5496,7 @@ public class SchemeRegularityRepository {
 
     public List<Level2ReadingSubmissionMetrics> getLgdLevel2WiseReadingSubmissionMetricsForNation(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 WITH submission_days_by_scheme AS (
                     SELECT
                         m.tenant_id,
@@ -5488,8 +5513,9 @@ public class SchemeRegularityRepository {
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
                     COALESCE(SUM(sd.submission_days), 0)::int AS total_submission_days
                 FROM (
-                    SELECT DISTINCT tenant_id, scheme_id, level_2_lgd_id
-                    FROM analytics_schema.dim_scheme_table
+                    SELECT DISTINCT s.tenant_id, s.scheme_id, s.level_2_lgd_id
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{NWS}}
                 ) s
                 LEFT JOIN submission_days_by_scheme sd
                     ON sd.tenant_id = s.tenant_id
@@ -5498,7 +5524,7 @@ public class SchemeRegularityRepository {
                   AND s.level_2_lgd_id IS NOT NULL
                 GROUP BY s.tenant_id, s.level_2_lgd_id
                 ORDER BY s.tenant_id, s.level_2_lgd_id
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -5513,16 +5539,19 @@ public class SchemeRegularityRepository {
 
     public List<OutageReasonSchemeCount> getOverallOutageReasonSchemeCount(
             LocalDate startDate, LocalDate endDate) {
-        String sql = """
+        String sql = withDashboardFragments("""
                 SELECT
                     f.outage_reason,
                     COUNT(DISTINCT (f.tenant_id, f.scheme_id))::int AS scheme_count
                 FROM analytics_schema.fact_water_quantity_table f
+                LEFT JOIN analytics_schema.dim_scheme_table s
+                    ON s.scheme_id = f.scheme_id
+                    AND s.tenant_id = f.tenant_id
                 WHERE f.outage_reason IS NOT NULL
-                  AND f.date BETWEEN ? AND ?
+                  AND f.date BETWEEN ? AND ?{{NWS}}
                 GROUP BY f.outage_reason
                 ORDER BY f.outage_reason
-                """;
+                """);
 
         return jdbcTemplate.query(
                 sql,
@@ -5548,7 +5577,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id,
@@ -5567,22 +5596,15 @@ public class SchemeRegularityRepository {
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id = ?
-                      AND s.%3$s = ?
+                      AND s.%3$s = ?{{WS}}
                     ORDER BY s.scheme_id, s.%2$s, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 water_by_scheme AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint
+                        {{SWS}}
                             AS total_water_supplied_liters
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
@@ -5608,7 +5630,7 @@ public class SchemeRegularityRepository {
                     ON w.scheme_id = s.scheme_id
                 GROUP BY c.child_lgd_id, c.title
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -5650,7 +5672,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         d.department_id AS child_department_id,
@@ -5669,22 +5691,15 @@ public class SchemeRegularityRepository {
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id = ?
-                      AND s.%3$s = ?
+                      AND s.%3$s = ?{{WS}}
                     ORDER BY s.scheme_id, s.%2$s, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 water_by_scheme AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint
+                        {{SWS}}
                             AS total_water_supplied_liters
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
@@ -5710,7 +5725,7 @@ public class SchemeRegularityRepository {
                     ON w.scheme_id = s.scheme_id
                 GROUP BY c.child_department_id, c.title
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -5775,7 +5790,7 @@ public class SchemeRegularityRepository {
             Integer regionId,
             LocalDate startDate,
             LocalDate endDate) {
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
@@ -5784,22 +5799,15 @@ public class SchemeRegularityRepository {
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.tenant_id = ?
-                      AND s.%1$s = ?
+                      AND s.%1$s = ?{{WS}}
                     ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 water_by_scheme AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN (f.submission_status = 1 OR f.submission_status IS NULL)
-                                     AND f.water_quantity > 0
-                                    THEN f.water_quantity
-                                ELSE 0
-                            END
-                        ), 0)::bigint
+                        {{SWS}}
                             AS total_water_supplied_liters
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.tenant_id = ?
                       AND f.date BETWEEN ? AND ?
                       AND f.scheme_id IN (SELECT scheme_id FROM schemes_in_scope)
@@ -5819,7 +5827,7 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope s
                 LEFT JOIN water_by_scheme w
                     ON w.scheme_id = s.scheme_id
-                """, schemeLocationColumn);
+                """, schemeLocationColumn));
 
         return jdbcTemplate.queryForObject(
                 sql,
@@ -5857,7 +5865,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(parentLgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH tenant_cfg AS (
                     SELECT
                         t.tenant_id,
@@ -5886,7 +5894,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.fhtc_count, 0) AS fhtc_count,
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%3$s = ?
+                    WHERE s.%3$s = ?{{WS}}
                 ),
                 dates_in_range AS (
                     SELECT d.full_date AS date
@@ -5896,8 +5904,8 @@ public class SchemeRegularityRepository {
                 ewater_by_scheme AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(f.water_quantity), 0)::bigint AS total_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_ewater_quantity
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.scheme_id
                 ),
@@ -5918,7 +5926,7 @@ public class SchemeRegularityRepository {
                         f.scheme_id,
                         f.date,
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.scheme_id, f.date
                 ),
@@ -5971,7 +5979,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN region_supply_days ps
                     ON ps.child_lgd_id = c.child_lgd_id
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -6011,7 +6019,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(parentLgdLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH tenant_cfg AS (
                     SELECT
                         t.tenant_id,
@@ -6040,7 +6048,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                     ORDER BY s.scheme_id, s.%2$s, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 dates_in_range AS (
@@ -6051,8 +6059,8 @@ public class SchemeRegularityRepository {
                 ewater_by_scheme AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(f.water_quantity), 0)::bigint AS total_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_ewater_quantity
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
                     GROUP BY f.scheme_id
@@ -6074,7 +6082,7 @@ public class SchemeRegularityRepository {
                         f.scheme_id,
                         f.date,
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
                     GROUP BY f.scheme_id, f.date
@@ -6128,7 +6136,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN region_supply_days ps
                     ON ps.child_lgd_id = c.child_lgd_id
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn);
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -6173,7 +6181,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(parentDepartmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH tenant_cfg AS (
                     SELECT
                         t.tenant_id,
@@ -6202,7 +6210,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.fhtc_count, 0) AS fhtc_count,
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%3$s = ?
+                    WHERE s.%3$s = ?{{WS}}
                 ),
                 dates_in_range AS (
                     SELECT d.full_date AS date
@@ -6212,8 +6220,8 @@ public class SchemeRegularityRepository {
                 ewater_by_scheme AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(f.water_quantity), 0)::bigint AS total_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_ewater_quantity
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.scheme_id
                 ),
@@ -6234,7 +6242,7 @@ public class SchemeRegularityRepository {
                         f.scheme_id,
                         f.date,
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                     GROUP BY f.scheme_id, f.date
                 ),
@@ -6287,7 +6295,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN region_supply_days ps
                     ON ps.child_department_id = c.child_department_id
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -6357,8 +6365,11 @@ public class SchemeRegularityRepository {
     public List<PeriodicSchemeRegularityMetrics> getPeriodicSchemeRegularityForNation(
             LocalDate startDate, LocalDate endDate, PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForMeterReadings(scale);
+        // Same period-bucketing expression, retargeted from the meter-reading date column to the
+        // water-quantity date column so water is bucketed by fact_water_quantity.date.
+        String periodStartFromWater = sqlParts.periodStartFromFact().replace("m.reading_date", "f.date");
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH params AS (
                     SELECT ?::date AS anchor_start
                 ),
@@ -6367,14 +6378,16 @@ public class SchemeRegularityRepository {
                         s.tenant_id,
                         s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
+                    WHERE TRUE{{NWS}}
                 ),
                 scheme_fhtc_totals AS (
                     SELECT
                         COALESCE(SUM(s.fhtc_count), 0)::bigint AS total_achieved_fhtc_count
                     FROM (
-                        SELECT DISTINCT ON (tenant_id, scheme_id) tenant_id, scheme_id, COALESCE(fhtc_count, 0) AS fhtc_count
-                        FROM analytics_schema.dim_scheme_table
-                        ORDER BY tenant_id, scheme_id, COALESCE(fhtc_count, 0) DESC
+                        SELECT DISTINCT ON (s.tenant_id, s.scheme_id) s.tenant_id, s.scheme_id, COALESCE(s.fhtc_count, 0) AS fhtc_count
+                        FROM analytics_schema.dim_scheme_table s
+                        WHERE TRUE{{NWS}}
+                        ORDER BY s.tenant_id, s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
                     ) s
                 ),
                 periods AS (
@@ -6390,8 +6403,7 @@ public class SchemeRegularityRepository {
                         m.tenant_id,
                         m.scheme_id,
                         %4$s AS period_start_date,
-                        COUNT(DISTINCT m.reading_date)::int AS supply_days,
-                        COALESCE(SUM(m.confirmed_reading), 0)::bigint AS total_water_quantity
+                        COUNT(DISTINCT m.reading_date)::int AS supply_days
                     FROM params,
                          analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope s
@@ -6401,11 +6413,22 @@ public class SchemeRegularityRepository {
                       AND m.confirmed_reading > 0
                     GROUP BY m.tenant_id, m.scheme_id, %4$s
                 ),
+                period_water AS (
+                    SELECT
+                        %5$s AS period_start_date,
+                        {{SWS}} AS total_water_quantity
+                    FROM params,
+                         {{LWQ}} f
+                    JOIN schemes_in_scope s
+                        ON s.scheme_id = f.scheme_id
+                        AND s.tenant_id = f.tenant_id
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY %5$s
+                ),
                 period_supply AS (
                     SELECT
                         period_start_date,
-                        COALESCE(SUM(supply_days)::int, 0) AS total_supply_days,
-                        COALESCE(SUM(total_water_quantity)::bigint, 0) AS total_water_quantity
+                        COALESCE(SUM(supply_days)::int, 0) AS total_supply_days
                     FROM scheme_supply_days
                     GROUP BY period_start_date
                 )
@@ -6415,16 +6438,19 @@ public class SchemeRegularityRepository {
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
                     COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
-                    COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
+                    COALESCE(pw.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
                 LEFT JOIN period_supply ps
                     ON ps.period_start_date = p.period_start_date
+                LEFT JOIN period_water pw
+                    ON pw.period_start_date = p.period_start_date
                 ORDER BY p.period_start_date
                 """,
                 sqlParts.periodStartFromSeries(),
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
-                sqlParts.periodStartFromFact());
+                sqlParts.periodStartFromFact(),
+                periodStartFromWater));
 
         return jdbcTemplate.query(
                 sql,
@@ -6439,6 +6465,8 @@ public class SchemeRegularityRepository {
                 startDate,
                 endDate,
                 startDate,
+                endDate,
+                startDate,
                 endDate);
     }
 
@@ -6449,7 +6477,7 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH params AS (
                     SELECT ?::date AS anchor_start
                 ),
@@ -6458,7 +6486,7 @@ public class SchemeRegularityRepository {
                         s.scheme_id,
                         COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                     ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
                 ),
                 scheme_fhtc_totals AS (
@@ -6474,22 +6502,44 @@ public class SchemeRegularityRepository {
                     FROM params,
                          generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
-                scheme_day AS (
+                meter_day AS (
                     SELECT
                         m.scheme_id,
                         m.reading_date::date AS reading_date,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity
+                        MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope s
                         ON s.scheme_id = m.scheme_id
                     WHERE m.reading_date BETWEEN ? AND ?
                     GROUP BY m.scheme_id, m.reading_date::date
                 ),
+                water_day AS (
+                    SELECT
+                        f.scheme_id,
+                        f.date AS reading_date,
+                        {{SWS}} AS day_water_quantity
+                    FROM {{LWQ}} f
+                    JOIN schemes_in_scope s
+                        ON s.scheme_id = f.scheme_id
+                    WHERE f.date BETWEEN ? AND ?
+                    GROUP BY f.scheme_id, f.date
+                ),
+                scheme_day AS (
+                    SELECT
+                        COALESCE(md.scheme_id, wd.scheme_id) AS scheme_id,
+                        COALESCE(md.reading_date, wd.reading_date) AS reading_date,
+                        COALESCE(md.has_supply, 0) AS has_supply,
+                        COALESCE(wd.day_water_quantity, 0)::bigint AS day_water_quantity
+                    FROM meter_day md
+                    FULL OUTER JOIN water_day wd
+                        ON wd.scheme_id = md.scheme_id
+                        AND wd.reading_date = md.reading_date
+                ),
                 scheme_supply_days AS (
                     SELECT
                         sd.scheme_id,
                         %5$s AS period_start_date,
-                        COUNT(*) FILTER (WHERE sd.day_water_quantity > 0)::int AS supply_days,
+                        COUNT(*) FILTER (WHERE sd.has_supply = 1)::int AS supply_days,
                         COALESCE(SUM(sd.day_water_quantity), 0)::bigint AS total_water_quantity
                     FROM params,
                          scheme_day sd
@@ -6519,7 +6569,7 @@ public class SchemeRegularityRepository {
                 sqlParts.periodStartFromSeries(),
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
-                sqlParts.periodStartFromFact());
+                sqlParts.periodStartFromFact()));
 
         return jdbcTemplate.query(
                 sql,
@@ -6535,6 +6585,8 @@ public class SchemeRegularityRepository {
                 startDate,
                 endDate,
                 startDate,
+                endDate,
+                startDate,
                 endDate);
     }
 
@@ -6546,7 +6598,7 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH params AS (
                     SELECT ?::date AS anchor_start
                 ),
@@ -6556,7 +6608,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc_count
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                     ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC
                 ),
                 scheme_fhtc_totals AS (
@@ -6572,11 +6624,11 @@ public class SchemeRegularityRepository {
                     FROM params,
                          generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
-                scheme_day AS (
+                meter_day AS (
                     SELECT
                         m.scheme_id,
                         m.reading_date::date AS reading_date,
-                        COALESCE(SUM(CASE WHEN m.confirmed_reading > 0 THEN m.confirmed_reading ELSE 0 END), 0)::bigint AS day_water_quantity
+                        MAX(CASE WHEN m.confirmed_reading > 0 THEN 1 ELSE 0 END)::int AS has_supply
                     FROM analytics_schema.fact_meter_reading_table m
                     JOIN schemes_in_scope s
                         ON s.scheme_id = m.scheme_id
@@ -6584,11 +6636,34 @@ public class SchemeRegularityRepository {
                       AND m.tenant_id = ?
                     GROUP BY m.scheme_id, m.reading_date::date
                 ),
+                water_day AS (
+                    SELECT
+                        f.scheme_id,
+                        f.date AS reading_date,
+                        {{SWS}} AS day_water_quantity
+                    FROM {{LWQ}} f
+                    JOIN schemes_in_scope s
+                        ON s.scheme_id = f.scheme_id
+                    WHERE f.date BETWEEN ? AND ?
+                      AND f.tenant_id = ?
+                    GROUP BY f.scheme_id, f.date
+                ),
+                scheme_day AS (
+                    SELECT
+                        COALESCE(md.scheme_id, wd.scheme_id) AS scheme_id,
+                        COALESCE(md.reading_date, wd.reading_date) AS reading_date,
+                        COALESCE(md.has_supply, 0) AS has_supply,
+                        COALESCE(wd.day_water_quantity, 0)::bigint AS day_water_quantity
+                    FROM meter_day md
+                    FULL OUTER JOIN water_day wd
+                        ON wd.scheme_id = md.scheme_id
+                        AND wd.reading_date = md.reading_date
+                ),
                 scheme_supply_days AS (
                     SELECT
                         sd.scheme_id,
                         %5$s AS period_start_date,
-                        COUNT(*) FILTER (WHERE sd.day_water_quantity > 0)::int AS supply_days,
+                        COUNT(*) FILTER (WHERE sd.has_supply = 1)::int AS supply_days,
                         COALESCE(SUM(sd.day_water_quantity), 0)::bigint AS total_water_quantity
                     FROM params,
                          scheme_day sd
@@ -6618,7 +6693,7 @@ public class SchemeRegularityRepository {
                 sqlParts.periodStartFromSeries(),
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
-                sqlParts.periodStartFromFact());
+                sqlParts.periodStartFromFact()));
 
         return jdbcTemplate.query(
                 sql,
@@ -6634,6 +6709,9 @@ public class SchemeRegularityRepository {
                 tenantId,
                 startDate,
                 endDate,
+                startDate,
+                endDate,
+                tenantId,
                 startDate,
                 endDate,
                 tenantId);
@@ -6655,7 +6733,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(parentDepartmentLevel);
 
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH tenant_cfg AS (
                     SELECT
                         t.tenant_id,
@@ -6684,7 +6762,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.planned_fhtc, 0) AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%3$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                     ORDER BY s.scheme_id, s.%2$s, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 dates_in_range AS (
@@ -6695,8 +6773,8 @@ public class SchemeRegularityRepository {
                 ewater_by_scheme AS (
                     SELECT
                         f.scheme_id,
-                        COALESCE(SUM(f.water_quantity), 0)::bigint AS total_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                        {{SWS}} AS total_ewater_quantity
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
                     GROUP BY f.scheme_id
@@ -6718,7 +6796,7 @@ public class SchemeRegularityRepository {
                         f.scheme_id,
                         f.date,
                         COALESCE(SUM(f.water_quantity), 0)::bigint AS daily_ewater_quantity
-                    FROM analytics_schema.fact_water_quantity_table f
+                    FROM {{LWQ}} f
                     WHERE f.date BETWEEN ? AND ?
                       AND f.tenant_id = ?
                     GROUP BY f.scheme_id, f.date
@@ -6772,7 +6850,7 @@ public class SchemeRegularityRepository {
                 LEFT JOIN region_supply_days ps
                     ON ps.child_department_id = c.child_department_id
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn);
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
 
         return jdbcTemplate.query(
                 sql,
@@ -6871,14 +6949,14 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH params AS (
                     SELECT ?::date AS anchor_start
                 ),
                 schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                 ),
                 periods AS (
                     SELECT DISTINCT
@@ -6915,7 +6993,7 @@ public class SchemeRegularityRepository {
                 sqlParts.periodStartFromSeries(),
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
-                sqlParts.periodStartFromFact());
+                sqlParts.periodStartFromFact()));
 
         return jdbcTemplate.query(
                 sql,
@@ -6947,7 +7025,7 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH params AS (
                     SELECT ?::date AS anchor_start
                 ),
@@ -6955,7 +7033,7 @@ public class SchemeRegularityRepository {
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
-                      AND s.tenant_id = ?
+                      AND s.tenant_id = ?{{WS}}
                 ),
                 periods AS (
                     SELECT DISTINCT
@@ -6993,7 +7071,7 @@ public class SchemeRegularityRepository {
                 sqlParts.periodStartFromSeries(),
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
-                sqlParts.periodStartFromFact());
+                sqlParts.periodStartFromFact()));
 
         return jdbcTemplate.query(
                 sql,
@@ -7026,7 +7104,7 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlParts(scale);
-        String sql = String.format("""
+        String sql = withDashboardFragments(String.format("""
                 WITH params AS (
                     SELECT ?::date AS anchor_start
                 ),
@@ -7037,7 +7115,7 @@ public class SchemeRegularityRepository {
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count,
                         COALESCE(s.planned_fhtc, 0)::bigint AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.%1$s = ?
+                    WHERE s.%1$s = ?{{WS}}
                     ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 periods AS (
@@ -7084,7 +7162,7 @@ public class SchemeRegularityRepository {
                 sqlParts.periodStartFromSeries(),
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
-                sqlParts.periodStartFromFact());
+                sqlParts.periodStartFromFact()));
 
         return jdbcTemplate.query(
                 sql,
