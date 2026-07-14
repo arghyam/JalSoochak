@@ -226,6 +226,28 @@ class DimensionServiceImplTest {
     }
 
     @Test
+    void updateIncludedWorkStatuses_nationalTenantMissing_createsConfigRowInsteadOfThrowing() {
+        // tenant-0 is a config-only singleton that no TENANT_CREATED event ever creates, so the
+        // national default must be materialised on first write rather than dead-lettered. (Regression:
+        // findById(0).orElseThrow silently DLQ'd every national update.)
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 0, "NATIONAL", List.of(4));
+        when(dimTenantRepository.findById(0)).thenReturn(Optional.empty());
+
+        service.updateIncludedWorkStatuses(event);
+
+        ArgumentCaptor<DimTenant> captor = ArgumentCaptor.forClass(DimTenant.class);
+        verify(dimTenantRepository, times(1)).save(captor.capture());
+        DimTenant saved = captor.getValue();
+        assertThat(saved.getTenantId()).isZero();
+        assertThat(saved.getStateCode()).isEqualTo("NATIONAL");
+        assertThat(saved.getTitle()).isEqualTo("NATIONAL");
+        assertThat(saved.getStatus()).isEqualTo(1);
+        assertThat(saved.getCreatedAt()).isNotNull();
+        assertThat(saved.getIncludedWorkStatuses()).containsExactly(4);
+    }
+
+    @Test
     void upsertLgdLocation_whenInvalidGeoJson_setsGeomNullAndSaves() {
         LgdLocationEvent event = new LgdLocationEvent();
         event.setLgdId(101);

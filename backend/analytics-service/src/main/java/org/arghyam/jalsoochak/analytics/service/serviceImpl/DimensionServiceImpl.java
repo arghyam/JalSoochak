@@ -40,6 +40,11 @@ import java.util.UUID;
 @Slf4j
 public class DimensionServiceImpl implements DimensionService {
 
+    /** The national-default tenant: a config-only singleton, never created by TENANT_CREATED. */
+    private static final Integer NATIONAL_TENANT_ID = 0;
+    /** Status stamped on the synthetic national-default row (excluded from tenant enumerations). */
+    private static final int NATIONAL_TENANT_STATUS = 1;
+
     private final DimTenantRepository dimTenantRepository;
     private final DimUserRepository dimUserRepository;
     private final DimSchemeRepository dimSchemeRepository;
@@ -245,9 +250,23 @@ public class DimensionServiceImpl implements DimensionService {
     @Override
     @Transactional
     public void updateIncludedWorkStatuses(IncludedWorkStatusesUpdatedEvent event) {
+        // The national default (tenantId=0) is a config-only singleton: no TENANT_CREATED event ever
+        // creates it, so it must be materialised on first write instead of throwing. Real tenants still
+        // require an existing row (TENANT_CREATED precedes any config change on the same ordered topic).
         DimTenant tenant = dimTenantRepository.findById(event.getTenantId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "No dim_tenant_table row for tenantId=" + event.getTenantId()));
+                .orElseGet(() -> {
+                    if (!NATIONAL_TENANT_ID.equals(event.getTenantId())) {
+                        throw new IllegalStateException(
+                                "No dim_tenant_table row for tenantId=" + event.getTenantId());
+                    }
+                    return DimTenant.builder()
+                            .tenantId(event.getTenantId())
+                            .stateCode(event.getStateCode())
+                            .title(event.getStateCode())
+                            .status(NATIONAL_TENANT_STATUS)
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                });
         tenant.setIncludedWorkStatuses(event.getWorkStatuses());
         tenant.setUpdatedAt(LocalDateTime.now());
         dimTenantRepository.save(tenant);
