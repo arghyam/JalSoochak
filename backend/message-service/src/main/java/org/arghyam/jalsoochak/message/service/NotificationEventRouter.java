@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsCountryService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
+import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
@@ -102,6 +103,7 @@ public class NotificationEventRouter {
     private final SmsCountryService smsCountryService;
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
+    private final DailyReportPdfService dailyReportPdfService;
     private final MinioStorageService minioStorageService;
     private final MessageTemplateService messageTemplateService;
     private final AccountEmailService accountEmailService;
@@ -113,6 +115,16 @@ public class NotificationEventRouter {
 
     @Value("${app.base-url:http://localhost:8085}")
     private String baseUrl;
+
+    /**
+     * Gates delivery of the SUB_DIVISIONAL_OFFICER daily report. Defaults to {@code false} because
+     * the SDO report layout is not yet specified (the sample docx is the SECTION_OFFICER template);
+     * SDO events are computed and logged but not sent until an SDO layout is agreed and this is enabled.
+     */
+    @Value("${app.daily-report.sdo-enabled:false}")
+    private boolean dailyReportSdoEnabled;
+
+    private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
 
     @PostConstruct
     void validateBaseUrl() {
@@ -142,6 +154,7 @@ public class NotificationEventRouter {
             switch (eventType.toUpperCase()) {
                 case "NUDGE" -> handleNudge(root);
                 case "ESCALATION" -> handleEscalation(root);
+                case "DAILY_REPORT_KPIS" -> handleDailySituationReport(root);
                 case "STAFF_SYNC_COMPLETED" -> handleStaffSyncCompleted(root);
                 case "UPDATE_USER_LANGUAGE" -> handleUpdateUserLanguage(root);
                 case "SEND_WELCOME_MESSAGE" -> handleSendWelcomeMessage(root);
@@ -821,5 +834,111 @@ public class NotificationEventRouter {
         log.info("[Router/ESCALATION] level={} → {} ({})", level, sent ? "SENT" : "FAILED", loggableUrl);
         log.debug("[Router/ESCALATION] officer={} level={} → {} ({})", officerPhone, level,
                 sent ? "SENT" : "FAILED", loggableUrl);
+    }
+
+    /**
+     * Handles a {@code DAILY_REPORT_KPIS} event: resolves the officer's contact from the operational
+     * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to MinIO, and
+     * sends the document HSM via Glific. Mirrors {@link #handleEscalation}.
+     */
+    private void handleDailySituationReport(JsonNode root) throws Exception {
+        int tenantId = root.path("tenantId").asInt(0);
+        String tenantSchema = root.path("tenantSchema").asText("");
+        long officerUserId = root.path("officerUserId").asLong(0);
+        String officerUserType = root.path("officerUserType").asText("");
+
+        if (tenantSchema.isBlank() || !tenantSchema.matches(SCHEMA_PATTERN) || officerUserId <= 0) {
+            log.warn("[Router/DAILY_REPORT] Invalid tenantSchema/officerUserId, skipping");
+            return;
+        }
+        if (!root.hasNonNull("kpis")) {
+            log.warn("[Router/DAILY_REPORT] Missing kpis payload, skipping");
+            return;
+        }
+
+        // SDO layout is not yet specified — compute-and-log but do not deliver until enabled.
+        if ("SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType) && !dailyReportSdoEnabled) {
+            log.info("[Router/DAILY_REPORT] SDO delivery disabled (no SDO layout yet); skipping officer={}",
+                    officerUserId);
+            return;
+        }
+
+        DailyReportKpis kpis = objectMapper.treeToValue(root.path("kpis"), DailyReportKpis.class);
+
+        OfficerContact officer = resolveOfficerContactById(tenantSchema, officerUserId);
+        if (officer.contactId() == null && (officer.phone() == null || officer.phone().isBlank())) {
+            log.warn("[Router/DAILY_REPORT] No phone or whatsapp_connection_id for officer={} in schema={}, skipping",
+                    officerUserId, tenantSchema);
+            return;
+        }
+
+        String officerName = officer.name() != null ? officer.name() : "Officer";
+        String filename = dailyReportPdfService.generate(kpis, officerName, officerUserType);
+        java.nio.file.Path localPath = Paths.get(reportDir, filename);
+        String minioUrl;
+        try {
+            minioUrl = minioStorageService.upload(localPath);
+        } catch (Exception uploadEx) {
+            log.error("[Router/DAILY_REPORT] MinIO upload failed, retaining local PDF for recovery: {} — {}",
+                    localPath, uploadEx.getMessage());
+            throw uploadEx;
+        }
+        try {
+            Files.deleteIfExists(localPath);
+        } catch (Exception cleanupEx) {
+            log.warn("[Router/DAILY_REPORT] Could not delete local PDF {}: {}", localPath, cleanupEx.getMessage());
+        }
+
+        long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
+
+        boolean sent = whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType);
+        if (!sent) {
+            throw new IllegalStateException("[Router/DAILY_REPORT] WhatsApp daily report delivery failed");
+        }
+        String loggableUrl = minioUrl.replaceFirst("\\?.*$", "");
+        log.info("[Router/DAILY_REPORT] officer={} role={} → SENT ({})", officerUserId, officerUserType, loggableUrl);
+    }
+
+    /** Officer contact resolved from the operational {@code user_table} by user id. */
+    private record OfficerContact(Long contactId, String name, String phone) {}
+
+    /**
+     * Returns the officer's stored Glific contact id, or opts them in by phone and publishes a
+     * {@code WHATSAPP_CONTACT_REGISTERED} event so tenant-service persists the new contact id.
+     */
+    private long resolveContactIdOrOptIn(OfficerContact officer, String tenantSchema, long officerUserId) {
+        if (officer.contactId() != null && officer.contactId() > 0) {
+            return officer.contactId();
+        }
+        long contactId = glificWhatsAppService.optIn(officer.phone());
+        if (contactId > 0) {
+            kafkaProducer.publishJson(COMMON_TOPIC,
+                    WhatsAppContactRegisteredEvent.builder()
+                            .eventType("WHATSAPP_CONTACT_REGISTERED")
+                            .tenantSchema(tenantSchema)
+                            .userId(officerUserId)
+                            .contactId(contactId)
+                            .build());
+        }
+        return contactId;
+    }
+
+    /**
+     * Resolves an officer's Glific contact id, decrypted display name, and decrypted phone number
+     * from {@code <tenantSchema>.user_table} by user id. {@code tenantSchema} is validated by the
+     * caller against {@link #SCHEMA_PATTERN} before interpolation (schema names are SQL identifiers
+     * and cannot be bound as {@code ?}); the user id is bound as a parameter.
+     */
+    @SuppressWarnings("java:S2077")
+    private OfficerContact resolveOfficerContactById(String tenantSchema, long userId) {
+        String sql = "SELECT whatsapp_connection_id, title, phone_number FROM " + tenantSchema
+                + ".user_table WHERE id = ? LIMIT 1";
+        List<OfficerContact> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new OfficerContact(
+                        rs.getObject("whatsapp_connection_id", Long.class),
+                        piiEncryptionService.safeDecrypt(rs.getString("title")),
+                        piiEncryptionService.safeDecrypt(rs.getString("phone_number"))),
+                userId);
+        return rows.isEmpty() ? new OfficerContact(null, null, null) : rows.get(0);
     }
 }

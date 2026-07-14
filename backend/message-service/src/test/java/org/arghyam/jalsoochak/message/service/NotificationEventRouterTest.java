@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.sql.ResultSet;
 import java.util.List;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
@@ -57,6 +59,9 @@ class NotificationEventRouterTest {
 
     @Mock
     private EscalationPdfService escalationPdfService;
+
+    @Mock
+    private DailyReportPdfService dailyReportPdfService;
 
     @Mock
     private MinioStorageService minioStorageService;
@@ -1093,5 +1098,67 @@ class NotificationEventRouterTest {
         verify(accountEmailService).sendInviteEmail(
                 "sa@mp.gov.in", "Priya Sharma", "STATE_ADMIN", "https://link", 24);
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
+    }
+
+    // ── DAILY_REPORT_KPIS ────────────────────────────────────────────────────────
+
+    private static final String DAILY_REPORT_JSON = """
+            {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+             "officerUserId":500,"officerUserType":"SECTION_OFFICER",
+             "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10}}
+            """;
+
+    @SuppressWarnings("unchecked")
+    private void stubOfficerContact(Long whatsappId, String encTitle, String encPhone) {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getObject("whatsapp_connection_id", Long.class)).thenReturn(whatsappId);
+                    when(rs.getString("title")).thenReturn(encTitle);
+                    when(rs.getString("phone_number")).thenReturn(encPhone);
+                    return List.of(rm.mapRow(rs, 0));
+                });
+    }
+
+    @Test
+    void handleDailyReport_generatesPdfAndSendsToSectionOfficer() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER")))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER"))
+                .thenReturn(true);
+
+        router.route(DAILY_REPORT_JSON);
+
+        verify(dailyReportPdfService).generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"));
+        verify(minioStorageService).upload(any(Path.class));
+        verify(whatsAppChannel).sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER");
+        // Stored contact present → no opt-in, no contact-registered event.
+        verify(glificWhatsAppService, never()).optIn(anyString());
+    }
+
+    @Test
+    void handleDailyReport_skipsSubDivisionalOfficerWhenSdoDisabled() {
+        // dailyReportSdoEnabled defaults to false in unit context.
+        String sdoJson = DAILY_REPORT_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER");
+
+        router.route(sdoJson);
+
+        verifyNoInteractions(dailyReportPdfService);
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void handleDailyReport_skipsWhenNoContactResolvable() {
+        stubOfficerContact(null, null, null); // no whatsapp id, no phone
+        when(piiEncryptionService.safeDecrypt(any())).thenReturn(null);
+
+        router.route(DAILY_REPORT_JSON);
+
+        verifyNoInteractions(dailyReportPdfService);
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString());
     }
 }

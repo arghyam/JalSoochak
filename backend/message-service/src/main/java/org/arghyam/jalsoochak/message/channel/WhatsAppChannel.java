@@ -151,4 +151,25 @@ public class WhatsAppChannel implements NotificationChannel {
             return false;
         }
     }
+
+    /**
+     * Sends the Daily Water Service Situation Report PDF (document HSM) to an officer via Glific
+     * using an already-resolved Glific contact ID. The template is chosen by officer role.
+     *
+     * @param contactId       Glific contact ID of the officer
+     * @param documentUrl     publicly reachable MinIO URL of the report PDF
+     * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
+     * @return {@code true} if the message was accepted by Glific
+     */
+    public boolean sendDailyReport(long contactId, String documentUrl, String officerUserType) {
+        try {
+            glificWhatsAppService.sendDailyReportHsm(contactId, documentUrl, officerUserType);
+            log.info("[WHATSAPP] Daily report HSM sent");
+            log.debug("[WHATSAPP] Daily report HSM sent to contactId={}", contactId);
+            return true;
+        } catch (Exception ex) {
+            log.error("[WHATSAPP] Failed daily report delivery: {}", ex.getMessage(), ex);
+            return false;
+        }
+    }
 }

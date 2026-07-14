@@ -383,6 +383,44 @@ class NudgeRepositoryIntegrationTest {
         assertThat(result).isEmpty();
     }
 
+    // ─────────────────── findDistinctOfficerUserIdsByUserType ───────────────────
+
+    @Test
+    void findDistinctOfficerUserIdsByUserType_returnsDistinctIdsForActiveMappings() {
+        int so1 = insertUser("SO A", "919000000020", sectionOfficerTypeId);
+        int so2 = insertUser("SO B", "919000000021", sectionOfficerTypeId);
+        // so1 mapped twice to the same scheme (must still appear once); so2 mapped once.
+        insertSchemeMapping(so1, schemeId, 1);
+        insertSchemeMapping(so1, schemeId, 1);
+        insertSchemeMapping(so2, schemeId, 1);
+
+        java.util.List<Long> ids =
+                nudgeRepository.findDistinctOfficerUserIdsByUserType("tenant_test", "SECTION_OFFICER");
+
+        assertThat(ids).containsExactlyInAnyOrder((long) so1, (long) so2);
+    }
+
+    @Test
+    void findDistinctOfficerUserIdsByUserType_excludesInactiveUsersAndMappings() {
+        int inactiveUser = insertInactiveUser("SO Inactive3", "914500000005", sectionOfficerTypeId);
+        insertSchemeMapping(inactiveUser, schemeId, 1); // active mapping, inactive user
+        int inactiveMapUser = insertUser("SO InactiveMap", "919000000022", sectionOfficerTypeId);
+        insertSchemeMapping(inactiveMapUser, schemeId, 0); // inactive mapping
+
+        java.util.List<Long> ids =
+                nudgeRepository.findDistinctOfficerUserIdsByUserType("tenant_test", "SECTION_OFFICER");
+
+        assertThat(ids).isEmpty();
+    }
+
+    @Test
+    void findDistinctOfficerUserIdsByUserType_returnsEmpty_whenNoOfficersOfType() {
+        java.util.List<Long> ids =
+                nudgeRepository.findDistinctOfficerUserIdsByUserType("tenant_test", "SUB_DIVISIONAL_OFFICER");
+
+        assertThat(ids).isEmpty();
+    }
+
     @Test
     void streamUsersWithNoUploadToday_includesRow_whenDbNameIsEmpty() {
         // A user whose title (name) is an empty string — must still be emitted, not skipped

@@ -251,6 +251,27 @@ public class NudgeRepository {
     }
 
     /**
+     * Returns the distinct user ids of officers of the given type ({@code SECTION_OFFICER},
+     * {@code SUB_DIVISIONAL_OFFICER}, …) who oversee at least one active scheme in the tenant.
+     *
+     * <p>Used by the Daily Water Service Situation Report scheduler to decide which officers to
+     * request a report for. Returns ids only — no PII is read here (message-service resolves the
+     * officer's contact when it delivers the report).</p>
+     */
+    @SuppressWarnings("java:S2077")
+    public List<Long> findDistinctOfficerUserIdsByUserType(String schema, String userTypeName) {
+        validateSchemaName(schema);
+        String sql = String.format("""
+                SELECT DISTINCT u.id AS user_id
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.user_table u ON u.id = usm.user_id
+                JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type
+                WHERE UPPER(ut.c_name) = UPPER(?) AND usm.status = 1 AND u.status = 1
+                """, schema, schema);
+        return jdbcTemplate.queryForList(sql, Long.class, userTypeName);
+    }
+
+    /**
      * Persists the Glific contact ID for the given user.
      * Called by the Kafka consumer when a {@code WHATSAPP_CONTACT_REGISTERED} event arrives.
      */

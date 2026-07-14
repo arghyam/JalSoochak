@@ -17,7 +17,11 @@ import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.DailyReportRequestEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.DailyReportKpisEvent;
+import org.arghyam.jalsoochak.analytics.dto.DailyReportKpiDTO;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
+import org.arghyam.jalsoochak.analytics.service.DailySituationReportService;
 import org.arghyam.jalsoochak.analytics.service.FactService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,14 +30,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class AnalyticsKafkaConsumer {
 
+    private static final String COMMON_TOPIC = "common-topic";
+
     private final ObjectMapper objectMapper;
     private final DimensionService dimensionService;
     private final FactService factService;
+    private final DailySituationReportService dailySituationReportService;
+    private final KafkaProducer kafkaProducer;
 
     @KafkaListener(topics = "tenant-service-topic", groupId = "${spring.kafka.consumer.group-id}")
     public void consumeTenantEvents(String message) {
@@ -183,12 +193,45 @@ public class AnalyticsKafkaConsumer {
                     TenantEscalationEvent event = objectMapper.readValue(message, TenantEscalationEvent.class);
                     factService.ingestTenantEscalation(event);
                 }
+                case "DAILY_REPORT_REQUEST" -> handleDailyReportRequest(message);
                 default -> log.debug("[analytics] Ignoring common-topic event type: {}", eventType);
             }
         } catch (Exception e) {
             log.error("Failed to process common-topic event: {}", e.getMessage(), e);
             throw new RuntimeException(e.getMessage(), e);
         }
+    }
+
+    /**
+     * Computes the Daily Water Service Situation Report KPIs for one officer and publishes a
+     * {@code DAILY_REPORT_KPIS} event back to {@code common-topic} for message-service to render.
+     * No PII is read or emitted here — identity ({@code officerUserId}, {@code tenantSchema}) is
+     * forwarded so message-service can resolve the officer's contact from the operational schema.
+     */
+    private void handleDailyReportRequest(String message) throws Exception {
+        DailyReportRequestEvent request = objectMapper.readValue(message, DailyReportRequestEvent.class);
+        if (request.getTenantId() == null || request.getOfficerUserId() == null
+                || request.getReportDate() == null || request.getReportDate().isBlank()) {
+            log.warn("[analytics/DAILY_REPORT_REQUEST] Missing tenantId/officerUserId/reportDate, skipping");
+            return;
+        }
+
+        LocalDate reportDate = LocalDate.parse(request.getReportDate());
+        DailyReportKpiDTO kpis = dailySituationReportService.buildReport(
+                request.getTenantId(), request.getOfficerUserId(), reportDate);
+
+        DailyReportKpisEvent kpisEvent = DailyReportKpisEvent.builder()
+                .eventType("DAILY_REPORT_KPIS")
+                .tenantId(request.getTenantId())
+                .tenantSchema(request.getTenantSchema())
+                .officerUserId(request.getOfficerUserId())
+                .officerUserType(request.getOfficerUserType())
+                .kpis(kpis)
+                .build();
+
+        kafkaProducer.publishJson(COMMON_TOPIC, kpisEvent);
+        log.info("[analytics/DAILY_REPORT_REQUEST] KPIs computed for officer={} tenant={} date={}",
+                request.getOfficerUserId(), request.getTenantId(), reportDate);
     }
 
     private String extractEventType(String json) {
