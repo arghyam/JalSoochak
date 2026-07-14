@@ -45,6 +45,10 @@ class SchemeRegularityRepositoryIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("spring.flyway.schemas", () -> "analytics_schema");
+        // Aggregation-focused IT: disable the dashboard work_status filter so seeded schemes
+        // (which do not all carry the handed-over work_status) are included. Filter behaviour is
+        // covered separately by SchemeRegularityRepositoryWorkStatusFilterIntegrationTest.
+        registry.add("analytics.dashboard.included-work-statuses", () -> "");
     }
 
     @Autowired
@@ -369,13 +373,15 @@ class SchemeRegularityRepositoryIntegrationTest {
                 WHERE tenant_id = 1
                 """);
 
-        // Baseline (single mapping row): Scheme A daily eWater = D1:100, D2:200, D8:300 -> only D1 hits [100,100].
+        // Baseline (single mapping row): Scheme A daily eWater = D1:100, D2:200, D8:300 -> only D1 hits [100,100]
+        // for the efficient-range band (which uses raw daily volume, dedup-only). The headline waterQuantity
+        // total is now the canonical supplied volume ({{SWS}}): only the SUBMITTED D2 row (200) counts.
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> baseline =
                 repository.getRegionWiseWaterQuantityByLgd(1, 100, D1, D10);
         assertThat(baseline.get(0).lgdId()).isEqualTo(101);
         assertThat(baseline.get(0).supplyDaysInEfficientRange()).isEqualTo(1L);
         assertThat(baseline.get(0).householdCount()).isEqualTo(10L);
-        assertThat(baseline.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(baseline.get(0).waterQuantity()).isEqualTo(200L);
 
         // Second mapping row for Scheme A in the SAME child region (level_2=101), differing planned_fhtc
         // and a different parent_department to satisfy the V24 unique key. fhtc stays 10 (threshold unchanged).
@@ -393,11 +399,11 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> withDup =
                 repository.getRegionWiseWaterQuantityByLgd(1, 100, D1, D10);
-        // Must NOT inflate: efficient days stay 1, household stays 10, water stays 600 (not 2 / 20 / 1200).
+        // Must NOT inflate: efficient days stay 1, household stays 10, water stays 200 (not 400).
         assertThat(withDup.get(0).lgdId()).isEqualTo(101);
         assertThat(withDup.get(0).supplyDaysInEfficientRange()).isEqualTo(1L);
         assertThat(withDup.get(0).householdCount()).isEqualTo(10L);
-        assertThat(withDup.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(withDup.get(0).waterQuantity()).isEqualTo(200L);
     }
 
     @Test
@@ -623,7 +629,8 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 7));
         assertThat(weekOne.schemeCount()).isEqualTo(2);
         assertThat(weekOne.totalSupplyDays()).isEqualTo(2);
-        assertThat(weekOne.totalWaterQuantity()).isEqualTo(15L);
+        // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL only): only D2 (200) qualifies.
+        assertThat(weekOne.totalWaterQuantity()).isEqualTo(200L);
 
         SchemeRegularityRepository.PeriodicSchemeRegularityMetrics weekTwo = rows.get(1);
         assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 8));
@@ -643,7 +650,8 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(rows.get(0).periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 31));
         assertThat(rows.get(0).schemeCount()).isEqualTo(2);
         assertThat(rows.get(0).totalSupplyDays()).isEqualTo(2);
-        assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(15L);
+        // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL only): only D2 (200) qualifies.
+        assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(200L);
     }
 
     @Test
@@ -1053,25 +1061,66 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void suppliedWater_countsNullSubmissionStatusRows() {
+        // Legacy/direct-event water can persist submission_status = NULL; with a positive volume it must
+        // count as supplied (exercises the "submission_status = SUBMITTED OR submission_status IS NULL" branch).
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 1, 1, 11, 40, D3, null, null, null);
+
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics scheme1 =
+                repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3).stream()
+                        .filter(r -> r.schemeId().equals(1)).findFirst().orElseThrow();
+
+        // D2 SUBMITTED (200) + D3 NULL-status (40) = 240; D1 NOT_SUBMITTED (100) stays excluded.
+        assertThat(scheme1.totalWaterSuppliedLiters()).isEqualTo(240L);
+    }
+
+    @Test
+    void suppliedWater_deduplicatesToLatestRowPerSchemeAndDate() {
+        // fact_water_quantity_table has no uniqueness on (tenant, scheme, date). Insert a stray *newer*
+        // duplicate for (tenant1, scheme1, D2): summing both rows would give 700, so the query must instead
+        // take only the latest row per (tenant, scheme, date) — mirroring ingestion's updated_at DESC, id DESC.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW() + INTERVAL '1 hour', ?, ?, ?)
+                """, 1, 1, 11, 500, D2, SubmissionStatus.SUBMITTED.getCode(), null, null);
+
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics scheme1 =
+                repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3).stream()
+                        .filter(r -> r.schemeId().equals(1)).findFirst().orElseThrow();
+
+        // Latest D2 row wins (500) — not summed with the seeded 200 (=700) and not the stale 200.
+        assertThat(scheme1.totalWaterSuppliedLiters()).isEqualTo(500L);
+    }
+
+    @Test
     void regionWiseWaterQuantityQueries_returnExpectedRows_forLgdAndDepartment() {
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> byLgd =
                 repository.getRegionWiseWaterQuantityByLgd(100, D1, D10);
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> byDept =
                 repository.getRegionWiseWaterQuantityByDepartment(200, D1, D10);
 
+        // Region-wise water is now unified on the canonical supplied-volume definition ({{SWS}}): only
+        // SUBMITTED/legacy-NULL rows with positive delta count (H1). Scheme 1 (child 101/dept 201) supplied
+        // only on D2 (200; D1/D8 are NOT_SUBMITTED). Scheme 2 (child 102/dept 202) has only NOT_SUBMITTED
+        // rows -> 0. This now reconciles with the headline getRegionOwnWaterSupply / average-per-region.
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
         assertThat(byLgd.get(0).householdCount()).isEqualTo(10);
-        assertThat(byLgd.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(byLgd.get(0).waterQuantity()).isEqualTo(200L);
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).householdCount()).isEqualTo(20);
-        assertThat(byLgd.get(1).waterQuantity()).isEqualTo(120L);
+        assertThat(byLgd.get(1).waterQuantity()).isEqualTo(0L);
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
-        assertThat(byDept.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(byDept.get(0).waterQuantity()).isEqualTo(200L);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
-        assertThat(byDept.get(1).waterQuantity()).isEqualTo(120L);
+        assertThat(byDept.get(1).waterQuantity()).isEqualTo(0L);
     }
 
     private void truncateAll() {

@@ -101,6 +101,12 @@ logging:
 analytics:
   single-tenant-mode: ${SINGLE_TENANT_MODE:false}
 
+  dashboard:
+    # Comma-separated work_status values whose schemes are included in dashboard calculations.
+    # 4 = handed-over. Extend this list (e.g. "4,5") to include more statuses without a code change.
+    # Empty/blank disables the filter (all schemes included).
+    included-work-statuses: ${ANALYTICS_DASHBOARD_INCLUDED_WORK_STATUSES:4}
+
   scheduler:
     common:
       cron: ${ANALYTICS_SCHEDULER_CRON:0 0 0 * * *}

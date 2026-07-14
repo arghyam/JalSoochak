@@ -43,21 +43,26 @@ public class GlificAuthService {
             return;
         }
         log.info("[GlificAuth] Logging in to Glific...");
-        JsonNode data = webClient.post()
-                .uri(authUrl)
-                .header("Content-Type", "application/json")
-                .bodyValue(Map.of("user", Map.of("phone", username, "password", password)))
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block(Duration.ofSeconds(30));
+        try {
+            JsonNode data = webClient.post()
+                    .uri(authUrl)
+                    .header("Content-Type", "application/json")
+                    .bodyValue(Map.of("user", Map.of("phone", username, "password", password)))
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block(Duration.ofSeconds(30));
 
-        if (data == null || !data.has("data")) {
-            throw new RuntimeException("[GlificAuth] Login failed: null or unexpected response");
+            if (data == null || !data.has("data")) {
+                throw new RuntimeException("[GlificAuth] Login failed: null or unexpected response");
+            }
+            JsonNode tokenData = data.path("data");
+            accessToken = requireNonBlankToken(tokenData, "access_token", "login");
+            renewalToken = requireNonBlankToken(tokenData, "renewal_token", "login");
+            log.info("[GlificAuth] Login successful, access token acquired");
+        } catch (Exception e) {
+            log.error("[GlificAuth] Login failed; verify Glific credentials. WhatsApp flows will remain disabled. Error: {}", e.getMessage());
+            // Do not rethrow; let the context initialization finish.
         }
-        JsonNode tokenData = data.path("data");
-        accessToken = requireNonBlankToken(tokenData, "access_token", "login");
-        renewalToken = requireNonBlankToken(tokenData, "renewal_token", "login");
-        log.info("[GlificAuth] Login successful, access token acquired");
     }
 
     public String getAccessToken() {

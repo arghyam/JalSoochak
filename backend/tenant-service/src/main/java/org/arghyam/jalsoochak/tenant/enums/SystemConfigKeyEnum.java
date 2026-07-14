@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.tenant.enums;
 
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 
@@ -46,7 +47,15 @@ public enum SystemConfigKeyEnum implements ConfigKey {
      * is in the vicinity of the Scheme.
      * Managed by Super User.
      */
-    LOCATION_AFFINITY_THRESHOLD(SimpleConfigValueDTO.class);
+    LOCATION_AFFINITY_THRESHOLD(SimpleConfigValueDTO.class),
+
+    /**
+     * National default for the scheme work statuses counted in analytics dashboards
+     * (analytics tenant-0). Codes: 1=Ongoing, 2=Completed, 3=Not Started, 4=Handed Over.
+     * Published to analytics via INCLUDED_WORK_STATUSES_UPDATED with tenantId=0.
+     * Managed by Super User.
+     */
+    INCLUDED_WORK_STATUSES(IncludedWorkStatusesConfigDTO.class);
 
     private final Class<? extends ConfigValueDTO> dtoClass;
 

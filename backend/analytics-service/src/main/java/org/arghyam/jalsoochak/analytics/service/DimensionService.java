@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.service;
 
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEvent;
@@ -25,6 +26,8 @@ public interface DimensionService {
     void upsertDepartmentLocation(DepartmentLocationEvent event);
 
     void updateWaterNorm(WaterNormUpdatedEvent event);
+
+    void updateIncludedWorkStatuses(IncludedWorkStatusesUpdatedEvent event);
 
     void updateLocationHierarchyNames(TenantLocationHierarchyUpdatedEvent event);
 

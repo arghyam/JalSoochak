@@ -48,11 +48,23 @@ public interface SchemePerformanceSchedulerRepository extends JpaRepository<Fact
             JOIN analytics_schema.dim_tenant_table dt
               ON dt.tenant_id = ds.tenant_id
             LEFT JOIN (
+                -- De-duplicate to the latest fact_water_quantity row per (tenant, scheme, date) before
+                -- summing, so a stray duplicate row can never double-count the day's volume. The table has
+                -- no uniqueness on (tenant_id, scheme_id, date); ingestion keeps the current row via
+                -- find-latest-and-update, ordered by updated_at DESC, id DESC (DISTINCT ON mirrors that).
+                -- NOTE: this intentionally sums ALL submission statuses, unlike the dashboard's "supplied
+                -- water" definition (SUBMITTED or NULL status, water_quantity > 0). Left as-is so daily
+                -- performance scores do not silently shift; revisit with product if the two must agree.
                 SELECT tenant_id,
                        scheme_id,
                        SUM(water_quantity) AS total_water_supplied
-                FROM analytics_schema.fact_water_quantity_table
-                WHERE date = :targetDate
+                FROM (
+                    SELECT DISTINCT ON (fwq.tenant_id, fwq.scheme_id, fwq.date)
+                           fwq.tenant_id, fwq.scheme_id, fwq.water_quantity
+                    FROM analytics_schema.fact_water_quantity_table fwq
+                    WHERE fwq.date = :targetDate
+                    ORDER BY fwq.tenant_id, fwq.scheme_id, fwq.date, fwq.updated_at DESC, fwq.id DESC
+                ) latest
                 GROUP BY tenant_id, scheme_id
             ) supply
               ON supply.tenant_id = ds.tenant_id

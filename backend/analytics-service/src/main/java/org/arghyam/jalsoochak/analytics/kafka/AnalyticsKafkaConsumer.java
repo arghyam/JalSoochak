@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.kafka;
 
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.EscalationEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
@@ -47,6 +48,11 @@ public class AnalyticsKafkaConsumer {
                 case "WATER_NORM_UPDATED" -> {
                     WaterNormUpdatedEvent event = objectMapper.readValue(message, WaterNormUpdatedEvent.class);
                     dimensionService.updateWaterNorm(event);
+                }
+                case "INCLUDED_WORK_STATUSES_UPDATED" -> {
+                    IncludedWorkStatusesUpdatedEvent event =
+                            objectMapper.readValue(message, IncludedWorkStatusesUpdatedEvent.class);
+                    dimensionService.updateIncludedWorkStatuses(event);
                 }
                 case "TENANT_LOCATION_HIERARCHY_UPDATED" -> {
                     TenantLocationHierarchyUpdatedEvent event = objectMapper.readValue(message,

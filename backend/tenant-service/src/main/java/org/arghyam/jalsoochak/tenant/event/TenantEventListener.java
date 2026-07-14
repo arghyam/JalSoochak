@@ -95,6 +95,28 @@ public class TenantEventListener {
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleIncludedWorkStatusesUpdated(IncludedWorkStatusesUpdatedEvent event) {
+        log.info("Handling IncludedWorkStatusesUpdatedEvent after commit [tenantId={}]", event.getTenantId());
+        if (event.getTenantId() == null
+                || event.getWorkStatuses() == null || event.getWorkStatuses().isEmpty()) {
+            log.warn("Cannot publish INCLUDED_WORK_STATUSES_UPDATED event: tenantId or workStatuses null/empty [tenantId={}]",
+                    event.getTenantId());
+            return;
+        }
+        try {
+            Map<String, Object> payload = Map.of(
+                    "eventType", "INCLUDED_WORK_STATUSES_UPDATED",
+                    "tenantId", event.getTenantId(),
+                    "stateCode", event.getStateCode() != null ? event.getStateCode() : "",
+                    "workStatuses", event.getWorkStatuses());
+            kafkaProducer.publishJson(TENANT_TOPIC, payload);
+            log.info("Published INCLUDED_WORK_STATUSES_UPDATED event [tenantId={}]", event.getTenantId());
+        } catch (Exception e) {
+            log.error("Failed to publish INCLUDED_WORK_STATUSES_UPDATED event [tenantId={}]", event.getTenantId(), e);
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleWaterSupplyThresholdUpdated(WaterSupplyThresholdUpdatedEvent event) {
         log.info("Handling WaterSupplyThresholdUpdatedEvent after commit [tenantId={}]", event.getTenantId());
         if (event.getTenantId() == null || event.getStateCode() == null || event.getStateCode().isBlank()) {
