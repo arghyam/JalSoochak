@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: V31 - Add user_channel_preference & user_language_preference to common_schema
+-- Migration: V33 - Add user_channel_preference & user_language_preference to common_schema
 -- ============================================================
 -- These tables already exist in deployed environments (created out-of-band) but were
 -- never tracked by Flyway, so a freshly provisioned database would be missing them and
