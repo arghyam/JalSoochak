@@ -281,16 +281,7 @@ public class GlificWhatsAppService {
 
     /**
      * Sends the Daily Water Service Situation Report document HSM to an officer. Two-step, like
-     * {@link #sendEscalationHsm}: upload the PDF via {@code createMescd backend/message-service
-NOTIFICATIONS_WHATSAPP_DRY_RUN=true \
-NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true \
-MINIO_ENDPOINT=http://localhost:9000 \
-MINIO_ACCESS_KEY=minioadmin \
-MINIO_SECRET_KEY=minioadmin \
-MINIO_BUCKET=escalation-reports \
-MINIO_BASE_URL=http://localhost:9000 \
-mvn spring-boot:run -Djacoco.skip=true
-sageMedia}, then
+     * {@link #sendEscalationHsm}: upload the PDF via {@code createMessageMedia}, then
      * {@code createAndSendMessage} with the {@code mediaId} as the document header. The Glific
      * template is chosen by officer role (SO vs SDO).
      *

@@ -10,6 +10,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,6 +42,12 @@ class DailySituationReportServiceTest {
     private static final LocalDate REPORT_DATE = LocalDate.of(2026, 7, 7);
     private static final LocalDate PREV_DATE = LocalDate.of(2026, 7, 6);
 
+    /** Mirrors {@code DailySituationReportService.istDayStartUtc}: IST day start expressed UTC-naive. */
+    private static LocalDateTime istDayStartUtc(LocalDate day) {
+        return day.atStartOfDay(ZoneId.of("Asia/Kolkata"))
+                .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+    }
+
     @Test
     void buildReport_computesKpisForBothDays() {
         when(schemeRegularityRepository.getSchemeCountByUser(TENANT, (int) OFFICER)).thenReturn(10);
@@ -58,12 +67,12 @@ class DailySituationReportServiceTest {
 
         // Anomalies: reportDate window has [5:3,4:1]; previous window empty.
         when(reportRepository.countAnomaliesByType(eq(TENANT), eq(OFFICER),
-                eq(REPORT_DATE.atStartOfDay()), eq(REPORT_DATE.plusDays(1).atStartOfDay())))
+                eq(istDayStartUtc(REPORT_DATE)), eq(istDayStartUtc(REPORT_DATE.plusDays(1)))))
                 .thenReturn(List.of(
                         DailyReportKpiDTO.TypeCount.builder().type("5").count(3).build(),
                         DailyReportKpiDTO.TypeCount.builder().type("4").count(1).build()));
         when(reportRepository.countAnomaliesByType(eq(TENANT), eq(OFFICER),
-                eq(PREV_DATE.atStartOfDay()), eq(PREV_DATE.plusDays(1).atStartOfDay())))
+                eq(istDayStartUtc(PREV_DATE)), eq(istDayStartUtc(PREV_DATE.plusDays(1)))))
                 .thenReturn(List.of());
 
         when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(TENANT, (int) OFFICER, REPORT_DATE, REPORT_DATE))

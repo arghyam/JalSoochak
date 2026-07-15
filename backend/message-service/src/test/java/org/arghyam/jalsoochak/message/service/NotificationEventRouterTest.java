@@ -1105,7 +1105,11 @@ class NotificationEventRouterTest {
     private static final String DAILY_REPORT_JSON = """
             {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
              "officerUserId":500,"officerUserType":"SECTION_OFFICER",
-             "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10}}
+             "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
+                     "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,
+                                  "regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                     "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,
+                                    "regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4}}}
             """;
 
     @SuppressWarnings("unchecked")
@@ -1160,5 +1164,29 @@ class NotificationEventRouterTest {
 
         verifyNoInteractions(dailyReportPdfService);
         verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void handleDailyReport_fallsBackToOptIn_andPublishesEvent_whenNoStoredContactId() throws Exception {
+        // No stored whatsapp_connection_id, but an encrypted phone is present → opt-in fallback.
+        stubOfficerContact(null, "enc-title", "enc-phone");
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500024");
+        when(dailyReportPdfService.generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER")))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
+        when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER"))
+                .thenReturn(true);
+
+        router.route(DAILY_REPORT_JSON);
+
+        verify(dailyReportPdfService).generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"));
+        verify(glificWhatsAppService).optIn("919876500024");
+        verify(whatsAppChannel).sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER");
+        verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
+            String s = event.toString();
+            return s.contains("WHATSAPP_CONTACT_REGISTERED") && s.contains("88");
+        }));
     }
 }

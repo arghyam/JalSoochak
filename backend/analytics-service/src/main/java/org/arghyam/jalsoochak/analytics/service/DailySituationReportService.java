@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -27,6 +30,9 @@ import java.util.List;
 public class DailySituationReportService {
 
     private static final int SUPPLY_WINDOW_DAYS = 7;
+
+    /** Report days are calendar days in IST; anomaly {@code created_at} is stored UTC-naive. */
+    private static final ZoneId REPORT_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final DailySituationReportRepository reportRepository;
     private final SchemeRegularityRepository schemeRegularityRepository;
@@ -51,7 +57,7 @@ public class DailySituationReportService {
                         .toList();
 
         List<DailyReportKpiDTO.TypeCount> anomalies = reportRepository.countAnomaliesByType(
-                tenantId, officerUserId, reportDate.atStartOfDay(), reportDate.plusDays(1).atStartOfDay());
+                tenantId, officerUserId, istDayStartUtc(reportDate), istDayStartUtc(reportDate.plusDays(1)));
 
         return DailyReportKpiDTO.builder()
                 .reportDate(reportDate.toString())
@@ -75,7 +81,7 @@ public class DailySituationReportService {
                 tenantId, userId, day.minusDays(SUPPLY_WINDOW_DAYS - 1L), day);
 
         int anomalyCount = reportRepository
-                .countAnomaliesByType(tenantId, userId, day.atStartOfDay(), day.plusDays(1).atStartOfDay())
+                .countAnomaliesByType(tenantId, userId, istDayStartUtc(day), istDayStartUtc(day.plusDays(1)))
                 .stream()
                 .mapToInt(DailyReportKpiDTO.TypeCount::getCount)
                 .sum();
@@ -96,6 +102,15 @@ public class DailySituationReportService {
                 .readingSubmissionPct(readingSubmissionPct)
                 .anomalousCount(anomalyCount)
                 .build();
+    }
+
+    /**
+     * UTC-naive instant for the start of the given IST calendar day, matching how anomaly
+     * {@code created_at} timestamps are stored. Used to build the half-open interval
+     * {@code [reportDate 00:00 IST, next day 00:00 IST)} against UTC-stored timestamps.
+     */
+    private static LocalDateTime istDayStartUtc(LocalDate day) {
+        return day.atStartOfDay(REPORT_ZONE).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
     }
 
     private static int safeCount(Integer value) {

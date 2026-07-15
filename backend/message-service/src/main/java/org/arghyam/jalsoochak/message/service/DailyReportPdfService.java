@@ -88,7 +88,7 @@ public class DailyReportPdfService {
 
             PDPage page = new PDPage(PDRectangle.A4);
             doc.addPage(page);
-            PDPageContentStream cs = new PDPageContentStream(doc, page);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
             float y = PAGE_HEIGHT - MARGIN;
 
             // ---- Header ----
@@ -161,7 +161,7 @@ public class DailyReportPdfService {
                         MARGIN, y);
             }
 
-            cs.close();
+            } // content stream closed here (try-with-resources) — must precede doc.save()
             doc.save(filePath.toFile());
         }
 
@@ -251,12 +251,18 @@ public class DailyReportPdfService {
         return r;
     }
 
-    /** Strips characters outside Latin-1 so PDFBox's Standard-14 fonts never throw on encoding. */
+    /**
+     * Replaces characters PDFBox's WinAnsi encoding (used by the Standard-14 Helvetica fonts)
+     * cannot render with {@code '?'} so {@code cell()}/{@code showText()} never throw. Allows
+     * printable ASCII (32–126) and the Latin-1 supplement (160–255) only, excluding DEL (127),
+     * the C1 control range (128–159), and the soft hyphen (173) — none of which map to a glyph.
+     */
     private String safe(String s) {
         if (s == null) return "";
         StringBuilder sb = new StringBuilder(s.length());
         for (char c : s.toCharArray()) {
-            sb.append(c >= 32 && c <= 255 ? c : '?');
+            boolean supported = (c >= 32 && c <= 126) || (c >= 160 && c <= 255 && c != 173);
+            sb.append(supported ? c : '?');
         }
         return sb.toString();
     }

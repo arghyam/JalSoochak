@@ -25,6 +25,7 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
@@ -864,6 +865,11 @@ public class NotificationEventRouter {
         }
 
         DailyReportKpis kpis = objectMapper.treeToValue(root.path("kpis"), DailyReportKpis.class);
+        if (!isRenderableKpis(kpis)) {
+            log.warn("[Router/DAILY_REPORT] Incomplete or malformed kpis payload for officer={}, skipping (non-retryable)",
+                    officerUserId);
+            return;
+        }
 
         OfficerContact officer = resolveOfficerContactById(tenantSchema, officerUserId);
         if (officer.contactId() == null && (officer.phone() == null || officer.phone().isBlank())) {
@@ -897,6 +903,31 @@ public class NotificationEventRouter {
         }
         String loggableUrl = minioUrl.replaceFirst("\\?.*$", "");
         log.info("[Router/DAILY_REPORT] officer={} role={} → SENT ({})", officerUserId, officerUserType, loggableUrl);
+    }
+
+    /**
+     * A KPI payload is renderable only when both dates are present and ISO-parseable and both
+     * day-KPI blocks exist. Guarding here keeps a malformed/incomplete payload from surfacing as a
+     * {@link DateTimeParseException} or NPE inside PDF rendering, which the container would retry;
+     * instead it is treated as a permanent, non-retryable skip like the other checks above.
+     */
+    private boolean isRenderableKpis(DailyReportKpis kpis) {
+        if (kpis == null || kpis.getYesterday() == null || kpis.getPreviousDay() == null) {
+            return false;
+        }
+        return isIsoDate(kpis.getReportDate()) && isIsoDate(kpis.getPreviousDate());
+    }
+
+    private boolean isIsoDate(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            LocalDate.parse(value);
+            return true;
+        } catch (DateTimeParseException e) {
+            return false;
+        }
     }
 
     /** Officer contact resolved from the operational {@code user_table} by user id. */

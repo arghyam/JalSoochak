@@ -31,6 +31,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 
 @Component
 @RequiredArgsConstructor
@@ -211,12 +212,22 @@ public class AnalyticsKafkaConsumer {
     private void handleDailyReportRequest(String message) throws Exception {
         DailyReportRequestEvent request = objectMapper.readValue(message, DailyReportRequestEvent.class);
         if (request.getTenantId() == null || request.getOfficerUserId() == null
-                || request.getReportDate() == null || request.getReportDate().isBlank()) {
-            log.warn("[analytics/DAILY_REPORT_REQUEST] Missing tenantId/officerUserId/reportDate, skipping");
+                || request.getReportDate() == null || request.getReportDate().isBlank()
+                || request.getTenantSchema() == null || request.getTenantSchema().isBlank()
+                || request.getOfficerUserType() == null || request.getOfficerUserType().isBlank()) {
+            log.warn("[analytics/DAILY_REPORT_REQUEST] Missing required field "
+                    + "(tenantId/officerUserId/reportDate/tenantSchema/officerUserType), skipping");
             return;
         }
 
-        LocalDate reportDate = LocalDate.parse(request.getReportDate());
+        LocalDate reportDate;
+        try {
+            reportDate = LocalDate.parse(request.getReportDate());
+        } catch (DateTimeParseException e) {
+            log.warn("[analytics/DAILY_REPORT_REQUEST] Malformed reportDate '{}', skipping (non-retryable)",
+                    request.getReportDate());
+            return;
+        }
         DailyReportKpiDTO kpis = dailySituationReportService.buildReport(
                 request.getTenantId(), request.getOfficerUserId(), reportDate);
 
