@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 /**
@@ -59,6 +60,19 @@ public class DailySituationReportService {
         List<DailyReportKpiDTO.TypeCount> anomalies = reportRepository.countAnomaliesByType(
                 tenantId, officerUserId, istDayStartUtc(reportDate), istDayStartUtc(reportDate.plusDays(1)));
 
+        // Section 2 — Priority Actions: per-scheme outage detail for the covered day (D-1).
+        List<DailyReportKpiDTO.PriorityAction> priorityActions =
+                reportRepository.listNoSupplyByScheme(tenantId, officerUserId, reportDate)
+                        .stream()
+                        .map(s -> DailyReportKpiDTO.PriorityAction.builder()
+                                .schemeId(s.schemeId())
+                                .issue(s.outageReason())
+                                .daysNoSupply(s.lastSupplyDate() == null
+                                        ? null
+                                        : (int) ChronoUnit.DAYS.between(s.lastSupplyDate(), reportDate))
+                                .build())
+                        .toList();
+
         return DailyReportKpiDTO.builder()
                 .reportDate(reportDate.toString())
                 .previousDate(previousDate.toString())
@@ -67,6 +81,7 @@ public class DailySituationReportService {
                 .previousDay(previousDay)
                 .reasonsForNoSupply(reasons)
                 .anomaliesByType(anomalies)
+                .priorityActions(priorityActions)
                 .build();
     }
 

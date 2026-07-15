@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.message.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -24,12 +25,14 @@ import java.util.List;
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsCountryService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
+import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
 import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -1129,7 +1132,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_generatesPdfAndSendsToSectionOfficer() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER")))
+        when(dailyReportPdfService.generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList()))
                 .thenReturn("daily_report_x.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER"))
@@ -1137,7 +1140,7 @@ class NotificationEventRouterTest {
 
         router.route(DAILY_REPORT_JSON);
 
-        verify(dailyReportPdfService).generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"));
+        verify(dailyReportPdfService).generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList());
         verify(minioStorageService).upload(any(Path.class));
         verify(whatsAppChannel).sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER");
         // Stored contact present → no opt-in, no contact-registered event.
@@ -1172,7 +1175,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(null, "enc-title", "enc-phone");
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500024");
-        when(dailyReportPdfService.generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER")))
+        when(dailyReportPdfService.generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList()))
                 .thenReturn("daily_report_x.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
@@ -1181,12 +1184,92 @@ class NotificationEventRouterTest {
 
         router.route(DAILY_REPORT_JSON);
 
-        verify(dailyReportPdfService).generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"));
+        verify(dailyReportPdfService).generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList());
         verify(glificWhatsAppService).optIn("919876500024");
         verify(whatsAppChannel).sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER");
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
             String s = event.toString();
             return s.contains("WHATSAPP_CONTACT_REGISTERED") && s.contains("88");
         }));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void handleDailyReport_enrichesPriorityRowsFromOperationalSchema() throws Exception {
+        String json = """
+                {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+                 "officerUserId":500,"officerUserType":"SECTION_OFFICER",
+                 "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
+                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
+                         "priorityActions":[{"schemeId":7,"issue":"Pump Failure","daysNoSupply":5}]}}
+                """;
+
+        // Officer contact (by id) — has a stored WhatsApp id, so no opt-in.
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id = ?")),
+                any(RowMapper.class), eq(500L)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getObject("whatsapp_connection_id", Long.class)).thenReturn(12345L);
+                    when(rs.getString("title")).thenReturn("enc-officer");
+                    when(rs.getString("phone_number")).thenReturn(null);
+                    return List.of(rm.mapRow(rs, 0));
+                });
+        // Scheme label (by id).
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".scheme_master_table WHERE id = ?")),
+                any(RowMapper.class), eq(7)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("scheme_name")).thenReturn("Rampur WSS");
+                    when(rs.getString("centre_scheme_id")).thenReturn("IMIS-7");
+                    return List.of(rm.mapRow(rs, 0));
+                });
+        // Pump operators (by scheme) — two operators.
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains("PUMP_OPERATOR")),
+                any(RowMapper.class), eq(7)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet r1 = mock(ResultSet.class);
+                    when(r1.getString("title")).thenReturn("enc-n1");
+                    when(r1.getString("phone_number")).thenReturn("enc-p1");
+                    ResultSet r2 = mock(ResultSet.class);
+                    when(r2.getString("title")).thenReturn("enc-n2");
+                    when(r2.getString("phone_number")).thenReturn("enc-p2");
+                    return List.of(rm.mapRow(r1, 0), rm.mapRow(r2, 1));
+                });
+        when(piiEncryptionService.safeDecrypt(any())).thenAnswer(inv -> {
+            String v = inv.getArgument(0);
+            if (v == null) {
+                return null;
+            }
+            return switch (v) {
+                case "enc-officer" -> "Binod";
+                case "enc-n1" -> "Ramesh";
+                case "enc-p1" -> "919000000001";
+                case "enc-n2" -> "Suresh";
+                case "enc-p2" -> "919000000002";
+                default -> v;
+            };
+        });
+        when(dailyReportPdfService.generate(any(), eq("Binod"), eq("SECTION_OFFICER"), anyList()))
+                .thenReturn("f.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER")).thenReturn(true);
+
+        router.route(json);
+
+        ArgumentCaptor<List<DailyReportPriorityRow>> cap = ArgumentCaptor.forClass(List.class);
+        verify(dailyReportPdfService).generate(any(), eq("Binod"), eq("SECTION_OFFICER"), cap.capture());
+        List<DailyReportPriorityRow> rows = cap.getValue();
+        assertThat(rows).hasSize(1);
+        DailyReportPriorityRow row = rows.get(0);
+        assertThat(row.getScheme()).isEqualTo("Rampur WSS");
+        assertThat(row.getImisId()).isEqualTo("IMIS-7");
+        assertThat(row.getJalMitraNames()).isEqualTo("Ramesh, Suresh");
+        assertThat(row.getJalMitraMobiles()).isEqualTo("919000000001, 919000000002");
+        assertThat(row.getIssue()).isEqualTo("Pump Failure");
+        assertThat(row.getRemarks()).isEqualTo("No water supply for past 5 days");
     }
 }

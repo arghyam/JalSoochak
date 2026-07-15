@@ -119,4 +119,26 @@ class DailySituationReportServiceTest {
         assertThat(dto.getYesterday().getRegularSupplyPctWeek()).isZero();
         assertThat(dto.getYesterday().getReadingSubmissionPct()).isZero();
     }
+
+    @Test
+    void buildReport_populatesPriorityActionsWithDaysNoSupply() {
+        when(reportRepository.listNoSupplyByScheme(TENANT, OFFICER, REPORT_DATE)).thenReturn(List.of(
+                new DailySituationReportRepository.NoSupplyScheme(7, "Pump Failure", LocalDate.of(2026, 7, 2)),
+                new DailySituationReportRepository.NoSupplyScheme(9, "Pipeline Break", null)));
+
+        DailyReportKpiDTO dto = service.buildReport(TENANT, OFFICER, REPORT_DATE);
+
+        assertThat(dto.getPriorityActions()).hasSize(2);
+        assertThat(dto.getPriorityActions())
+                .anySatisfy(pa -> {
+                    assertThat(pa.getSchemeId()).isEqualTo(7);
+                    assertThat(pa.getIssue()).isEqualTo("Pump Failure");
+                    assertThat(pa.getDaysNoSupply()).isEqualTo(5);   // 2026-07-07 − 2026-07-02
+                })
+                .anySatisfy(pa -> {
+                    assertThat(pa.getSchemeId()).isEqualTo(9);
+                    assertThat(pa.getIssue()).isEqualTo("Pipeline Break");
+                    assertThat(pa.getDaysNoSupply()).isNull();       // never supplied
+                });
+    }
 }

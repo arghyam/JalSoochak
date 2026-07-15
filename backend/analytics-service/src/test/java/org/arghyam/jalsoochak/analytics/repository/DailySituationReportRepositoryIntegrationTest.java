@@ -128,6 +128,33 @@ class DailySituationReportRepositoryIntegrationTest {
         });
     }
 
+    @Test
+    void listNoSupplyByScheme_returnsOutageSchemesWithLastSupplyDate() {
+        // scheme 2: a prior positive supply 3 days before + an outage reason recorded on DAY
+        insertReading(2, 50, 50, DAY.minusDays(3));
+        insertOutage(2, "Pump Failure", DAY);
+        // scheme 3: outage reason on DAY, but never supplied → last supply date null
+        insertOutage(3, "Pipeline Break", DAY);
+
+        List<DailySituationReportRepository.NoSupplyScheme> rows =
+                repository.listNoSupplyByScheme(TENANT, OFFICER, DAY);
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows)
+                .anySatisfy(s -> {
+                    assertThat(s.schemeId()).isEqualTo(2);
+                    assertThat(s.outageReason()).isEqualTo("Pump Failure");
+                    assertThat(s.lastSupplyDate()).isEqualTo(DAY.minusDays(3));
+                })
+                .anySatisfy(s -> {
+                    assertThat(s.schemeId()).isEqualTo(3);
+                    assertThat(s.outageReason()).isEqualTo("Pipeline Break");
+                    assertThat(s.lastSupplyDate()).isNull();
+                });
+        // scheme 1 has readings but no outage reason on DAY → excluded
+        assertThat(rows).noneSatisfy(s -> assertThat(s.schemeId()).isEqualTo(1));
+    }
+
     // ---- seed helpers ----------------------------------------------------
 
     private void seed() {
@@ -220,6 +247,15 @@ class DailySituationReportRepositoryIntegrationTest {
                 (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status)
                 VALUES (?, ?, ?, ?, ?, NOW(), NOW(), 1)
                 """, TENANT, schemeId, OFFICER, litres, date);
+    }
+
+    private void insertOutage(int schemeId, String reason, LocalDate date) {
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at,
+                 submission_status, outage_reason)
+                VALUES (?, ?, ?, 0, ?, NOW(), NOW(), 0, ?)
+                """, TENANT, schemeId, OFFICER, date, reason);
     }
 
     private void insertAnomaly(String uuid, String type, int schemeId, LocalDate date, boolean deleted) {

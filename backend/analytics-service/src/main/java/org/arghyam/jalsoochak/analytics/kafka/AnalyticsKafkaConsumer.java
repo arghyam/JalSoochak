@@ -228,6 +228,12 @@ public class AnalyticsKafkaConsumer {
                     request.getReportDate());
             return;
         }
+
+        String corr = request.getCorrelationId();
+        long startNanos = System.nanoTime();
+        log.info("[analytics/DAILY_REPORT_REQUEST] corr={} received: tenant={} officer={} role={} date={}",
+                corr, request.getTenantId(), request.getOfficerUserId(), request.getOfficerUserType(), reportDate);
+
         DailyReportKpiDTO kpis = dailySituationReportService.buildReport(
                 request.getTenantId(), request.getOfficerUserId(), reportDate);
 
@@ -237,12 +243,22 @@ public class AnalyticsKafkaConsumer {
                 .tenantSchema(request.getTenantSchema())
                 .officerUserId(request.getOfficerUserId())
                 .officerUserType(request.getOfficerUserType())
+                .correlationId(corr)
                 .kpis(kpis)
                 .build();
 
         kafkaProducer.publishJson(COMMON_TOPIC, kpisEvent);
-        log.info("[analytics/DAILY_REPORT_REQUEST] KPIs computed for officer={} tenant={} date={}",
-                request.getOfficerUserId(), request.getTenantId(), reportDate);
+
+        long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        log.info("[analytics/DAILY_REPORT_REQUEST] corr={} computed+published: tenant={} officer={} date={} "
+                        + "totalSchemes={} supplyingY={} reasons={} anomalies={} priorityActions={} tookMs={}",
+                corr, request.getTenantId(), request.getOfficerUserId(), reportDate,
+                kpis.getTotalSchemes(),
+                kpis.getYesterday() != null ? kpis.getYesterday().getSchemesSupplying() : 0,
+                kpis.getReasonsForNoSupply() != null ? kpis.getReasonsForNoSupply().size() : 0,
+                kpis.getAnomaliesByType() != null ? kpis.getAnomaliesByType().size() : 0,
+                kpis.getPriorityActions() != null ? kpis.getPriorityActions().size() : 0,
+                tookMs);
     }
 
     private String extractEventType(String json) {

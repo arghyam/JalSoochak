@@ -26,6 +26,7 @@ public class DailyReportKpis {
     private DayKpis previousDay;
     private List<ReasonCount> reasonsForNoSupply;
     private List<TypeCount> anomaliesByType;
+    private List<PriorityAction> priorityActions;
 
     @Data
     @Builder
@@ -60,5 +61,20 @@ public class DailyReportKpis {
     public static class TypeCount {
         private String type;
         private int count;
+    }
+
+    /**
+     * Section 2 — one Priority Actions entry as computed by analytics. Scheme name / IMIS id /
+     * pump operators are resolved in message-service (operational schema + PII) at render time.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class PriorityAction {
+        private int schemeId;
+        private String issue;
+        private Integer daysNoSupply;
     }
 }

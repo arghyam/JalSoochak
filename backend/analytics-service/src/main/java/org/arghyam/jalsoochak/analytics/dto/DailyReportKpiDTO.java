@@ -39,8 +39,15 @@ public class DailyReportKpiDTO {
     /** Section 3 — outage-reason → scheme-count for {@link #reportDate} (raw reason keys). */
     private List<ReasonCount> reasonsForNoSupply;
 
-    /** Section 4 — anomaly-type-code → count for {@link #reportDate} (codes "1".."9"). */
+    /** Section 4 — anomaly-type → count for {@link #reportDate}. Values are the anomaly-type
+     *  NAME as stored in {@code anomaly_table.type} (e.g. {@code NO_SUBMISSION}); legacy rows may
+     *  hold the numeric code string. message-service maps either form to a human label. */
     private List<TypeCount> anomaliesByType;
+
+    /** Section 2 — Priority Actions: one entry per officer scheme that had an outage reason on
+     *  {@link #reportDate}. Scheme name / IMIS id / pump operators are resolved downstream in
+     *  message-service (which has the operational schema + PII); analytics carries only the ids. */
+    private List<PriorityAction> priorityActions;
 
     @Data
     @Builder
@@ -75,8 +82,23 @@ public class DailyReportKpiDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class TypeCount {
-        /** Anomaly type code as stored in {@code anomaly_table.type} ("1".."9"). */
+        /** Anomaly type as stored in {@code anomaly_table.type} — the enum NAME
+         *  (e.g. {@code NO_SUBMISSION}); legacy rows may hold the numeric code string. */
         private String type;
         private int count;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PriorityAction {
+        /** Scheme surrogate id — same value in analytics {@code dim_scheme_table.scheme_id}
+         *  and operational {@code scheme_master_table.id}. */
+        private int schemeId;
+        /** Outage reason (human name from {@code fact_water_quantity_table.outage_reason}). */
+        private String issue;
+        /** Consecutive days with no water supply up to the report day; null if never supplied. */
+        private Integer daysNoSupply;
     }
 }

@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Enumerates the officers of a single tenant and publishes one {@code DAILY_REPORT_REQUEST} per
@@ -40,10 +41,18 @@ public class DailySituationReportSchedulerService {
 
     public void processDailyReportsForTenant(String schema, int tenantId) {
         LocalDate reportDate = LocalDate.now(IST).minusDays(1);
-        int count = 0;
+        String correlationId = UUID.randomUUID().toString();
+        long startNanos = System.nanoTime();
+        List<String> roles = officerRoles();
 
-        for (String role : officerRoles()) {
+        log.info("[DailyReportJob] corr={} start: tenant={} schema={} date={} roles={}",
+                correlationId, tenantId, schema, reportDate, roles);
+
+        int count = 0;
+        for (String role : roles) {
             List<Long> officerIds = nudgeRepository.findDistinctOfficerUserIdsByUserType(schema, role);
+            log.info("[DailyReportJob] corr={} tenant={} role={} → {} officer(s)",
+                    correlationId, tenantId, role, officerIds.size());
             for (Long officerUserId : officerIds) {
                 DailyReportRequestEvent event = DailyReportRequestEvent.builder()
                         .eventType("DAILY_REPORT_REQUEST")
@@ -52,15 +61,18 @@ public class DailySituationReportSchedulerService {
                         .officerUserId(officerUserId)
                         .officerUserType(role)
                         .reportDate(reportDate.toString())
+                        .correlationId(correlationId)
                         .build();
                 kafkaProducer.publishJson(COMMON_TOPIC, event);
                 count++;
-                log.debug("[DailyReportJob] Published DAILY_REPORT_REQUEST for officer={} role={}", officerUserId, role);
+                log.debug("[DailyReportJob] corr={} published DAILY_REPORT_REQUEST officer={} role={}",
+                        correlationId, officerUserId, role);
             }
         }
 
-        log.info("[DailyReportJob] schema={} → requested reports for {} officers (date={})",
-                schema, count, reportDate);
+        long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        log.info("[DailyReportJob] corr={} done: tenant={} schema={} date={} requested={} officer(s) tookMs={}",
+                correlationId, tenantId, schema, reportDate, count, tookMs);
     }
 
     private List<String> officerRoles() {

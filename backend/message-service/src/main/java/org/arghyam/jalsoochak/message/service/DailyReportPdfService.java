@@ -5,30 +5,32 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.font.PDType1Font;
-import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
+import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Renders the Daily Water Service Situation Report PDF (Apache PDFBox) for one officer.
  *
- * <p>The layout mirrors {@code JalSoochak Daily Water Service Situation Report.docx} for the
- * SECTION_OFFICER role (v1): header, Summary KPI table (Yesterday vs Previous Day + trend),
- * Reasons for No Water Supply, and Anomalous Submissions. Modelled on {@link EscalationPdfService}.</p>
- *
- * <p>The SUB_DIVISIONAL_OFFICER layout is not yet specified; until an SDO sample is provided it
- * reuses the same layout (see {@code app.daily-report.sdo-enabled} gating in the router).</p>
+ * <p>Layout mirrors {@code JalSoochak Daily Water Service Situation Report.docx} for the
+ * SECTION_OFFICER role: header, a bordered Summary table (Yesterday vs Previous Day + trend),
+ * Priority Actions, Reasons for No Water Supply, and Anomalous Submissions. All tables have cell
+ * borders; the whole document is drawn with an embedded DejaVu Sans font so the trend arrows
+ * ({@code ▲}/{@code ▼}) and dash ({@code —}) render correctly.</p>
  */
 @Service
 @Slf4j
@@ -43,35 +45,50 @@ public class DailyReportPdfService {
     @Value("${daily-report.support-phone:}")
     private String supportPhone;
 
-    private static final float MARGIN = 50f;
-    private static final float LINE_HEIGHT = 16f;
+    private static final float MARGIN = 40f;
+    private static final float PAGE_WIDTH = PDRectangle.A4.getWidth();
     private static final float PAGE_HEIGHT = PDRectangle.A4.getHeight();
+    private static final float CONTENT_WIDTH = PAGE_WIDTH - 2 * MARGIN;
+    private static final float CELL_PAD = 3f;
+
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final DateTimeFormatter DISPLAY = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
     private static final DateTimeFormatter HEADER = DateTimeFormatter.ofPattern("dd MMMM yyyy");
 
-    private static final Map<String, String> ANOMALY_LABELS = Map.ofEntries(
-            Map.entry("1", "Unreadable Image"),
-            Map.entry("2", "Manual Override"),
-            Map.entry("3", "Consecutive Override (5 days)"),
-            Map.entry("4", "Duplicate Image"),
-            Map.entry("5", "Reading Less Than Previous"),
-            Map.entry("6", "No Water Supply"),
-            Map.entry("7", "Low Water Supply"),
-            Map.entry("8", "Over Water Supply"),
-            Map.entry("9", "No Submission"));
+    private static final String NO_CHANGE = "—";      // — em dash
+    private static final String UP = "▲ ";            // ▲
+    private static final String DOWN = "▼ ";          // ▼
 
-    private PDType1Font bold;
-    private PDType1Font regular;
+    /** anomaly_table.type stores the EscalationType NAME; map names → friendly labels. */
+    private static final Map<String, String> ANOMALY_LABELS = Map.ofEntries(
+            Map.entry("UNREADABLE_IMAGE", "Unreadable Image"),
+            Map.entry("MANUAL_OVERRIDE", "Manual Override"),
+            Map.entry("CONSECUTIVE_OVERRIDE_5_DAYS", "Consecutive Override (5 days)"),
+            Map.entry("DUPLICATE_IMAGE_SUBMISSION", "Duplicate Image"),
+            Map.entry("READING_LESS_THAN_PREVIOUS", "Reading Less Than Previous"),
+            Map.entry("NO_WATER_SUPPLY", "No Water Supply"),
+            Map.entry("LOW_WATER_SUPPLY", "Low Water Supply"),
+            Map.entry("OVER_WATER_SUPPLY", "Over Water Supply"),
+            Map.entry("NO_SUBMISSION", "No Submission"));
+
+    /** Legacy fallback: some pre-migration rows store the numeric code string instead of the name. */
+    private static final Map<String, String> CODE_TO_NAME = Map.ofEntries(
+            Map.entry("1", "UNREADABLE_IMAGE"), Map.entry("2", "MANUAL_OVERRIDE"),
+            Map.entry("3", "CONSECUTIVE_OVERRIDE_5_DAYS"), Map.entry("4", "DUPLICATE_IMAGE_SUBMISSION"),
+            Map.entry("5", "READING_LESS_THAN_PREVIOUS"), Map.entry("6", "NO_WATER_SUPPLY"),
+            Map.entry("7", "LOW_WATER_SUPPLY"), Map.entry("8", "OVER_WATER_SUPPLY"),
+            Map.entry("9", "NO_SUBMISSION"));
 
     /**
      * Generates the report PDF and returns the filename (not the full path).
      *
      * @param kpis            computed KPI payload from analytics-service
      * @param officerName     decrypted officer display name (resolved by the caller)
-     * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER (drives the filename + layout)
+     * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER (drives filename + layout)
+     * @param priorityRows    fully-resolved Priority Actions rows (scheme/IMIS/operators/issue/remarks)
      */
-    public String generate(DailyReportKpis kpis, String officerName, String officerUserType) throws IOException {
+    public String generate(DailyReportKpis kpis, String officerName, String officerUserType,
+                           List<DailyReportPriorityRow> priorityRows) throws IOException {
         ensureReportDirExists();
 
         LocalDate reportDate = LocalDate.parse(kpis.getReportDate(), ISO);
@@ -83,85 +100,58 @@ public class DailyReportPdfService {
         Path filePath = Paths.get(reportDir, filename);
 
         try (PDDocument doc = new PDDocument()) {
-            bold = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
-            regular = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
-
-            PDPage page = new PDPage(PDRectangle.A4);
-            doc.addPage(page);
-            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
-            float y = PAGE_HEIGHT - MARGIN;
+            PDFont font = loadFont(doc, "/fonts/DejaVuSans.ttf");
+            PDFont bold = loadFont(doc, "/fonts/DejaVuSans-Bold.ttf");
+            Ctx ctx = new Ctx(doc, font, bold);
+            ctx.newPage();
 
             // ---- Header ----
-            y = text(cs, bold, 16, "Daily Water Service Situation Report", MARGIN, y);
-            y -= 4;
-            y = text(cs, regular, 11, "Officer: " + safe(officerName != null ? officerName : "Officer"), MARGIN, y);
-            y = text(cs, regular, 11, "Date: " + reportDate.plusDays(1).format(HEADER), MARGIN, y);
-            y = text(cs, regular, 11, "Reporting Period: 00:00 hrs - 23:59 hrs", MARGIN, y);
-            y = text(cs, regular, 9,
-                    "Generated by JalSoochak. Visit the JalSoochak Dashboard at " + dashboardUrl + " for more insights",
-                    MARGIN, y);
-            y -= LINE_HEIGHT;
+            headerLine(ctx, bold, 16, "Daily Water Service Situation Report");
+            headerLine(ctx, font, 11, "Officer: " + (officerName != null ? officerName : "Officer"));
+            headerLine(ctx, font, 11, "Date: " + reportDate.plusDays(1).format(HEADER));
+            headerLine(ctx, font, 11, "Reporting Period: 00:00 hrs - 23:59 hrs");
+            headerLine(ctx, font, 9,
+                    "Generated by JalSoochak. Visit the JalSoochak Dashboard at " + dashboardUrl + " for more insights");
+            ctx.y -= 8;
 
             // ---- 1. Summary ----
-            y = text(cs, bold, 13, "1. Summary", MARGIN, y);
-            y -= 4;
-            String colY = "Yesterday (" + reportDate.format(DISPLAY) + ")";
-            String colP = "Previous Day (" + previousDate.format(DISPLAY) + ")";
-            float[] cols = {MARGIN, MARGIN + 220, MARGIN + 330, MARGIN + 445};
-            y = tableHeader(cs, y, cols, "KPI", colY, colP, "Trend");
+            sectionTitle(ctx, "1. Summary");
+            float[] sumCols = {215, 110, 110, CONTENT_WIDTH - 435};
+            String[] sumHeader = {
+                    "KPI",
+                    "Yesterday\n(" + reportDate.format(DISPLAY) + ")",
+                    "Previous Day\n(" + previousDate.format(DISPLAY) + ")",
+                    "Trend"};
+            drawTable(ctx, sumCols, sumHeader, summaryRows(kpis), 10f, 10f);
+            ctx.y -= 12;
 
-            DailyReportKpis.DayKpis yd = kpis.getYesterday();
-            DailyReportKpis.DayKpis pd = kpis.getPreviousDay();
-            y = kpiRow(cs, y, cols, "Total Schemes", kpis.getTotalSchemes(), kpis.getTotalSchemes());
-            y = kpiRow(cs, y, cols, "Schemes Supplying Water", yd.getSchemesSupplying(), pd.getSchemesSupplying());
-            y = kpiRow(cs, y, cols, "Schemes Not Supplying Water", yd.getSchemesNotSupplying(), pd.getSchemesNotSupplying());
-            y = kpiRowD(cs, y, cols, "Average LPCD", yd.getAvgLpcd(), pd.getAvgLpcd(), "");
-            y = kpiRowD(cs, y, cols, "Average MLD", yd.getAvgMld(), pd.getAvgMld(), "");
-            y = kpiRowD(cs, y, cols, "Regular Supply (%) past 1 week", yd.getRegularSupplyPctWeek(), pd.getRegularSupplyPctWeek(), "%");
-            y = kpiRowD(cs, y, cols, "Reading Submission (%)", yd.getReadingSubmissionPct(), pd.getReadingSubmissionPct(), "%");
-            y = kpiRow(cs, y, cols, "Anomalous Submissions", yd.getAnomalousCount(), pd.getAnomalousCount());
-            y -= LINE_HEIGHT;
+            // ---- 2. Priority Actions ----
+            sectionTitle(ctx, "2. Priority Actions");
+            float[] paCols = {95, 70, 92, 82, 84, CONTENT_WIDTH - 423};
+            String[] paHeader = {"Scheme", "IMIS_ID", "Jal Mitra Name", "Jal Mitra Mobile", "Issue", "Remarks"};
+            drawTable(ctx, paCols, paHeader, priorityActionRows(priorityRows), 8f, 8.5f);
+            ctx.y -= 12;
 
             // ---- 3. Reasons for No Water Supply ----
-            // The v1 report (Summary + Reasons + Anomalies) fits a single A4 page for realistic
-            // data volumes (outage reasons and anomaly types are each bounded to a small set).
-            y = text(cs, bold, 13, "3. Reasons for No Water Supply", MARGIN, y);
-            y -= 4;
-            float[] rcols = {MARGIN, MARGIN + 360};
-            y = tableHeader(cs, y, rcols, "Reason", "Count", null, null);
-            List<DailyReportKpis.ReasonCount> reasons = kpis.getReasonsForNoSupply();
-            if (reasons == null || reasons.isEmpty()) {
-                y = twoCol(cs, y, rcols, "No outages reported", "0");
-            } else {
-                for (DailyReportKpis.ReasonCount r : reasons) {
-                    y = twoCol(cs, y, rcols, prettifyReason(r.getReason()), String.valueOf(r.getCount()));
-                }
-            }
-            y -= LINE_HEIGHT;
+            sectionTitle(ctx, "3. Reasons for No Water Supply");
+            float[] rCols = {CONTENT_WIDTH - 100, 100};
+            drawTable(ctx, rCols, new String[]{"Reason", "Count"}, reasonRows(kpis), 10f, 10f);
+            ctx.y -= 12;
 
             // ---- 4. Anomalous Submissions ----
-            y = text(cs, bold, 13, "4. Anomalous Submissions", MARGIN, y);
-            y -= 4;
-            float[] acols = {MARGIN, MARGIN + 360};
-            y = tableHeader(cs, y, acols, "Type", "Count", null, null);
-            List<DailyReportKpis.TypeCount> anomalies = kpis.getAnomaliesByType();
-            if (anomalies == null || anomalies.isEmpty()) {
-                y = twoCol(cs, y, acols, "No anomalies", "0");
-            } else {
-                for (DailyReportKpis.TypeCount t : anomalies) {
-                    y = twoCol(cs, y, acols, anomalyLabel(t.getType()), String.valueOf(t.getCount()));
-                }
-            }
-            y -= LINE_HEIGHT;
+            sectionTitle(ctx, "4. Anomalous Submissions");
+            drawTable(ctx, rCols, new String[]{"Type", "Count"}, anomalyRows(kpis), 10f, 10f);
+            ctx.y -= 12;
 
             // ---- Footer ----
             if (supportPhone != null && !supportPhone.isBlank()) {
-                text(cs, regular, 8,
-                        "* If you think you received this message by mistake, please reach out to " + supportPhone,
-                        MARGIN, y);
+                ctx.ensureSpace(16);
+                ctx.y -= 12;
+                ctx.text(font, 8, MARGIN, ctx.y,
+                        "* If you think you received this message by mistake, please reach out to " + supportPhone);
             }
 
-            } // content stream closed here (try-with-resources) — must precede doc.save()
+            ctx.close();
             doc.save(filePath.toFile());
         }
 
@@ -169,62 +159,84 @@ public class DailyReportPdfService {
         return filename;
     }
 
-    // ---- table / text helpers -------------------------------------------
+    // ---- row builders ---------------------------------------------------
 
-    private float tableHeader(PDPageContentStream cs, float y, float[] cols,
-                              String c0, String c1, String c2, String c3) throws IOException {
-        cell(cs, bold, 10, c0, cols[0], y);
-        if (c1 != null) cell(cs, bold, 10, c1, cols[1], y);
-        if (c2 != null) cell(cs, bold, 10, c2, cols[2], y);
-        if (c3 != null) cell(cs, bold, 10, c3, cols[3], y);
-        return y - LINE_HEIGHT;
+    private List<String[]> summaryRows(DailyReportKpis k) {
+        DailyReportKpis.DayKpis y = k.getYesterday();
+        DailyReportKpis.DayKpis p = k.getPreviousDay();
+        List<String[]> rows = new ArrayList<>();
+        rows.add(intRow("Total Schemes", k.getTotalSchemes(), k.getTotalSchemes()));
+        rows.add(intRow("Schemes Supplying Water", y.getSchemesSupplying(), p.getSchemesSupplying()));
+        rows.add(intRow("Schemes Not Supplying Water", y.getSchemesNotSupplying(), p.getSchemesNotSupplying()));
+        rows.add(dblRow("Average LPCD", y.getAvgLpcd(), p.getAvgLpcd(), ""));
+        rows.add(dblRow("Average MLD", y.getAvgMld(), p.getAvgMld(), ""));
+        rows.add(dblRow("Regular Supply (%) past 1 week", y.getRegularSupplyPctWeek(), p.getRegularSupplyPctWeek(), "%"));
+        rows.add(dblRow("Reading Submission (%)", y.getReadingSubmissionPct(), p.getReadingSubmissionPct(), "%"));
+        rows.add(intRow("Anomalous Submissions", y.getAnomalousCount(), p.getAnomalousCount()));
+        return rows;
     }
 
-    private float kpiRow(PDPageContentStream cs, float y, float[] cols, String label, int yVal, int pVal) throws IOException {
-        cell(cs, regular, 10, label, cols[0], y);
-        cell(cs, regular, 10, String.valueOf(yVal), cols[1], y);
-        cell(cs, regular, 10, String.valueOf(pVal), cols[2], y);
-        cell(cs, regular, 10, trend(yVal - pVal, ""), cols[3], y);
-        return y - LINE_HEIGHT;
+    private String[] intRow(String label, int yVal, int pVal) {
+        return new String[]{label, String.valueOf(yVal), String.valueOf(pVal), trendInt(yVal - pVal)};
     }
 
-    private float kpiRowD(PDPageContentStream cs, float y, float[] cols, String label,
-                          double yVal, double pVal, String suffix) throws IOException {
-        cell(cs, regular, 10, label, cols[0], y);
-        cell(cs, regular, 10, fmt(yVal) + suffix, cols[1], y);
-        cell(cs, regular, 10, fmt(pVal) + suffix, cols[2], y);
-        cell(cs, regular, 10, trendD(yVal - pVal, suffix), cols[3], y);
-        return y - LINE_HEIGHT;
+    private String[] dblRow(String label, double yVal, double pVal, String suffix) {
+        return new String[]{label, fmt(yVal) + suffix, fmt(pVal) + suffix, trendDouble(yVal - pVal, suffix)};
     }
 
-    private float twoCol(PDPageContentStream cs, float y, float[] cols, String c0, String c1) throws IOException {
-        cell(cs, regular, 10, c0, cols[0], y);
-        cell(cs, regular, 10, c1, cols[1], y);
-        return y - LINE_HEIGHT;
+    private List<String[]> priorityActionRows(List<DailyReportPriorityRow> rows) {
+        List<String[]> out = new ArrayList<>();
+        if (rows == null || rows.isEmpty()) {
+            out.add(new String[]{"No priority actions for this day", "", "", "", "", ""});
+            return out;
+        }
+        for (DailyReportPriorityRow r : rows) {
+            out.add(new String[]{
+                    nvl(r.getScheme()), nvl(r.getImisId()), nvl(r.getJalMitraNames()),
+                    nvl(r.getJalMitraMobiles()), nvl(r.getIssue()), nvl(r.getRemarks())});
+        }
+        return out;
     }
 
-    private float text(PDPageContentStream cs, PDType1Font font, float size, String s, float x, float y) throws IOException {
-        cell(cs, font, size, s, x, y);
-        return y - LINE_HEIGHT;
+    private List<String[]> reasonRows(DailyReportKpis k) {
+        List<String[]> out = new ArrayList<>();
+        List<DailyReportKpis.ReasonCount> reasons = k.getReasonsForNoSupply();
+        if (reasons == null || reasons.isEmpty()) {
+            out.add(new String[]{"No outages reported for this day", "0"});
+            return out;
+        }
+        for (DailyReportKpis.ReasonCount r : reasons) {
+            out.add(new String[]{prettifyReason(r.getReason()), String.valueOf(r.getCount())});
+        }
+        return out;
     }
 
-    private void cell(PDPageContentStream cs, PDType1Font font, float size, String s, float x, float y) throws IOException {
-        cs.beginText();
-        cs.setFont(font, size);
-        cs.newLineAtOffset(x, y);
-        cs.showText(safe(s));
-        cs.endText();
+    private List<String[]> anomalyRows(DailyReportKpis k) {
+        List<String[]> out = new ArrayList<>();
+        List<DailyReportKpis.TypeCount> anomalies = k.getAnomaliesByType();
+        if (anomalies == null || anomalies.isEmpty()) {
+            out.add(new String[]{"No anomalies for this day", "0"});
+            return out;
+        }
+        for (DailyReportKpis.TypeCount t : anomalies) {
+            out.add(new String[]{anomalyLabel(t.getType()), String.valueOf(t.getCount())});
+        }
+        return out;
     }
 
-    /** Signed-delta trend text — ASCII only to stay within Helvetica/WinAnsi encoding. */
-    private String trend(int delta, String suffix) {
-        if (delta == 0) return "0";
-        return (delta > 0 ? "+" : "") + delta + suffix;
+    // ---- trend / formatting --------------------------------------------
+
+    private String trendInt(int delta) {
+        if (delta == 0) return NO_CHANGE;
+        return (delta > 0 ? UP + "+" + delta : DOWN + "-" + Math.abs(delta));
     }
 
-    private String trendD(double delta, String suffix) {
-        if (Math.abs(delta) < 0.05) return "0";
-        return (delta > 0 ? "+" : "") + fmt(delta) + suffix;
+    private String trendDouble(double delta, String suffix) {
+        // Round to 1 dp so floating-point subtraction (e.g. 18.4 - 18.1) doesn't leak long decimals.
+        double rounded = Math.round(delta * 10.0) / 10.0;
+        if (Math.abs(rounded) < 0.05) return NO_CHANGE;
+        String v = fmt(Math.abs(rounded)) + suffix;
+        return (rounded > 0 ? UP + "+" : DOWN + "-") + v;
     }
 
     private String fmt(double v) {
@@ -232,13 +244,16 @@ public class DailyReportPdfService {
     }
 
     private String anomalyLabel(String type) {
-        return ANOMALY_LABELS.getOrDefault(type, "Type " + type);
+        if (type == null) return "Unknown";
+        if (ANOMALY_LABELS.containsKey(type)) return ANOMALY_LABELS.get(type);
+        String name = CODE_TO_NAME.get(type.trim());            // legacy numeric code → name
+        if (name != null && ANOMALY_LABELS.containsKey(name)) return ANOMALY_LABELS.get(name);
+        return prettifyReason(type);
     }
 
     private String prettifyReason(String reason) {
         if (reason == null || reason.isBlank()) return "Unknown";
         String r = reason.trim();
-        // Prettify config-style keys (SNAKE_CASE / lower_case) into Title Case words.
         if (r.matches("\\w+") && (r.contains("_") || r.equals(r.toUpperCase()) || r.equals(r.toLowerCase()))) {
             String[] parts = r.toLowerCase().split("_");
             StringBuilder sb = new StringBuilder();
@@ -251,20 +266,163 @@ public class DailyReportPdfService {
         return r;
     }
 
-    /**
-     * Replaces characters PDFBox's WinAnsi encoding (used by the Standard-14 Helvetica fonts)
-     * cannot render with {@code '?'} so {@code cell()}/{@code showText()} never throw. Allows
-     * printable ASCII (32–126) and the Latin-1 supplement (160–255) only, excluding DEL (127),
-     * the C1 control range (128–159), and the soft hyphen (173) — none of which map to a glyph.
-     */
-    private String safe(String s) {
+    private String nvl(String s) {
+        return s == null ? "" : s;
+    }
+
+    // ---- table + text rendering ----------------------------------------
+
+    private void sectionTitle(Ctx ctx, String title) throws IOException {
+        ctx.ensureSpace(40);
+        ctx.y -= 18;
+        ctx.text(ctx.bold, 13, MARGIN, ctx.y, title);
+        ctx.y -= 6;
+    }
+
+    private void headerLine(Ctx ctx, PDFont font, float size, String text) throws IOException {
+        ctx.y -= (size + 4);
+        ctx.text(font, size, MARGIN, ctx.y, text);
+    }
+
+    /** Draws a bordered table with a bold header row; wraps cells and paginates, re-drawing the header. */
+    private void drawTable(Ctx ctx, float[] colW, String[] header, List<String[]> rows,
+                           float fontSize, float headerFontSize) throws IOException {
+        float headerH = rowHeight(ctx.bold, headerFontSize, colW, header);
+        ctx.ensureSpace(headerH + rowHeight(ctx.font, fontSize, colW, rows.isEmpty() ? header : rows.get(0)));
+        drawRow(ctx, colW, header, ctx.bold, headerFontSize);
+        for (String[] r : rows) {
+            float h = rowHeight(ctx.font, fontSize, colW, r);
+            if (ctx.y - h < MARGIN) {
+                ctx.newPage();
+                drawRow(ctx, colW, header, ctx.bold, headerFontSize);
+            }
+            drawRow(ctx, colW, r, ctx.font, fontSize);
+        }
+    }
+
+    private float rowHeight(PDFont font, float fontSize, float[] colW, String[] cells) throws IOException {
+        float lh = fontSize * 1.25f;
+        int maxLines = 1;
+        for (int c = 0; c < colW.length; c++) {
+            int lines = wrapCell(font, fontSize, cellAt(cells, c), colW[c] - 2 * CELL_PAD).size();
+            maxLines = Math.max(maxLines, lines);
+        }
+        return maxLines * lh + 2 * CELL_PAD;
+    }
+
+    private void drawRow(Ctx ctx, float[] colW, String[] cells, PDFont font, float fontSize) throws IOException {
+        float lh = fontSize * 1.25f;
+        List<List<String>> wrapped = new ArrayList<>();
+        int maxLines = 1;
+        for (int c = 0; c < colW.length; c++) {
+            List<String> lines = wrapCell(font, fontSize, cellAt(cells, c), colW[c] - 2 * CELL_PAD);
+            wrapped.add(lines);
+            maxLines = Math.max(maxLines, lines.size());
+        }
+        float rowH = maxLines * lh + 2 * CELL_PAD;
+        float top = ctx.y;
+        float cx = MARGIN;
+        for (int c = 0; c < colW.length; c++) {
+            float baseline = top - CELL_PAD - fontSize;
+            for (String line : wrapped.get(c)) {
+                ctx.text(font, fontSize, cx + CELL_PAD, baseline, line);
+                baseline -= lh;
+            }
+            ctx.rect(cx, top - rowH, colW[c], rowH);
+            cx += colW[c];
+        }
+        ctx.y = top - rowH;
+    }
+
+    private String cellAt(String[] cells, int c) {
+        return (c < cells.length && cells[c] != null) ? cells[c] : "";
+    }
+
+    /** Wraps text to the given width (points), splitting on explicit newlines first, then words. */
+    private List<String> wrapCell(PDFont font, float fontSize, String text, float maxWidth) throws IOException {
+        List<String> out = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            out.add("");
+            return out;
+        }
+        for (String paragraph : text.split("\n", -1)) {
+            wrapParagraph(font, fontSize, paragraph, maxWidth, out);
+        }
+        return out;
+    }
+
+    private void wrapParagraph(PDFont font, float fontSize, String paragraph, float maxWidth, List<String> out)
+            throws IOException {
+        if (paragraph.isEmpty()) {
+            out.add("");
+            return;
+        }
+        StringBuilder line = new StringBuilder();
+        for (String word : paragraph.split(" ")) {
+            String candidate = line.length() == 0 ? word : line + " " + word;
+            if (textWidth(font, fontSize, candidate) <= maxWidth || line.length() == 0) {
+                // If a single word is itself too wide, hard-split it.
+                if (line.length() == 0 && textWidth(font, fontSize, word) > maxWidth) {
+                    hardSplit(font, fontSize, word, maxWidth, out);
+                } else {
+                    line = new StringBuilder(candidate);
+                }
+            } else {
+                out.add(line.toString());
+                line = new StringBuilder(word);
+            }
+        }
+        if (line.length() > 0) {
+            out.add(line.toString());
+        }
+    }
+
+    private void hardSplit(PDFont font, float fontSize, String word, float maxWidth, List<String> out)
+            throws IOException {
+        StringBuilder chunk = new StringBuilder();
+        for (char ch : word.toCharArray()) {
+            if (textWidth(font, fontSize, chunk.toString() + ch) > maxWidth && chunk.length() > 0) {
+                out.add(chunk.toString());
+                chunk = new StringBuilder();
+            }
+            chunk.append(ch);
+        }
+        if (chunk.length() > 0) {
+            out.add(chunk.toString());
+        }
+    }
+
+    private float textWidth(PDFont font, float fontSize, String text) throws IOException {
+        return font.getStringWidth(sanitize(font, text)) / 1000f * fontSize;
+    }
+
+    /** Replaces any character the embedded font can't encode with '?' so showText never throws. */
+    private static String sanitize(PDFont font, String s) {
         if (s == null) return "";
         StringBuilder sb = new StringBuilder(s.length());
-        for (char c : s.toCharArray()) {
-            boolean supported = (c >= 32 && c <= 126) || (c >= 160 && c <= 255 && c != 173);
-            sb.append(supported ? c : '?');
-        }
+        s.codePoints().forEach(cp -> {
+            if (cp == '\n' || cp == '\r' || cp == '\t') {
+                sb.append(' ');
+                return;
+            }
+            String ch = new String(Character.toChars(cp));
+            try {
+                font.getStringWidth(ch);
+                sb.append(ch);
+            } catch (Exception e) {
+                sb.append('?');
+            }
+        });
         return sb.toString();
+    }
+
+    private PDFont loadFont(PDDocument doc, String resourcePath) throws IOException {
+        try (InputStream in = getClass().getResourceAsStream(resourcePath)) {
+            if (in == null) {
+                throw new IOException("Embedded font not found on classpath: " + resourcePath);
+            }
+            return PDType0Font.load(doc, in);
+        }
     }
 
     private void ensureReportDirExists() throws IOException {
@@ -272,6 +430,57 @@ public class DailyReportPdfService {
         if (!Files.exists(dir)) {
             Files.createDirectories(dir);
             log.info("[DailyReportPdf] Created report directory: {}", dir);
+        }
+    }
+
+    /** Per-render state (page/stream/cursor). Instance-per-call — safe under concurrent Kafka handling. */
+    private static final class Ctx {
+        private final PDDocument doc;
+        private final PDFont font;
+        private final PDFont bold;
+        private PDPageContentStream cs;
+        private float y;
+
+        Ctx(PDDocument doc, PDFont font, PDFont bold) {
+            this.doc = doc;
+            this.font = font;
+            this.bold = bold;
+        }
+
+        void newPage() throws IOException {
+            if (cs != null) {
+                cs.close();
+            }
+            PDPage page = new PDPage(PDRectangle.A4);
+            doc.addPage(page);
+            cs = new PDPageContentStream(doc, page);
+            y = PAGE_HEIGHT - MARGIN;
+        }
+
+        void ensureSpace(float needed) throws IOException {
+            if (y - needed < MARGIN) {
+                newPage();
+            }
+        }
+
+        void text(PDFont f, float size, float x, float baselineY, String s) throws IOException {
+            cs.beginText();
+            cs.setFont(f, size);
+            cs.newLineAtOffset(x, baselineY);
+            cs.showText(sanitize(f, s));
+            cs.endText();
+        }
+
+        void rect(float x, float yBottom, float w, float h) throws IOException {
+            cs.setLineWidth(0.5f);
+            cs.addRect(x, yBottom, w, h);
+            cs.stroke();
+        }
+
+        void close() throws IOException {
+            if (cs != null) {
+                cs.close();
+            }
         }
     }
 }

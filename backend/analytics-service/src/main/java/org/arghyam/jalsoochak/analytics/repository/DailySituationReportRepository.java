@@ -153,6 +153,50 @@ public class DailySituationReportRepository {
     }
 
     /**
+     * Per-scheme "no water supply" rows for the officer on {@code day} — the detail behind the
+     * Section 3 aggregate, used to build the Priority Actions table. For each of the officer's schemes
+     * that recorded an {@code outage_reason} on {@code day}, returns the scheme id, the outage reason,
+     * and the last date the scheme actually supplied water (any {@code confirmed_reading > 0}), from
+     * which the caller derives "no supply for N days". {@code lastSupplyDate} is null if the scheme has
+     * never supplied. Scheme name / IMIS id / operators are resolved downstream (message-service).
+     */
+    public List<NoSupplyScheme> listNoSupplyByScheme(Integer tenantId, Long userId, LocalDate day) {
+        String sql = """
+                WITH user_schemes AS (
+                    SELECT DISTINCT usm.scheme_id
+                    FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    WHERE usm.user_id = ?
+                      AND usm.tenant_id = ?
+                )
+                SELECT f.scheme_id,
+                       MIN(f.outage_reason) AS outage_reason,
+                       (SELECT MAX(m.reading_date)
+                          FROM analytics_schema.fact_meter_reading_table m
+                         WHERE m.scheme_id = f.scheme_id
+                           AND m.tenant_id = ?
+                           AND m.confirmed_reading > 0) AS last_supply_date
+                FROM analytics_schema.fact_water_quantity_table f
+                JOIN user_schemes us ON us.scheme_id = f.scheme_id
+                WHERE f.tenant_id = ?
+                  AND f.date = ?
+                  AND f.outage_reason IS NOT NULL
+                GROUP BY f.scheme_id
+                ORDER BY f.scheme_id
+                """;
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new NoSupplyScheme(
+                        rs.getInt("scheme_id"),
+                        rs.getString("outage_reason"),
+                        rs.getObject("last_supply_date", LocalDate.class)),
+                userId, tenantId, tenantId, tenantId, day);
+    }
+
+    /** One officer scheme that reported an outage on the report day, plus its last supply date. */
+    public record NoSupplyScheme(int schemeId, String outageReason, LocalDate lastSupplyDate) {
+    }
+
+    /**
      * Anomaly counts grouped by {@code type} for the officer's schemes over the half-open
      * interval {@code [fromInclusive, toExclusive)} of {@code created_at} (UTC-naive, matching
      * how anomaly timestamps are stored). Excludes soft-deleted rows.

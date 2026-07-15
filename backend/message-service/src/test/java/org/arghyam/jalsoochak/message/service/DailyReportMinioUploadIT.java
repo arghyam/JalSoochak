@@ -4,6 +4,7 @@ import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
+import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -62,7 +63,15 @@ class DailyReportMinioUploadIT {
         ReflectionTestUtils.setField(pdfService, "dashboardUrl", "https://jalsoochak.jjmbrain.in/");
         ReflectionTestUtils.setField(pdfService, "supportPhone", "919999999999");
 
-        String filename = pdfService.generate(sampleKpis(), "Binod Nimoli", "SECTION_OFFICER");
+        List<DailyReportPriorityRow> priority = List.of(
+                DailyReportPriorityRow.builder().scheme("Rampur WSS").imisId("RPWSS-108")
+                        .jalMitraNames("Ramesh Kumar").jalMitraMobiles("919000000001")
+                        .issue("Pump Failure").remarks("No water supply for past 7 days").build(),
+                DailyReportPriorityRow.builder().scheme("Sitapur WSS").imisId("RPWSS-214")
+                        .jalMitraNames("Suresh Rao").jalMitraMobiles("919000000002")
+                        .issue("Electricity Supply Disconnected").remarks("No water supply for past 6 days").build());
+
+        String filename = pdfService.generate(sampleKpis(), "Binod Nimoli", "SECTION_OFFICER", priority);
         Path localPdf = tempDir.resolve(filename);
         assertThat(localPdf.toFile()).exists();
 

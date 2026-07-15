@@ -25,5 +25,6 @@ public class DailyReportKpisEvent {
     private String tenantSchema;
     private Long officerUserId;
     private String officerUserType;    // SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
+    private String correlationId;      // ties one report run's logs across tenant/analytics/message
     private DailyReportKpiDTO kpis;
 }
