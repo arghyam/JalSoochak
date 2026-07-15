@@ -68,11 +68,15 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
 
     @Test
     void getSchemeRegularityMetrics_duplicateWaterRowsOnSameDay_doNotIncreaseSupplyDays() {
-        // Regularity supply days come from fact_water_quantity, de-duplicated to the latest row per
-        // (scheme, date). A supply day = SUBMITTED/legacy-NULL row with water_quantity > 0.
-        // scheme 1: two SUBMITTED rows on D1 (duplicate) + a SUBMITTED row on D3 => 2 supply days.
-        seedWaterQuantity(1, 11, D1, 100, SubmissionStatus.SUBMITTED.getCode());
-        seedWaterQuantity(1, 11, D1, 120, SubmissionStatus.SUBMITTED.getCode()); // duplicate day, must not add
+        // Regularity supply days come from fact_water_quantity, de-duplicated to the LATEST row per
+        // (scheme, date) via DISTINCT ON (... ORDER BY updated_at DESC, id DESC). A supply day =
+        // SUBMITTED/legacy-NULL row with water_quantity > 0, evaluated on that latest row only.
+        // scheme 1, D1: an earlier supplied row is superseded by a later NOT_SUBMITTED (outage) row,
+        // so the winning D1 row is non-supplied and D1 must NOT count. A SUBMITTED row on D3 => 1 supply day.
+        // (If the query merely counted distinct dates with any supplied row, D1 would wrongly count => 2,
+        // so this asserts latest-row de-duplication rather than distinct-date counting.)
+        seedWaterQuantity(1, 11, D1, 100, SubmissionStatus.SUBMITTED.getCode()); // earlier row: supplied
+        seedWaterQuantity(1, 11, D1, 0, SubmissionStatus.NOT_SUBMITTED.getCode()); // later row wins: non-supplied
         seedWaterQuantity(1, 11, D3, 80, SubmissionStatus.SUBMITTED.getCode());
         // scheme 2: only a NOT_SUBMITTED (outage) row => 0 supply days.
         seedWaterQuantity(2, 12, D1, 0, SubmissionStatus.NOT_SUBMITTED.getCode());
@@ -81,8 +85,8 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
                 repository.getSchemeRegularityMetrics(100, D1, D3);
 
         assertThat(metrics.schemeCount()).isEqualTo(2);
-        // scheme 1: D1 (dedup) + D3 => 2; scheme 2: 0 => total 2.
-        assertThat(metrics.totalSupplyDays()).isEqualTo(2);
+        // scheme 1: latest D1 row non-supplied (excluded) + D3 => 1; scheme 2: 0 => total 1.
+        assertThat(metrics.totalSupplyDays()).isEqualTo(1);
     }
 
     @Test
