@@ -117,11 +117,15 @@ class DailySituationReportRepositoryIntegrationTest {
     }
 
     @Test
-    void countAnomaliesByType_excludesSoftDeletedAndOutOfWindow() {
-        // Anomaly on PREV must not appear in DAY's window.
+    void countAnomaliesByType_scopesToQueriedDayWindow() {
+        // The PREV window must return only the PREV anomaly (a4, type 5) and none of
+        // DAY's anomalies (a1, a2) — confirming the window boundary is applied per day.
         List<DailyReportKpiDTO.TypeCount> prev = repository.countAnomaliesByType(
                 TENANT, OFFICER, PREV.atStartOfDay(), PREV.plusDays(1).atStartOfDay());
-        assertThat(prev).isEmpty();
+        assertThat(prev).singleElement().satisfies(c -> {
+            assertThat(c.getType()).isEqualTo("5");
+            assertThat(c.getCount()).isEqualTo(1);
+        });
     }
 
     // ---- seed helpers ----------------------------------------------------
@@ -141,6 +145,12 @@ class DailySituationReportRepositoryIntegrationTest {
         mapOfficer(1);
         mapOfficer(2);
         mapOfficer(3);
+
+        // Date dimension — fact_water_quantity_table.date has an FK to dim_date_table.full_date.
+        // Seed the full week window so any fact row in range satisfies the constraint.
+        for (int i = 0; i <= 6; i++) {
+            insertDate(DAY.minusDays(i));
+        }
 
         // Meter readings — DAY
         insertReading(1, 110, 120, DAY);   // supplies + submits
@@ -188,6 +198,20 @@ class DailySituationReportRepositoryIntegrationTest {
                  reading_at, channel, reading_date, created_at)
                 VALUES (?, ?, ?, ?, ?, 90, 'x', ?, 1, ?, NOW())
                 """, TENANT, schemeId, OFFICER, extracted, confirmed, date.atTime(10, 0), date);
+    }
+
+    private void insertDate(LocalDate date) {
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_date_table
+                (date_key, full_date, day, month, month_name, quarter, year, week, is_weekend, fiscal_year)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (date_key) DO NOTHING
+                """,
+                Integer.parseInt(date.toString().replace("-", "")), date,
+                date.getDayOfMonth(), date.getMonthValue(), date.getMonth().name(),
+                (date.getMonthValue() - 1) / 3 + 1, date.getYear(),
+                date.get(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear()),
+                date.getDayOfWeek().getValue() >= 6, date.getYear());
     }
 
     private void insertWaterQuantity(int schemeId, int litres, LocalDate date) {
