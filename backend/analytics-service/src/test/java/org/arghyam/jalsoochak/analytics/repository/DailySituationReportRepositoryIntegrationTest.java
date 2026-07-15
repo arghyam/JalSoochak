@@ -132,6 +132,8 @@ class DailySituationReportRepositoryIntegrationTest {
     void listNoSupplyByScheme_returnsOutageSchemesWithLastSupplyDate() {
         // scheme 2: a prior positive supply 3 days before + an outage reason recorded on DAY
         insertReading(2, 50, 50, DAY.minusDays(3));
+        // a positive reading AFTER the report day must not count as the last supply date
+        insertReading(2, 60, 60, DAY.plusDays(1));
         insertOutage(2, "Pump Failure", DAY);
         // scheme 3: outage reason on DAY, but never supplied → last supply date null
         insertOutage(3, "Pipeline Break", DAY);

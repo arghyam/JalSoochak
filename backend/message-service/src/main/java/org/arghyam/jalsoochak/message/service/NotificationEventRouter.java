@@ -925,12 +925,20 @@ public class NotificationEventRouter {
      */
     private List<DailyReportPriorityRow> buildPriorityRows(String tenantSchema, DailyReportKpis kpis, String corr) {
         List<DailyReportPriorityRow> rows = new ArrayList<>();
-        if (kpis.getPriorityActions() == null) {
+        if (kpis.getPriorityActions() == null || kpis.getPriorityActions().isEmpty()) {
             return rows;
         }
+        // Batch-fetch scheme labels and pump operators for all referenced schemes up front
+        // (two queries total) rather than two per priority action, then enrich from memory.
+        Set<Integer> schemeIds = new LinkedHashSet<>();
         for (DailyReportKpis.PriorityAction pa : kpis.getPriorityActions()) {
-            SchemeLabel scheme = resolveSchemeLabel(tenantSchema, pa.getSchemeId());
-            List<OperatorContact> operators = resolvePumpOperators(tenantSchema, pa.getSchemeId());
+            schemeIds.add(pa.getSchemeId());
+        }
+        Map<Integer, SchemeLabel> schemeLabels = resolveSchemeLabels(tenantSchema, schemeIds);
+        Map<Integer, List<OperatorContact>> operatorsByScheme = resolvePumpOperators(tenantSchema, schemeIds);
+        for (DailyReportKpis.PriorityAction pa : kpis.getPriorityActions()) {
+            SchemeLabel scheme = schemeLabels.getOrDefault(pa.getSchemeId(), new SchemeLabel(null, null));
+            List<OperatorContact> operators = operatorsByScheme.getOrDefault(pa.getSchemeId(), List.of());
             String names = operators.stream().map(OperatorContact::name)
                     .filter(n -> n != null && !n.isBlank()).collect(java.util.stream.Collectors.joining(", "));
             String mobiles = operators.stream().map(OperatorContact::phone)
@@ -1033,36 +1041,66 @@ public class NotificationEventRouter {
     private record OperatorContact(String name, String phone) {}
 
     /**
-     * Resolves a scheme's display name + IMIS id (centre_scheme_id) from the operational schema.
-     * {@code tenantSchema} is validated against {@link #SCHEMA_PATTERN} by the caller; {@code schemeId}
-     * binds as {@code ?}.
+     * Batch-resolves scheme display name + IMIS id (centre_scheme_id) for the given scheme ids from the
+     * operational schema, keyed by scheme id. {@code tenantSchema} is validated against
+     * {@link #SCHEMA_PATTERN} by the caller (schema names are SQL identifiers and cannot be bound as
+     * {@code ?}); the ids bind as parameters.
      */
     @SuppressWarnings("java:S2077")
-    private SchemeLabel resolveSchemeLabel(String tenantSchema, int schemeId) {
-        String sql = "SELECT scheme_name, centre_scheme_id FROM " + tenantSchema
-                + ".scheme_master_table WHERE id = ? AND deleted_at IS NULL LIMIT 1";
-        List<SchemeLabel> rows = jdbcTemplate.query(sql,
-                (rs, n) -> new SchemeLabel(rs.getString("scheme_name"), rs.getString("centre_scheme_id")),
-                schemeId);
-        return rows.isEmpty() ? new SchemeLabel(null, null) : rows.get(0);
+    private Map<Integer, SchemeLabel> resolveSchemeLabels(String tenantSchema, Set<Integer> schemeIds) {
+        if (schemeIds.isEmpty()) {
+            return Map.of();
+        }
+        String sql = "SELECT id, scheme_name, centre_scheme_id FROM " + tenantSchema
+                + ".scheme_master_table WHERE id IN (" + placeholders(schemeIds.size()) + ") AND deleted_at IS NULL";
+        List<SchemeRow> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new SchemeRow(rs.getInt("id"),
+                        new SchemeLabel(rs.getString("scheme_name"), rs.getString("centre_scheme_id"))),
+                schemeIds.toArray());
+        Map<Integer, SchemeLabel> byId = new LinkedHashMap<>();
+        for (SchemeRow row : rows) {
+            byId.put(row.schemeId(), row.label());
+        }
+        return byId;
     }
 
     /**
-     * Resolves all active PUMP_OPERATOR (Jal Mitra) users mapped to a scheme, with decrypted name +
-     * phone. {@code tenantSchema} is validated by the caller; {@code schemeId} binds as {@code ?}.
+     * Batch-resolves all active PUMP_OPERATOR (Jal Mitra) users mapped to the given schemes, with
+     * decrypted name + phone, grouped by scheme id. {@code tenantSchema} is validated by the caller;
+     * the ids bind as parameters.
      */
     @SuppressWarnings("java:S2077")
-    private List<OperatorContact> resolvePumpOperators(String tenantSchema, int schemeId) {
-        String sql = "SELECT u.title, u.phone_number FROM " + tenantSchema + ".user_scheme_mapping_table usm "
+    private Map<Integer, List<OperatorContact>> resolvePumpOperators(String tenantSchema, Set<Integer> schemeIds) {
+        if (schemeIds.isEmpty()) {
+            return Map.of();
+        }
+        String sql = "SELECT usm.scheme_id, u.title, u.phone_number FROM " + tenantSchema + ".user_scheme_mapping_table usm "
                 + "JOIN " + tenantSchema + ".user_table u ON u.id = usm.user_id "
                 + "JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type "
-                + "WHERE usm.scheme_id = ? AND UPPER(ut.c_name) = 'PUMP_OPERATOR' "
+                + "WHERE usm.scheme_id IN (" + placeholders(schemeIds.size()) + ") AND UPPER(ut.c_name) = 'PUMP_OPERATOR' "
                 + "AND usm.status = 1 AND u.status = 1 AND usm.deleted_at IS NULL AND u.deleted_at IS NULL "
-                + "ORDER BY u.id";
-        return jdbcTemplate.query(sql,
-                (rs, n) -> new OperatorContact(
-                        piiEncryptionService.safeDecrypt(rs.getString("title")),
-                        piiEncryptionService.safeDecrypt(rs.getString("phone_number"))),
-                schemeId);
+                + "ORDER BY usm.scheme_id, u.id";
+        List<OperatorRow> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new OperatorRow(rs.getInt("scheme_id"),
+                        new OperatorContact(
+                                piiEncryptionService.safeDecrypt(rs.getString("title")),
+                                piiEncryptionService.safeDecrypt(rs.getString("phone_number")))),
+                schemeIds.toArray());
+        Map<Integer, List<OperatorContact>> byScheme = new LinkedHashMap<>();
+        for (OperatorRow row : rows) {
+            byScheme.computeIfAbsent(row.schemeId(), k -> new ArrayList<>()).add(row.contact());
+        }
+        return byScheme;
     }
+
+    /** Builds a {@code ?, ?, ...} placeholder list of the given length for an {@code IN (...)} clause. */
+    private static String placeholders(int count) {
+        return String.join(", ", java.util.Collections.nCopies(count, "?"));
+    }
+
+    /** Intermediate row carrying the scheme id alongside its resolved label, for batch grouping. */
+    private record SchemeRow(int schemeId, SchemeLabel label) {}
+
+    /** Intermediate row carrying the scheme id alongside one resolved operator, for batch grouping. */
+    private record OperatorRow(int schemeId, OperatorContact contact) {}
 }

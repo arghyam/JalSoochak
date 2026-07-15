@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 /**
  * A fully-resolved Priority Actions row, ready to render in the PDF. Built in
@@ -21,7 +22,8 @@ public class DailyReportPriorityRow {
     private String scheme;          // scheme_name
     private String imisId;          // centre_scheme_id
     private String jalMitraNames;   // pump operator name(s), comma-joined
-    private String jalMitraMobiles; // pump operator phone(s), comma-joined
+    @ToString.Exclude
+    private String jalMitraMobiles; // pump operator phone(s), comma-joined — PII, omitted from toString()
     private String issue;           // outage reason (human name)
     private String remarks;         // e.g. "No water supply for past N days"
 }

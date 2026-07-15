@@ -174,7 +174,8 @@ public class DailySituationReportRepository {
                           FROM analytics_schema.fact_meter_reading_table m
                          WHERE m.scheme_id = f.scheme_id
                            AND m.tenant_id = ?
-                           AND m.confirmed_reading > 0) AS last_supply_date
+                           AND m.confirmed_reading > 0
+                           AND m.reading_date <= ?) AS last_supply_date
                 FROM analytics_schema.fact_water_quantity_table f
                 JOIN user_schemes us ON us.scheme_id = f.scheme_id
                 WHERE f.tenant_id = ?
@@ -189,7 +190,7 @@ public class DailySituationReportRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("outage_reason"),
                         rs.getObject("last_supply_date", LocalDate.class)),
-                userId, tenantId, tenantId, tenantId, day);
+                userId, tenantId, tenantId, day, tenantId, day);
     }
 
     /** One officer scheme that reported an outage on the report day, plus its last supply date. */

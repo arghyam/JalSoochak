@@ -1216,25 +1216,28 @@ class NotificationEventRouterTest {
                     when(rs.getString("phone_number")).thenReturn(null);
                     return List.of(rm.mapRow(rs, 0));
                 });
-        // Scheme label (by id).
-        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".scheme_master_table WHERE id = ?")),
+        // Scheme labels (batched by id).
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".scheme_master_table WHERE id IN")),
                 any(RowMapper.class), eq(7)))
                 .thenAnswer(inv -> {
                     RowMapper<Object> rm = inv.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
+                    when(rs.getInt("id")).thenReturn(7);
                     when(rs.getString("scheme_name")).thenReturn("Rampur WSS");
                     when(rs.getString("centre_scheme_id")).thenReturn("IMIS-7");
                     return List.of(rm.mapRow(rs, 0));
                 });
-        // Pump operators (by scheme) — two operators.
+        // Pump operators (batched by scheme) — two operators.
         when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains("PUMP_OPERATOR")),
                 any(RowMapper.class), eq(7)))
                 .thenAnswer(inv -> {
                     RowMapper<Object> rm = inv.getArgument(1);
                     ResultSet r1 = mock(ResultSet.class);
+                    when(r1.getInt("scheme_id")).thenReturn(7);
                     when(r1.getString("title")).thenReturn("enc-n1");
                     when(r1.getString("phone_number")).thenReturn("enc-p1");
                     ResultSet r2 = mock(ResultSet.class);
+                    when(r2.getInt("scheme_id")).thenReturn(7);
                     when(r2.getString("title")).thenReturn("enc-n2");
                     when(r2.getString("phone_number")).thenReturn("enc-p2");
                     return List.of(rm.mapRow(r1, 0), rm.mapRow(r2, 1));
