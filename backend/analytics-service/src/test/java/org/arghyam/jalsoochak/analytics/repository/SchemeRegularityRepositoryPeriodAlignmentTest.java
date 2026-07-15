@@ -14,7 +14,7 @@ class SchemeRegularityRepositoryPeriodAlignmentTest {
 
     @Test
     void weekIsRollingAnchoredToStartDate_monthIsCalendarAligned() throws Exception {
-        SchemeRegularityRepository repo = new SchemeRegularityRepository(mock(JdbcTemplate.class), "4");
+        SchemeRegularityRepository repo = new SchemeRegularityRepository(mock(JdbcTemplate.class), "4", false);
 
         Object weekParts = invokeBuildPeriodSqlParts(repo, PeriodScale.WEEK);
         String weekSeriesStart = invokeStringAccessor(weekParts, "periodStartFromSeries");

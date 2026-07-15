@@ -159,12 +159,15 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
-    void getSchemeRegularityMetricsByLgd_countsOnlyPositiveConfirmedReadingDays() {
+    void getSchemeRegularityMetricsByLgd_countsOnlyWaterSuppliedDays() {
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
                 repository.getSchemeRegularityMetrics(100, D1, D3);
 
+        // Regularity supply days now come from fact_water_quantity (SUBMITTED/legacy-NULL with
+        // water_quantity > 0), not meter readings. Over D1..D3 scheme 1 supplied only on D2 (SUBMITTED 200);
+        // D1 is NOT_SUBMITTED. Scheme 2 supplied 0 days. Total = 1 (was 2 under the reading-based definition).
         assertThat(metrics.schemeCount()).isEqualTo(2);
-        assertThat(metrics.totalSupplyDays()).isEqualTo(2);
+        assertThat(metrics.totalSupplyDays()).isEqualTo(1);
     }
 
     @Test
@@ -184,7 +187,8 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getReadingSubmissionRateMetricsByDepartment(200, D1, D3);
 
         assertThat(regularity.schemeCount()).isEqualTo(2);
-        assertThat(regularity.totalSupplyDays()).isEqualTo(2);
+        // Water-based supply days: scheme 1 supplied only on D2 (SUBMITTED); scheme 2 supplied 0 => 1 total.
+        assertThat(regularity.totalSupplyDays()).isEqualTo(1);
         assertThat(submission.schemeCount()).isEqualTo(2);
         assertThat(submission.totalSupplyDays()).isEqualTo(4);
     }
@@ -219,17 +223,19 @@ class SchemeRegularityRepositoryIntegrationTest {
         List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> byDept =
                 repository.getChildSchemeRegularityMetricsByDepartment(200, D1, D3);
 
+        // Water-based supply days: scheme 1 (child 101/dept 201) supplied only on D2 => 1 day;
+        // averageRegularity = 1 / (1 scheme * 3 days) = 0.3333. Scheme 2 (child 102/dept 202) supplied 0.
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
-        assertThat(byLgd.get(0).totalSupplyDays()).isEqualTo(2);
-        assertThat(byLgd.get(0).averageRegularity()).isEqualByComparingTo("0.6667");
+        assertThat(byLgd.get(0).totalSupplyDays()).isEqualTo(1);
+        assertThat(byLgd.get(0).averageRegularity()).isEqualByComparingTo("0.3333");
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).totalSupplyDays()).isEqualTo(0);
         assertThat(byLgd.get(1).averageRegularity()).isEqualByComparingTo("0.0000");
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
-        assertThat(byDept.get(0).totalSupplyDays()).isEqualTo(2);
+        assertThat(byDept.get(0).totalSupplyDays()).isEqualTo(1);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
         assertThat(byDept.get(1).totalSupplyDays()).isEqualTo(0);
     }
@@ -273,8 +279,9 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getChildSchemeRegularityMetricsByLgd(100, D1, D3);
         assertThat(childRegularity.get(0).lgdId()).isEqualTo(101);
         assertThat(childRegularity.get(0).schemeCount()).isEqualTo(1);
-        assertThat(childRegularity.get(0).totalSupplyDays()).isEqualTo(2);
-        assertThat(childRegularity.get(0).averageRegularity()).isEqualByComparingTo("0.6667");
+        // Water-based: scheme 1 supplied only on D2 => 1 supply day; 1 / (1 * 3) = 0.3333.
+        assertThat(childRegularity.get(0).totalSupplyDays()).isEqualTo(1);
+        assertThat(childRegularity.get(0).averageRegularity()).isEqualByComparingTo("0.3333");
 
         // Scheme-count helper stays distinct.
         assertThat(repository.getSchemeCountByLgdInScope(1, 100)).isEqualTo(2);
@@ -628,7 +635,8 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(weekOne.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
         assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 7));
         assertThat(weekOne.schemeCount()).isEqualTo(2);
-        assertThat(weekOne.totalSupplyDays()).isEqualTo(2);
+        // Water-based supply days: scheme 1 supplied only on D2 (SUBMITTED) in week one => 1.
+        assertThat(weekOne.totalSupplyDays()).isEqualTo(1);
         // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL only): only D2 (200) qualifies.
         assertThat(weekOne.totalWaterQuantity()).isEqualTo(200L);
 
@@ -649,8 +657,23 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(rows.get(0).periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
         assertThat(rows.get(0).periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 31));
         assertThat(rows.get(0).schemeCount()).isEqualTo(2);
-        assertThat(rows.get(0).totalSupplyDays()).isEqualTo(2);
+        // Water-based supply days: scheme 1 supplied only on D2 (SUBMITTED) => 1.
+        assertThat(rows.get(0).totalSupplyDays()).isEqualTo(1);
         // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL only): only D2 (200) qualifies.
+        assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(200L);
+    }
+
+    @Test
+    void getPeriodicSchemeRegularityForNation_monthScale_countsWaterSuppliedDays() {
+        List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> rows =
+                repository.getPeriodicSchemeRegularityForNation(D1, D3, PeriodScale.MONTH);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
+        assertThat(rows.get(0).schemeCount()).isEqualTo(2);
+        // Water-based supply days across all tenants: only scheme 1 / D2 (SUBMITTED) qualifies over D1..D3 => 1.
+        assertThat(rows.get(0).totalSupplyDays()).isEqualTo(1);
+        // total_water_quantity sums SUBMITTED/NULL rows only: D2 (200).
         assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(200L);
     }
 
@@ -1030,7 +1053,8 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(current).hasSize(2);
         assertThat(current.get(0).schemeId()).isEqualTo(1);
         assertThat(current.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
-        assertThat(current.get(0).supplyDays()).isEqualTo(2);
+        // supply_days now measured off fact_water_quantity: scheme 1 supplied only on D2 (SUBMITTED) => 1.
+        assertThat(current.get(0).supplyDays()).isEqualTo(1);
         // 200 liters (D2 SUBMITTED) / (households 10 * 3 days) = 6.6667
         assertThat(current.get(0).averageLitersPerHousehold()).isEqualByComparingTo("6.6667");
         assertThat(current.get(1).schemeId()).isEqualTo(2);

@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: V33 - Scheme id mismatch tracking (SCHEME-ID-MISMATCH)
+-- Migration: V34 - Scheme id mismatch tracking (SCHEME-ID-MISMATCH)
 -- ------------------------------------------------------------
 -- Some scheme rows in the tenant master data carry a wrong
 -- state_scheme_id or centre_scheme_id. A field submission carries
@@ -55,7 +55,8 @@ END $$;
 
 -- ── Part B: Ensure new tenant schemas include the same columns ──────────────
 -- Wrapper pattern (as used by V7/V10/V12/V31): preserve the current implementation once under a
--- versioned name, then wrap it to add the SCHEME-ID-MISMATCH columns.
+-- versioned name, then wrap it to add the SCHEME-ID-MISMATCH columns. The captured base therefore
+-- already includes the V32 flowvision provisioning, which must run before this migration.
 DO $$
 BEGIN
     IF EXISTS (
@@ -70,11 +71,11 @@ BEGIN
         SELECT 1
         FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE p.proname = 'create_tenant_schema_v33_base'
+        WHERE p.proname = 'create_tenant_schema_v34_base'
           AND n.nspname = 'common_schema'
           AND pg_get_function_identity_arguments(p.oid) = 'schema_name text'
     ) THEN
-        ALTER FUNCTION common_schema.create_tenant_schema(text) RENAME TO create_tenant_schema_v33_base;
+        ALTER FUNCTION common_schema.create_tenant_schema(text) RENAME TO create_tenant_schema_v34_base;
     END IF;
 END $$;
 
@@ -84,7 +85,7 @@ LANGUAGE plpgsql
 AS $func$
 BEGIN
     -- Execute the existing provisioning logic first.
-    PERFORM common_schema.create_tenant_schema_v33_base(schema_name);
+    PERFORM common_schema.create_tenant_schema_v34_base(schema_name);
 
     -- SCHEME-ID-MISMATCH: tracking columns for new tenant schemas. Guard with to_regclass so a
     -- partially-provisioned schema is skipped per-table instead of aborting on the follow-up

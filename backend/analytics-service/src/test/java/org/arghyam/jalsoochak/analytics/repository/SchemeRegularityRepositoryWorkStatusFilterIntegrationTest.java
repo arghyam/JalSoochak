@@ -65,6 +65,10 @@ class SchemeRegularityRepositoryWorkStatusFilterIntegrationTest {
         registry.add("spring.flyway.schemas", () -> "analytics_schema");
         // The behaviour under test: only work_status = 4 (handed-over) schemes are included.
         registry.add("analytics.dashboard.included-work-statuses", () -> "4");
+        // The continuous-schemes work_status filter defaults to OFF; this suite asserts the filtered
+        // (ON) behaviour for continuous schemes too, so enable it explicitly. The default-OFF path is
+        // covered by SchemeRegularityRepositoryContinuousWorkStatusToggleIntegrationTest.
+        registry.add("analytics.dashboard.continuous-schemes.work-status-filter-enabled", () -> "true");
     }
 
     @Autowired
