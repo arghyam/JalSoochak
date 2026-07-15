@@ -34,11 +34,24 @@ public class SchemeRegularityRepository {
      */
     private final DashboardWorkStatusFilter workStatusFilter;
 
+    /**
+     * Runtime kill-switch for the {@code work_status} filter on the continuous-schemes count/list API
+     * only (tenant dashboards; never the national tenant 0 — see
+     * {@link #withContinuousSchemesDashboardFragments(String)}). {@code true} keeps the filter;
+     * {@code false} counts/lists all schemes regardless of {@code work_status} (default). Every other dashboard
+     * query is unaffected. Flip via {@code analytics.dashboard.continuous-schemes.work-status-filter-enabled}
+     * with no code change.
+     */
+    private final boolean continuousSchemesWorkStatusFilterEnabled;
+
     public SchemeRegularityRepository(
             JdbcTemplate jdbcTemplate,
-            @Value("${analytics.dashboard.included-work-statuses:4}") String includedWorkStatusesCsv) {
+            @Value("${analytics.dashboard.included-work-statuses:4}") String includedWorkStatusesCsv,
+            @Value("${analytics.dashboard.continuous-schemes.work-status-filter-enabled:false}")
+            boolean continuousSchemesWorkStatusFilterEnabled) {
         this.jdbcTemplate = jdbcTemplate;
         this.workStatusFilter = new DashboardWorkStatusFilter(includedWorkStatusesCsv);
+        this.continuousSchemesWorkStatusFilterEnabled = continuousSchemesWorkStatusFilterEnabled;
     }
 
     private static final int NOT_SUBMITTED_STATUS = SubmissionStatus.NOT_SUBMITTED.getCode();
@@ -103,6 +116,24 @@ public class SchemeRegularityRepository {
     private String withDashboardFragments(String sql) {
         return withWaterFragments(sql
                 .replace("{{WS}}", workStatusFilter.andPredicate("s"))
+                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
+    }
+
+    /**
+     * Continuous-schemes variant of {@link #withDashboardFragments(String)}. The continuous-schemes
+     * count/list API (tenant dashboards only — never the national tenant 0, so these queries carry only
+     * the tenant-scoped {@code {{WS}}} token, never {@code {{NWS}}}) can turn its own {@code work_status}
+     * restriction on/off at runtime via {@code analytics.dashboard.continuous-schemes.work-status-filter-enabled}
+     * with no code change. When the flag is {@code false} the {@code {{WS}}} token renders to empty (no
+     * {@code work_status} restriction) for these queries only; every other dashboard query keeps the
+     * filter through {@link #withDashboardFragments(String)}. {@code {{NWS}}} is still resolved so the M1
+     * guard behaves identically, but continuous queries never contain it.
+     */
+    private String withContinuousSchemesDashboardFragments(String sql) {
+        String workStatusPredicate =
+                continuousSchemesWorkStatusFilterEnabled ? workStatusFilter.andPredicate("s") : "";
+        return withWaterFragments(sql
+                .replace("{{WS}}", workStatusPredicate)
                 .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
     }
 
@@ -3190,7 +3221,7 @@ public class SchemeRegularityRepository {
         // to line up with the reading_date IST day boundary. Both are plain TIMESTAMP storing UTC (anomaly
         // is normalized by migration V41; attempt is written UTC by telemetry), so "+ 5:30" is
         // session-timezone-independent — do NOT switch to AT TIME ZONE unless a column becomes timestamptz.
-        String sql = withDashboardFragments(String.format("""
+        String sql = withContinuousSchemesDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
@@ -3269,7 +3300,7 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        String sql = withContinuousSchemesDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
@@ -3314,7 +3345,7 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             int daysInRange
     ) {
-        String sql = withDashboardFragments("""
+        String sql = withContinuousSchemesDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
@@ -3371,7 +3402,7 @@ public class SchemeRegularityRepository {
 
         // REPORTED-METRIC: must use the SAME "reported day" definition as getContinuousSchemeCountByLgd so
         // the count (list=false) and the list (list=true) agree. Levers A/B/C mirror the count method.
-        String sql = withDashboardFragments(String.format("""
+        String sql = withContinuousSchemesDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
@@ -3455,7 +3486,7 @@ public class SchemeRegularityRepository {
             Integer limit,
             Integer offset
     ) {
-        String sql = withDashboardFragments("""
+        String sql = withContinuousSchemesDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
@@ -3529,7 +3560,7 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        String sql = withContinuousSchemesDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
                     FROM analytics_schema.dim_scheme_table s
