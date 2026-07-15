@@ -12,3 +12,8 @@
 * [Database Design](database-design.md)
 * [Non-functional Requirements](nfrs.md)
 * [Future Work](future-work.md)
+
+## Guides
+
+* [Installation Guide](installation-guide.md)
+* [Create a New Tenant (State/UT)](create-new-tenant.md)
