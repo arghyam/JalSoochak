@@ -107,6 +107,13 @@ analytics:
     # Empty/blank disables the filter (all schemes included).
     included-work-statuses: ${ANALYTICS_DASHBOARD_INCLUDED_WORK_STATUSES:4}
 
+    continuous-schemes:
+      # Toggles the work_status filter for the continuous-schemes count/list API ONLY (tenant
+      # dashboards; never the national tenant 0). Every other dashboard API always applies the filter.
+      # true  = restrict continuous-schemes to included-work-statuses schemes.
+      # false = count/list all schemes regardless of work_status. Flip without a code change (default).
+      work-status-filter-enabled: ${ANALYTICS_DASHBOARD_CONTINUOUS_SCHEMES_WORK_STATUS_FILTER_ENABLED:false}
+
   scheduler:
     common:
       cron: ${ANALYTICS_SCHEDULER_CRON:0 0 0 * * *}
