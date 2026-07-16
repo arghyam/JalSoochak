@@ -59,14 +59,11 @@ public class DailySituationReportService {
         DailyReportKpiDTO.DayKpis previousDay = buildDay(tenantId, officerUserId, previousDate, totalSchemes, population);
 
         // Section 3 + 4 are reported for the covered day (D-1) only.
-        // Section 3 ("Reasons for No Water Supply") is sourced from non_submission_reason: the
-        // reason an operator gave for not submitting a reading on the day (submission_status =
-        // NOT_SUBMITTED), grouped by reason with a distinct-scheme count.
         List<DailyReportKpiDTO.ReasonCount> reasons =
-                schemeRegularityRepository.getNonSubmissionReasonSchemeCountByUser(tenantId, officerUserId.intValue(), reportDate, reportDate)
+                schemeRegularityRepository.getOutageReasonSchemeCountByUser(tenantId, officerUserId.intValue(), reportDate, reportDate)
                         .stream()
                         .map(r -> DailyReportKpiDTO.ReasonCount.builder()
-                                .reason(r.nonSubmissionReason())
+                                .reason(r.outageReason())
                                 .count(r.schemeCount() != null ? r.schemeCount() : 0)
                                 .build())
                         .toList();
@@ -80,7 +77,7 @@ public class DailySituationReportService {
                         .stream()
                         .map(s -> DailyReportKpiDTO.PriorityAction.builder()
                                 .schemeId(s.schemeId())
-                                .issue(s.nonSubmissionReason())
+                                .issue(s.outageReason())
                                 .daysNoSupply(s.lastSupplyDate() == null
                                         ? null
                                         : (int) ChronoUnit.DAYS.between(s.lastSupplyDate(), reportDate))

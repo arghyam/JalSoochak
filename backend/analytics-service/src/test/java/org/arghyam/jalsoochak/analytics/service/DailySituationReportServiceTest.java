@@ -75,8 +75,8 @@ class DailySituationReportServiceTest {
                 eq(istDayStartUtc(PREV_DATE)), eq(istDayStartUtc(PREV_DATE.plusDays(1)))))
                 .thenReturn(List.of());
 
-        when(schemeRegularityRepository.getNonSubmissionReasonSchemeCountByUser(TENANT, (int) OFFICER, REPORT_DATE, REPORT_DATE))
-                .thenReturn(List.of(new SchemeRegularityRepository.NonSubmissionReasonSchemeCount("PUMP_FAILURE", 2)));
+        when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(TENANT, (int) OFFICER, REPORT_DATE, REPORT_DATE))
+                .thenReturn(List.of(new SchemeRegularityRepository.OutageReasonSchemeCount("PUMP_FAILURE", 2)));
 
         DailyReportKpiDTO dto = service.buildReport(TENANT, OFFICER, REPORT_DATE);
 
@@ -110,7 +110,7 @@ class DailySituationReportServiceTest {
         when(schemeRegularityRepository.getSchemeCountByUser(TENANT, (int) OFFICER)).thenReturn(0);
         when(reportRepository.populationServed(TENANT, OFFICER)).thenReturn(0L);
         when(reportRepository.countAnomaliesByType(any(), any(), any(), any())).thenReturn(List.of());
-        when(schemeRegularityRepository.getNonSubmissionReasonSchemeCountByUser(any(), any(), any(), any()))
+        when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(any(), any(), any(), any()))
                 .thenReturn(List.of());
 
         DailyReportKpiDTO dto = service.buildReport(TENANT, OFFICER, REPORT_DATE);
@@ -127,7 +127,7 @@ class DailySituationReportServiceTest {
         // Main SDO report scaffolding (values irrelevant to this assertion). The SDO's own
         // buildReport still runs, so stub the officer-scoped calls it shares with buildOfficerSummary.
         when(reportRepository.countAnomaliesByType(any(), any(), any(), any())).thenReturn(List.of());
-        when(schemeRegularityRepository.getNonSubmissionReasonSchemeCountByUser(any(), any(), any(), any()))
+        when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(any(), any(), any(), any()))
                 .thenReturn(List.of());
         when(schemeRegularityRepository.getSchemeCountByUser(TENANT, (int) OFFICER)).thenReturn(10);
         when(reportRepository.populationServed(TENANT, OFFICER)).thenReturn(1_000L);
@@ -161,7 +161,7 @@ class DailySituationReportServiceTest {
     @Test
     void buildReport_withoutSubordinates_hasEmptySectionOfficerSummaries() {
         when(reportRepository.countAnomaliesByType(any(), any(), any(), any())).thenReturn(List.of());
-        when(schemeRegularityRepository.getNonSubmissionReasonSchemeCountByUser(any(), any(), any(), any()))
+        when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(any(), any(), any(), any()))
                 .thenReturn(List.of());
 
         DailyReportKpiDTO dto = service.buildReport(TENANT, OFFICER, REPORT_DATE);

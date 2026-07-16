@@ -2,7 +2,6 @@ package org.arghyam.jalsoochak.analytics.repository;
 
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.analytics.dto.DailyReportKpiDTO;
-import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -23,9 +22,6 @@ import java.util.List;
 public class DailySituationReportRepository {
 
     private final JdbcTemplate jdbcTemplate;
-
-    /** fact_water_quantity_table.submission_status value marking a non-submission (no reading). */
-    private static final int NOT_SUBMITTED_STATUS = SubmissionStatus.NOT_SUBMITTED.getCode();
 
     /**
      * Number of the officer's schemes that supplied water on {@code day}
@@ -159,11 +155,10 @@ public class DailySituationReportRepository {
     /**
      * Per-scheme "no water supply" rows for the officer on {@code day} — the detail behind the
      * Section 3 aggregate, used to build the Priority Actions table. For each of the officer's schemes
-     * that recorded a {@code non_submission_reason} on {@code day} (with {@code submission_status =
-     * NOT_SUBMITTED}), returns the scheme id, that reason, and the last date the scheme actually
-     * supplied water (any {@code confirmed_reading > 0}), from which the caller derives "no supply for
-     * N days". {@code lastSupplyDate} is null if the scheme has never supplied. Scheme name / IMIS id /
-     * operators are resolved downstream (message-service).
+     * that recorded an {@code outage_reason} on {@code day}, returns the scheme id, the outage reason,
+     * and the last date the scheme actually supplied water (any {@code confirmed_reading > 0}), from
+     * which the caller derives "no supply for N days". {@code lastSupplyDate} is null if the scheme has
+     * never supplied. Scheme name / IMIS id / operators are resolved downstream (message-service).
      */
     public List<NoSupplyScheme> listNoSupplyByScheme(Integer tenantId, Long userId, LocalDate day) {
         String sql = """
@@ -174,7 +169,7 @@ public class DailySituationReportRepository {
                       AND usm.tenant_id = ?
                 )
                 SELECT f.scheme_id,
-                       MIN(f.non_submission_reason) AS non_submission_reason,
+                       MIN(f.outage_reason) AS outage_reason,
                        (SELECT MAX(m.reading_date)
                           FROM analytics_schema.fact_meter_reading_table m
                          WHERE m.scheme_id = f.scheme_id
@@ -185,8 +180,7 @@ public class DailySituationReportRepository {
                 JOIN user_schemes us ON us.scheme_id = f.scheme_id
                 WHERE f.tenant_id = ?
                   AND f.date = ?
-                  AND f.non_submission_reason IS NOT NULL
-                  AND f.submission_status = ?
+                  AND f.outage_reason IS NOT NULL
                 GROUP BY f.scheme_id
                 ORDER BY f.scheme_id
                 """;
@@ -194,13 +188,13 @@ public class DailySituationReportRepository {
                 sql,
                 (rs, rowNum) -> new NoSupplyScheme(
                         rs.getInt("scheme_id"),
-                        rs.getString("non_submission_reason"),
+                        rs.getString("outage_reason"),
                         rs.getObject("last_supply_date", LocalDate.class)),
-                userId, tenantId, tenantId, day, tenantId, day, NOT_SUBMITTED_STATUS);
+                userId, tenantId, tenantId, day, tenantId, day);
     }
 
-    /** One officer scheme with a non-submission reason on the report day, plus its last supply date. */
-    public record NoSupplyScheme(int schemeId, String nonSubmissionReason, LocalDate lastSupplyDate) {
+    /** One officer scheme that reported an outage on the report day, plus its last supply date. */
+    public record NoSupplyScheme(int schemeId, String outageReason, LocalDate lastSupplyDate) {
     }
 
     /**
