@@ -42,6 +42,8 @@ import org.arghyam.jalsoochak.user.exceptions.AccountTemporarilyLockedException;
 import org.arghyam.jalsoochak.user.exceptions.CaptchaVerificationException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
@@ -128,6 +130,9 @@ class AuthServiceImplTest {
     @Mock
     private CaptchaVerificationService captchaVerificationService;
 
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
     private AuthServiceImpl authService;
 
     @BeforeEach
@@ -136,7 +141,7 @@ class AuthServiceImplTest {
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
                 userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, passwordResetProperties,
                 frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper, dataVersionRepository,
-                captchaVerificationService
+                captchaVerificationService, transactionTemplate
         );
     }
 
@@ -536,6 +541,14 @@ class AuthServiceImplTest {
     @Nested
     @DisplayName("forgotPassword()")
     class ForgotPasswordTests {
+
+        @BeforeEach
+        void stubTransactionTemplate() {
+            // forgotPassword now runs its DB work inside transactionTemplate.execute(...);
+            // make the mock invoke the callback so the body executes.
+            when(transactionTemplate.execute(any())).thenAnswer(inv ->
+                    ((TransactionCallback<?>) inv.getArgument(0)).doInTransaction(null));
+        }
 
         @Test
         @DisplayName("Should return silently (OWASP) when email is not registered")

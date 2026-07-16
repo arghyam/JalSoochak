@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -15,6 +16,7 @@ import org.arghyam.jalsoochak.user.service.StaffKeycloakService.ProvisionResult;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import org.arghyam.jalsoochak.user.clients.KeycloakClient;
@@ -103,6 +105,10 @@ class StaffAuthServiceImplTest {
             request = new StaffOtpRequestDTO();
             request.setPhoneNumber("919876543210");
             request.setTenantCode("mp");
+            // requestOtp now runs its DB work inside transactionTemplate.execute(...); make the mock
+            // invoke the callback. lenient() because the captcha-failure test short-circuits first.
+            lenient().when(transactionTemplate.execute(any())).thenAnswer(inv ->
+                    ((TransactionCallback<?>) inv.getArgument(0)).doInTransaction(null));
         }
 
         @Test
