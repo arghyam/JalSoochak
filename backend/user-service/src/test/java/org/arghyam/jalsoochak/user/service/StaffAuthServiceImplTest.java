@@ -30,7 +30,9 @@ import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
+import org.arghyam.jalsoochak.user.exceptions.CaptchaVerificationException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
+import org.arghyam.jalsoochak.user.service.CaptchaVerificationService;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
@@ -55,6 +57,7 @@ class StaffAuthServiceImplTest {
     @Mock UserNotificationEventPublisher eventPublisher;
     @Mock UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock TransactionTemplate transactionTemplate;
+    @Mock CaptchaVerificationService captchaVerificationService;
 
     StaffAuthServiceImpl service;
 
@@ -86,7 +89,7 @@ class StaffAuthServiceImplTest {
         OtpProperties otpProps = new OtpProperties(10, 5, 60, 6, "WHATSAPP", null);
         service = new StaffAuthServiceImpl(userCommonRepository, userTenantRepository,
                 otpProps, otpService, staffKeycloakService, keycloakClient, eventPublisher,
-                userAnalyticsEventPublisher, transactionTemplate);
+                userAnalyticsEventPublisher, transactionTemplate, captchaVerificationService);
     }
 
     @Nested
@@ -115,6 +118,18 @@ class StaffAuthServiceImplTest {
 
             verify(otpService).requestOtp(10L, 1, OtpType.LOGIN);
             verify(eventPublisher).publishLoginOtpAfterCommit(any(SendLoginOtpEvent.class), eq(10L), eq("MP"));
+        }
+
+        @Test
+        @DisplayName("CAPTCHA failure short-circuits before any DB work or OTP send")
+        void captchaFailure_shortCircuits() {
+            doThrow(new CaptchaVerificationException("CAPTCHA verification failed"))
+                    .when(captchaVerificationService).verify(any(), eq("staff_otp"));
+
+            assertThatThrownBy(() -> service.requestOtp(request))
+                    .isInstanceOf(CaptchaVerificationException.class);
+
+            verifyNoInteractions(userCommonRepository, userTenantRepository, otpService, eventPublisher);
         }
 
         @Test

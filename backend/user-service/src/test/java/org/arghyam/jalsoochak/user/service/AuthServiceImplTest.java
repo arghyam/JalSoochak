@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -38,6 +39,7 @@ import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.AccountTemporarilyLockedException;
+import org.arghyam.jalsoochak.user.exceptions.CaptchaVerificationException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -123,6 +125,9 @@ class AuthServiceImplTest {
     @Mock
     private DataVersionRepository dataVersionRepository;
 
+    @Mock
+    private CaptchaVerificationService captchaVerificationService;
+
     private AuthServiceImpl authService;
 
     @BeforeEach
@@ -130,7 +135,8 @@ class AuthServiceImplTest {
         authService = new AuthServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
                 userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, passwordResetProperties,
-                frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper, dataVersionRepository
+                frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper, dataVersionRepository,
+                captchaVerificationService
         );
     }
 
@@ -238,6 +244,19 @@ class AuthServiceImplTest {
             AuthResult result = authService.login(loginRequest("sa@example.com", "pass"));
 
             assertNull(result.tokenResponse().getName());
+        }
+
+        @Test
+        @DisplayName("CAPTCHA failure short-circuits before any DB/Keycloak work")
+        void login_captchaFailure_shortCircuits() {
+            doThrow(new CaptchaVerificationException("CAPTCHA verification failed"))
+                    .when(captchaVerificationService).verify(any(), eq("login"));
+
+            assertThrows(CaptchaVerificationException.class,
+                    () -> authService.login(loginRequest("user@example.com", "pass")));
+
+            verify(userCommonRepository, never()).findAdminUserByEmail(anyString());
+            verify(keycloakClient, never()).obtainToken(anyString(), anyString());
         }
 
         @Test
