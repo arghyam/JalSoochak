@@ -21,6 +21,7 @@ import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
+import org.arghyam.jalsoochak.user.service.CaptchaVerificationService;
 import org.arghyam.jalsoochak.user.service.OtpService;
 import org.arghyam.jalsoochak.user.service.StaffAuthService;
 import org.arghyam.jalsoochak.user.service.StaffKeycloakService;
@@ -58,10 +59,14 @@ public class StaffAuthServiceImpl implements StaffAuthService {
     private final UserNotificationEventPublisher eventPublisher;
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final TransactionTemplate transactionTemplate;
+    private final CaptchaVerificationService captchaVerificationService;
 
     @Override
     @Transactional
     public OtpRequestResponseDTO requestOtp(StaffOtpRequestDTO request) {
+        // Verify CAPTCHA first — before any DB work or OTP send — so a failure short-circuits
+        // without revealing account state (anti-enumeration). No-op when captcha.enabled=false.
+        captchaVerificationService.verify(request.getCaptchaToken(), "staff_otp");
         String tenantCode = request.getTenantCode().trim().toUpperCase();
         String phone = request.getPhoneNumber().trim();
 

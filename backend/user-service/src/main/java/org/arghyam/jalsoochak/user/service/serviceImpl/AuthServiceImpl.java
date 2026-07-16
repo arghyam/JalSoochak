@@ -42,6 +42,7 @@ import org.arghyam.jalsoochak.user.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.service.AuthService;
+import org.arghyam.jalsoochak.user.service.CaptchaVerificationService;
 import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
 import org.arghyam.jalsoochak.user.service.MetadataDecryptionHelper;
 import org.arghyam.jalsoochak.user.service.TokenService;
@@ -83,6 +84,7 @@ public class AuthServiceImpl implements AuthService {
     private final ObjectMapper objectMapper;
     private final MetadataDecryptionHelper metadataDecryptionHelper;
     private final DataVersionRepository dataVersionRepository;
+    private final CaptchaVerificationService captchaVerificationService;
 
     /** Advisory Retry-After (seconds) sent with a lockout 429. Keep aligned with the realm's brute-force wait. */
     @Value("${security.login.lockout-retry-after-seconds:60}")
@@ -91,6 +93,9 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public AuthResult login(LoginRequestDTO request) {
         log.info("login – processing authentication request");
+        // Verify CAPTCHA first — before any DB/Keycloak work — so a failure short-circuits without
+        // revealing account state (anti-enumeration). No-op when captcha.enabled=false.
+        captchaVerificationService.verify(request.getCaptchaToken(), "login");
         AdminUserRow user = userCommonRepository.findAdminUserByEmail(request.getEmail())
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid credentials"));
 
@@ -354,6 +359,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public void forgotPassword(ForgotPasswordRequestDTO request) {
         log.info("forgotPassword – password reset requested");
+        captchaVerificationService.verify(request.getCaptchaToken(), "forgot_password");
         var userOpt = userCommonRepository.findAdminUserByEmail(request.getEmail());
         if (userOpt.isEmpty() || userOpt.get().status() == AdminUserStatus.PENDING) {
             return; // OWASP: no email enumeration; also silently skip PENDING users (not yet activated)
