@@ -4,6 +4,7 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.dto.common.ApiErrorResponseDTO;
 import org.slf4j.MDC;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -72,6 +73,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponseDTO> handleInvalidCredentials(InvalidCredentialsException ex) {
         log.warn("Authentication failed: {}", ex.getMessage());
         return build(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
+    @ExceptionHandler(AccountTemporarilyLockedException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleAccountLocked(AccountTemporarilyLockedException ex) {
+        log.warn("Login blocked – account temporarily locked by brute-force detection");
+        ResponseEntity<ApiErrorResponseDTO> response = build(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+                .body(response.getBody());
     }
 
     @ExceptionHandler(AccountDeactivatedException.class)
