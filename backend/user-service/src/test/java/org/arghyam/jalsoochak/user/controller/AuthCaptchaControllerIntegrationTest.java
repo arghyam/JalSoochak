@@ -188,13 +188,17 @@ class AuthCaptchaControllerIntegrationTest {
     }
 
     // ── staff OTP ──────────────────────────────────────────────────────────────
+    // Note: these payloads use an all-digits placeholder (919999999999) rather than the
+    // project-standard 91XXXXXXXXXX PII mask because StaffOtpRequestDTO.phoneNumber enforces
+    // a digits-only @Pattern; the masked form would fail bean validation and mask what these
+    // tests actually assert (the CAPTCHA gate). The number is not a real subscriber.
 
     @Test
     @DisplayName("staff OTP with a missing CAPTCHA token → 400 (before tenant/phone lookup)")
     void staffOtp_missingCaptcha_returns400() throws Exception {
         mockMvc.perform(post("/api/v1/auth/staff/otp")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phoneNumber\":\"919876543210\",\"tenantCode\":\"MP\"}"))
+                        .content("{\"phoneNumber\":\"919999999999\",\"tenantCode\":\"MP\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -205,7 +209,7 @@ class AuthCaptchaControllerIntegrationTest {
 
         mockMvc.perform(post("/api/v1/auth/staff/otp")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phoneNumber\":\"919876543210\",\"tenantCode\":\"MP\",\"captchaToken\":\"good\"}"))
+                        .content("{\"phoneNumber\":\"919999999999\",\"tenantCode\":\"MP\",\"captchaToken\":\"good\"}"))
                 .andExpect(status().isNotFound());
     }
 }

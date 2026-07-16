@@ -215,7 +215,13 @@ public class StaffAuthServiceImpl implements StaffAuthService {
             provisionResult = staffKeycloakService.ensureKeycloakAccount(freshUser, tenantCode, schema);
             token = keycloakClient.obtainToken(freshUser.phoneNumber(), provisionResult.managedPassword());
         } catch (RuntimeException e) {
-            otpService.revertOtpConsumption(consumedOtpId);
+            try {
+                otpService.revertOtpConsumption(consumedOtpId);
+            } catch (RuntimeException revertEx) {
+                // Never let a reversion failure mask the original cause.
+                e.addSuppressed(revertEx);
+                log.error("OTP consumption reversion failed for consumedOtpId={}", consumedOtpId, revertEx);
+            }
             throw e;
         } finally {
             // Sync the newly-provisioned Keycloak UUID to analytics_schema.dim_user_table.
