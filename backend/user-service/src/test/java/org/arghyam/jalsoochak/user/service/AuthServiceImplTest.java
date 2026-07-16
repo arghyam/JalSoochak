@@ -37,7 +37,10 @@ import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
+import org.arghyam.jalsoochak.user.exceptions.AccountTemporarilyLockedException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
 import org.arghyam.jalsoochak.user.enums.ResourceType;
@@ -244,6 +247,33 @@ class AuthServiceImplTest {
 
             assertThrows(InvalidCredentialsException.class,
                     () -> authService.login(loginRequest("nobody@example.com", "pass")));
+        }
+
+        @Test
+        @DisplayName("Should raise AccountTemporarilyLockedException when a 401 hides a brute-force lockout")
+        void login_lockedAccount_throwsTooManyRequests() {
+            when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakClient.obtainToken("user@example.com", "wrong"))
+                    .thenThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username, password, or refresh token"));
+            when(keycloakAdminHelper.isTemporarilyLockedByBruteForce("kc-uuid")).thenReturn(true);
+
+            assertThrows(AccountTemporarilyLockedException.class,
+                    () -> authService.login(loginRequest("user@example.com", "wrong")));
+        }
+
+        @Test
+        @DisplayName("Wrong password on an unlocked account is normalised to the generic invalid-credentials error")
+        void login_wrongPassword_notLocked_normalisesToInvalidCredentials() {
+            when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakClient.obtainToken("user@example.com", "wrong"))
+                    .thenThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username, password, or refresh token"));
+            when(keycloakAdminHelper.isTemporarilyLockedByBruteForce("kc-uuid")).thenReturn(false);
+
+            InvalidCredentialsException ex = assertThrows(InvalidCredentialsException.class,
+                    () -> authService.login(loginRequest("user@example.com", "wrong")));
+
+            // Must match the unknown-account message verbatim so responses are indistinguishable.
+            assertEquals("Invalid credentials", ex.getMessage());
         }
 
         @Test
