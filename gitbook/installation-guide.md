@@ -37,7 +37,7 @@ Perform the following steps directly on your external PostgreSQL host:
 
 ### 3.1. Install PostgreSQL
 Refer to the official package repository for your OS. For Ubuntu/Debian:
-```bash
+```bash  
 sudo apt update
 sudo apt install postgresql postgresql-contrib -y
 ```
@@ -194,7 +194,7 @@ If your images are hosted in a private AWS Elastic Container Registry (ECR), you
 Navigate to the `infra/deploy-as-code` directory and trigger the deployment.
 
 > [!IMPORTANT]
-> Since PostgreSQL is running on an external VM, **do not** apply `postgres-helmfile.yaml`. Applying it would deploy an in-cluster PostgreSQL client. Only execute `jalsoochak-helmfile.yaml`.
+> Since PostgreSQL is running on an external VM, **do not** apply `postgres-helmfile.yaml`. Applying it would deploy an in-cluster PostgreSQL Server. Only execute `jalsoochak-helmfile.yaml`.
 
 Run Helmfile deploy:
 ```bash
