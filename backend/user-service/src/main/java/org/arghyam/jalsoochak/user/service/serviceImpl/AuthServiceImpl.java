@@ -56,6 +56,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -85,6 +86,7 @@ public class AuthServiceImpl implements AuthService {
     private final MetadataDecryptionHelper metadataDecryptionHelper;
     private final DataVersionRepository dataVersionRepository;
     private final CaptchaVerificationService captchaVerificationService;
+    private final TransactionTemplate transactionTemplate;
 
     /** Advisory Retry-After (seconds) sent with a lockout 429. Keep aligned with the realm's brute-force wait. */
     @Value("${security.login.lockout-retry-after-seconds:60}")
@@ -356,10 +358,19 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    @Transactional
     public void forgotPassword(ForgotPasswordRequestDTO request) {
         log.info("forgotPassword – password reset requested");
+        // Verify CAPTCHA before opening a transaction: the external verification call must not run
+        // inside a DB transaction (which would otherwise hold a pooled connection for its duration),
+        // and a failure short-circuits without any DB work. No-op when captcha.enabled=false.
         captchaVerificationService.verify(request.getCaptchaToken(), "forgot_password");
+        transactionTemplate.execute(status -> {
+            forgotPasswordTransactional(request);
+            return null;
+        });
+    }
+
+    private void forgotPasswordTransactional(ForgotPasswordRequestDTO request) {
         var userOpt = userCommonRepository.findAdminUserByEmail(request.getEmail());
         if (userOpt.isEmpty() || userOpt.get().status() == AdminUserStatus.PENDING) {
             return; // OWASP: no email enumeration; also silently skip PENDING users (not yet activated)

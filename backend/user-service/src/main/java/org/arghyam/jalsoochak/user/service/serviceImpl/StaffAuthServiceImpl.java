@@ -27,7 +27,6 @@ import org.arghyam.jalsoochak.user.service.StaffAuthService;
 import org.arghyam.jalsoochak.user.service.StaffKeycloakService;
 import org.arghyam.jalsoochak.user.util.TenantAccessValidator;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Objects;
@@ -62,11 +61,15 @@ public class StaffAuthServiceImpl implements StaffAuthService {
     private final CaptchaVerificationService captchaVerificationService;
 
     @Override
-    @Transactional
     public OtpRequestResponseDTO requestOtp(StaffOtpRequestDTO request) {
-        // Verify CAPTCHA first — before any DB work or OTP send — so a failure short-circuits
-        // without revealing account state (anti-enumeration). No-op when captcha.enabled=false.
+        // Verify CAPTCHA before opening a transaction: the external verification call must not run
+        // inside a DB transaction (which would otherwise hold a pooled connection for its duration),
+        // and a failure short-circuits without any DB work. No-op when captcha.enabled=false.
         captchaVerificationService.verify(request.getCaptchaToken(), "staff_otp");
+        return Objects.requireNonNull(transactionTemplate.execute(status -> requestOtpTransactional(request)));
+    }
+
+    private OtpRequestResponseDTO requestOtpTransactional(StaffOtpRequestDTO request) {
         String tenantCode = request.getTenantCode().trim().toUpperCase();
         String phone = request.getPhoneNumber().trim();
 
