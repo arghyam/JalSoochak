@@ -12,6 +12,7 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -113,6 +114,28 @@ public class KeycloakAdminHelper {
             log.info("Compensated: deleted Keycloak user {}", keycloakId);
         } catch (Exception e) {
             log.error("Failed to compensate Keycloak user {}", keycloakId, e);
+        }
+    }
+
+    /**
+     * Reports whether realm brute-force detection has temporarily locked the given Keycloak user.
+     * <p>
+     * The token endpoint returns a generic {@code invalid_grant / "Invalid user credentials"} for a
+     * locked account (indistinguishable from a wrong password), so lockout can only be observed via
+     * the admin attack-detection API. Fails open — a status-check error returns {@code false} so a
+     * transient admin-API problem never blocks an otherwise-valid login attempt.
+     */
+    public boolean isTemporarilyLockedByBruteForce(String keycloakId) {
+        if (keycloakId == null || keycloakId.isBlank()) return false;
+        try {
+            Map<String, Object> status = keycloakProvider.getAdminInstance()
+                    .realm(keycloakProvider.getRealm())
+                    .attackDetection()
+                    .bruteForceUserStatus(keycloakId);
+            return Boolean.TRUE.equals(status.get("disabled"));
+        } catch (Exception e) {
+            log.warn("Could not read brute-force status for Keycloak user {}: {}", keycloakId, e.getMessage());
+            return false;
         }
     }
 }
