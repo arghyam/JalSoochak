@@ -84,6 +84,12 @@ public class GlobalExceptionHandler {
                 .body(response.getBody());
     }
 
+    @ExceptionHandler(CaptchaVerificationException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleCaptchaVerification(CaptchaVerificationException ex) {
+        log.warn("CAPTCHA verification failed");
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
     @ExceptionHandler(AccountDeactivatedException.class)
     public ResponseEntity<ApiErrorResponseDTO> handleDeactivated(AccountDeactivatedException ex) {
         log.warn("Access denied – account deactivated: {}", ex.getMessage());
