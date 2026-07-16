@@ -124,7 +124,9 @@ public class DailyReportPdfService {
             sectionTitle(ctx, "1. Summary");
 
             // SDO only: per-Section-Officer breakdown table, drawn FIRST in the Summary section.
-            if (isSdo(officerUserType) && sectionOfficerRows != null && !sectionOfficerRows.isEmpty()) {
+            // Always rendered for an SDO report; sectionOfficerSummaryRows draws an empty-state row
+            // when there are no section officers.
+            if (isSdo(officerUserType)) {
                 float[] soCols = {78, 62, 42, 48, 48, 42, 42, 55, 55, CONTENT_WIDTH - 472};
                 String[] soHeader = {
                         "Section Officer Name", "Mobile No.", "Total Schemes",
