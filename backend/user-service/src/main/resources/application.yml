@@ -93,6 +93,15 @@ http-client:
   connect-timeout-ms: ${HTTP_CONNECT_TIMEOUT_MS:5000}
   read-timeout-ms: ${HTTP_READ_TIMEOUT_MS:10000}
 
+# Server-side CAPTCHA verification on unauthenticated auth endpoints (login, staff OTP, forgot-password).
+# Ships dark: enabled=false makes verify(...) a no-op. Flip CAPTCHA_ENABLED=true (and set the secret)
+# per environment once the frontend sends captchaToken. Reuses the http-client.* timeouts.
+captcha:
+  enabled: ${CAPTCHA_ENABLED:false}
+  provider: ${CAPTCHA_PROVIDER:recaptcha-v2}
+  verify-url: ${CAPTCHA_VERIFY_URL:https://www.google.com/recaptcha/api/siteverify}
+  secret-key: ${CAPTCHA_SECRET_KEY:}
+
 pii:
   encryption-key: ${PII_ENCRYPTION_KEY}
   hmac-key: ${PII_HMAC_KEY}
