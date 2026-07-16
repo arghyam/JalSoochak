@@ -24,6 +24,7 @@ import org.arghyam.jalsoochak.user.dto.response.TokenResponseDTO;
 import org.arghyam.jalsoochak.user.enums.AdminUserStatus;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
+import org.arghyam.jalsoochak.user.exceptions.AccountTemporarilyLockedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
@@ -50,8 +51,11 @@ import org.arghyam.jalsoochak.user.util.TenantAccessValidator;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -80,6 +84,10 @@ public class AuthServiceImpl implements AuthService {
     private final MetadataDecryptionHelper metadataDecryptionHelper;
     private final DataVersionRepository dataVersionRepository;
 
+    /** Advisory Retry-After (seconds) sent with a lockout 429. Keep aligned with the realm's brute-force wait. */
+    @Value("${security.login.lockout-retry-after-seconds:60}")
+    private long lockoutRetryAfterSeconds;
+
     @Override
     public AuthResult login(LoginRequestDTO request) {
         log.info("login – processing authentication request");
@@ -95,7 +103,27 @@ public class AuthServiceImpl implements AuthService {
 
         validateTenantStatus(user.tenantId(), TenantAccessRole.fromCName(user.userTypeCName()));
 
-        KeycloakTokenResponse token = keycloakClient.obtainToken(request.getEmail(), request.getPassword());
+        KeycloakTokenResponse token;
+        try {
+            token = keycloakClient.obtainToken(request.getEmail(), request.getPassword());
+        } catch (ResponseStatusException e) {
+            // A locked account returns the same generic 401 as a wrong password, so only the admin
+            // attack-detection API can distinguish it. KeycloakClient may also pre-detect lockout as
+            // a 429 (for Keycloak setups that send an explicit message). Either way, surface a
+            // friendly 429 with Retry-After.
+            boolean lockedViaKeycloakBody = e.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS;
+            boolean lockedViaAttackDetection = e.getStatusCode() == HttpStatus.UNAUTHORIZED
+                    && keycloakAdminHelper.isTemporarilyLockedByBruteForce(user.uuid());
+            if (lockedViaKeycloakBody || lockedViaAttackDetection) {
+                throw new AccountTemporarilyLockedException(lockoutRetryAfterSeconds);
+            }
+            // Wrong password: normalise to the exact same 401 as an unknown account so the response
+            // does not reveal whether the account exists (account-enumeration hardening).
+            if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                throw new InvalidCredentialsException("Invalid credentials");
+            }
+            throw e;
+        }
         return buildEnrichedAuthResult(token, user);
     }
 
