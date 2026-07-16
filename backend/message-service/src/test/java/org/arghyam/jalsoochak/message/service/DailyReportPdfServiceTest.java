@@ -5,6 +5,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
+import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -71,9 +72,23 @@ class DailyReportPdfServiceTest {
                         .issue("Electricity Supply Disconnected").remarks("No water supply for past 6 days").build());
     }
 
+    private List<DailyReportSectionOfficerRow> sampleSectionOfficers() {
+        return List.of(
+                DailyReportSectionOfficerRow.builder()
+                        .officerName("Alice").officerMobile("919868595001")
+                        .totalSchemes(154).schemesSupplying(148).schemesNotSupplying(6)
+                        .avgLpcd(67).avgMld(678).regularSupplyPctWeek(32).readingSubmissionPct(78)
+                        .anomalousCount(8).build(),
+                DailyReportSectionOfficerRow.builder()
+                        .officerName("Bob").officerMobile("919868595002")
+                        .totalSchemes(90).schemesSupplying(80).schemesNotSupplying(10)
+                        .avgLpcd(55).avgMld(400).regularSupplyPctWeek(60).readingSubmissionPct(88)
+                        .anomalousCount(2).build());
+    }
+
     @Test
     void generate_createsValidPdfWithExpectedFilename() throws Exception {
-        String filename = service.generate(sampleKpis(), "Binod Nimoli", "SECTION_OFFICER", samplePriority());
+        String filename = service.generate(sampleKpis(), "Binod Nimoli", "SECTION_OFFICER", samplePriority(), List.of());
 
         assertThat(filename)
                 .startsWith("daily_report_SECTION_OFFICER_Binod_Nimoli_2026-07-07")
@@ -155,8 +170,40 @@ class DailyReportPdfServiceTest {
         assertThat(text).contains("No anomalies");
     }
 
+    @Test
+    void generate_sdoReport_rendersSectionOfficerBreakdownTableFirstInSummary() throws Exception {
+        String filename = service.generate(
+                sampleKpis(), "SDO Kumar", "SUB_DIVISIONAL_OFFICER", samplePriority(), sampleSectionOfficers());
+        assertThat(filename).startsWith("daily_report_SUB_DIVISIONAL_OFFICER_SDO_Kumar_2026-07-07");
+
+        String text;
+        try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            text = new PDFTextStripper().getText(doc);
+        }
+        // Extra breakdown table + its officers appear, alongside the normal SO sections.
+        assertThat(text).contains("Section Officer");   // breakdown header token
+        assertThat(text).contains("Alice");
+        assertThat(text).contains("Bob");
+        assertThat(text).contains("1. Summary");
+        assertThat(text).contains("2. Priority Actions");
+        // The breakdown table is drawn before the KPI summary table: the first officer name
+        // precedes the "Yesterday" summary-table header in the extracted text.
+        assertThat(text.indexOf("Alice")).isLessThan(text.indexOf("Yesterday"));
+    }
+
+    @Test
+    void generate_soReport_doesNotRenderSectionOfficerBreakdown() throws Exception {
+        // Even if summaries were somehow supplied, a SECTION_OFFICER layout must not draw the table.
+        String filename = service.generate(
+                sampleKpis(), "Binod Nimoli", "SECTION_OFFICER", samplePriority(), sampleSectionOfficers());
+        try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            String text = new PDFTextStripper().getText(doc);
+            assertThat(text).doesNotContain("Alice");
+        }
+    }
+
     private String renderText(DailyReportKpis kpis, List<DailyReportPriorityRow> priority) throws Exception {
-        String filename = service.generate(kpis, "Binod Nimoli", "SECTION_OFFICER", priority);
+        String filename = service.generate(kpis, "Binod Nimoli", "SECTION_OFFICER", priority, List.of());
         try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
             return new PDFTextStripper().getText(doc);
         }

@@ -9,6 +9,7 @@ import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
+import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -49,7 +50,8 @@ public class DailyReportPdfService {
     private static final float PAGE_WIDTH = PDRectangle.A4.getWidth();
     private static final float PAGE_HEIGHT = PDRectangle.A4.getHeight();
     private static final float CONTENT_WIDTH = PAGE_WIDTH - 2 * MARGIN;
-    private static final float CELL_PAD = 3f;
+    private static final float CELL_PAD = 6f;
+    private static final float LINE_SPACING = 1.5f;
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final DateTimeFormatter DISPLAY = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
@@ -82,13 +84,17 @@ public class DailyReportPdfService {
     /**
      * Generates the report PDF and returns the filename (not the full path).
      *
-     * @param kpis            computed KPI payload from analytics-service
-     * @param officerName     decrypted officer display name (resolved by the caller)
-     * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER (drives filename + layout)
-     * @param priorityRows    fully-resolved Priority Actions rows (scheme/IMIS/operators/issue/remarks)
+     * @param kpis              computed KPI payload from analytics-service
+     * @param officerName       decrypted officer display name (resolved by the caller)
+     * @param officerUserType   SECTION_OFFICER | SUB_DIVISIONAL_OFFICER (drives filename + layout)
+     * @param priorityRows      fully-resolved Priority Actions rows (scheme/IMIS/operators/issue/remarks)
+     * @param sectionOfficerRows SDO-only per-officer Summary breakdown rows (name/mobile + KPIs); drawn
+     *                          as the first table of the Summary section for a SUB_DIVISIONAL_OFFICER.
+     *                          Ignored (may be null/empty) for a SECTION_OFFICER report.
      */
     public String generate(DailyReportKpis kpis, String officerName, String officerUserType,
-                           List<DailyReportPriorityRow> priorityRows) throws IOException {
+                           List<DailyReportPriorityRow> priorityRows,
+                           List<DailyReportSectionOfficerRow> sectionOfficerRows) throws IOException {
         ensureReportDirExists();
 
         LocalDate reportDate = LocalDate.parse(kpis.getReportDate(), ISO);
@@ -116,6 +122,19 @@ public class DailyReportPdfService {
 
             // ---- 1. Summary ----
             sectionTitle(ctx, "1. Summary");
+
+            // SDO only: per-Section-Officer breakdown table, drawn FIRST in the Summary section.
+            if (isSdo(officerUserType) && sectionOfficerRows != null && !sectionOfficerRows.isEmpty()) {
+                float[] soCols = {78, 62, 42, 48, 48, 42, 42, 55, 55, CONTENT_WIDTH - 472};
+                String[] soHeader = {
+                        "Section Officer Name", "Mobile No.", "Total Schemes",
+                        "Schemes Supplying Water", "Schemes Not Supplying Water",
+                        "Average LPCD", "Average MLD", "Regular Supply (%) for past 1 week",
+                        "Reading Submission (%)", "Anomalous Submissions"};
+                drawTable(ctx, soCols, soHeader, sectionOfficerSummaryRows(sectionOfficerRows), 7f, 7f);
+                ctx.y -= 12;
+            }
+
             float[] sumCols = {215, 110, 110, CONTENT_WIDTH - 435};
             String[] sumHeader = {
                     "KPI",
@@ -182,6 +201,29 @@ public class DailyReportPdfService {
 
     private String[] dblRow(String label, double yVal, double pVal, String suffix) {
         return new String[]{label, fmt(yVal) + suffix, fmt(pVal) + suffix, trendDouble(yVal - pVal, suffix)};
+    }
+
+    private static boolean isSdo(String officerUserType) {
+        return "SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType != null ? officerUserType.trim() : null);
+    }
+
+    private List<String[]> sectionOfficerSummaryRows(List<DailyReportSectionOfficerRow> rows) {
+        List<String[]> out = new ArrayList<>();
+        if (rows == null || rows.isEmpty()) {
+            out.add(new String[]{"No section officers for this SDO", "", "", "", "", "", "", "", "", ""});
+            return out;
+        }
+        for (DailyReportSectionOfficerRow r : rows) {
+            out.add(new String[]{
+                    nvl(r.getOfficerName()), nvl(r.getOfficerMobile()),
+                    String.valueOf(r.getTotalSchemes()),
+                    String.valueOf(r.getSchemesSupplying()),
+                    String.valueOf(r.getSchemesNotSupplying()),
+                    fmt(r.getAvgLpcd()), fmt(r.getAvgMld()),
+                    fmt(r.getRegularSupplyPctWeek()) + "%", fmt(r.getReadingSubmissionPct()) + "%",
+                    String.valueOf(r.getAnomalousCount())});
+        }
+        return out;
     }
 
     private List<String[]> priorityActionRows(List<DailyReportPriorityRow> rows) {
@@ -276,7 +318,7 @@ public class DailyReportPdfService {
         ctx.ensureSpace(40);
         ctx.y -= 18;
         ctx.text(ctx.bold, 13, MARGIN, ctx.y, title);
-        ctx.y -= 6;
+        ctx.y -= 14;
     }
 
     private void headerLine(Ctx ctx, PDFont font, float size, String text) throws IOException {
@@ -301,7 +343,7 @@ public class DailyReportPdfService {
     }
 
     private float rowHeight(PDFont font, float fontSize, float[] colW, String[] cells) throws IOException {
-        float lh = fontSize * 1.25f;
+        float lh = fontSize * LINE_SPACING;
         int maxLines = 1;
         for (int c = 0; c < colW.length; c++) {
             int lines = wrapCell(font, fontSize, cellAt(cells, c), colW[c] - 2 * CELL_PAD).size();
@@ -311,7 +353,7 @@ public class DailyReportPdfService {
     }
 
     private void drawRow(Ctx ctx, float[] colW, String[] cells, PDFont font, float fontSize) throws IOException {
-        float lh = fontSize * 1.25f;
+        float lh = fontSize * LINE_SPACING;
         List<List<String>> wrapped = new ArrayList<>();
         int maxLines = 1;
         for (int c = 0; c < colW.length; c++) {

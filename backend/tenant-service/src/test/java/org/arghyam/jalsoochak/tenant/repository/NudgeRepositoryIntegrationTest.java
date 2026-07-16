@@ -421,6 +421,63 @@ class NudgeRepositoryIntegrationTest {
         assertThat(ids).isEmpty();
     }
 
+    // ───────────────────── findSubordinateSectionOfficerIds ─────────────────────
+
+    @Test
+    void findSubordinateSectionOfficerIds_returnsSectionOfficersSharingTheSdosSchemes() {
+        int schemeB = insertScheme("S-B");
+        int schemeC = insertScheme("S-C");
+
+        // SDO (role irrelevant to the SDO side of the join) mapped to schemes A(setUp) and B.
+        int sdo = insertUser("SDO One", "919000000030", districtOfficerTypeId);
+        insertSchemeMapping(sdo, schemeId, 1);
+        insertSchemeMapping(sdo, schemeB, 1);
+
+        // Two Section Officers sharing the SDO's schemes → included (distinct).
+        int so1 = insertUser("SO Alpha", "919000000031", sectionOfficerTypeId);
+        int so2 = insertUser("SO Beta", "919000000032", sectionOfficerTypeId);
+        insertSchemeMapping(so1, schemeId, 1);
+        insertSchemeMapping(so2, schemeB, 1);
+
+        // Section Officer on a scheme the SDO does NOT oversee → excluded.
+        int soOther = insertUser("SO Gamma", "919000000033", sectionOfficerTypeId);
+        insertSchemeMapping(soOther, schemeC, 1);
+
+        // A pump operator sharing a scheme → excluded (not a Section Officer).
+        int op = insertUser("Op Delta", "919000000034", operatorTypeId);
+        insertSchemeMapping(op, schemeId, 1);
+
+        List<Long> ids = nudgeRepository.findSubordinateSectionOfficerIds("tenant_test", sdo);
+
+        assertThat(ids).containsExactlyInAnyOrder((long) so1, (long) so2);
+
+        jdbcTemplate.update("DELETE FROM tenant_test.scheme_master_table WHERE id IN (?, ?)", schemeB, schemeC);
+    }
+
+    @Test
+    void findSubordinateSectionOfficerIds_excludesInactiveUsersAndMappings() {
+        int sdo = insertUser("SDO Two", "919000000040", districtOfficerTypeId);
+        insertSchemeMapping(sdo, schemeId, 1);
+
+        int inactiveUser = insertInactiveUser("SO InactiveUser", "919000000041", sectionOfficerTypeId);
+        insertSchemeMapping(inactiveUser, schemeId, 1);   // active mapping, inactive user
+        int inactiveMap = insertUser("SO InactiveMap2", "919000000042", sectionOfficerTypeId);
+        insertSchemeMapping(inactiveMap, schemeId, 0);    // inactive mapping
+
+        List<Long> ids = nudgeRepository.findSubordinateSectionOfficerIds("tenant_test", sdo);
+
+        assertThat(ids).isEmpty();
+    }
+
+    @Test
+    void findSubordinateSectionOfficerIds_rejectsInvalidSchemaName() {
+        assertThatThrownBy(() ->
+                nudgeRepository.findSubordinateSectionOfficerIds("bad-schema!", 1L))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid schema name");
+    }
+
     @Test
     void streamUsersWithNoUploadToday_includesRow_whenDbNameIsEmpty() {
         // A user whose title (name) is an empty string — must still be emitted, not skipped
@@ -575,6 +632,12 @@ class NudgeRepositoryIntegrationTest {
                 "INSERT INTO tenant_test.user_table (title, phone_number, user_type, language_id, email, status) " +
                 "VALUES (?, ?, ?, 0, ?, 0) RETURNING id",
                 Integer.class, name, phone, userTypeId, phone + "@test.com");
+    }
+
+    private int insertScheme(String stateSchemeId) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO tenant_test.scheme_master_table (state_scheme_id) VALUES (?) RETURNING id",
+                Integer.class, stateSchemeId);
     }
 
     private void insertSchemeMapping(int userId, int schemeId, int status) {

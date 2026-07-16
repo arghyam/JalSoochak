@@ -52,6 +52,8 @@ class DailySituationReportSchedulerServiceTest {
                 .thenReturn(List.of(11L, 12L));
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
                 .thenReturn(List.of(20L));
+        // Only the SDO (20L) resolves subordinate Section Officers.
+        when(nudgeRepository.findSubordinateSectionOfficerIds(SCHEMA, 20L)).thenReturn(List.of(11L, 12L));
 
         service.processDailyReportsForTenant(SCHEMA, TENANT);
 
@@ -71,8 +73,19 @@ class DailySituationReportSchedulerServiceTest {
         assertThat(events).extracting(e -> ((DailyReportRequestEvent) e).getOfficerUserId())
                 .containsExactlyInAnyOrder(11L, 12L, 20L);
         assertThat(events).filteredOn(e -> ((DailyReportRequestEvent) e).getOfficerUserId() == 20L)
-                .allSatisfy(e -> assertThat(((DailyReportRequestEvent) e).getOfficerUserType())
-                        .isEqualTo("SUB_DIVISIONAL_OFFICER"));
+                .singleElement()
+                .satisfies(e -> {
+                    DailyReportRequestEvent sdo = (DailyReportRequestEvent) e;
+                    assertThat(sdo.getOfficerUserType()).isEqualTo("SUB_DIVISIONAL_OFFICER");
+                    // SDO event carries the subordinate Section Officer ids for the breakdown table.
+                    assertThat(sdo.getSubordinateOfficerUserIds()).containsExactlyInAnyOrder(11L, 12L);
+                });
+        // Section Officer events carry no subordinate list.
+        assertThat(events).filteredOn(e -> ((DailyReportRequestEvent) e).getOfficerUserType().equals("SECTION_OFFICER"))
+                .allSatisfy(e -> assertThat(((DailyReportRequestEvent) e).getSubordinateOfficerUserIds()).isNull());
+        // Subordinate resolution happens only for the SDO, never for a Section Officer.
+        verify(nudgeRepository, org.mockito.Mockito.never()).findSubordinateSectionOfficerIds(SCHEMA, 11L);
+        verify(nudgeRepository, org.mockito.Mockito.never()).findSubordinateSectionOfficerIds(SCHEMA, 12L);
     }
 
     @Test

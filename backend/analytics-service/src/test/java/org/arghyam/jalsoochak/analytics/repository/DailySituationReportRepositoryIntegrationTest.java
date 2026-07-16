@@ -129,14 +129,14 @@ class DailySituationReportRepositoryIntegrationTest {
     }
 
     @Test
-    void listNoSupplyByScheme_returnsOutageSchemesWithLastSupplyDate() {
-        // scheme 2: a prior positive supply 3 days before + an outage reason recorded on DAY
+    void listNoSupplyByScheme_returnsNonSubmissionSchemesWithLastSupplyDate() {
+        // scheme 2: a prior positive supply 3 days before + a non-submission reason recorded on DAY
         insertReading(2, 50, 50, DAY.minusDays(3));
         // a positive reading AFTER the report day must not count as the last supply date
         insertReading(2, 60, 60, DAY.plusDays(1));
-        insertOutage(2, "Pump Failure", DAY);
-        // scheme 3: outage reason on DAY, but never supplied → last supply date null
-        insertOutage(3, "Pipeline Break", DAY);
+        insertNonSubmission(2, "Pump Failure", DAY);
+        // scheme 3: non-submission reason on DAY, but never supplied → last supply date null
+        insertNonSubmission(3, "Pipeline Break", DAY);
 
         List<DailySituationReportRepository.NoSupplyScheme> rows =
                 repository.listNoSupplyByScheme(TENANT, OFFICER, DAY);
@@ -145,15 +145,15 @@ class DailySituationReportRepositoryIntegrationTest {
         assertThat(rows)
                 .anySatisfy(s -> {
                     assertThat(s.schemeId()).isEqualTo(2);
-                    assertThat(s.outageReason()).isEqualTo("Pump Failure");
+                    assertThat(s.nonSubmissionReason()).isEqualTo("Pump Failure");
                     assertThat(s.lastSupplyDate()).isEqualTo(DAY.minusDays(3));
                 })
                 .anySatisfy(s -> {
                     assertThat(s.schemeId()).isEqualTo(3);
-                    assertThat(s.outageReason()).isEqualTo("Pipeline Break");
+                    assertThat(s.nonSubmissionReason()).isEqualTo("Pipeline Break");
                     assertThat(s.lastSupplyDate()).isNull();
                 });
-        // scheme 1 has readings but no outage reason on DAY → excluded
+        // scheme 1 has readings but no non-submission reason on DAY → excluded
         assertThat(rows).noneSatisfy(s -> assertThat(s.schemeId()).isEqualTo(1));
     }
 
@@ -251,11 +251,11 @@ class DailySituationReportRepositoryIntegrationTest {
                 """, TENANT, schemeId, OFFICER, litres, date);
     }
 
-    private void insertOutage(int schemeId, String reason, LocalDate date) {
+    private void insertNonSubmission(int schemeId, String reason, LocalDate date) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.fact_water_quantity_table
                 (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at,
-                 submission_status, outage_reason)
+                 submission_status, non_submission_reason)
                 VALUES (?, ?, ?, 0, ?, NOW(), NOW(), 0, ?)
                 """, TENANT, schemeId, OFFICER, date, reason);
     }

@@ -71,7 +71,7 @@ class DailyReportMinioUploadIT {
                         .jalMitraNames("Suresh Rao").jalMitraMobiles("919000000002")
                         .issue("Electricity Supply Disconnected").remarks("No water supply for past 6 days").build());
 
-        String filename = pdfService.generate(sampleKpis(), "Binod Nimoli", "SECTION_OFFICER", priority);
+        String filename = pdfService.generate(sampleKpis(), "Binod Nimoli", "SECTION_OFFICER", priority, List.of());
         Path localPdf = tempDir.resolve(filename);
         assertThat(localPdf.toFile()).exists();
 

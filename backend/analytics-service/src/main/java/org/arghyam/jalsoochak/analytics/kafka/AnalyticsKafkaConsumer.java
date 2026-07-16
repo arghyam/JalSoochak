@@ -235,7 +235,8 @@ public class AnalyticsKafkaConsumer {
                 corr, request.getTenantId(), request.getOfficerUserId(), request.getOfficerUserType(), reportDate);
 
         DailyReportKpiDTO kpis = dailySituationReportService.buildReport(
-                request.getTenantId(), request.getOfficerUserId(), reportDate);
+                request.getTenantId(), request.getOfficerUserId(), reportDate,
+                request.getSubordinateOfficerUserIds());
 
         DailyReportKpisEvent kpisEvent = DailyReportKpisEvent.builder()
                 .eventType("DAILY_REPORT_KPIS")

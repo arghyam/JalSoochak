@@ -28,6 +28,13 @@ public class DailyReportKpis {
     private List<TypeCount> anomaliesByType;
     private List<PriorityAction> priorityActions;
 
+    /**
+     * SDO-only Summary breakdown — one row per Section Officer under the SDO (report day only).
+     * Present only for a SUB_DIVISIONAL_OFFICER report; null/empty otherwise. Officer name + mobile are
+     * resolved by message-service from the operational {@code user_table} at render time.
+     */
+    private List<SectionOfficerSummary> sectionOfficerSummaries;
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -76,5 +83,26 @@ public class DailyReportKpis {
         private int schemeId;
         private String issue;
         private Integer daysNoSupply;
+    }
+
+    /**
+     * SDO Summary breakdown row for one Section Officer (report day only). Officer name + mobile are
+     * resolved by message-service from the operational {@code user_table} using {@link #officerUserId}.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SectionOfficerSummary {
+        private long officerUserId;
+        private int totalSchemes;
+        private int schemesSupplying;
+        private int schemesNotSupplying;
+        private double avgLpcd;
+        private double avgMld;
+        private double regularSupplyPctWeek;
+        private double readingSubmissionPct;
+        private int anomalousCount;
     }
 }

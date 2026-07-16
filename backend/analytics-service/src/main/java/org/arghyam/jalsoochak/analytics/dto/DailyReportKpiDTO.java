@@ -36,7 +36,7 @@ public class DailyReportKpiDTO {
     /** Summary metrics for {@link #previousDate}. */
     private DayKpis previousDay;
 
-    /** Section 3 — outage-reason → scheme-count for {@link #reportDate} (raw reason keys). */
+    /** Section 3 — non-submission-reason → scheme-count for {@link #reportDate} (raw reason keys). */
     private List<ReasonCount> reasonsForNoSupply;
 
     /** Section 4 — anomaly-type → count for {@link #reportDate}. Values are the anomaly-type
@@ -44,10 +44,16 @@ public class DailyReportKpiDTO {
      *  hold the numeric code string. message-service maps either form to a human label. */
     private List<TypeCount> anomaliesByType;
 
-    /** Section 2 — Priority Actions: one entry per officer scheme that had an outage reason on
+    /** Section 2 — Priority Actions: one entry per officer scheme that had a non-submission reason on
      *  {@link #reportDate}. Scheme name / IMIS id / pump operators are resolved downstream in
      *  message-service (which has the operational schema + PII); analytics carries only the ids. */
     private List<PriorityAction> priorityActions;
+
+    /** SDO-only Summary breakdown — one row per Section Officer under the SDO (for {@link #reportDate}
+     *  only). Populated only when the request carried a subordinate-officer list (i.e. the report is
+     *  for a SUB_DIVISIONAL_OFFICER); {@code null}/empty for a SECTION_OFFICER report. Officer name and
+     *  mobile are resolved downstream in message-service; analytics carries only the user id + KPIs. */
+    private List<SectionOfficerSummary> sectionOfficerSummaries;
 
     @Data
     @Builder
@@ -88,6 +94,28 @@ public class DailyReportKpiDTO {
         private int count;
     }
 
+    /**
+     * One Section Officer's single-day summary KPIs, for the SDO report's per-officer breakdown table.
+     * Mirrors the Section 1 Summary columns (no trend). {@code officerUserId} lets message-service
+     * resolve the officer's name + mobile from the operational schema at render time.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SectionOfficerSummary {
+        /** Section Officer user id (operational {@code user_table.id}); PII resolved downstream. */
+        private long officerUserId;
+        private int totalSchemes;
+        private int schemesSupplying;
+        private int schemesNotSupplying;
+        private double avgLpcd;
+        private double avgMld;
+        private double regularSupplyPctWeek;
+        private double readingSubmissionPct;
+        private int anomalousCount;
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -96,7 +124,7 @@ public class DailyReportKpiDTO {
         /** Scheme surrogate id — same value in analytics {@code dim_scheme_table.scheme_id}
          *  and operational {@code scheme_master_table.id}. */
         private int schemeId;
-        /** Outage reason (human name from {@code fact_water_quantity_table.outage_reason}). */
+        /** Non-submission reason (human name from {@code fact_water_quantity_table.non_submission_reason}). */
         private String issue;
         /** Consecutive days with no water supply up to the report day; null if never supplied. */
         private Integer daysNoSupply;

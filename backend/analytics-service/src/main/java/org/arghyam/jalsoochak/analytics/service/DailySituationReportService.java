@@ -39,6 +39,17 @@ public class DailySituationReportService {
     private final SchemeRegularityRepository schemeRegularityRepository;
 
     public DailyReportKpiDTO buildReport(Integer tenantId, Long officerUserId, LocalDate reportDate) {
+        return buildReport(tenantId, officerUserId, reportDate, null);
+    }
+
+    /**
+     * Builds the officer's report. When {@code subordinateOfficerUserIds} is non-empty (an SDO report),
+     * additionally computes a per-Section-Officer single-day Summary breakdown
+     * ({@link DailyReportKpiDTO#getSectionOfficerSummaries()}); message-service resolves each officer's
+     * name + mobile at render time.
+     */
+    public DailyReportKpiDTO buildReport(Integer tenantId, Long officerUserId, LocalDate reportDate,
+                                         List<Long> subordinateOfficerUserIds) {
         LocalDate previousDate = reportDate.minusDays(1);
 
         int totalSchemes = safeCount(schemeRegularityRepository.getSchemeCountByUser(tenantId, officerUserId.intValue()));
@@ -48,11 +59,14 @@ public class DailySituationReportService {
         DailyReportKpiDTO.DayKpis previousDay = buildDay(tenantId, officerUserId, previousDate, totalSchemes, population);
 
         // Section 3 + 4 are reported for the covered day (D-1) only.
+        // Section 3 ("Reasons for No Water Supply") is sourced from non_submission_reason: the
+        // reason an operator gave for not submitting a reading on the day (submission_status =
+        // NOT_SUBMITTED), grouped by reason with a distinct-scheme count.
         List<DailyReportKpiDTO.ReasonCount> reasons =
-                schemeRegularityRepository.getOutageReasonSchemeCountByUser(tenantId, officerUserId.intValue(), reportDate, reportDate)
+                schemeRegularityRepository.getNonSubmissionReasonSchemeCountByUser(tenantId, officerUserId.intValue(), reportDate, reportDate)
                         .stream()
                         .map(r -> DailyReportKpiDTO.ReasonCount.builder()
-                                .reason(r.outageReason())
+                                .reason(r.nonSubmissionReason())
                                 .count(r.schemeCount() != null ? r.schemeCount() : 0)
                                 .build())
                         .toList();
@@ -66,12 +80,20 @@ public class DailySituationReportService {
                         .stream()
                         .map(s -> DailyReportKpiDTO.PriorityAction.builder()
                                 .schemeId(s.schemeId())
-                                .issue(s.outageReason())
+                                .issue(s.nonSubmissionReason())
                                 .daysNoSupply(s.lastSupplyDate() == null
                                         ? null
                                         : (int) ChronoUnit.DAYS.between(s.lastSupplyDate(), reportDate))
                                 .build())
                         .toList();
+
+        // SDO-only: per-Section-Officer single-day Summary breakdown (covered day D-1).
+        List<DailyReportKpiDTO.SectionOfficerSummary> sectionOfficerSummaries =
+                (subordinateOfficerUserIds == null || subordinateOfficerUserIds.isEmpty())
+                        ? List.of()
+                        : subordinateOfficerUserIds.stream()
+                                .map(soUserId -> buildOfficerSummary(tenantId, soUserId, reportDate))
+                                .toList();
 
         return DailyReportKpiDTO.builder()
                 .reportDate(reportDate.toString())
@@ -82,6 +104,30 @@ public class DailySituationReportService {
                 .reasonsForNoSupply(reasons)
                 .anomaliesByType(anomalies)
                 .priorityActions(priorityActions)
+                .sectionOfficerSummaries(sectionOfficerSummaries)
+                .build();
+    }
+
+    /**
+     * Single-day Summary KPIs for one Section Officer, scoped to that officer's own schemes — the
+     * per-officer row of the SDO report's breakdown table. Reuses the same {@link #buildDay} logic as
+     * the main Summary section; officer name + mobile are resolved downstream (message-service).
+     */
+    public DailyReportKpiDTO.SectionOfficerSummary buildOfficerSummary(
+            Integer tenantId, Long officerUserId, LocalDate reportDate) {
+        int totalSchemes = safeCount(schemeRegularityRepository.getSchemeCountByUser(tenantId, officerUserId.intValue()));
+        long population = reportRepository.populationServed(tenantId, officerUserId);
+        DailyReportKpiDTO.DayKpis day = buildDay(tenantId, officerUserId, reportDate, totalSchemes, population);
+        return DailyReportKpiDTO.SectionOfficerSummary.builder()
+                .officerUserId(officerUserId)
+                .totalSchemes(totalSchemes)
+                .schemesSupplying(day.getSchemesSupplying())
+                .schemesNotSupplying(day.getSchemesNotSupplying())
+                .avgLpcd(day.getAvgLpcd())
+                .avgMld(day.getAvgMld())
+                .regularSupplyPctWeek(day.getRegularSupplyPctWeek())
+                .readingSubmissionPct(day.getReadingSubmissionPct())
+                .anomalousCount(day.getAnomalousCount())
                 .build();
     }
 

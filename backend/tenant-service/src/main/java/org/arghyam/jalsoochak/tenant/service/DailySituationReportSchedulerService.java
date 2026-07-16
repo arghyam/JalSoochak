@@ -39,6 +39,8 @@ public class DailySituationReportSchedulerService {
     @Value("${daily-report.officer.user-types:SECTION_OFFICER,SUB_DIVISIONAL_OFFICER}")
     private String officerUserTypesCsv;
 
+    private static final String SDO_ROLE = "SUB_DIVISIONAL_OFFICER";
+
     public void processDailyReportsForTenant(String schema, int tenantId) {
         LocalDate reportDate = LocalDate.now(IST).minusDays(1);
         String correlationId = UUID.randomUUID().toString();
@@ -53,7 +55,13 @@ public class DailySituationReportSchedulerService {
             List<Long> officerIds = nudgeRepository.findDistinctOfficerUserIdsByUserType(schema, role);
             log.info("[DailyReportJob] corr={} tenant={} role={} → {} officer(s)",
                     correlationId, tenantId, role, officerIds.size());
+            boolean isSdo = SDO_ROLE.equalsIgnoreCase(role);
             for (Long officerUserId : officerIds) {
+                // For an SDO, resolve the Section Officers under them (shared-scheme derivation) so
+                // analytics can compute the per-officer Summary breakdown. Ids only — no PII.
+                List<Long> subordinateOfficerIds = isSdo
+                        ? nudgeRepository.findSubordinateSectionOfficerIds(schema, officerUserId)
+                        : null;
                 DailyReportRequestEvent event = DailyReportRequestEvent.builder()
                         .eventType("DAILY_REPORT_REQUEST")
                         .tenantId(tenantId)
@@ -62,11 +70,13 @@ public class DailySituationReportSchedulerService {
                         .officerUserType(role)
                         .reportDate(reportDate.toString())
                         .correlationId(correlationId)
+                        .subordinateOfficerUserIds(subordinateOfficerIds)
                         .build();
                 kafkaProducer.publishJson(COMMON_TOPIC, event);
                 count++;
-                log.debug("[DailyReportJob] corr={} published DAILY_REPORT_REQUEST officer={} role={}",
-                        correlationId, officerUserId, role);
+                log.debug("[DailyReportJob] corr={} published DAILY_REPORT_REQUEST officer={} role={} subordinates={}",
+                        correlationId, officerUserId, role,
+                        subordinateOfficerIds != null ? subordinateOfficerIds.size() : 0);
             }
         }
 

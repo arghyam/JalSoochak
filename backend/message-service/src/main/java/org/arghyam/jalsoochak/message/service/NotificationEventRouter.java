@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
+import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
@@ -119,11 +120,11 @@ public class NotificationEventRouter {
     private String baseUrl;
 
     /**
-     * Gates delivery of the SUB_DIVISIONAL_OFFICER daily report. Defaults to {@code false} because
-     * the SDO report layout is not yet specified (the sample docx is the SECTION_OFFICER template);
-     * SDO events are computed and logged but not sent until an SDO layout is agreed and this is enabled.
+     * Gates delivery of the SUB_DIVISIONAL_OFFICER daily report. Defaults to {@code true} now that the
+     * SDO layout exists (the SO report plus a per-Section-Officer Summary breakdown table). Retained as
+     * an operational kill-switch — set to {@code false} to suppress SDO reports without a redeploy.
      */
-    @Value("${app.daily-report.sdo-enabled:false}")
+    @Value("${app.daily-report.sdo-enabled:true}")
     private boolean dailyReportSdoEnabled;
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
@@ -863,9 +864,10 @@ public class NotificationEventRouter {
         log.info("[Router/DAILY_REPORT] corr={} received: tenant={} officer={} role={}",
                 corr, tenantId, officerUserId, officerUserType);
 
-        // SDO layout is not yet specified — compute-and-log but do not deliver until enabled.
+        // SDO delivery is enabled by default now that the SDO layout exists; the dailyReportSdoEnabled
+        // flag remains an operational kill-switch to suppress SDO reports without a redeploy.
         if ("SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType) && !dailyReportSdoEnabled) {
-            log.info("[Router/DAILY_REPORT] corr={} SDO delivery disabled (no SDO layout yet); skipping officer={}",
+            log.info("[Router/DAILY_REPORT] corr={} SDO delivery disabled via flag; skipping officer={}",
                     corr, officerUserId);
             return;
         }
@@ -889,8 +891,11 @@ public class NotificationEventRouter {
                 corr, officerUserId, officerName, officer.contactId() != null);
 
         List<DailyReportPriorityRow> priorityRows = buildPriorityRows(tenantSchema, kpis, corr);
+        List<DailyReportSectionOfficerRow> sectionOfficerRows =
+                buildSectionOfficerRows(tenantSchema, kpis, corr);
 
-        String filename = dailyReportPdfService.generate(kpis, officerName, officerUserType, priorityRows);
+        String filename = dailyReportPdfService.generate(
+                kpis, officerName, officerUserType, priorityRows, sectionOfficerRows);
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
         String minioUrl;
         try {
@@ -955,6 +960,72 @@ public class NotificationEventRouter {
         log.debug("[Router/DAILY_REPORT] corr={} built {} priority row(s)", corr, rows.size());
         return rows;
     }
+
+    /**
+     * Resolves each analytics {@code SectionOfficerSummary} (KPIs keyed by officer user id) into a
+     * printable SDO-breakdown row by looking up the Section Officer's decrypted name + mobile from the
+     * operational {@code user_table}. Returns an empty list for a non-SDO report (no summaries present).
+     * Officer order from analytics is preserved.
+     */
+    private List<DailyReportSectionOfficerRow> buildSectionOfficerRows(String tenantSchema, DailyReportKpis kpis, String corr) {
+        List<DailyReportSectionOfficerRow> rows = new ArrayList<>();
+        if (kpis.getSectionOfficerSummaries() == null || kpis.getSectionOfficerSummaries().isEmpty()) {
+            return rows;
+        }
+        Set<Long> officerIds = new LinkedHashSet<>();
+        for (DailyReportKpis.SectionOfficerSummary s : kpis.getSectionOfficerSummaries()) {
+            officerIds.add(s.getOfficerUserId());
+        }
+        Map<Long, OfficerContact> contacts = resolveOfficerContactsByIds(tenantSchema, officerIds);
+        for (DailyReportKpis.SectionOfficerSummary s : kpis.getSectionOfficerSummaries()) {
+            OfficerContact c = contacts.get(s.getOfficerUserId());
+            String name = (c != null && c.name() != null) ? c.name() : ("#" + s.getOfficerUserId());
+            String mobile = (c != null && c.phone() != null) ? c.phone() : "";
+            rows.add(DailyReportSectionOfficerRow.builder()
+                    .officerName(name)
+                    .officerMobile(mobile)
+                    .totalSchemes(s.getTotalSchemes())
+                    .schemesSupplying(s.getSchemesSupplying())
+                    .schemesNotSupplying(s.getSchemesNotSupplying())
+                    .avgLpcd(s.getAvgLpcd())
+                    .avgMld(s.getAvgMld())
+                    .regularSupplyPctWeek(s.getRegularSupplyPctWeek())
+                    .readingSubmissionPct(s.getReadingSubmissionPct())
+                    .anomalousCount(s.getAnomalousCount())
+                    .build());
+        }
+        log.debug("[Router/DAILY_REPORT] corr={} built {} section-officer row(s)", corr, rows.size());
+        return rows;
+    }
+
+    /**
+     * Batch-resolves each officer's decrypted display name + phone from {@code <tenantSchema>.user_table}
+     * by user id, keyed by user id. {@code tenantSchema} is validated against {@link #SCHEMA_PATTERN} by
+     * the caller (schema names are SQL identifiers and cannot be bound as {@code ?}); the ids bind as
+     * parameters. Mirrors {@link #resolveOfficerContactById} for many ids in one query.
+     */
+    @SuppressWarnings("java:S2077")
+    private Map<Long, OfficerContact> resolveOfficerContactsByIds(String tenantSchema, Set<Long> officerIds) {
+        if (officerIds.isEmpty()) {
+            return Map.of();
+        }
+        String sql = "SELECT id, whatsapp_connection_id, title, phone_number FROM " + tenantSchema
+                + ".user_table WHERE id IN (" + placeholders(officerIds.size()) + ")";
+        List<OfficerContactRow> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new OfficerContactRow(rs.getLong("id"), new OfficerContact(
+                        rs.getObject("whatsapp_connection_id", Long.class),
+                        piiEncryptionService.safeDecrypt(rs.getString("title")),
+                        piiEncryptionService.safeDecrypt(rs.getString("phone_number")))),
+                officerIds.toArray());
+        Map<Long, OfficerContact> byId = new LinkedHashMap<>();
+        for (OfficerContactRow row : rows) {
+            byId.put(row.userId(), row.contact());
+        }
+        return byId;
+    }
+
+    /** Intermediate row carrying the officer user id alongside its resolved contact, for batch grouping. */
+    private record OfficerContactRow(long userId, OfficerContact contact) {}
 
     private String formatNoSupplyRemark(Integer daysNoSupply) {
         if (daysNoSupply == null) {
