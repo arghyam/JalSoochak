@@ -88,7 +88,13 @@ public class AuthServiceImpl implements AuthService {
     private final CaptchaVerificationService captchaVerificationService;
     private final TransactionTemplate transactionTemplate;
 
-    /** Advisory Retry-After (seconds) sent with a lockout 429. Keep aligned with the realm's brute-force wait. */
+    /**
+     * Advisory Retry-After (seconds) sent with a lockout 429 — a hint only; Keycloak owns the real
+     * unlock timing. Set per-realm: the default 60 matches Keycloak's first-lockout wait
+     * ({@code waitIncrementSeconds}), favouring common-case accuracy. Use {@code maxFailureWaitSeconds}
+     * (Keycloak default 900) for a conservative upper bound that never under-reports, at the cost of
+     * over-reporting early lockouts. Under-reporting is self-correcting — an early retry just gets another 429.
+     */
     @Value("${security.login.lockout-retry-after-seconds:60}")
     private long lockoutRetryAfterSeconds;
 

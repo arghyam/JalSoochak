@@ -1,15 +1,22 @@
 package org.arghyam.jalsoochak.user.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
+
+import org.keycloak.admin.client.resource.AttackDetectionResource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import org.arghyam.jalsoochak.user.config.KeycloakProvider;
 import org.arghyam.jalsoochak.user.dto.response.AdminUserResponseDTO;
@@ -164,6 +171,104 @@ class KeycloakAdminHelperTest {
 
             assertNull(result.getFirstName());
             assertNull(result.getLastName());
+        }
+    }
+
+    @Nested
+    @DisplayName("isTemporarilyLockedByBruteForce — short-TTL probe cache")
+    class BruteForceLockCache {
+
+        private AttackDetectionResource attackDetection;
+
+        @BeforeEach
+        void configureCache() {
+            // The helper is built with `new` in the outer setUp, so the @Value fields default to 0
+            // (cache disabled). Set realistic values for these tests.
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheTtlSeconds", 15L);
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheMaxSize", 10_000);
+            attackDetection = keycloakProvider.getAdminInstance()
+                    .realm(keycloakProvider.getRealm())
+                    .attackDetection();
+        }
+
+        @Test
+        @DisplayName("blank/null id short-circuits without any admin call")
+        void blankIdSkipsProbe() {
+            assertFalse(helper.isTemporarilyLockedByBruteForce(null));
+            assertFalse(helper.isTemporarilyLockedByBruteForce("  "));
+            verifyNoInteractions(attackDetection);
+        }
+
+        @Test
+        @DisplayName("a locked result is cached — the second call within TTL makes no second probe")
+        void cachesLockedResultWithinTtl() {
+            String uuid = "kc-locked-1";
+            when(attackDetection.bruteForceUserStatus(uuid)).thenReturn(Map.of("disabled", Boolean.TRUE));
+
+            assertTrue(helper.isTemporarilyLockedByBruteForce(uuid));
+            assertTrue(helper.isTemporarilyLockedByBruteForce(uuid));
+
+            verify(attackDetection, times(1)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("an unlocked result is also cached — avoids a probe on every wrong password")
+        void cachesUnlockedResultWithinTtl() {
+            String uuid = "kc-unlocked-1";
+            when(attackDetection.bruteForceUserStatus(uuid)).thenReturn(Map.of("disabled", Boolean.FALSE));
+
+            assertFalse(helper.isTemporarilyLockedByBruteForce(uuid));
+            assertFalse(helper.isTemporarilyLockedByBruteForce(uuid));
+
+            verify(attackDetection, times(1)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("cache is per-user — distinct ids each probe once")
+        void cacheIsKeyedByUser() {
+            when(attackDetection.bruteForceUserStatus("kc-a")).thenReturn(Map.of("disabled", Boolean.TRUE));
+            when(attackDetection.bruteForceUserStatus("kc-b")).thenReturn(Map.of("disabled", Boolean.FALSE));
+
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-a"));
+            assertFalse(helper.isTemporarilyLockedByBruteForce("kc-b"));
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-a"));
+
+            verify(attackDetection, times(1)).bruteForceUserStatus("kc-a");
+            verify(attackDetection, times(1)).bruteForceUserStatus("kc-b");
+        }
+
+        @Test
+        @DisplayName("fails open — an admin-API error returns false and is not cached")
+        void failsOpenAndDoesNotCacheOnError() {
+            String uuid = "kc-error-1";
+            when(attackDetection.bruteForceUserStatus(uuid))
+                    .thenThrow(new RuntimeException("admin API down"))
+                    .thenReturn(Map.of("disabled", Boolean.TRUE));
+
+            // First call: probe throws → fail open to false.
+            assertFalse(helper.isTemporarilyLockedByBruteForce(uuid));
+            // A false-on-error must NOT be cached, so the next call re-probes and now sees the lock.
+            assertTrue(helper.isTemporarilyLockedByBruteForce(uuid));
+
+            verify(attackDetection, times(2)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("cache stays correct even when full of live entries (re-probes instead of caching)")
+        void staysCorrectWhenCacheFull() {
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheMaxSize", 1);
+            when(attackDetection.bruteForceUserStatus("kc-full-a")).thenReturn(Map.of("disabled", Boolean.TRUE));
+            when(attackDetection.bruteForceUserStatus("kc-full-b")).thenReturn(Map.of("disabled", Boolean.TRUE));
+
+            // Fills the single slot with kc-full-a.
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-full-a"));
+            // kc-full-b cannot be cached (slot full of a live entry) but must still return the correct value.
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-full-b"));
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-full-b"));
+
+            // kc-full-a served from cache (1 probe); kc-full-b re-probes every time (never cached).
+            verify(attackDetection, times(1)).bruteForceUserStatus("kc-full-a");
+            verify(attackDetection, times(2)).bruteForceUserStatus("kc-full-b");
         }
     }
 }
