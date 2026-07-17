@@ -18,5 +18,6 @@ public sealed interface ConfigValueDTO permits
         EscalationRulesConfigDTO,
         GlificMessagesConfigDTO,
         WaterSupplyThresholdConfigDTO,
-        IncludedWorkStatusesConfigDTO {
+        IncludedWorkStatusesConfigDTO,
+        RegularityThresholdConfigDTO {
 }
