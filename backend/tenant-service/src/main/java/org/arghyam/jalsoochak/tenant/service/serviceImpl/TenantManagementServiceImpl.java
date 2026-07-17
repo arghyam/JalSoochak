@@ -27,6 +27,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
@@ -59,6 +60,7 @@ import org.arghyam.jalsoochak.tenant.event.TenantConfigUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.IncludedWorkStatusesUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.RegularityThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.ConfigurationException;
@@ -458,6 +460,15 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             List<Integer> workStatuses = dto.validatedWorkStatuses();
             eventPublisher.publishEvent(
                     new IncludedWorkStatusesUpdatedEvent(tenantId, tenant.getStateCode(), workStatuses));
+        }
+
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.REGULARITY_THRESHOLD_PERCENT)) {
+            RegularityThresholdConfigDTO dto =
+                    (RegularityThresholdConfigDTO) results.get(TenantConfigKeyEnum.REGULARITY_THRESHOLD_PERCENT);
+            // Enforced validation for JsonNode-bound configs (bean validation does not run on treeToValue).
+            Double thresholdPercent = dto.validatedThresholdPercent();
+            eventPublisher.publishEvent(
+                    new RegularityThresholdUpdatedEvent(tenantId, tenant.getStateCode(), thresholdPercent));
         }
 
         return TenantConfigResponseDTO.builder()
