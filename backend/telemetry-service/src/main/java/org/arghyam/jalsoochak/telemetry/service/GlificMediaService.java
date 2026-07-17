@@ -14,6 +14,10 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.function.Supplier;
 
 @Slf4j
@@ -77,7 +81,7 @@ public class GlificMediaService {
 
         return executeDownloadWithRetry(
                 () -> restTemplate.exchange(glificMediaBaseUrl + "/" + mediaId, HttpMethod.GET, entity, byte[].class),
-                "Glific mediaId " + mediaId,
+                "glific:" + mediaId,
                 "Failed to download image from Glific"
         );
     }
@@ -89,13 +93,14 @@ public class GlificMediaService {
 
         return executeDownloadWithRetry(
                 () -> restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class),
-                "URL " + url,
+                // The media URL is pre-signed and carries access credentials, so logs get a digest of it.
+                "url:" + digest(url),
                 "Failed to download image"
         );
     }
 
     private byte[] executeDownloadWithRetry(Supplier<ResponseEntity<byte[]>> requestSupplier,
-                                            String targetLabel,
+                                            String mediaRef,
                                             String failurePrefix) throws IOException {
         long totalBackoffMs = 0L;
         for (int attempt = 1; attempt <= mediaDownloadRetryMaxAttempts; attempt++) {
@@ -109,20 +114,44 @@ public class GlificMediaService {
             } catch (RestClientException e) {
                 boolean retriable = isRetriableException(e);
                 if (!retriable) {
-                    log.warn("Media download for {} failed with non-retriable error: {}", targetLabel, e.getMessage());
+                    log.warn("Media download for {} failed with non-retriable error: {}", mediaRef, describe(e));
                     throw new IOException(failurePrefix + " due to a non-retriable error", e);
                 }
                 if (attempt == mediaDownloadRetryMaxAttempts) {
-                    log.warn("Media download for {} failed after {} attempts: {}", targetLabel, attempt, e.getMessage());
+                    log.warn("Media download for {} failed after {} attempts: {}", mediaRef, attempt, describe(e));
                     throw new IOException(failurePrefix + " after " + attempt + " attempts", e);
                 }
                 long backoffMs = computeBackoffMs(attempt, totalBackoffMs);
                 totalBackoffMs += backoffMs;
-                log.warn("Media download attempt {} failed for {}. Retrying in {} ms", attempt, targetLabel, backoffMs);
+                log.warn("Media download attempt {} failed for {}. Retrying in {} ms", attempt, mediaRef, backoffMs);
                 sleepBackoff(backoffMs);
             }
         }
         throw new IOException(failurePrefix);
+    }
+
+    /**
+     * Renders an exception for logging using only metadata that cannot carry media content or credentials.
+     * The message of a {@link RestClientResponseException} embeds the response body, so it is never logged.
+     */
+    private String describe(RestClientException exception) {
+        if (exception instanceof RestClientResponseException responseException) {
+            return exception.getClass().getSimpleName() + " status=" + responseException.getStatusCode().value();
+        }
+        return exception.getClass().getSimpleName();
+    }
+
+    /**
+     * Stable short digest, so repeated failures for the same media can be correlated across log lines
+     * without the underlying value appearing in them.
+     */
+    private String digest(String value) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash, 0, 6);
+        } catch (NoSuchAlgorithmException e) {
+            return "unavailable";
+        }
     }
 
     private boolean isRetriableException(RestClientException exception) {

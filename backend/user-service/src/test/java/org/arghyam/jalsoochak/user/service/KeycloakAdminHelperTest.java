@@ -12,8 +12,15 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.keycloak.admin.client.resource.AttackDetectionResource;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -269,6 +276,69 @@ class KeycloakAdminHelperTest {
             // kc-full-a served from cache (1 probe); kc-full-b re-probes every time (never cached).
             verify(attackDetection, times(1)).bruteForceUserStatus("kc-full-a");
             verify(attackDetection, times(2)).bruteForceUserStatus("kc-full-b");
+        }
+
+        @Test
+        @DisplayName("concurrent callers for one user share a single probe rather than each issuing their own")
+        void concurrentCallersForSameUserShareOneProbe() throws Exception {
+            String uuid = "kc-single-flight";
+            CountDownLatch probeStarted = new CountDownLatch(1);
+            CountDownLatch releaseProbe = new CountDownLatch(1);
+            when(attackDetection.bruteForceUserStatus(uuid)).thenAnswer(invocation -> {
+                probeStarted.countDown();
+                releaseProbe.await(5, TimeUnit.SECONDS);
+                return Map.of("disabled", Boolean.TRUE);
+            });
+
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<Boolean> first = pool.submit(() -> helper.isTemporarilyLockedByBruteForce(uuid));
+                assertTrue(probeStarted.await(5, TimeUnit.SECONDS), "first caller should have started a probe");
+
+                // The second caller arrives while that probe is still in flight. The entry is installed
+                // before the probe runs, so this caller joins it instead of starting a competing probe.
+                Future<Boolean> second = pool.submit(() -> helper.isTemporarilyLockedByBruteForce(uuid));
+                releaseProbe.countDown();
+
+                assertTrue(first.get(5, TimeUnit.SECONDS));
+                assertTrue(second.get(5, TimeUnit.SECONDS));
+            } finally {
+                pool.shutdownNow();
+            }
+
+            verify(attackDetection, times(1)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("distinct users racing concurrently cannot collectively overshoot the cap")
+        void concurrentDistinctUsersRespectMaxSize() throws Exception {
+            int maxSize = 2;
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheMaxSize", maxSize);
+            when(attackDetection.bruteForceUserStatus(anyString())).thenReturn(Map.of("disabled", Boolean.FALSE));
+
+            CountDownLatch startTogether = new CountDownLatch(1);
+            ExecutorService pool = Executors.newFixedThreadPool(8);
+            List<Future<Boolean>> results = new ArrayList<>();
+            try {
+                for (int i = 0; i < 64; i++) {
+                    String uuid = "kc-cap-" + i;
+                    results.add(pool.submit(() -> {
+                        startTogether.await(5, TimeUnit.SECONDS);
+                        return helper.isTemporarilyLockedByBruteForce(uuid);
+                    }));
+                }
+                startTogether.countDown();
+                for (Future<Boolean> result : results) {
+                    // Every caller still gets the correct answer, cached or not.
+                    assertFalse(result.get(10, TimeUnit.SECONDS));
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+
+            Map<?, ?> cache = (Map<?, ?>) ReflectionTestUtils.getField(helper, "lockStatusCache");
+            assertTrue(cache != null && cache.size() <= maxSize,
+                    "cache overshot its cap: " + (cache == null ? "null" : cache.size()));
         }
     }
 }
