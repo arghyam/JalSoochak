@@ -37,8 +37,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>Scheme 2 — work_status = 1 (not handed-over)</li>
  *   <li>Scheme 3 — work_status = NULL</li>
  * </ul>
- * Over D1..D2 (2 days) Schemes 1 and 2 report both days; Scheme 3 reports only D1. With the filter ON
- * the continuous count would be 1 (Scheme 1 only); with it OFF it is 2 (Schemes 1 and 2).
+ * Over D1..D2 (2 days) Schemes 1 and 2 report both days; Scheme 3 reports only D1. Continuous now means
+ * "reported on at least one day", so with the filter ON the continuous count would be 1 (Scheme 1 only);
+ * with it OFF it is 3 (all three schemes reported at least once).
  */
 @JdbcTest
 @Testcontainers
@@ -80,7 +81,6 @@ class SchemeRegularityRepositoryContinuousWorkStatusToggleIntegrationTest {
     private static final int DEPARTMENT = 200;
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D2 = LocalDate.of(2026, 1, 2);
-    private static final int DAYS_IN_RANGE = 2;
 
     private static final int HANDED_OVER = 4;
     private static final int NOT_HANDED_OVER = 1;
@@ -93,30 +93,31 @@ class SchemeRegularityRepositoryContinuousWorkStatusToggleIntegrationTest {
 
     @Test
     void continuousCount_byLgd_countsAllSchemesRegardlessOfWorkStatus() {
-        // Filter ON would leave only Scheme 1; with the toggle OFF, Scheme 2 (ws=1) is also counted.
-        assertThat(repository.getContinuousSchemeCountByLgd(TENANT, LGD, D1, D2, DAYS_IN_RANGE))
-                .isEqualTo(2L);
+        // Filter ON would leave only Scheme 1; with the toggle OFF, Schemes 2 (ws=1) and 3 (NULL) are
+        // also counted -- all three reported on at least one day.
+        assertThat(repository.getContinuousSchemeCountByLgd(TENANT, LGD, D1, D2))
+                .isEqualTo(3L);
     }
 
     @Test
     void continuousList_byLgd_listsAllSchemesRegardlessOfWorkStatus() {
         List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
-                repository.getContinuousSchemesByLgd(TENANT, LGD, D1, D2, DAYS_IN_RANGE, 100, 0);
+                repository.getContinuousSchemesByLgd(TENANT, LGD, D1, D2, 100, 0);
         assertThat(rows)
                 .extracting(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
-                .containsExactlyInAnyOrder(1, 2);
+                .containsExactlyInAnyOrder(1, 2, 3);
     }
 
     @Test
     void continuousCount_byDepartment_countsAllSchemesRegardlessOfWorkStatus() {
-        assertThat(repository.getContinuousSchemeCountByDepartment(TENANT, DEPARTMENT, D1, D2, DAYS_IN_RANGE))
-                .isEqualTo(2L);
+        assertThat(repository.getContinuousSchemeCountByDepartment(TENANT, DEPARTMENT, D1, D2))
+                .isEqualTo(3L);
     }
 
     @Test
     void continuousCount_byUser_countsAllSchemesRegardlessOfWorkStatus() {
-        assertThat(repository.getContinuousSchemeCountByUserSchemes(TENANT, USER, D1, D2, DAYS_IN_RANGE))
-                .isEqualTo(2L);
+        assertThat(repository.getContinuousSchemeCountByUserSchemes(TENANT, USER, D1, D2))
+                .isEqualTo(3L);
     }
 
     @Test
