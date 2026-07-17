@@ -93,7 +93,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private static final String DEBUG_LOG_PATH = "/home/beehyv/Desktop/Codes/jalSoochak/JalSoochak_New/.cursor/debug.log";
     private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
 
-    @Value("${analytics.scheduler.scheme-status.critical-after-days:15}")
+    @Value("${analytics.scheduler.scheme-status.critical-after-days:30}")
     private int criticalAfterDays;
 
     private final SchemeRegularityRepository schemeRegularityRepository;

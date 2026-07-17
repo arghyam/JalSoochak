@@ -122,7 +122,7 @@ analytics:
       lookback-days: ${ANALYTICS_NATIONAL_DASHBOARD_LOOKBACK_DAYS:30}
     scheme-status:
       inactive-after-days: ${ANALYTICS_SCHEME_STATUS_INACTIVE_AFTER_DAYS:30}
-      critical-after-days: ${ANALYTICS_SCHEME_STATUS_CRITICAL_AFTER_DAYS:5}
+      critical-after-days: ${ANALYTICS_SCHEME_STATUS_CRITICAL_AFTER_DAYS:30}
 
     dim-date-backfill:
       cron: ${ANALYTICS_DIM_DATE_BACKFILL_CRON:0 10 0 * * *}
