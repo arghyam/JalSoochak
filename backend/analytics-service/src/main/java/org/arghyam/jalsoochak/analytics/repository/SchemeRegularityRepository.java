@@ -3191,8 +3191,7 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             Integer lgdId,
             LocalDate startDate,
-            LocalDate endDate,
-            int daysInRange
+            LocalDate endDate
     ) {
         Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
         if (lgdLevel == null) {
@@ -3201,6 +3200,7 @@ public class SchemeRegularityRepository {
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
         // REPORTED-METRIC: a "reported day" = any day the scheme SUPPLIED or ATTEMPTED a submission.
+        // Continuous = the scheme reported on AT LEAST ONE day in the range (reported_days >= 1).
         // Four levers, each independently revertible (grep REPORTED-METRIC):
         //   (A) supplied -> reported: drop the confirmed_reading>0 filter (re-add to revert)
         //   (B) include image-quality rejects (duplicate/unreadable/less-than-previous) as reported days
@@ -3254,7 +3254,7 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN reported_days rd
                   ON rd.scheme_id = ss.scheme_id
-                WHERE COALESCE(rd.reported_days, 0) = ?
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 """, schemeLgdColumn));
 
         Long count = jdbcTemplate.queryForObject(
@@ -3270,8 +3270,7 @@ public class SchemeRegularityRepository {
                 endDate,        // (B) range end
                 tenantId,       // (C) submission_attempt tenant
                 startDate,      // (C) range start
-                endDate,        // (C) range end
-                daysInRange     // continuous == reported every day
+                endDate         // (C) range end
         );
         return count == null ? 0L : count;
     }
@@ -3280,8 +3279,7 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             Integer departmentId,
             LocalDate startDate,
-            LocalDate endDate,
-            int daysInRange
+            LocalDate endDate
     ) {
         Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
         if (departmentLevel == null) {
@@ -3311,7 +3309,7 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN supply_days sd
                   ON sd.scheme_id = ss.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) = ?
+                WHERE COALESCE(sd.supply_days, 0) >= 1
                 """, schemeDepartmentColumn));
 
         Long count = jdbcTemplate.queryForObject(
@@ -3321,8 +3319,7 @@ public class SchemeRegularityRepository {
                 tenantId,
                 tenantId,
                 startDate,
-                endDate,
-                daysInRange
+                endDate
         );
         return count == null ? 0L : count;
     }
@@ -3331,8 +3328,7 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             Integer userId,
             LocalDate startDate,
-            LocalDate endDate,
-            int daysInRange
+            LocalDate endDate
     ) {
         String sql = withContinuousSchemesDashboardFragments("""
                 WITH user_schemes AS (
@@ -3358,7 +3354,7 @@ public class SchemeRegularityRepository {
                 FROM user_schemes us
                 LEFT JOIN supply_days sd
                   ON sd.scheme_id = us.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) = ?
+                WHERE COALESCE(sd.supply_days, 0) >= 1
                 """);
 
         Long count = jdbcTemplate.queryForObject(
@@ -3368,8 +3364,7 @@ public class SchemeRegularityRepository {
                 tenantId,
                 tenantId,
                 startDate,
-                endDate,
-                daysInRange
+                endDate
         );
         return count == null ? 0L : count;
     }
@@ -3379,7 +3374,6 @@ public class SchemeRegularityRepository {
             Integer lgdId,
             LocalDate startDate,
             LocalDate endDate,
-            int daysInRange,
             Integer limit,
             Integer offset
     ) {
@@ -3437,7 +3431,7 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN reported_days rd
                   ON rd.scheme_id = ss.scheme_id
-                WHERE COALESCE(rd.reported_days, 0) = ?
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 ORDER BY ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3460,7 +3454,6 @@ public class SchemeRegularityRepository {
                 tenantId,       // (C) submission_attempt tenant
                 startDate,      // (C) range start
                 endDate,        // (C) range end
-                daysInRange,    // continuous == reported every day
                 limit,
                 offset
         );
@@ -3471,7 +3464,6 @@ public class SchemeRegularityRepository {
             Integer userId,
             LocalDate startDate,
             LocalDate endDate,
-            int daysInRange,
             Integer limit,
             Integer offset
     ) {
@@ -3510,7 +3502,7 @@ public class SchemeRegularityRepository {
                 FROM scheme_details sd
                 LEFT JOIN supply_days sdy
                   ON sdy.scheme_id = sd.scheme_id
-                WHERE COALESCE(sdy.supply_days, 0) = ?
+                WHERE COALESCE(sdy.supply_days, 0) >= 1
                 ORDER BY sd.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3528,7 +3520,6 @@ public class SchemeRegularityRepository {
                 tenantId,
                 startDate,
                 endDate,
-                daysInRange,
                 limit,
                 offset
         );
@@ -3539,7 +3530,6 @@ public class SchemeRegularityRepository {
             Integer departmentId,
             LocalDate startDate,
             LocalDate endDate,
-            int daysInRange,
             Integer limit,
             Integer offset
     ) {
@@ -3573,7 +3563,7 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN supply_days sd
                   ON sd.scheme_id = ss.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) = ?
+                WHERE COALESCE(sd.supply_days, 0) >= 1
                 ORDER BY ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3590,7 +3580,6 @@ public class SchemeRegularityRepository {
                 tenantId,
                 startDate,
                 endDate,
-                daysInRange,
                 limit,
                 offset
         );

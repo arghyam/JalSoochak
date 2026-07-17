@@ -2313,7 +2313,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         long continuousCount = schemeRegularityRepository.getContinuousSchemeCountByLgd(
-                tenantId, lgdId, startDate, endDate, daysInRange);
+                tenantId, lgdId, startDate, endDate);
         if (!list) {
             return ContinuousSchemesResponse.builder()
                     .continuousSchemeCount(continuousCount)
@@ -2338,7 +2338,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int offset = (effectivePage - 1) * effectiveLimit;
         List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
                 schemeRegularityRepository.getContinuousSchemesByLgd(
-                        tenantId, lgdId, startDate, endDate, daysInRange, effectiveLimit, offset);
+                        tenantId, lgdId, startDate, endDate, effectiveLimit, offset);
 
         return ContinuousSchemesResponse.builder()
                 .continuousSchemeCount(continuousCount)
@@ -2373,7 +2373,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         long continuousCount = schemeRegularityRepository.getContinuousSchemeCountByDepartment(
-                tenantId, departmentId, startDate, endDate, daysInRange);
+                tenantId, departmentId, startDate, endDate);
         if (!list) {
             return ContinuousSchemesResponse.builder()
                     .continuousSchemeCount(continuousCount)
@@ -2398,7 +2398,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int offset = (effectivePage - 1) * effectiveLimit;
         List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
                 schemeRegularityRepository.getContinuousSchemesByDepartment(
-                        tenantId, departmentId, startDate, endDate, daysInRange, effectiveLimit, offset);
+                        tenantId, departmentId, startDate, endDate, effectiveLimit, offset);
 
         return ContinuousSchemesResponse.builder()
                 .continuousSchemeCount(continuousCount)
@@ -2433,7 +2433,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         long continuousCount = schemeRegularityRepository.getContinuousSchemeCountByUserSchemes(
-                tenantId, userId, startDate, endDate, daysInRange);
+                tenantId, userId, startDate, endDate);
         if (!list) {
             return ContinuousSchemesResponse.builder()
                     .continuousSchemeCount(continuousCount)
@@ -2458,7 +2458,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int offset = (effectivePage - 1) * effectiveLimit;
         List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
                 schemeRegularityRepository.getContinuousSchemesByUserSchemes(
-                        tenantId, userId, startDate, endDate, daysInRange, effectiveLimit, offset);
+                        tenantId, userId, startDate, endDate, effectiveLimit, offset);
 
         return ContinuousSchemesResponse.builder()
                 .continuousSchemeCount(continuousCount)
