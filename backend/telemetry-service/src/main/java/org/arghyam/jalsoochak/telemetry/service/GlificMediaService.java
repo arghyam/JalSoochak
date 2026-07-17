@@ -109,10 +109,12 @@ public class GlificMediaService {
             } catch (RestClientException e) {
                 boolean retriable = isRetriableException(e);
                 if (!retriable) {
-                    throw new IOException(failurePrefix + " due to non-retriable error: " + e.getMessage(), e);
+                    log.warn("Media download for {} failed with non-retriable error: {}", targetLabel, e.getMessage());
+                    throw new IOException(failurePrefix + " due to a non-retriable error", e);
                 }
                 if (attempt == mediaDownloadRetryMaxAttempts) {
-                    throw new IOException(failurePrefix + " after " + attempt + " attempts: " + e.getMessage(), e);
+                    log.warn("Media download for {} failed after {} attempts: {}", targetLabel, attempt, e.getMessage());
+                    throw new IOException(failurePrefix + " after " + attempt + " attempts", e);
                 }
                 long backoffMs = computeBackoffMs(attempt, totalBackoffMs);
                 totalBackoffMs += backoffMs;
