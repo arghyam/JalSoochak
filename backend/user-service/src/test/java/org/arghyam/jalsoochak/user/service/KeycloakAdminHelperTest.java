@@ -21,6 +21,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.keycloak.admin.client.resource.AttackDetectionResource;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -307,6 +308,51 @@ class KeycloakAdminHelperTest {
             }
 
             verify(attackDetection, times(1)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("concurrent callers for one user share a probe even when the cache cannot retain it")
+        void concurrentCallersShareOneProbeWhenCacheFull() throws Exception {
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheMaxSize", 1);
+            when(attackDetection.bruteForceUserStatus("kc-occupant")).thenReturn(Map.of("disabled", Boolean.FALSE));
+            // Fill the only slot, so kc-spray can never be admitted and its result is never retained.
+            assertFalse(helper.isTemporarilyLockedByBruteForce("kc-occupant"));
+
+            AtomicInteger probesInFlight = new AtomicInteger();
+            AtomicInteger peakProbesInFlight = new AtomicInteger();
+            when(attackDetection.bruteForceUserStatus("kc-spray")).thenAnswer(invocation -> {
+                peakProbesInFlight.accumulateAndGet(probesInFlight.incrementAndGet(), Math::max);
+                try {
+                    // Hold the probe open so that any duplicate would have to overlap this one.
+                    Thread.sleep(50);
+                    return Map.of("disabled", Boolean.TRUE);
+                } finally {
+                    probesInFlight.decrementAndGet();
+                }
+            });
+
+            int callers = 8;
+            CountDownLatch startTogether = new CountDownLatch(1);
+            ExecutorService pool = Executors.newFixedThreadPool(callers);
+            List<Future<Boolean>> results = new ArrayList<>();
+            try {
+                for (int i = 0; i < callers; i++) {
+                    results.add(pool.submit(() -> {
+                        startTogether.await(5, TimeUnit.SECONDS);
+                        return helper.isTemporarilyLockedByBruteForce("kc-spray");
+                    }));
+                }
+                startTogether.countDown();
+                for (Future<Boolean> result : results) {
+                    assertTrue(result.get(10, TimeUnit.SECONDS), "every caller should observe the lock");
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+
+            // Single-flight is exactly this: never two probes for one user at once, cacheable or not.
+            // Asserting the peak rather than a total keeps the test immune to how the callers interleave.
+            assertEquals(1, peakProbesInFlight.get(), "an uncacheable user must not multiply admin probes");
         }
 
         @Test

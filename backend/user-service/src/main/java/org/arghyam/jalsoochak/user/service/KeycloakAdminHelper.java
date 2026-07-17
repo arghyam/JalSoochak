@@ -45,15 +45,16 @@ public class KeycloakAdminHelper {
     private final AtomicInteger lockStatusCacheSize = new AtomicInteger();
 
     /**
-     * One cache slot. {@code status} is completed exactly once, by the thread that installed the entry,
-     * so concurrent misses for the same user join a single in-flight probe rather than each issuing
-     * their own. It completes with {@code null} when the probe itself failed.
+     * Probes currently in flight, keyed by Keycloak user id, so concurrent callers for one user share a
+     * single admin round-trip. Deliberately separate from the result cache: coordination has to work even
+     * for users the cache cannot admit, which is exactly when a spray makes duplicate probes most likely.
+     * Each entry is removed as its probe settles, so this holds at most one entry per concurrently
+     * probing request thread and needs no cap of its own.
      */
-    private record LockStatusEntry(CompletableFuture<Boolean> status, long expiresAtNanos) {
+    private final ConcurrentHashMap<String, CompletableFuture<Boolean>> inFlightProbes = new ConcurrentHashMap<>();
 
-        LockStatusEntry(long expiresAtNanos) {
-            this(new CompletableFuture<>(), expiresAtNanos);
-        }
+    /** One cached probe result, valid until {@code expiresAtNanos}. */
+    private record LockStatusEntry(boolean locked, long expiresAtNanos) {
 
         boolean isLive(long nowNanos) {
             return expiresAtNanos > nowNanos;
@@ -174,66 +175,57 @@ public class KeycloakAdminHelper {
         if (keycloakId == null || keycloakId.isBlank()) return false;
 
         long now = System.nanoTime();
-        LockStatusEntry fresh = new LockStatusEntry(now + TimeUnit.SECONDS.toNanos(lockoutProbeCacheTtlSeconds));
-        LockStatusEntry entry = installOrJoin(keycloakId, fresh, now);
-
-        if (entry == null) {
-            // Cache is full of live entries for other users — probe uncached rather than evict them.
-            return Boolean.TRUE.equals(queryBruteForceStatus(keycloakId));
+        LockStatusEntry cached = lockStatusCache.get(keycloakId);
+        if (cached != null && cached.isLive(now)) {
+            return cached.locked();
         }
-        if (entry != fresh) {
-            // Another thread owns this user's probe: wait on its result instead of duplicating it.
-            return Boolean.TRUE.equals(entry.status().join());
-        }
-        return Boolean.TRUE.equals(runOwnedProbe(keycloakId, fresh));
+        return Boolean.TRUE.equals(probeOnce(keycloakId, now));
     }
 
     /**
-     * Returns the live entry for this user, installing {@code fresh} if there is none. The returned entry
-     * is {@code fresh} exactly when this thread won the right to run the probe, another entry when it should
-     * join a probe already in flight, or {@code null} when the cache is at capacity and cannot admit the user.
+     * Runs at most one probe per user at a time: the first caller owns the round-trip and any caller
+     * arriving while it is in flight waits on that same result. This holds whether or not the result can
+     * be retained, so a spray wide enough to fill the cache still cannot multiply probes for one account.
+     * A failed probe is not cached, so a transient admin-API problem is never pinned as "not locked" for
+     * the TTL; the next attempt re-queries once the admin API recovers.
      */
-    private LockStatusEntry installOrJoin(String keycloakId, LockStatusEntry fresh, long now) {
-        LockStatusEntry live = lockStatusCache.get(keycloakId);
-        if (live != null && live.isLive(now)) return live;
+    private Boolean probeOnce(String keycloakId, long now) {
+        CompletableFuture<Boolean> owned = new CompletableFuture<>();
+        CompletableFuture<Boolean> inFlight = inFlightProbes.putIfAbsent(keycloakId, owned);
+        if (inFlight != null) {
+            return inFlight.join();
+        }
 
+        Boolean locked = null;
+        try {
+            locked = queryBruteForceStatus(keycloakId);
+            if (locked != null) {
+                cacheResult(keycloakId, locked, now);
+            }
+        } finally {
+            // Cache first, then stop collecting joiners: a caller arriving after this either joins a newer
+            // probe or reads the result above. Always completes, so no joiner is left stranded.
+            inFlightProbes.remove(keycloakId, owned);
+            owned.complete(locked);
+        }
+        return locked;
+    }
+
+    /** Retains a probe result if the cache can admit it; skipping retention only costs a later re-probe. */
+    private void cacheResult(String keycloakId, boolean locked, long now) {
         if (!reserveSlot()) {
             purgeExpired(now);
-            if (!reserveSlot()) {
-                // Still at capacity: join a live entry if one raced in, otherwise signal "uncacheable".
-                LockStatusEntry raced = lockStatusCache.get(keycloakId);
-                return raced != null && raced.isLive(now) ? raced : null;
-            }
+            if (!reserveSlot()) return;
         }
+        LockStatusEntry fresh = new LockStatusEntry(locked, now + TimeUnit.SECONDS.toNanos(lockoutProbeCacheTtlSeconds));
         // compute() serialises per key, so the admission decision and the install are one atomic step.
         boolean[] consumedSlot = {false};
-        LockStatusEntry installed = lockStatusCache.compute(keycloakId, (id, current) -> {
-            if (current != null && current.isLive(now)) return current;
-            // Replacing an expired entry reuses the slot it already holds; only a new key consumes ours.
+        lockStatusCache.compute(keycloakId, (id, current) -> {
+            // Replacing any existing entry reuses the slot it already holds; only a new key consumes ours.
             consumedSlot[0] = current == null;
             return fresh;
         });
         if (!consumedSlot[0]) releaseSlot();
-        return installed;
-    }
-
-    /**
-     * Runs the one probe this thread owns and publishes the result to every thread joining the same entry.
-     * A failed probe is evicted rather than cached, so a transient admin-API problem is not pinned as
-     * "not locked" for the TTL; the next attempt re-queries once the admin API recovers.
-     */
-    private Boolean runOwnedProbe(String keycloakId, LockStatusEntry entry) {
-        Boolean locked = null;
-        try {
-            locked = queryBruteForceStatus(keycloakId);
-        } finally {
-            if (locked == null && lockStatusCache.remove(keycloakId, entry)) {
-                releaseSlot();
-            }
-            // Always completes, so a joiner can never be stranded waiting on this entry.
-            entry.status().complete(locked);
-        }
-        return locked;
     }
 
     /** Claims capacity for one entry, or reports that the cache is full. */
@@ -252,7 +244,7 @@ public class KeycloakAdminHelper {
 
     /**
      * Reclaims slots held by expired entries. The value-conditional remove keeps the counter honest when a
-     * concurrent {@link #installOrJoin} has already replaced the entry being purged.
+     * concurrent {@link #cacheResult} has already replaced the entry being purged.
      */
     private void purgeExpired(long now) {
         lockStatusCache.forEach((id, entry) -> {
