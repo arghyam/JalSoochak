@@ -31,6 +31,7 @@ import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
+import org.arghyam.jalsoochak.analytics.helper.RegularityThresholdFilter;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -96,6 +97,14 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     @Value("${analytics.scheduler.scheme-status.critical-after-days:15}")
     private int criticalAfterDays;
 
+    /**
+     * Trailing window (in days, inclusive) that a single-day {@code /scheme-regularity/average} request
+     * expands to: a share-of-days KPI is meaningless over one day, so {@code start == end} widens to this
+     * many trailing days. Env-only (not per-tenant). Periodic buckets are never expanded.
+     */
+    @Value("${analytics.dashboard.regularity.single-day-lookback-days:30}")
+    private int regularitySingleDayLookbackDays;
+
     private final SchemeRegularityRepository schemeRegularityRepository;
     private final DimTenantRepository dimTenantRepository;
     private final DimUserRepository dimUserRepository;
@@ -108,6 +117,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
+        // Single-day requests expand to a trailing window before the cache key / query / reported window.
+        startDate = expandSingleDayWindowStart(startDate, endDate);
         // #region agent log
         appendDebugLog(
                 "H1",
@@ -146,15 +157,14 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 "H2",
                 "SchemeRegularityServiceImpl:getAverageSchemeRegularity:repo_success",
                 "Regularity repository call succeeded",
-                Map.of("daysInRange", daysInRange, "schemeCount", metrics.schemeCount(), "totalSupplyDays", metrics.totalSupplyDays()));
+                Map.of("daysInRange", daysInRange, "schemeCount", metrics.schemeCount(), "regularSchemeCount", metrics.regularSchemeCount()));
         // #endregion
 
-        BigDecimal averageRegularity = BigDecimal.ZERO;
-        if (metrics.schemeCount() > 0 && daysInRange > 0) {
-            BigDecimal denominator = BigDecimal.valueOf((long) metrics.schemeCount() * daysInRange);
-            averageRegularity = BigDecimal.valueOf(metrics.totalSupplyDays())
-                    .divide(denominator, 4, RoundingMode.HALF_UP);
-        }
+        BigDecimal thresholdPercent =
+                schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(tenantId);
+        int thresholdDays = RegularityThresholdFilter.thresholdDays(daysInRange, thresholdPercent);
+        BigDecimal averageRegularity =
+                RegularityThresholdFilter.regularityRate(metrics.regularSchemeCount(), metrics.schemeCount());
 
         AverageSchemeRegularityResponse response = AverageSchemeRegularityResponse.builder()
                 .lgdId(parentLgdId)
@@ -167,7 +177,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .daysInRange(daysInRange)
                 .schemeCount(metrics.schemeCount())
                 .totalSupplyDays(metrics.totalSupplyDays())
+                .regularSchemeCount(metrics.regularSchemeCount())
                 .averageRegularity(averageRegularity)
+                .thresholdPercent(thresholdPercent)
+                .thresholdDays(thresholdDays)
                 .childRegionCount(0)
                 .childRegions(List.of())
                 .build();
@@ -259,6 +272,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
+        // Single-day requests expand to a trailing window before the cache key / query / reported window.
+        startDate = expandSingleDayWindowStart(startDate, endDate);
 
         String cacheKey = SCHEME_REGULARITY_CACHE_PREFIX
                 + ":tenant:" + tenantId
@@ -276,12 +291,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 schemeRegularityRepository.getSchemeRegularityMetricsByDepartment(
                         tenantId, parentDepartmentId, startDate, endDate);
 
-        BigDecimal averageRegularity = BigDecimal.ZERO;
-        if (metrics.schemeCount() > 0 && daysInRange > 0) {
-            BigDecimal denominator = BigDecimal.valueOf((long) metrics.schemeCount() * daysInRange);
-            averageRegularity = BigDecimal.valueOf(metrics.totalSupplyDays())
-                    .divide(denominator, 4, RoundingMode.HALF_UP);
-        }
+        BigDecimal thresholdPercent =
+                schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(tenantId);
+        int thresholdDays = RegularityThresholdFilter.thresholdDays(daysInRange, thresholdPercent);
+        BigDecimal averageRegularity =
+                RegularityThresholdFilter.regularityRate(metrics.regularSchemeCount(), metrics.schemeCount());
 
         AverageSchemeRegularityResponse response = AverageSchemeRegularityResponse.builder()
                 .lgdId(null)
@@ -294,7 +308,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .daysInRange(daysInRange)
                 .schemeCount(metrics.schemeCount())
                 .totalSupplyDays(metrics.totalSupplyDays())
+                .regularSchemeCount(metrics.regularSchemeCount())
                 .averageRegularity(averageRegularity)
+                .thresholdPercent(thresholdPercent)
+                .thresholdDays(thresholdDays)
                 .childRegionCount(0)
                 .childRegions(List.of())
                 .build();
@@ -308,6 +325,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTenantInput(tenantId);
         validateLgdInput(parentLgdId);
         validateDateRange(startDate, endDate);
+        // Single-day requests expand to a trailing window before the cache key / query / reported window.
+        startDate = expandSingleDayWindowStart(startDate, endDate);
 
         String cacheKey = SCHEME_REGULARITY_CACHE_PREFIX
                 + ":tenant:" + tenantId
@@ -341,23 +360,25 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .title(m.title())
                         .schemeCount(m.schemeCount())
                         .totalSupplyDays(m.totalSupplyDays())
+                        .regularSchemeCount(m.regularSchemeCount())
                         .averageRegularity(m.averageRegularity())
                         .build())
                 .toList();
 
         int totalSchemeCount = metrics.stream()
-                .map(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::schemeCount)
-                .mapToInt(Integer::intValue)
+                .mapToInt(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::schemeCount)
                 .sum();
         int totalSupplyDays = metrics.stream()
-                .map(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::totalSupplyDays)
-                .mapToInt(Integer::intValue)
+                .mapToInt(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::totalSupplyDays)
                 .sum();
-        BigDecimal averageRegularity = BigDecimal.ZERO;
-        if (totalSchemeCount > 0 && daysInRange > 0) {
-            averageRegularity = BigDecimal.valueOf(totalSupplyDays)
-                    .divide(BigDecimal.valueOf((long) totalSchemeCount * daysInRange), 4, RoundingMode.HALF_UP);
-        }
+        int totalRegularSchemeCount = metrics.stream()
+                .mapToInt(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::regularSchemeCount)
+                .sum();
+        BigDecimal thresholdPercent =
+                schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(tenantId);
+        int thresholdDays = RegularityThresholdFilter.thresholdDays(daysInRange, thresholdPercent);
+        BigDecimal averageRegularity =
+                RegularityThresholdFilter.regularityRate(totalRegularSchemeCount, totalSchemeCount);
 
         AverageSchemeRegularityResponse response = AverageSchemeRegularityResponse.builder()
                 .lgdId(parentLgdId)
@@ -370,7 +391,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .daysInRange(daysInRange)
                 .schemeCount(totalSchemeCount)
                 .totalSupplyDays(totalSupplyDays)
+                .regularSchemeCount(totalRegularSchemeCount)
                 .averageRegularity(averageRegularity)
+                .thresholdPercent(thresholdPercent)
+                .thresholdDays(thresholdDays)
                 .childRegionCount(childRegions.size())
                 .childRegions(childRegions)
                 .build();
@@ -384,6 +408,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTenantInput(tenantId);
         validateDepartmentInput(parentDepartmentId);
         validateDateRange(startDate, endDate);
+        // Single-day requests expand to a trailing window before the cache key / query / reported window.
+        startDate = expandSingleDayWindowStart(startDate, endDate);
 
         String cacheKey = SCHEME_REGULARITY_CACHE_PREFIX
                 + ":tenant:" + tenantId
@@ -419,23 +445,25 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .title(m.title())
                         .schemeCount(m.schemeCount())
                         .totalSupplyDays(m.totalSupplyDays())
+                        .regularSchemeCount(m.regularSchemeCount())
                         .averageRegularity(m.averageRegularity())
                         .build())
                 .toList();
 
         int totalSchemeCount = metrics.stream()
-                .map(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::schemeCount)
-                .mapToInt(Integer::intValue)
+                .mapToInt(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::schemeCount)
                 .sum();
         int totalSupplyDays = metrics.stream()
-                .map(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::totalSupplyDays)
-                .mapToInt(Integer::intValue)
+                .mapToInt(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::totalSupplyDays)
                 .sum();
-        BigDecimal averageRegularity = BigDecimal.ZERO;
-        if (totalSchemeCount > 0 && daysInRange > 0) {
-            averageRegularity = BigDecimal.valueOf(totalSupplyDays)
-                    .divide(BigDecimal.valueOf((long) totalSchemeCount * daysInRange), 4, RoundingMode.HALF_UP);
-        }
+        int totalRegularSchemeCount = metrics.stream()
+                .mapToInt(SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics::regularSchemeCount)
+                .sum();
+        BigDecimal thresholdPercent =
+                schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(tenantId);
+        int thresholdDays = RegularityThresholdFilter.thresholdDays(daysInRange, thresholdPercent);
+        BigDecimal averageRegularity =
+                RegularityThresholdFilter.regularityRate(totalRegularSchemeCount, totalSchemeCount);
 
         AverageSchemeRegularityResponse response = AverageSchemeRegularityResponse.builder()
                 .lgdId(null)
@@ -448,7 +476,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .daysInRange(daysInRange)
                 .schemeCount(totalSchemeCount)
                 .totalSupplyDays(totalSupplyDays)
+                .regularSchemeCount(totalRegularSchemeCount)
                 .averageRegularity(averageRegularity)
+                .thresholdPercent(thresholdPercent)
+                .thresholdDays(thresholdDays)
                 .childRegionCount(childRegions.size())
                 .childRegions(childRegions)
                 .build();
@@ -956,13 +987,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
                     Integer schemeCount = row.schemeCount();
                     Integer totalSupplyDays = reg != null ? reg.totalSupplyDays() : 0;
+                    // reg.schemeCount() shares the same {{NWS}} scheme universe as row.schemeCount(), so the
+                    // regular count is a subset of the displayed count (rate in [0,1]).
+                    int regularSchemeCount = reg != null ? reg.regularSchemeCount() : 0;
                     Integer totalSubmissionDays = sub != null ? sub.totalSubmissionDays() : 0;
 
-                    BigDecimal averageRegularity = BigDecimal.ZERO;
-                    if (schemeCount != null && schemeCount > 0 && daysInRange > 0) {
-                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
-                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
-                    }
+                    BigDecimal averageRegularity = RegularityThresholdFilter.regularityRate(
+                            regularSchemeCount, schemeCount != null ? schemeCount : 0);
 
                     BigDecimal readingSubmissionRate = BigDecimal.ZERO;
                     if (schemeCount != null && schemeCount > 0 && daysInRange > 0) {
@@ -986,6 +1017,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                             .supplyDaysInEfficientRange(
                                     supplyDaysInEfficientRangeByKey.getOrDefault(key, 0L))
                             .totalSupplyDays(totalSupplyDays)
+                            .regularSchemeCount(regularSchemeCount)
                             .averageRegularity(averageRegularity)
                             .totalSubmissionDays(totalSubmissionDays)
                             .readingSubmissionRate(readingSubmissionRate)
@@ -1065,11 +1097,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .map(metric -> {
                     SchemeRegularityRepository.NationalDashboardTenantStateMetadata meta =
                             tenantStateMetadataByTenantId.get(metric.tenantId());
-                    BigDecimal averageRegularity = BigDecimal.ZERO;
-                    if (metric.schemeCount() > 0 && daysInRange > 0) {
-                        averageRegularity = BigDecimal.valueOf(metric.totalSupplyDays())
-                                .divide(BigDecimal.valueOf((long) metric.schemeCount() * daysInRange), 4, RoundingMode.HALF_UP);
-                    }
+                    BigDecimal averageRegularity = RegularityThresholdFilter.regularityRate(
+                            metric.regularSchemeCount(), metric.schemeCount());
                     return NationalDashboardResponse.StateRegularity.builder()
                             .tenantId(metric.tenantId())
                             .lgdId(meta != null ? meta.lgdId() : null)
@@ -1078,6 +1107,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                             .stateTitle(metric.title())
                             .schemeCount(metric.schemeCount())
                             .totalSupplyDays(metric.totalSupplyDays())
+                            .regularSchemeCount(metric.regularSchemeCount())
                             .averageRegularity(averageRegularity)
                             .build();
                 })
@@ -2835,6 +2865,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .status(resolveSchemeStatus(metric.operatingStatus()))
                         .supplyDays(metric.supplyDays())
                         .averageRegularity(calculateReportingRate(metric.supplyDays(), daysInRange))
+                        .isRegular(metric.isRegular())
                         .submissionDays(metric.submissionDays())
                         .submissionRate(calculateReportingRate(metric.submissionDays(), daysInRange))
                         .build())
@@ -2895,6 +2926,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .status(resolveSchemeStatus(metric.operatingStatus()))
                         .supplyDays(metric.supplyDays())
                         .averageRegularity(calculateReportingRate(metric.supplyDays(), daysInRange))
+                        .isRegular(metric.isRegular())
                         .submissionDays(metric.submissionDays())
                         .submissionRate(calculateReportingRate(metric.submissionDays(), daysInRange))
                         .build())
@@ -2960,6 +2992,20 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         if (endDate.isBefore(startDate)) {
             throw new IllegalArgumentException("end_date must be on or after start_date");
         }
+    }
+
+    /**
+     * For {@code /scheme-regularity/average} only: a single-day request ({@code start == end}) is too small
+     * a sample for a share-of-days KPI, so it expands to a trailing {@link #regularitySingleDayLookbackDays}
+     * window (inclusive of the requested day). Returns the (possibly widened) start date; the caller must
+     * use it for the cache key, the query, and the reported window so all three agree. Multi-day requests
+     * pass through unchanged.
+     */
+    private LocalDate expandSingleDayWindowStart(LocalDate startDate, LocalDate endDate) {
+        if (startDate.equals(endDate)) {
+            return endDate.minusDays(Math.max(1, regularitySingleDayLookbackDays) - 1L);
+        }
+        return startDate;
     }
 
     private void validateTopSchemeCount(Integer topSchemeCount) {
@@ -3053,26 +3099,22 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         List<PeriodicSchemeRegularityResponse.PeriodicSchemeRegularityPeriodMetric> periodicMetrics =
                 metrics.stream()
                         .map(metric -> {
+                            // Cap the bucket's dates to the request window for display. The KPI's per-bucket
+                            // regular count was already classified in SQL against these same capped days, so
+                            // Java must not recompute the day count independently.
                             LocalDate cappedPeriodStart =
                                     metric.periodStartDate().isBefore(startDate) ? startDate : metric.periodStartDate();
                             LocalDate cappedPeriodEnd =
                                     metric.periodEndDate().isAfter(endDate) ? endDate : metric.periodEndDate();
 
-                            long periodDays =
-                                    ChronoUnit.DAYS.between(cappedPeriodStart, cappedPeriodEnd) + 1;
-
-                            BigDecimal averageRegularity = BigDecimal.ZERO;
-                            if (metric.schemeCount() > 0 && periodDays > 0) {
-                                BigDecimal denominator =
-                                        BigDecimal.valueOf((long) metric.schemeCount() * periodDays);
-                                averageRegularity = BigDecimal.valueOf(metric.totalSupplyDays())
-                                        .divide(denominator, 4, RoundingMode.HALF_UP);
-                            }
+                            BigDecimal averageRegularity = RegularityThresholdFilter.regularityRate(
+                                    metric.regularSchemeCount(), metric.schemeCount());
 
                             return PeriodicSchemeRegularityResponse.PeriodicSchemeRegularityPeriodMetric.builder()
                                     .periodStartDate(cappedPeriodStart)
                                     .periodEndDate(cappedPeriodEnd)
                                     .totalSupplyDays(metric.totalSupplyDays())
+                                    .regularSchemeCount(metric.regularSchemeCount())
                                     .totalWaterQuantity(metric.totalWaterQuantity())
                                     .averageRegularity(averageRegularity)
                                     .build();
@@ -3103,21 +3145,16 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         List<PeriodicNationalSchemeRegularityResponse.PeriodicNationalSchemeRegularityPeriodMetric> periodicMetrics =
                 metrics.stream()
                         .map(metric -> {
+                            // Cap the bucket's dates to the request window for display. The KPI's per-bucket
+                            // regular count was already classified in SQL against these same capped days, so
+                            // Java must not recompute the day count independently.
                             LocalDate cappedPeriodStart =
                                     metric.periodStartDate().isBefore(startDate) ? startDate : metric.periodStartDate();
                             LocalDate cappedPeriodEnd =
                                     metric.periodEndDate().isAfter(endDate) ? endDate : metric.periodEndDate();
 
-                            long periodDays =
-                                    ChronoUnit.DAYS.between(cappedPeriodStart, cappedPeriodEnd) + 1;
-
-                            BigDecimal averageRegularity = BigDecimal.ZERO;
-                            if (metric.schemeCount() > 0 && periodDays > 0) {
-                                BigDecimal denominator =
-                                        BigDecimal.valueOf((long) metric.schemeCount() * periodDays);
-                                averageRegularity = BigDecimal.valueOf(metric.totalSupplyDays())
-                                        .divide(denominator, 4, RoundingMode.HALF_UP);
-                            }
+                            BigDecimal averageRegularity = RegularityThresholdFilter.regularityRate(
+                                    metric.regularSchemeCount(), metric.schemeCount());
 
                             return PeriodicNationalSchemeRegularityResponse.PeriodicNationalSchemeRegularityPeriodMetric
                                     .builder()
@@ -3125,6 +3162,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                     .periodEndDate(cappedPeriodEnd)
                                     .schemeCount(metric.schemeCount())
                                     .totalSupplyDays(metric.totalSupplyDays())
+                                    .regularSchemeCount(metric.regularSchemeCount())
                                     .totalWaterQuantity(metric.totalWaterQuantity())
                                     .averageRegularity(averageRegularity)
                                     .build();
