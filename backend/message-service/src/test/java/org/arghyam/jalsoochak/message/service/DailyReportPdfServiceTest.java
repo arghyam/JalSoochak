@@ -88,16 +88,31 @@ class DailyReportPdfServiceTest {
 
     @Test
     void generate_createsValidPdfWithExpectedFilename() throws Exception {
-        String filename = service.generate(sampleKpis(), "Binod Nimoli", "SECTION_OFFICER", samplePriority(), List.of());
+        String filename = service.generate(sampleKpis(), 500L, "Binod Nimoli", "SECTION_OFFICER", samplePriority(), List.of());
 
         assertThat(filename)
-                .startsWith("daily_report_SECTION_OFFICER_Binod_Nimoli_2026-07-07")
+                .startsWith("daily_report_SECTION_OFFICER_500_2026-07-07")
                 .endsWith(".pdf");
         Path pdf = tempDir.resolve(filename);
         assertThat(pdf.toFile()).exists().isFile();
         try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
             assertThat(doc.getNumberOfPages()).isGreaterThanOrEqualTo(1);
         }
+    }
+
+    @Test
+    void generate_twoOfficersWithSameNameAndRole_produceDistinctFilenames() throws Exception {
+        // Regression for the PII cross-exposure blocker: the filename → MinIO object key must be
+        // unique per officer. Two Section Officers with the identical display name and report date
+        // must NOT collapse to the same object key (which would overwrite and misdeliver one's PDF).
+        String fileA = service.generate(sampleKpis(), 601L, "Sunil Kumar", "SECTION_OFFICER", samplePriority(), List.of());
+        String fileB = service.generate(sampleKpis(), 602L, "Sunil Kumar", "SECTION_OFFICER", samplePriority(), List.of());
+
+        assertThat(fileA).isNotEqualTo(fileB);
+        assertThat(fileA).contains("_601_");
+        assertThat(fileB).contains("_602_");
+        assertThat(tempDir.resolve(fileA).toFile()).exists();
+        assertThat(tempDir.resolve(fileB).toFile()).exists();
     }
 
     @Test
@@ -173,8 +188,8 @@ class DailyReportPdfServiceTest {
     @Test
     void generate_sdoReport_rendersSectionOfficerBreakdownTableFirstInSummary() throws Exception {
         String filename = service.generate(
-                sampleKpis(), "SDO Kumar", "SUB_DIVISIONAL_OFFICER", samplePriority(), sampleSectionOfficers());
-        assertThat(filename).startsWith("daily_report_SUB_DIVISIONAL_OFFICER_SDO_Kumar_2026-07-07");
+                sampleKpis(), 700L, "SDO Kumar", "SUB_DIVISIONAL_OFFICER", samplePriority(), sampleSectionOfficers());
+        assertThat(filename).startsWith("daily_report_SUB_DIVISIONAL_OFFICER_700_2026-07-07");
 
         String text;
         try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
@@ -195,7 +210,7 @@ class DailyReportPdfServiceTest {
     void generate_soReport_doesNotRenderSectionOfficerBreakdown() throws Exception {
         // Even if summaries were somehow supplied, a SECTION_OFFICER layout must not draw the table.
         String filename = service.generate(
-                sampleKpis(), "Binod Nimoli", "SECTION_OFFICER", samplePriority(), sampleSectionOfficers());
+                sampleKpis(), 500L, "Binod Nimoli", "SECTION_OFFICER", samplePriority(), sampleSectionOfficers());
         try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
             String text = new PDFTextStripper().getText(doc);
             assertThat(text).doesNotContain("Alice");
@@ -203,7 +218,7 @@ class DailyReportPdfServiceTest {
     }
 
     private String renderText(DailyReportKpis kpis, List<DailyReportPriorityRow> priority) throws Exception {
-        String filename = service.generate(kpis, "Binod Nimoli", "SECTION_OFFICER", priority, List.of());
+        String filename = service.generate(kpis, 500L, "Binod Nimoli", "SECTION_OFFICER", priority, List.of());
         try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
             return new PDFTextStripper().getText(doc);
         }

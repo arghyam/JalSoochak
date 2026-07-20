@@ -895,7 +895,7 @@ public class NotificationEventRouter {
                 buildSectionOfficerRows(tenantSchema, kpis, corr);
 
         String filename = dailyReportPdfService.generate(
-                kpis, officerName, officerUserType, priorityRows, sectionOfficerRows);
+                kpis, officerUserId, officerName, officerUserType, priorityRows, sectionOfficerRows);
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
         String minioUrl;
         try {

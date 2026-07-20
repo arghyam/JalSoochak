@@ -179,10 +179,29 @@ public class GlificWhatsAppService {
             throw new IllegalStateException(
                     "glific.template.login-otp-id must be configured — SEND_LOGIN_OTP events cannot be delivered without it");
         }
-        if (!dailyReportDryRun && isBlank(dailyReportSoTemplateId)) {
+        if (!dailyReportDryRun) {
+            if (isBlank(dailyReportSoTemplateId)) {
+                throw new IllegalStateException(
+                        "glific.template.daily-report-so-id must be configured when daily-report delivery is enabled"
+                        + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports)");
+            }
+            // sendDailyReportHsm does Integer.parseInt on the resolved template id, so fail fast at
+            // startup on a non-numeric id rather than per-message (retry → DLT) at delivery time.
+            requireNumericTemplateId(dailyReportSoTemplateId, "glific.template.daily-report-so-id");
+            // The SDO id is optional (resolveDailyReportTemplateId falls back to the SO template),
+            // so validate it only when it has been configured.
+            if (!isBlank(dailyReportSdoTemplateId)) {
+                requireNumericTemplateId(dailyReportSdoTemplateId, "glific.template.daily-report-sdo-id");
+            }
+        }
+    }
+
+    private static void requireNumericTemplateId(String value, String propertyName) {
+        try {
+            Integer.parseInt(value);
+        } catch (NumberFormatException e) {
             throw new IllegalStateException(
-                    "glific.template.daily-report-so-id must be configured when daily-report delivery is enabled"
-                    + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports)");
+                    propertyName + " must be a numeric Glific template id but was '" + value + "'", e);
         }
     }
 

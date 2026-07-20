@@ -1133,7 +1133,7 @@ class NotificationEventRouterTest {
     void handleDailyReport_generatesPdfAndSendsToSectionOfficer() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
-        when(dailyReportPdfService.generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
                 .thenReturn("daily_report_x.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER"))
@@ -1141,7 +1141,7 @@ class NotificationEventRouterTest {
 
         router.route(DAILY_REPORT_JSON);
 
-        verify(dailyReportPdfService).generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
         verify(minioStorageService).upload(any(Path.class));
         verify(whatsAppChannel).sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER");
         // Stored contact present → no opt-in, no contact-registered event.
@@ -1217,7 +1217,7 @@ class NotificationEventRouterTest {
                 default -> v;
             };
         });
-        when(dailyReportPdfService.generate(any(), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), anyList()))
                 .thenReturn("sdo.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/sdo.pdf");
         when(whatsAppChannel.sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER")).thenReturn(true);
@@ -1226,7 +1226,7 @@ class NotificationEventRouterTest {
 
         ArgumentCaptor<List<DailyReportSectionOfficerRow>> cap = ArgumentCaptor.forClass(List.class);
         verify(dailyReportPdfService).generate(
-                any(), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), cap.capture());
+                any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), cap.capture());
         verify(whatsAppChannel).sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER");
 
         List<DailyReportSectionOfficerRow> soRows = cap.getValue();
@@ -1255,7 +1255,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(null, "enc-title", "enc-phone");
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500024");
-        when(dailyReportPdfService.generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
                 .thenReturn("daily_report_x.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
@@ -1264,7 +1264,7 @@ class NotificationEventRouterTest {
 
         router.route(DAILY_REPORT_JSON);
 
-        verify(dailyReportPdfService).generate(any(), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
         verify(glificWhatsAppService).optIn("919876500024");
         verify(whatsAppChannel).sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER");
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
@@ -1336,7 +1336,7 @@ class NotificationEventRouterTest {
                 default -> v;
             };
         });
-        when(dailyReportPdfService.generate(any(), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
                 .thenReturn("f.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
         when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER")).thenReturn(true);
@@ -1344,7 +1344,7 @@ class NotificationEventRouterTest {
         router.route(json);
 
         ArgumentCaptor<List<DailyReportPriorityRow>> cap = ArgumentCaptor.forClass(List.class);
-        verify(dailyReportPdfService).generate(any(), eq("Binod"), eq("SECTION_OFFICER"), cap.capture(), anyList());
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), cap.capture(), anyList());
         List<DailyReportPriorityRow> rows = cap.getValue();
         assertThat(rows).hasSize(1);
         DailyReportPriorityRow row = rows.get(0);
