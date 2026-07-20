@@ -43,6 +43,8 @@ public class SchemeRegularityListResponse {
         private String status;
         private Integer supplyDays;
         private BigDecimal averageRegularity;
+        /** Whether this scheme met the regularity threshold over the window (additive; rate unchanged). */
+        private Boolean isRegular;
         private Integer submissionDays;
         private BigDecimal submissionRate;
     }

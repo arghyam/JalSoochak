@@ -251,6 +251,56 @@ public class NudgeRepository {
     }
 
     /**
+     * Returns the distinct user ids of officers of the given type ({@code SECTION_OFFICER},
+     * {@code SUB_DIVISIONAL_OFFICER}, …) who oversee at least one active scheme in the tenant.
+     *
+     * <p>Used by the Daily Water Service Situation Report scheduler to decide which officers to
+     * request a report for. Returns ids only — no PII is read here (message-service resolves the
+     * officer's contact when it delivers the report).</p>
+     */
+    @SuppressWarnings("java:S2077")
+    public List<Long> findDistinctOfficerUserIdsByUserType(String schema, String userTypeName) {
+        validateSchemaName(schema);
+        String sql = String.format("""
+                SELECT DISTINCT u.id AS user_id
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.user_table u ON u.id = usm.user_id
+                JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type
+                WHERE UPPER(ut.c_name) = UPPER(?) AND usm.status = 1 AND u.status = 1
+                """, schema, schema);
+        return jdbcTemplate.queryForList(sql, Long.class, userTypeName);
+    }
+
+    /**
+     * Returns the distinct user ids of {@code SECTION_OFFICER}s who share at least one active scheme
+     * with the given Sub-Divisional Officer — i.e. the Section Officers "under" that SDO. There is no
+     * explicit SDO→SO hierarchy in the schema, so the relationship is derived through the schemes both
+     * are mapped to in {@code user_scheme_mapping_table}.
+     *
+     * <p>Used by the Daily Water Service Situation Report scheduler to build the SDO report's
+     * per-officer Summary breakdown. Returns ids only — no PII (message-service resolves each
+     * officer's name/mobile at render time; analytics computes their KPIs).</p>
+     */
+    @SuppressWarnings("java:S2077")
+    public List<Long> findSubordinateSectionOfficerIds(String schema, long sdoUserId) {
+        validateSchemaName(schema);
+        String sql = String.format("""
+                SELECT DISTINCT so_u.id AS user_id
+                FROM %1$s.user_scheme_mapping_table sdo_usm
+                JOIN %1$s.user_scheme_mapping_table so_usm
+                    ON so_usm.scheme_id = sdo_usm.scheme_id
+                JOIN %1$s.user_table so_u ON so_u.id = so_usm.user_id
+                JOIN common_schema.user_type_master_table so_ut ON so_ut.id = so_u.user_type
+                WHERE sdo_usm.user_id = ?
+                  AND sdo_usm.status = 1
+                  AND so_usm.status = 1
+                  AND so_u.status = 1
+                  AND UPPER(so_ut.c_name) = 'SECTION_OFFICER'
+                """, schema);
+        return jdbcTemplate.queryForList(sql, Long.class, sdoUserId);
+    }
+
+    /**
      * Persists the Glific contact ID for the given user.
      * Called by the Kafka consumer when a {@code WHATSAPP_CONTACT_REGISTERED} event arrives.
      */

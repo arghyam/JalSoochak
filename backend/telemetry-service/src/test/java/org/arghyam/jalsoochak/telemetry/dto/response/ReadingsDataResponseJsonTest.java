@@ -24,12 +24,12 @@ class ReadingsDataResponseJsonTest {
         assertTrue(json.has("correlationId"));
         assertEquals("corr-123", json.get("correlationId").asText());
         assertFalse(json.has("correlation_id"));
-        assertFalse(json.has("errorCode"));
-        assertEquals("UNREADABLE_IMAGE", json.get("error_code").asText());
+        assertFalse(json.has("error_code"));
+        assertEquals("UNREADABLE_IMAGE", json.get("errorCode").asText());
     }
 
     @Test
-    void serializesCreateReadingErrorCodeAsSnakeCase() throws Exception {
+    void serializesCreateReadingErrorCodeAsCamelCase() throws Exception {
         CreateReadingResponse response = CreateReadingResponse.builder()
                 .success(false)
                 .errorCode(TelemetryErrorCode.FLOW_VISION_FAILED)
@@ -37,7 +37,7 @@ class ReadingsDataResponseJsonTest {
                 .build();
 
         JsonNode json = OBJECT_MAPPER.readTree(OBJECT_MAPPER.writeValueAsString(response));
-        assertFalse(json.has("errorCode"));
-        assertEquals("FLOW_VISION_FAILED", json.get("error_code").asText());
+        assertFalse(json.has("error_code"));
+        assertEquals("FLOW_VISION_FAILED", json.get("errorCode").asText());
     }
 }

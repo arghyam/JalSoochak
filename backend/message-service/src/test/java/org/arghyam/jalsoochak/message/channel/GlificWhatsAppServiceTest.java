@@ -486,6 +486,40 @@ class GlificWhatsAppServiceTest {
                 .hasMessageContaining("sendHsmMessage");
     }
 
+    // ────────────── daily-report template-id validation (@PostConstruct) ────────────
+
+    @Test
+    void validateTemplates_throwsWhenDailyReportSoTemplateIdNotNumeric() {
+        // Delivery enabled (no dry-run) and the SO template id is present but non-numeric —
+        // sendDailyReportHsm would fail at Integer.parseInt, so we must fail fast at startup.
+        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "not-a-number");
+
+        assertThatThrownBy(() -> service.validateTemplates())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("daily-report-so-id");
+    }
+
+    @Test
+    void validateTemplates_throwsWhenDailyReportSdoTemplateIdNotNumeric() {
+        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+        ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId", "abc");
+
+        assertThatThrownBy(() -> service.validateTemplates())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("daily-report-sdo-id");
+    }
+
+    @Test
+    void validateTemplates_passesWhenDailyReportTemplateIdsAreNumeric() {
+        ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+        ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId", "43");
+
+        assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+    }
+
     // ────────────────────────────── helpers ────────────────────────────────────
 
     @SuppressWarnings("unchecked")

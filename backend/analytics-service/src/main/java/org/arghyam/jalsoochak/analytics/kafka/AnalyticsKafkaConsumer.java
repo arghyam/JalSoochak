@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.kafka;
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.RegularityThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
@@ -17,7 +18,11 @@ import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterQuantityEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.AnomalyEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.DailyReportRequestEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.DailyReportKpisEvent;
+import org.arghyam.jalsoochak.analytics.dto.DailyReportKpiDTO;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
+import org.arghyam.jalsoochak.analytics.service.DailySituationReportService;
 import org.arghyam.jalsoochak.analytics.service.FactService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,14 +31,21 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class AnalyticsKafkaConsumer {
 
+    private static final String COMMON_TOPIC = "common-topic";
+
     private final ObjectMapper objectMapper;
     private final DimensionService dimensionService;
     private final FactService factService;
+    private final DailySituationReportService dailySituationReportService;
+    private final KafkaProducer kafkaProducer;
 
     @KafkaListener(topics = "tenant-service-topic", groupId = "${spring.kafka.consumer.group-id}")
     public void consumeTenantEvents(String message) {
@@ -53,6 +65,11 @@ public class AnalyticsKafkaConsumer {
                     IncludedWorkStatusesUpdatedEvent event =
                             objectMapper.readValue(message, IncludedWorkStatusesUpdatedEvent.class);
                     dimensionService.updateIncludedWorkStatuses(event);
+                }
+                case "REGULARITY_THRESHOLD_UPDATED" -> {
+                    RegularityThresholdUpdatedEvent event =
+                            objectMapper.readValue(message, RegularityThresholdUpdatedEvent.class);
+                    dimensionService.updateRegularityThreshold(event);
                 }
                 case "TENANT_LOCATION_HIERARCHY_UPDATED" -> {
                     TenantLocationHierarchyUpdatedEvent event = objectMapper.readValue(message,
@@ -183,12 +200,72 @@ public class AnalyticsKafkaConsumer {
                     TenantEscalationEvent event = objectMapper.readValue(message, TenantEscalationEvent.class);
                     factService.ingestTenantEscalation(event);
                 }
+                case "DAILY_REPORT_REQUEST" -> handleDailyReportRequest(message);
                 default -> log.debug("[analytics] Ignoring common-topic event type: {}", eventType);
             }
         } catch (Exception e) {
             log.error("Failed to process common-topic event: {}", e.getMessage(), e);
             throw new RuntimeException(e.getMessage(), e);
         }
+    }
+
+    /**
+     * Computes the Daily Water Service Situation Report KPIs for one officer and publishes a
+     * {@code DAILY_REPORT_KPIS} event back to {@code common-topic} for message-service to render.
+     * No PII is read or emitted here — identity ({@code officerUserId}, {@code tenantSchema}) is
+     * forwarded so message-service can resolve the officer's contact from the operational schema.
+     */
+    private void handleDailyReportRequest(String message) throws Exception {
+        DailyReportRequestEvent request = objectMapper.readValue(message, DailyReportRequestEvent.class);
+        if (request.getTenantId() == null || request.getOfficerUserId() == null
+                || request.getReportDate() == null || request.getReportDate().isBlank()
+                || request.getTenantSchema() == null || request.getTenantSchema().isBlank()
+                || request.getOfficerUserType() == null || request.getOfficerUserType().isBlank()) {
+            log.warn("[analytics/DAILY_REPORT_REQUEST] Missing required field "
+                    + "(tenantId/officerUserId/reportDate/tenantSchema/officerUserType), skipping");
+            return;
+        }
+
+        LocalDate reportDate;
+        try {
+            reportDate = LocalDate.parse(request.getReportDate());
+        } catch (DateTimeParseException e) {
+            log.warn("[analytics/DAILY_REPORT_REQUEST] Malformed reportDate '{}', skipping (non-retryable)",
+                    request.getReportDate());
+            return;
+        }
+
+        String corr = request.getCorrelationId();
+        long startNanos = System.nanoTime();
+        log.info("[analytics/DAILY_REPORT_REQUEST] corr={} received: tenant={} officer={} role={} date={}",
+                corr, request.getTenantId(), request.getOfficerUserId(), request.getOfficerUserType(), reportDate);
+
+        DailyReportKpiDTO kpis = dailySituationReportService.buildReport(
+                request.getTenantId(), request.getOfficerUserId(), reportDate,
+                request.getSubordinateOfficerUserIds());
+
+        DailyReportKpisEvent kpisEvent = DailyReportKpisEvent.builder()
+                .eventType("DAILY_REPORT_KPIS")
+                .tenantId(request.getTenantId())
+                .tenantSchema(request.getTenantSchema())
+                .officerUserId(request.getOfficerUserId())
+                .officerUserType(request.getOfficerUserType())
+                .correlationId(corr)
+                .kpis(kpis)
+                .build();
+
+        kafkaProducer.publishJson(COMMON_TOPIC, kpisEvent);
+
+        long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        log.info("[analytics/DAILY_REPORT_REQUEST] corr={} computed+published: tenant={} officer={} date={} "
+                        + "totalSchemes={} supplyingY={} reasons={} anomalies={} priorityActions={} tookMs={}",
+                corr, request.getTenantId(), request.getOfficerUserId(), reportDate,
+                kpis.getTotalSchemes(),
+                kpis.getYesterday() != null ? kpis.getYesterday().getSchemesSupplying() : 0,
+                kpis.getReasonsForNoSupply() != null ? kpis.getReasonsForNoSupply().size() : 0,
+                kpis.getAnomaliesByType() != null ? kpis.getAnomaliesByType().size() : 0,
+                kpis.getPriorityActions() != null ? kpis.getPriorityActions().size() : 0,
+                tookMs);
     }
 
     private String extractEventType(String json) {

@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonValue;
  * Stable, machine-readable error codes returned on telemetry reading responses
  * ({@link CreateReadingResponse} and {@link ReadingsDataResponse}).
  *
- * <p>This enum is the single source of truth for the {@code error_code} field of the reading API.
+ * <p>This enum is the single source of truth for the {@code errorCode} field of the reading API.
  * Each constant serializes to its {@code UPPER_SNAKE_CASE} {@link #code()} value via {@link JsonValue};
  * the field is omitted from the JSON when {@code null} (the DTOs are annotated
  * {@code @JsonInclude(NON_NULL)}), so a code is present only on failure responses. The wire value
@@ -69,7 +69,7 @@ public enum TelemetryErrorCode {
         this.code = code;
     }
 
-    /** The stable {@code UPPER_SNAKE_CASE} value serialized to the {@code error_code} JSON field. */
+    /** The stable {@code UPPER_SNAKE_CASE} value serialized to the {@code errorCode} JSON field. */
     @JsonValue
     public String code() {
         return code;

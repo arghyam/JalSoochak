@@ -141,7 +141,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
-                .andExpect(jsonPath("$.data.error_code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -169,7 +169,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
-                .andExpect(jsonPath("$.data.error_code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 
@@ -221,7 +221,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
-                .andExpect(jsonPath("$.data.error_code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
     }
 

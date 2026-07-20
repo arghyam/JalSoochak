@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.service;
 
+import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -23,6 +24,7 @@ public class TenantConfigService {
 
     private static final String NUDGE_KEY = "PUMP_OPERATOR_REMINDER_NUDGE_TIME";
     private static final String ESCALATION_KEY = "FIELD_STAFF_ESCALATION_RULES";
+    private static final String DAILY_REPORT_KEY = "DAILY_SITUATION_REPORT_TIME";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -50,6 +52,12 @@ public class TenantConfigService {
 
     @Value("${escalation.level2.officer.user_type:DISTRICT_OFFICER}")
     private String defaultLevel2OfficerType;
+
+    @Value("${daily-report.schedule.hour:6}")
+    private int defaultDailyReportHour;
+
+    @Value("${daily-report.schedule.minute:0}")
+    private int defaultDailyReportMinute;
 
     public NudgeScheduleConfig getNudgeConfig(int tenantId) {
         String json = fetchConfigValue(tenantId, NUDGE_KEY);
@@ -88,6 +96,28 @@ public class TenantConfigService {
             log.warn("[TenantConfig] Failed to parse escalation config for tenant={}: {}", tenantId, e.getMessage());
             return defaultEscalationConfig();
         }
+    }
+
+    public DailyReportScheduleConfig getDailyReportConfig(int tenantId) {
+        String json = fetchConfigValue(tenantId, DAILY_REPORT_KEY);
+        if (json == null) return defaultDailyReportConfig();
+        try {
+            JsonNode sched = objectMapper.readTree(json).path("dailyReport").path("schedule");
+            return DailyReportScheduleConfig.builder()
+                    .hour(sched.path("hour").asInt(defaultDailyReportHour))
+                    .minute(sched.path("minute").asInt(defaultDailyReportMinute))
+                    .build();
+        } catch (Exception e) {
+            log.warn("[TenantConfig] Failed to parse daily-report config for tenant={}: {}", tenantId, e.getMessage());
+            return defaultDailyReportConfig();
+        }
+    }
+
+    private DailyReportScheduleConfig defaultDailyReportConfig() {
+        return DailyReportScheduleConfig.builder()
+                .hour(defaultDailyReportHour)
+                .minute(defaultDailyReportMinute)
+                .build();
     }
 
     private String fetchConfigValue(int tenantId, String key) {

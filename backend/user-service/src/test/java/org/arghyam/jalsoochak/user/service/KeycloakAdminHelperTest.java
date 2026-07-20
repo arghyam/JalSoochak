@@ -1,15 +1,30 @@
 package org.arghyam.jalsoochak.user.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.keycloak.admin.client.resource.AttackDetectionResource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import org.arghyam.jalsoochak.user.config.KeycloakProvider;
 import org.arghyam.jalsoochak.user.dto.response.AdminUserResponseDTO;
@@ -164,6 +179,212 @@ class KeycloakAdminHelperTest {
 
             assertNull(result.getFirstName());
             assertNull(result.getLastName());
+        }
+    }
+
+    @Nested
+    @DisplayName("isTemporarilyLockedByBruteForce — short-TTL probe cache")
+    class BruteForceLockCache {
+
+        private AttackDetectionResource attackDetection;
+
+        @BeforeEach
+        void configureCache() {
+            // The helper is built with `new` in the outer setUp, so the @Value fields default to 0
+            // (cache disabled). Set realistic values for these tests.
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheTtlSeconds", 15L);
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheMaxSize", 10_000);
+            attackDetection = keycloakProvider.getAdminInstance()
+                    .realm(keycloakProvider.getRealm())
+                    .attackDetection();
+        }
+
+        @Test
+        @DisplayName("blank/null id short-circuits without any admin call")
+        void blankIdSkipsProbe() {
+            assertFalse(helper.isTemporarilyLockedByBruteForce(null));
+            assertFalse(helper.isTemporarilyLockedByBruteForce("  "));
+            verifyNoInteractions(attackDetection);
+        }
+
+        @Test
+        @DisplayName("a locked result is cached — the second call within TTL makes no second probe")
+        void cachesLockedResultWithinTtl() {
+            String uuid = "kc-locked-1";
+            when(attackDetection.bruteForceUserStatus(uuid)).thenReturn(Map.of("disabled", Boolean.TRUE));
+
+            assertTrue(helper.isTemporarilyLockedByBruteForce(uuid));
+            assertTrue(helper.isTemporarilyLockedByBruteForce(uuid));
+
+            verify(attackDetection, times(1)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("an unlocked result is also cached — avoids a probe on every wrong password")
+        void cachesUnlockedResultWithinTtl() {
+            String uuid = "kc-unlocked-1";
+            when(attackDetection.bruteForceUserStatus(uuid)).thenReturn(Map.of("disabled", Boolean.FALSE));
+
+            assertFalse(helper.isTemporarilyLockedByBruteForce(uuid));
+            assertFalse(helper.isTemporarilyLockedByBruteForce(uuid));
+
+            verify(attackDetection, times(1)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("cache is per-user — distinct ids each probe once")
+        void cacheIsKeyedByUser() {
+            when(attackDetection.bruteForceUserStatus("kc-a")).thenReturn(Map.of("disabled", Boolean.TRUE));
+            when(attackDetection.bruteForceUserStatus("kc-b")).thenReturn(Map.of("disabled", Boolean.FALSE));
+
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-a"));
+            assertFalse(helper.isTemporarilyLockedByBruteForce("kc-b"));
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-a"));
+
+            verify(attackDetection, times(1)).bruteForceUserStatus("kc-a");
+            verify(attackDetection, times(1)).bruteForceUserStatus("kc-b");
+        }
+
+        @Test
+        @DisplayName("fails open — an admin-API error returns false and is not cached")
+        void failsOpenAndDoesNotCacheOnError() {
+            String uuid = "kc-error-1";
+            when(attackDetection.bruteForceUserStatus(uuid))
+                    .thenThrow(new RuntimeException("admin API down"))
+                    .thenReturn(Map.of("disabled", Boolean.TRUE));
+
+            // First call: probe throws → fail open to false.
+            assertFalse(helper.isTemporarilyLockedByBruteForce(uuid));
+            // A false-on-error must NOT be cached, so the next call re-probes and now sees the lock.
+            assertTrue(helper.isTemporarilyLockedByBruteForce(uuid));
+
+            verify(attackDetection, times(2)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("cache stays correct even when full of live entries (re-probes instead of caching)")
+        void staysCorrectWhenCacheFull() {
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheMaxSize", 1);
+            when(attackDetection.bruteForceUserStatus("kc-full-a")).thenReturn(Map.of("disabled", Boolean.TRUE));
+            when(attackDetection.bruteForceUserStatus("kc-full-b")).thenReturn(Map.of("disabled", Boolean.TRUE));
+
+            // Fills the single slot with kc-full-a.
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-full-a"));
+            // kc-full-b cannot be cached (slot full of a live entry) but must still return the correct value.
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-full-b"));
+            assertTrue(helper.isTemporarilyLockedByBruteForce("kc-full-b"));
+
+            // kc-full-a served from cache (1 probe); kc-full-b re-probes every time (never cached).
+            verify(attackDetection, times(1)).bruteForceUserStatus("kc-full-a");
+            verify(attackDetection, times(2)).bruteForceUserStatus("kc-full-b");
+        }
+
+        @Test
+        @DisplayName("concurrent callers for one user share a single probe rather than each issuing their own")
+        void concurrentCallersForSameUserShareOneProbe() throws Exception {
+            String uuid = "kc-single-flight";
+            CountDownLatch probeStarted = new CountDownLatch(1);
+            CountDownLatch releaseProbe = new CountDownLatch(1);
+            when(attackDetection.bruteForceUserStatus(uuid)).thenAnswer(invocation -> {
+                probeStarted.countDown();
+                releaseProbe.await(5, TimeUnit.SECONDS);
+                return Map.of("disabled", Boolean.TRUE);
+            });
+
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<Boolean> first = pool.submit(() -> helper.isTemporarilyLockedByBruteForce(uuid));
+                assertTrue(probeStarted.await(5, TimeUnit.SECONDS), "first caller should have started a probe");
+
+                // The second caller arrives while that probe is still in flight. The entry is installed
+                // before the probe runs, so this caller joins it instead of starting a competing probe.
+                Future<Boolean> second = pool.submit(() -> helper.isTemporarilyLockedByBruteForce(uuid));
+                releaseProbe.countDown();
+
+                assertTrue(first.get(5, TimeUnit.SECONDS));
+                assertTrue(second.get(5, TimeUnit.SECONDS));
+            } finally {
+                pool.shutdownNow();
+            }
+
+            verify(attackDetection, times(1)).bruteForceUserStatus(uuid);
+        }
+
+        @Test
+        @DisplayName("concurrent callers for one user share a probe even when the cache cannot retain it")
+        void concurrentCallersShareOneProbeWhenCacheFull() throws Exception {
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheMaxSize", 1);
+            when(attackDetection.bruteForceUserStatus("kc-occupant")).thenReturn(Map.of("disabled", Boolean.FALSE));
+            // Fill the only slot, so kc-spray can never be admitted and its result is never retained.
+            assertFalse(helper.isTemporarilyLockedByBruteForce("kc-occupant"));
+
+            AtomicInteger probesInFlight = new AtomicInteger();
+            AtomicInteger peakProbesInFlight = new AtomicInteger();
+            when(attackDetection.bruteForceUserStatus("kc-spray")).thenAnswer(invocation -> {
+                peakProbesInFlight.accumulateAndGet(probesInFlight.incrementAndGet(), Math::max);
+                try {
+                    // Hold the probe open so that any duplicate would have to overlap this one.
+                    Thread.sleep(50);
+                    return Map.of("disabled", Boolean.TRUE);
+                } finally {
+                    probesInFlight.decrementAndGet();
+                }
+            });
+
+            int callers = 8;
+            CountDownLatch startTogether = new CountDownLatch(1);
+            ExecutorService pool = Executors.newFixedThreadPool(callers);
+            List<Future<Boolean>> results = new ArrayList<>();
+            try {
+                for (int i = 0; i < callers; i++) {
+                    results.add(pool.submit(() -> {
+                        startTogether.await(5, TimeUnit.SECONDS);
+                        return helper.isTemporarilyLockedByBruteForce("kc-spray");
+                    }));
+                }
+                startTogether.countDown();
+                for (Future<Boolean> result : results) {
+                    assertTrue(result.get(10, TimeUnit.SECONDS), "every caller should observe the lock");
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+
+            // Single-flight is exactly this: never two probes for one user at once, cacheable or not.
+            // Asserting the peak rather than a total keeps the test immune to how the callers interleave.
+            assertEquals(1, peakProbesInFlight.get(), "an uncacheable user must not multiply admin probes");
+        }
+
+        @Test
+        @DisplayName("distinct users racing concurrently cannot collectively overshoot the cap")
+        void concurrentDistinctUsersRespectMaxSize() throws Exception {
+            int maxSize = 2;
+            ReflectionTestUtils.setField(helper, "lockoutProbeCacheMaxSize", maxSize);
+            when(attackDetection.bruteForceUserStatus(anyString())).thenReturn(Map.of("disabled", Boolean.FALSE));
+
+            CountDownLatch startTogether = new CountDownLatch(1);
+            ExecutorService pool = Executors.newFixedThreadPool(8);
+            List<Future<Boolean>> results = new ArrayList<>();
+            try {
+                for (int i = 0; i < 64; i++) {
+                    String uuid = "kc-cap-" + i;
+                    results.add(pool.submit(() -> {
+                        startTogether.await(5, TimeUnit.SECONDS);
+                        return helper.isTemporarilyLockedByBruteForce(uuid);
+                    }));
+                }
+                startTogether.countDown();
+                for (Future<Boolean> result : results) {
+                    // Every caller still gets the correct answer, cached or not.
+                    assertFalse(result.get(10, TimeUnit.SECONDS));
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+
+            Map<?, ?> cache = (Map<?, ?>) ReflectionTestUtils.getField(helper, "lockStatusCache");
+            assertTrue(cache != null && cache.size() <= maxSize,
+                    "cache overshot its cap: " + (cache == null ? "null" : cache.size()));
         }
     }
 }

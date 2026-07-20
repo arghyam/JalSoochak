@@ -270,9 +270,9 @@ class SchemeRegularityRepositoryWorkStatusFilterIntegrationTest {
 
     @Test
     void continuousSchemeCount_byLgd_countsOnlyHandedOverScheme() {
-        // Over D1..D2 (2 days) Scheme 1 and Scheme 2 each reported both days; Scheme 3 only D1.
-        // Without the filter this would be 2; the filter leaves only Scheme 1.
-        assertThat(repository.getContinuousSchemeCountByLgd(1, 100, D1, D2, 2)).isEqualTo(1L);
+        // Over D1..D2 all three schemes reported on at least one day (continuous = reported >= 1 day).
+        // Without the filter this would be 3; the filter leaves only Scheme 1.
+        assertThat(repository.getContinuousSchemeCountByLgd(1, 100, D1, D2)).isEqualTo(1L);
     }
 
     // ---- seeding ----

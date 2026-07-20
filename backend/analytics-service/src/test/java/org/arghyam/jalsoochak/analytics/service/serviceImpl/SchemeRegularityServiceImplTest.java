@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NonSubmissionReasonSchemeCountResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.OutageReasonSchemeCountResponse;
@@ -31,6 +32,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -109,8 +111,11 @@ class SchemeRegularityServiceImplTest {
         mockRedisValueOps();
         String key = ":scheme_regularity:tenant:1:lgd:101:start:2026-01-01:end:2026-01-03:v2";
         when(valueOperations.get(key)).thenReturn(null);
+        // KPI is now regularSchemeCount / schemeCount: 1 regular of 2 schemes = 0.5000.
         when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, START, END))
-                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3));
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         AverageSchemeRegularityResponse response = service.getAverageSchemeRegularity(1, 101, START, END);
@@ -118,7 +123,11 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getDaysInRange()).isEqualTo(3);
         assertThat(response.getSchemeCount()).isEqualTo(2);
         assertThat(response.getTotalSupplyDays()).isEqualTo(3);
+        assertThat(response.getRegularSchemeCount()).isEqualTo(1);
         assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.5000");
+        // 90% of a 3-day window rounds (half-up) to 3 days required.
+        assertThat(response.getThresholdPercent()).isEqualByComparingTo("90");
+        assertThat(response.getThresholdDays()).isEqualTo(3);
         verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
@@ -126,14 +135,46 @@ class SchemeRegularityServiceImplTest {
     void getAverageSchemeRegularity_cacheReadFailure_fallsBackToRepository() throws Exception {
         mockRedisValueOps();
         when(valueOperations.get(any())).thenThrow(new RuntimeException("redis read failed"));
+        // 1 regular of 3 schemes = 0.3333.
         when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, START, END))
-                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(1, 1));
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(3, 1, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         AverageSchemeRegularityResponse response = service.getAverageSchemeRegularity(1, 101, START, END);
 
         assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.3333");
         verify(schemeRegularityRepository, times(1)).getSchemeRegularityMetrics(1, 101, START, END);
+    }
+
+    @Test
+    void getAverageSchemeRegularity_singleDayRequest_expandsToTrailingWindow() throws Exception {
+        // A share-of-days KPI over one day is meaningless, so start == end widens to a trailing window.
+        ReflectionTestUtils.setField(service, "regularitySingleDayLookbackDays", 30);
+        mockRedisValueOps();
+        LocalDate singleDay = LocalDate.of(2026, 1, 30);
+        LocalDate expandedStart = LocalDate.of(2026, 1, 1); // 30 trailing days, inclusive of singleDay
+        // Cache key, repository query and reported window must all use the expanded start, not singleDay.
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:2026-01-01:end:2026-01-30:v2";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, expandedStart, singleDay))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(4, 100, 3));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageSchemeRegularityResponse response =
+                service.getAverageSchemeRegularity(1, 101, singleDay, singleDay);
+
+        assertThat(response.getStartDate()).isEqualTo(expandedStart);
+        assertThat(response.getEndDate()).isEqualTo(singleDay);
+        assertThat(response.getDaysInRange()).isEqualTo(30);
+        // 90% of a 30-day window rounds (half-up) to 27 required days.
+        assertThat(response.getThresholdDays()).isEqualTo(27);
+        // The repository is queried over the widened window, never the single requested day.
+        verify(schemeRegularityRepository).getSchemeRegularityMetrics(1, 101, expandedStart, singleDay);
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
@@ -250,6 +291,7 @@ class SchemeRegularityServiceImplTest {
                                         2,
                                         0L,
                                         2,
+                                        1,
                                         15L)));
 
         PeriodicSchemeRegularityResponse response =
@@ -262,8 +304,9 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getMetrics().getFirst().getPeriodEndDate()).isEqualTo(requestedEnd);
         assertThat(response.getMetrics().getFirst().getTotalSupplyDays()).isEqualTo(2);
         assertThat(response.getMetrics().getFirst().getTotalWaterQuantity()).isEqualTo(15L);
-        // periodDays = 2026-01-01..2026-01-10 inclusive = 10; regularity = 2 / (2 * 10) = 0.1000
-        assertThat(response.getMetrics().getFirst().getAverageRegularity()).isEqualByComparingTo("0.1000");
+        // KPI is now regularSchemeCount / schemeCount (per-bucket count classified in SQL): 1 / 2 = 0.5000.
+        assertThat(response.getMetrics().getFirst().getRegularSchemeCount()).isEqualTo(1);
+        assertThat(response.getMetrics().getFirst().getAverageRegularity()).isEqualByComparingTo("0.5000");
     }
 
     @Test
@@ -285,6 +328,7 @@ class SchemeRegularityServiceImplTest {
                                         2,
                                         0L,
                                         2,
+                                        1,
                                         115L)));
 
         PeriodicSchemeRegularityResponse response =
@@ -297,8 +341,9 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getMetrics().getFirst().getPeriodEndDate()).isEqualTo(requestedEnd);
         assertThat(response.getMetrics().getFirst().getTotalSupplyDays()).isEqualTo(2);
         assertThat(response.getMetrics().getFirst().getTotalWaterQuantity()).isEqualTo(115L);
-        // periodDays = 2026-01-01..2026-01-10 inclusive = 10; regularity = 2 / (2 * 10) = 0.1000
-        assertThat(response.getMetrics().getFirst().getAverageRegularity()).isEqualByComparingTo("0.1000");
+        // KPI is now regularSchemeCount / schemeCount (per-bucket count classified in SQL): 1 / 2 = 0.5000.
+        assertThat(response.getMetrics().getFirst().getRegularSchemeCount()).isEqualTo(1);
+        assertThat(response.getMetrics().getFirst().getAverageRegularity()).isEqualByComparingTo("0.5000");
 
         verify(schemeRegularityRepository, times(1))
                 .getPeriodicSchemeRegularityForNation(START, requestedEnd, PeriodScale.WEEK);
@@ -325,6 +370,7 @@ class SchemeRegularityServiceImplTest {
                                         2,
                                         123L,
                                         2,
+                                        1,
                                         115L)));
 
         var response =
@@ -721,14 +767,18 @@ class SchemeRegularityServiceImplTest {
         mockRedisValueOps();
         String key = ":scheme_regularity:tenant:1:department:201:start:2026-01-01:end:2026-01-03:v2";
         when(valueOperations.get(key)).thenReturn(null);
+        // 2 regular of 3 schemes = 0.6667.
         when(schemeRegularityRepository.getSchemeRegularityMetricsByDepartment(1, 201, START, END))
-                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 4));
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(3, 4, 2));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         AverageSchemeRegularityResponse response =
                 service.getAverageSchemeRegularityByDepartment(1, 201, START, END);
 
         assertThat(response.getParentDepartmentId()).isEqualTo(201);
+        assertThat(response.getRegularSchemeCount()).isEqualTo(2);
         assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.6667");
     }
 
@@ -741,10 +791,12 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getChildSchemeRegularityMetricsByDepartment(1, 201, START, END))
                 .thenReturn(List.of(
                         new SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics(
-                                null, 301, "Dept-A", 2, 4, new BigDecimal("0.6667")),
+                                null, 301, "Dept-A", 2, 4, 2, new BigDecimal("1.0000")),
                         new SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics(
-                                null, 302, "Dept-B", 1, 1, new BigDecimal("0.3333"))
+                                null, 302, "Dept-B", 1, 1, 0, new BigDecimal("0.0000"))
                 ));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         AverageSchemeRegularityResponse response =
@@ -753,7 +805,9 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getChildRegionCount()).isEqualTo(2);
         assertThat(response.getSchemeCount()).isEqualTo(3);
         assertThat(response.getTotalSupplyDays()).isEqualTo(5);
-        assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.5556");
+        // Aggregate KPI = sum(regularSchemeCount) / sum(schemeCount) = 2 / 3 = 0.6667.
+        assertThat(response.getRegularSchemeCount()).isEqualTo(2);
+        assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.6667");
     }
 
     @Test
@@ -1204,8 +1258,8 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByLgd_buildsSchemeMetricsAndCounts() {
         when(schemeRegularityRepository.getSchemeRegionReportByLgd(1, 101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 2, 3),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 0, 1)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 2, 3, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 0, 1, false)
                 ));
         when(schemeRegularityRepository.getParentLgdCNameByLgd(1, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(1, 101)).thenReturn("District");
@@ -1218,7 +1272,9 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getActiveSchemeCount()).isEqualTo(1);
         assertThat(response.getInactiveSchemeCount()).isEqualTo(1);
         assertThat(response.getSchemes()).hasSize(2);
+        // Per-scheme reporting rate stays supplyDays/daysInRange (unchanged); isRegular is additive.
         assertThat(response.getSchemes().get(0).getAverageRegularity()).isEqualByComparingTo("0.6667");
+        assertThat(response.getSchemes().get(0).getIsRegular()).isFalse();
         assertThat(response.getSchemes().get(0).getSubmissionRate()).isEqualByComparingTo("1.0000");
         assertThat(response.getSchemes().get(1).getStatus()).isEqualTo("inactive");
     }
@@ -1227,7 +1283,7 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByDepartment_buildsSchemeMetricsAndCounts() {
         when(schemeRegularityRepository.getSchemeRegionReportByDepartment(1, 201, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(4, "Scheme D", 10004, 20004, 1, 1, 2)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(4, "Scheme D", 10004, 20004, 1, 1, 2, false)
                 ));
         when(schemeRegularityRepository.getParentDepartmentCNameByDepartment(1, 201)).thenReturn("Dept");
         when(schemeRegularityRepository.getParentDepartmentTitleByDepartment(1, 201)).thenReturn("Division");
@@ -1247,9 +1303,9 @@ class SchemeRegularityServiceImplTest {
     void getSchemeRegionReportByLgd_withPagination_returnsPagedSchemes() {
         when(schemeRegularityRepository.getSchemeRegionReportByLgd(1, 101, START, END))
                 .thenReturn(List.of(
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 2, 3),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 0, 1),
-                        new SchemeRegularityRepository.SchemeRegularityListMetrics(3, "Scheme C", 10003, 20003, 1, 3, 3)
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(1, "Scheme A", 10001, 20001, 1, 2, 3, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(2, "Scheme B", 10002, 20002, 0, 0, 1, false),
+                        new SchemeRegularityRepository.SchemeRegularityListMetrics(3, "Scheme C", 10003, 20003, 1, 3, 3, true)
                 ));
         when(schemeRegularityRepository.getParentLgdCNameByLgd(1, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(1, 101)).thenReturn("District");
@@ -1279,7 +1335,7 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getStateWiseRegularityMetrics(START, END))
                 .thenReturn(List.of(
                         new SchemeRegularityRepository.StateSchemeRegularityMetrics(
-                                1, "mp", "Madhya Pradesh", 5, 12)
+                                1, "mp", "Madhya Pradesh", 5, 12, 4)
                 ));
         when(schemeRegularityRepository.getStateWiseReadingSubmissionMetrics(START, END))
                 .thenReturn(List.of(
@@ -1299,6 +1355,9 @@ class SchemeRegularityServiceImplTest {
         NationalDashboardResponse response = service.refreshNationalDashboard(START, END);
 
         assertThat(response.getDaysInRange()).isEqualTo(3);
+        // Multi-day request: the regularity window equals the requested window (no expansion).
+        assertThat(response.getRegularityStartDate()).isEqualTo(START);
+        assertThat(response.getRegularityDaysInRange()).isEqualTo(3);
         assertThat(response.getStateWiseQuantityPerformance()).hasSize(1);
         assertThat(response.getStateWiseRegularity()).hasSize(1);
         assertThat(response.getStateWiseReadingSubmissionRate()).hasSize(1);
@@ -1306,8 +1365,163 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getStateWiseQuantityPerformance().getFirst().getTenantStatus()).isEqualTo(1);
         assertThat(response.getStateWiseQuantityPerformance().getFirst().getSupplyDaysInEfficientRange()).isEqualTo(7L);
         assertThat(response.getStateWiseRegularity().getFirst().getLgdId()).isEqualTo(100);
+        // National-dashboard KPI = regularSchemeCount / schemeCount = 4 / 5 = 0.8000.
+        assertThat(response.getStateWiseRegularity().getFirst().getRegularSchemeCount()).isEqualTo(4);
+        assertThat(response.getStateWiseRegularity().getFirst().getAverageRegularity()).isEqualByComparingTo("0.8000");
         assertThat(response.getStateWiseReadingSubmissionRate().getFirst().getTenantStatus()).isEqualTo(1);
         verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
+    void refreshNationalDashboard_singleDayRequest_widensOnlyRegularityWindow() throws Exception {
+        // Single-day national dashboard: regularity widens to the trailing window, but water-quantity and
+        // reading-submission stay on the literal single day, and the reported window stays the single day.
+        ReflectionTestUtils.setField(service, "regularitySingleDayLookbackDays", 30);
+        mockRedisValueOps();
+        LocalDate singleDay = LocalDate.of(2026, 1, 30);
+        LocalDate expandedStart = LocalDate.of(2026, 1, 1); // 30 trailing days, inclusive of singleDay
+
+        when(schemeRegularityRepository.getAverageWaterSupplyPerNation(singleDay, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                                1, "mp", null, null, "Madhya Pradesh", 120L, 110L, 140L, 64000L, 5, new BigDecimal("12800.0000"))
+                ));
+        when(schemeRegularityRepository.getTenantWiseSupplyDaysInEfficientRange(singleDay, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.TenantSupplyDaysInEfficientRange(1, 7L)
+                ));
+        when(schemeRegularityRepository.getStateWiseRegularityMetrics(expandedStart, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.StateSchemeRegularityMetrics(
+                                1, "mp", "Madhya Pradesh", 5, 120, 4)
+                ));
+        when(schemeRegularityRepository.getStateWiseReadingSubmissionMetrics(singleDay, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.StateReadingSubmissionMetrics(
+                                1, "mp", "Madhya Pradesh", 5, 3)
+                ));
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(singleDay, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.OutageReasonSchemeCount("draught", 3)
+                ));
+        when(schemeRegularityRepository.getNationalDashboardTenantStateMetadata())
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.NationalDashboardTenantStateMetadata(1, 100, 1)
+                ));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardResponse response = service.refreshNationalDashboard(singleDay, singleDay);
+
+        // The dashboard's reported window is the literal single day, not the widened regularity window.
+        assertThat(response.getStartDate()).isEqualTo(singleDay);
+        assertThat(response.getDaysInRange()).isEqualTo(1);
+        // ...but the effective regularity window is surfaced so totalSupplyDays is interpretable.
+        assertThat(response.getRegularityStartDate()).isEqualTo(expandedStart);
+        assertThat(response.getRegularityDaysInRange()).isEqualTo(30);
+        // Regularity computed over the widened window: 4 regular of 5 = 0.8000.
+        assertThat(response.getStateWiseRegularity().getFirst().getRegularSchemeCount()).isEqualTo(4);
+        assertThat(response.getStateWiseRegularity().getFirst().getAverageRegularity()).isEqualByComparingTo("0.8000");
+        // Regularity is queried over the widened window; quantity/submission over the literal single day.
+        verify(schemeRegularityRepository).getStateWiseRegularityMetrics(expandedStart, singleDay);
+        verify(schemeRegularityRepository).getAverageWaterSupplyPerNation(singleDay, singleDay);
+        verify(schemeRegularityRepository).getStateWiseReadingSubmissionMetrics(singleDay, singleDay);
+    }
+
+    @Test
+    void getNationalDashboardLevel2MetricsForApi_joinsRegularityRowsByTenantAndLgd() throws Exception {
+        mockRedisValueOps();
+        String key = ":national:dashboard:metrics:level2:start:2026-01-01:end:2026-01-03:v1";
+        when(valueOperations.get(key)).thenReturn(null);
+        // schemeCount for the KPI denominator comes from the quantity row...
+        when(schemeRegularityRepository.getLgdLevel2WiseWaterSupplyMetricsForNation(START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.Level2WaterSupplyMetrics(
+                                1, 1, "mp", "Madhya Pradesh", 101, "District-1",
+                                120L, 110L, 140L, 64000L, 5, new BigDecimal("12800.0000"))
+                ));
+        when(schemeRegularityRepository.getLgdLevel2WiseSupplyDaysInEfficientRangeForNation(START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.Level2SupplyDaysInEfficientRange(1, 101, 7L)
+                ));
+        // ...while regularSchemeCount / totalSupplyDays come from the separately-queried regularity row.
+        when(schemeRegularityRepository.getLgdLevel2WiseRegularityMetricsForNation(START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.Level2RegularityMetrics(1, 101, 5, 12, 4)
+                ));
+        when(schemeRegularityRepository.getLgdLevel2WiseReadingSubmissionMetricsForNation(START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.Level2ReadingSubmissionMetrics(1, 101, 5, 10)
+                ));
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(START, END))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.OutageReasonSchemeCount("draught", 3)
+                ));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardLevel2MetricsResponse response =
+                service.getNationalDashboardLevel2MetricsForApi(START, END);
+
+        assertThat(response.getDistricts()).hasSize(1);
+        // Multi-day request: the regularity window equals the requested window (no expansion).
+        assertThat(response.getRegularityStartDate()).isEqualTo(START);
+        assertThat(response.getRegularityDaysInRange()).isEqualTo(3);
+        NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow district = response.getDistricts().getFirst();
+        assertThat(district.getSchemeCount()).isEqualTo(5);
+        // Mapped from the joined regularity row, not the quantity row.
+        assertThat(district.getRegularSchemeCount()).isEqualTo(4);
+        assertThat(district.getTotalSupplyDays()).isEqualTo(12);
+        // KPI = regularSchemeCount / schemeCount = 4 / 5 = 0.8000.
+        assertThat(district.getAverageRegularity()).isEqualByComparingTo("0.8000");
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
+    void getNationalDashboardLevel2MetricsForApi_singleDayRequest_widensOnlyRegularityWindow() throws Exception {
+        ReflectionTestUtils.setField(service, "regularitySingleDayLookbackDays", 30);
+        mockRedisValueOps();
+        LocalDate singleDay = LocalDate.of(2026, 1, 30);
+        LocalDate expandedStart = LocalDate.of(2026, 1, 1); // 30 trailing days, inclusive of singleDay
+        String key = ":national:dashboard:metrics:level2:start:2026-01-30:end:2026-01-30:v1";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(schemeRegularityRepository.getLgdLevel2WiseWaterSupplyMetricsForNation(singleDay, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.Level2WaterSupplyMetrics(
+                                1, 1, "mp", "Madhya Pradesh", 101, "District-1",
+                                120L, 110L, 140L, 64000L, 5, new BigDecimal("12800.0000"))
+                ));
+        when(schemeRegularityRepository.getLgdLevel2WiseSupplyDaysInEfficientRangeForNation(singleDay, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.Level2SupplyDaysInEfficientRange(1, 101, 7L)
+                ));
+        when(schemeRegularityRepository.getLgdLevel2WiseRegularityMetricsForNation(expandedStart, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.Level2RegularityMetrics(1, 101, 5, 120, 4)
+                ));
+        when(schemeRegularityRepository.getLgdLevel2WiseReadingSubmissionMetricsForNation(singleDay, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.Level2ReadingSubmissionMetrics(1, 101, 5, 3)
+                ));
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(singleDay, singleDay))
+                .thenReturn(List.of(
+                        new SchemeRegularityRepository.OutageReasonSchemeCount("draught", 3)
+                ));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardLevel2MetricsResponse response =
+                service.getNationalDashboardLevel2MetricsForApi(singleDay, singleDay);
+
+        // Reported window stays the literal single day, but the effective regularity window is surfaced.
+        assertThat(response.getDaysInRange()).isEqualTo(1);
+        assertThat(response.getRegularityStartDate()).isEqualTo(expandedStart);
+        assertThat(response.getRegularityDaysInRange()).isEqualTo(30);
+        NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow district = response.getDistricts().getFirst();
+        // Regularity from the widened window: 4 regular of 5 = 0.8000.
+        assertThat(district.getRegularSchemeCount()).isEqualTo(4);
+        assertThat(district.getAverageRegularity()).isEqualByComparingTo("0.8000");
+        // Regularity queried over the widened window; quantity/submission over the literal single day.
+        verify(schemeRegularityRepository).getLgdLevel2WiseRegularityMetricsForNation(expandedStart, singleDay);
+        verify(schemeRegularityRepository).getLgdLevel2WiseWaterSupplyMetricsForNation(singleDay, singleDay);
+        verify(schemeRegularityRepository).getLgdLevel2WiseReadingSubmissionMetricsForNation(singleDay, singleDay);
     }
 
     @Test
@@ -1512,6 +1726,7 @@ class SchemeRegularityServiceImplTest {
                                 2,
                                 0L,
                                 3,
+                                1,
                                 20L)));
 
         PeriodicSchemeRegularityResponse response =
@@ -1600,12 +1815,16 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getChildSchemeRegularityMetricsByLgd(eq(1), eq(101), any(), any()))
                 .thenReturn(List.of(
                         new SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics(
-                                201, null, "Region A", 5, 10, new java.math.BigDecimal("0.6667"))));
+                                201, null, "Region A", 5, 10, 3, new java.math.BigDecimal("0.6000"))));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
 
         AverageSchemeRegularityResponse result =
                 service.getAverageSchemeRegularityForChildRegions(1, 101, START, END);
 
         assertThat(result.getSchemeCount()).isEqualTo(5);
+        assertThat(result.getRegularSchemeCount()).isEqualTo(3);
+        assertThat(result.getAverageRegularity()).isEqualByComparingTo("0.6000");
         assertThat(result.getChildRegionCount()).isEqualTo(1);
         assertThat(result.getScope()).isEqualTo("child");
     }

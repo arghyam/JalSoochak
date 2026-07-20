@@ -223,21 +223,27 @@ class SchemeRegularityRepositoryIntegrationTest {
         List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> byDept =
                 repository.getChildSchemeRegularityMetricsByDepartment(200, D1, D3);
 
-        // Water-based supply days: scheme 1 (child 101/dept 201) supplied only on D2 => 1 day;
-        // averageRegularity = 1 / (1 scheme * 3 days) = 0.3333. Scheme 2 (child 102/dept 202) supplied 0.
+        // Water-based supply days: scheme 1 (child 101/dept 201) supplied only on D2 => 1 day.
+        // KPI is now regularSchemeCount / schemeCount. At the default 90% threshold a 3-day window
+        // requires 3 supply days (round-half-up of 2.7), so a scheme with 1 supply day is NOT regular:
+        // regularSchemeCount = 0 => averageRegularity = 0/1 = 0.0000. Scheme 2 supplied 0 (also not regular).
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
         assertThat(byLgd.get(0).totalSupplyDays()).isEqualTo(1);
-        assertThat(byLgd.get(0).averageRegularity()).isEqualByComparingTo("0.3333");
+        assertThat(byLgd.get(0).regularSchemeCount()).isZero();
+        assertThat(byLgd.get(0).averageRegularity()).isEqualByComparingTo("0.0000");
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).totalSupplyDays()).isEqualTo(0);
+        assertThat(byLgd.get(1).regularSchemeCount()).isZero();
         assertThat(byLgd.get(1).averageRegularity()).isEqualByComparingTo("0.0000");
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
         assertThat(byDept.get(0).totalSupplyDays()).isEqualTo(1);
+        assertThat(byDept.get(0).regularSchemeCount()).isZero();
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
         assertThat(byDept.get(1).totalSupplyDays()).isEqualTo(0);
+        assertThat(byDept.get(1).regularSchemeCount()).isZero();
     }
 
     @Test
@@ -279,9 +285,12 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getChildSchemeRegularityMetricsByLgd(100, D1, D3);
         assertThat(childRegularity.get(0).lgdId()).isEqualTo(101);
         assertThat(childRegularity.get(0).schemeCount()).isEqualTo(1);
-        // Water-based: scheme 1 supplied only on D2 => 1 supply day; 1 / (1 * 3) = 0.3333.
+        // Water-based: scheme 1 supplied only on D2 => 1 supply day, counted once despite the duplicate
+        // mapping row. At the default 90% threshold (3 of 3 days required) the scheme is NOT regular:
+        // regularSchemeCount = 0 => averageRegularity = 0.0000.
         assertThat(childRegularity.get(0).totalSupplyDays()).isEqualTo(1);
-        assertThat(childRegularity.get(0).averageRegularity()).isEqualByComparingTo("0.3333");
+        assertThat(childRegularity.get(0).regularSchemeCount()).isZero();
+        assertThat(childRegularity.get(0).averageRegularity()).isEqualByComparingTo("0.0000");
 
         // Scheme-count helper stays distinct.
         assertThat(repository.getSchemeCountByLgdInScope(1, 100)).isEqualTo(2);

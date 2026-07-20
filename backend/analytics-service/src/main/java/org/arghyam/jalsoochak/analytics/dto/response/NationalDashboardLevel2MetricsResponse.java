@@ -19,6 +19,11 @@ public class NationalDashboardLevel2MetricsResponse {
     private LocalDate startDate;
     private LocalDate endDate;
     private Integer daysInRange;
+    // The window the regularity KPI (each district's totalSupplyDays / regularSchemeCount / averageRegularity)
+    // was computed over. Equals [startDate, endDate] for multi-day requests; for a single-day request it
+    // widens to a trailing lookback so a share-of-days KPI isn't judged on one day. endDate is shared.
+    private LocalDate regularityStartDate;
+    private Integer regularityDaysInRange;
     private Map<String, Integer> overallOutageReasonDistribution;
     private List<LgdLevel2MetricsRow> districts;
 
@@ -46,6 +51,7 @@ public class NationalDashboardLevel2MetricsResponse {
 
         // Regularity (same fields as NationalDashboardResponse.StateRegularity)
         private Integer totalSupplyDays;
+        private Integer regularSchemeCount;
         private BigDecimal averageRegularity;
 
         // Reading submission (same fields as NationalDashboardResponse.StateReadingSubmissionRate)

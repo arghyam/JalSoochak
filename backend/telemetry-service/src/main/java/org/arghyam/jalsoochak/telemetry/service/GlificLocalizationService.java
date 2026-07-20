@@ -121,6 +121,9 @@ public class GlificLocalizationService {
         if (normalized.contains("invalid media")) {
             return localizeMessage("Invalid media. Please submit a clear meter image.", languageKey);
         }
+        if (normalized.contains("failed to download image")) {
+            return localizeMessage("Image could not be processed. Please try again", languageKey);
+        }
         if (normalized.contains("issuereason contains invalid characters")) {
             return localizeMessage("Issue reason can only contain letters, numbers, and spaces.", languageKey);
         }

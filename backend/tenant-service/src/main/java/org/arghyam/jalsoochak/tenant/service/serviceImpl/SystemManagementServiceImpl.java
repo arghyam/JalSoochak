@@ -6,10 +6,12 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetSystemConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.SystemConfigResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.SystemConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.event.IncludedWorkStatusesUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.RegularityThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigKeyException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
@@ -125,6 +127,15 @@ public class SystemManagementServiceImpl implements SystemManagementService {
             List<Integer> workStatuses = dto.validatedWorkStatuses();
             eventPublisher.publishEvent(new IncludedWorkStatusesUpdatedEvent(
                     TenantConstants.SYSTEM_TENANT_ID, NATIONAL_STATE_CODE, workStatuses));
+        }
+
+        if (request.getConfigs().containsKey(SystemConfigKeyEnum.REGULARITY_THRESHOLD_PERCENT)) {
+            RegularityThresholdConfigDTO dto =
+                    (RegularityThresholdConfigDTO) results.get(SystemConfigKeyEnum.REGULARITY_THRESHOLD_PERCENT);
+            // Enforced validation for JsonNode-bound configs (bean validation does not run on treeToValue).
+            Double thresholdPercent = dto.validatedThresholdPercent();
+            eventPublisher.publishEvent(new RegularityThresholdUpdatedEvent(
+                    TenantConstants.SYSTEM_TENANT_ID, NATIONAL_STATE_CODE, thresholdPercent));
         }
 
         return SystemConfigResponseDTO.builder().configs(results).build();
