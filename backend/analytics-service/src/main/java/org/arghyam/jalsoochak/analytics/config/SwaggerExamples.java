@@ -172,7 +172,12 @@ public final class SwaggerExamples {
             {
               "success": true,
               "data": {
-                "averageRegularity": 0.75
+                "schemeCount": 4,
+                "totalSupplyDays": 96,
+                "regularSchemeCount": 3,
+                "averageRegularity": 0.75,
+                "thresholdPercent": 90.00,
+                "thresholdDays": 27
               }
             }
             """;
@@ -193,6 +198,7 @@ public final class SwaggerExamples {
                     "periodStartDate": "2026-01-01",
                     "periodEndDate": "2026-01-01",
                     "totalSupplyDays": 1,
+                    "regularSchemeCount": 1,
                     "totalWaterQuantity": 1500,
                     "averageRegularity": 0.8
                   }
@@ -468,6 +474,7 @@ public final class SwaggerExamples {
                     "status": "active",
                     "supplyDays": 2,
                     "averageRegularity": 0.6667,
+                    "isRegular": false,
                     "submissionDays": 3,
                     "submissionRate": 1.0
                   }
@@ -721,7 +728,8 @@ public final class SwaggerExamples {
                     "stateTitle": "Madhya Pradesh",
                     "schemeCount": 12,
                     "totalSupplyDays": 275,
-                    "averageRegularity": 0.74
+                    "regularSchemeCount": 9,
+                    "averageRegularity": 0.75
                   }
                 ],
                 "stateWiseReadingSubmissionRate": [
@@ -819,7 +827,8 @@ public final class SwaggerExamples {
                     "avgWaterSupplyPerScheme": 12800.0,
                     "supplyDaysInEfficientRange": 275,
                     "totalSupplyDays": 275,
-                    "averageRegularity": 0.74,
+                    "regularSchemeCount": 9,
+                    "averageRegularity": 0.75,
                     "totalSubmissionDays": 310,
                     "readingSubmissionRate": 0.83
                   }
@@ -844,8 +853,9 @@ public final class SwaggerExamples {
                     "periodEndDate": "2026-01-01",
                     "schemeCount": 10,
                     "totalSupplyDays": 275,
+                    "regularSchemeCount": 7,
                     "totalWaterQuantity": 500000,
-                    "averageRegularity": 0.74
+                    "averageRegularity": 0.7
                   }
                 ]
               }
