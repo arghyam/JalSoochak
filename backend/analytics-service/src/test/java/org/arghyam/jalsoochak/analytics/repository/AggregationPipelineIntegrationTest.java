@@ -23,9 +23,14 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end test of the pre-aggregation population (agg_scheme_daily -> region
+ * End-to-end test of the pre-aggregation population (fact_scheme_daily_table -> region
  * rollups, norm snapshot + efficient-range) and the aggregate read path. Requires
- * Docker (Testcontainers + real Flyway, so V40-V45 are exercised).
+ * Docker (Testcontainers + real Flyway, so V44-V49 are exercised).
+ *
+ * <p>Water semantics under test are the unified supplied-water rule: only the latest
+ * water row per scheme/day with submission_status SUBMITTED(1)-or-NULL and quantity &gt; 0
+ * counts; {@code supplied} mirrors the same rule (a NOT_SUBMITTED positive quantity is
+ * neither water nor a supply day).</p>
  */
 @JdbcTest
 @Testcontainers
@@ -72,32 +77,41 @@ class AggregationPipelineIntegrationTest {
         aggregationRepository.upsertSchemeDaily(D1, D2);
 
         Integer rows = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM analytics_schema.agg_scheme_daily WHERE tenant_id = 1", Integer.class);
+                "SELECT COUNT(*) FROM analytics_schema.fact_scheme_daily_table WHERE tenant_id = 1", Integer.class);
         assertThat(rows).isEqualTo(4);
 
         // scheme 1 / D1: supplied + efficient (water 10 within [10,10]); norm snapshot captured.
         Map<String, Object> s1 = jdbcTemplate.queryForMap("""
-                SELECT supplied, submitted, water_quantity_liters, water_quantity_row_count,
-                       confirmed_reading_total, in_efficient_range, snap_required_lpcd
-                FROM analytics_schema.agg_scheme_daily
+                SELECT supplied, submitted, water_supplied_liters,
+                       is_supply_efficient, norm_required_lpcd
+                FROM analytics_schema.fact_scheme_daily_table
                 WHERE tenant_id = 1 AND scheme_id = 1 AND reading_date = ?
                 """, D1);
         assertThat(s1.get("supplied")).isEqualTo(1);
         assertThat(s1.get("submitted")).isEqualTo(1);
-        assertThat(((Number) s1.get("water_quantity_liters")).longValue()).isEqualTo(10L);
-        assertThat(((Number) s1.get("water_quantity_row_count")).longValue()).isEqualTo(1L);
-        assertThat(((Number) s1.get("confirmed_reading_total")).longValue()).isEqualTo(10L);
-        assertThat(s1.get("in_efficient_range")).isEqualTo(1);
-        assertThat(((Number) s1.get("snap_required_lpcd")).intValue()).isEqualTo(1);
+        assertThat(((Number) s1.get("water_supplied_liters")).longValue()).isEqualTo(10L);
+        assertThat(s1.get("is_supply_efficient")).isEqualTo(1);
+        assertThat(((Number) s1.get("norm_required_lpcd")).intValue()).isEqualTo(1);
 
-        // scheme 2 / D2: confirmed_reading 0 -> not supplied; water 999 -> out of efficient range.
+        // scheme 2 / D1: SUBMITTED 999 -> supplied but out of the efficient band.
+        Map<String, Object> s2d1 = jdbcTemplate.queryForMap("""
+                SELECT supplied, water_supplied_liters, is_supply_efficient
+                FROM analytics_schema.fact_scheme_daily_table
+                WHERE tenant_id = 1 AND scheme_id = 2 AND reading_date = ?
+                """, D1);
+        assertThat(s2d1.get("supplied")).isEqualTo(1);
+        assertThat(((Number) s2d1.get("water_supplied_liters")).longValue()).isEqualTo(999L);
+        assertThat(s2d1.get("is_supply_efficient")).isEqualTo(0);
+
+        // scheme 2 / D2: NOT_SUBMITTED 500 -> excluded by the unified rule (no water, no supply day).
         Map<String, Object> s2 = jdbcTemplate.queryForMap("""
-                SELECT supplied, in_efficient_range
-                FROM analytics_schema.agg_scheme_daily
+                SELECT supplied, water_supplied_liters, is_supply_efficient
+                FROM analytics_schema.fact_scheme_daily_table
                 WHERE tenant_id = 1 AND scheme_id = 2 AND reading_date = ?
                 """, D2);
         assertThat(s2.get("supplied")).isEqualTo(0);
-        assertThat(s2.get("in_efficient_range")).isEqualTo(0);
+        assertThat(((Number) s2.get("water_supplied_liters")).longValue()).isEqualTo(0L);
+        assertThat(s2.get("is_supply_efficient")).isEqualTo(0);
     }
 
     @Test
@@ -107,31 +121,33 @@ class AggregationPipelineIntegrationTest {
         aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D2, D2, true);
         aggregationRepository.upsertRegionMetrics(PeriodScale.WEEK, LocalDate.of(2026, 1, 4), LocalDate.of(2026, 1, 10), true);
 
-        // DAY D1 at LGD level 1, region 1: both schemes supplied + efficient; continuous = 2 (daysInRange = 1).
+        // DAY D1 at LGD level 1, region 1: both schemes supplied (s1 10, s2 999); only s1 efficient;
+        // continuous = 2 (daysInRange = 1).
         Map<String, Object> day1 = jdbcTemplate.queryForMap("""
                 SELECT scheme_count, total_supply_days, total_submission_days, total_water_supplied_liters,
                        supply_days_in_efficient_range, continuous_scheme_count
-                FROM analytics_schema.agg_region_metrics
+                FROM analytics_schema.fact_region_metrics_table
                 WHERE period_scale = 'DAY' AND tenant_id = 1 AND hierarchy = 'LGD'
                   AND region_level = 1 AND region_id = 1 AND period_start = ?
                 """, D1);
         assertThat(day1.get("scheme_count")).isEqualTo(2);
         assertThat(day1.get("total_supply_days")).isEqualTo(2);
         assertThat(day1.get("total_submission_days")).isEqualTo(2);
-        assertThat(((Number) day1.get("total_water_supplied_liters")).longValue()).isEqualTo(20L);
-        assertThat(day1.get("supply_days_in_efficient_range")).isEqualTo(2);
+        assertThat(((Number) day1.get("total_water_supplied_liters")).longValue()).isEqualTo(1009L);
+        assertThat(day1.get("supply_days_in_efficient_range")).isEqualTo(1);
         assertThat(day1.get("continuous_scheme_count")).isEqualTo(2);
 
-        // WEEK aggregate sums both days: supply days = scheme1(2) + scheme2(1) = 3.
+        // WEEK aggregate sums both days: supply days = scheme1(2) + scheme2(1: D2 is NOT_SUBMITTED) = 3;
+        // water = 10 + 10 + 999 (the NOT_SUBMITTED 500 is excluded by the unified rule).
         Map<String, Object> week = jdbcTemplate.queryForMap("""
                 SELECT total_supply_days, total_submission_days, total_water_supplied_liters
-                FROM analytics_schema.agg_region_metrics
+                FROM analytics_schema.fact_region_metrics_table
                 WHERE period_scale = 'WEEK' AND tenant_id = 1 AND hierarchy = 'LGD'
                   AND region_level = 1 AND region_id = 1 AND period_start = ?
                 """, LocalDate.of(2026, 1, 4));
         assertThat(week.get("total_supply_days")).isEqualTo(3);
         assertThat(week.get("total_submission_days")).isEqualTo(4);
-        assertThat(((Number) week.get("total_water_supplied_liters")).longValue()).isEqualTo(1029L);
+        assertThat(((Number) week.get("total_water_supplied_liters")).longValue()).isEqualTo(1019L);
 
         // Read path: summing DAY rows over [D1, D2] yields supply days = 3, scheme_count = 2.
         var metrics = aggregateReadRepository.getRegionMetrics(1, "LGD", 1, D1, D2);
@@ -139,7 +155,7 @@ class AggregationPipelineIntegrationTest {
         assertThat(metrics.get().schemeCount()).isEqualTo(2);
         assertThat(metrics.get().totalSupplyDays()).isEqualTo(3L);
 
-        // National read (level-1, cross-tenant): one state row, submitted-water = 10+10+10+999.
+        // National read (level-1, cross-tenant): one state row reading the SAME unified water figure.
         var national = aggregateReadRepository.getNationalRegionMetrics(1, D1, D2);
         assertThat(national).isPresent();
         assertThat(national.get()).hasSize(1);
@@ -148,7 +164,7 @@ class AggregationPipelineIntegrationTest {
         assertThat(state.regionId()).isEqualTo(1);
         assertThat(state.schemeCount()).isEqualTo(2);
         assertThat(state.totalSupplyDays()).isEqualTo(3L);
-        assertThat(state.totalWaterSubmittedLiters()).isEqualTo(1029L);
+        assertThat(state.totalWaterSuppliedLiters()).isEqualTo(1019L);
     }
 
     @Test
@@ -162,8 +178,9 @@ class AggregationPipelineIntegrationTest {
         var child = children.get().get(0);
         assertThat(child.regionId()).isEqualTo(10);
         assertThat(child.schemeCount()).isEqualTo(2);
-        assertThat(child.totalSupplyDays()).isEqualTo(3L);   // scheme1 (D1,D2) + scheme2 (D1)
+        assertThat(child.totalSupplyDays()).isEqualTo(3L);   // scheme1 (D1,D2) + scheme2 (D1; D2 NOT_SUBMITTED)
         assertThat(child.totalSubmissionDays()).isEqualTo(4L);
+        assertThat(child.totalWaterSuppliedLiters()).isEqualTo(1019L);
 
         // Critical at cutoff = D2 (Jan 5): scheme1 last supply Jan 5 (not < cutoff),
         // scheme2 last supply Jan 4 (< cutoff) => 1 critical.
@@ -176,25 +193,25 @@ class AggregationPipelineIntegrationTest {
         assertThat(outageDist).isPresent();
         assertThat(outageDist.get()).isEmpty();
 
-        // Per-scheme water supply uses confirmed-reading totals.
+        // Per-scheme water supply uses the unified supplied-water figure.
         var schemes = aggregateReadRepository.getSchemeWaterSupply(1, D1, D2);
         assertThat(schemes).isPresent();
         assertThat(schemes.get()).hasSize(2);
         var s1 = schemes.get().stream().filter(r -> r.schemeId() == 1).findFirst().orElseThrow();
-        assertThat(s1.totalConfirmedReading()).isEqualTo(20L); // 10 (D1) + 10 (D2)
+        assertThat(s1.totalWaterSuppliedLiters()).isEqualTo(20L); // 10 (D1) + 10 (D2)
         assertThat(s1.supplyDays()).isEqualTo(2);
         var s2 = schemes.get().stream().filter(r -> r.schemeId() == 2).findFirst().orElseThrow();
-        assertThat(s2.totalConfirmedReading()).isEqualTo(10L); // 10 (D1); D2 confirmed 0
+        assertThat(s2.totalWaterSuppliedLiters()).isEqualTo(999L); // 999 (D1); D2 NOT_SUBMITTED excluded
         assertThat(s2.supplyDays()).isEqualTo(1);
     }
 
     private void truncateAll() {
         jdbcTemplate.execute("""
                 TRUNCATE
-                    analytics_schema.agg_region_distribution,
-                    analytics_schema.agg_region_metrics,
-                    analytics_schema.agg_scheme_daily,
-                    analytics_schema.dim_tenant_water_norm,
+                    analytics_schema.fact_region_distribution_table,
+                    analytics_schema.fact_region_metrics_table,
+                    analytics_schema.fact_scheme_daily_table,
+                    analytics_schema.dim_tenant_water_norm_table,
                     analytics_schema.fact_meter_reading_table,
                     analytics_schema.fact_water_quantity_table,
                     analytics_schema.dim_scheme_table,
@@ -229,7 +246,7 @@ class AggregationPipelineIntegrationTest {
                 """);
 
         jdbcTemplate.update("""
-                INSERT INTO analytics_schema.dim_tenant_water_norm
+                INSERT INTO analytics_schema.dim_tenant_water_norm_table
                 (tenant_id, effective_from, effective_to, required_lpcd, person_count_per_household,
                  over_supply_range_percentage, under_supply_range_percentage, created_at)
                 VALUES (1, DATE '2020-01-01', NULL, 1, 1, 0, 0, NOW())
@@ -252,17 +269,20 @@ class AggregationPipelineIntegrationTest {
                 (2, 1, 'S2', 1002, 2002, 0.0, 0.0, 1, 1, 10, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW())
                 """);
 
-        // Meter readings: scheme1 supplies both days; scheme2 supplies D1 only (conf 0 on D2).
+        // Meter readings drive `submitted` and the compliant/anomalous counts only
+        // (supply days come from the water rows under the unified rule).
         insertReading(1, 10, D1);
         insertReading(1, 10, D2);
         insertReading(2, 10, D1);
         insertReading(2, 0, D2);
 
-        // Water quantity: efficient (10) except scheme2/D2 (999, out of range).
-        insertWaterQuantity(1, 10, D1);
-        insertWaterQuantity(1, 10, D2);
-        insertWaterQuantity(2, 10, D1);
-        insertWaterQuantity(2, 999, D2);
+        // Water rows (unified rule): scheme1 efficient both days (10 within [10,10]);
+        // scheme2 D1 SUBMITTED 999 (supplied, out of range); scheme2 D2 NOT_SUBMITTED 500
+        // (excluded: no water, no supply day).
+        insertWaterQuantity(1, 10, D1, 1);
+        insertWaterQuantity(1, 10, D2, 1);
+        insertWaterQuantity(2, 999, D1, 1);
+        insertWaterQuantity(2, 500, D2, 0);
     }
 
     private void insertReading(int schemeId, int confirmed, LocalDate date) {
@@ -274,11 +294,11 @@ class AggregationPipelineIntegrationTest {
                 """, schemeId, confirmed, confirmed, date);
     }
 
-    private void insertWaterQuantity(int schemeId, int quantity, LocalDate date) {
+    private void insertWaterQuantity(int schemeId, int quantity, LocalDate date, int submissionStatus) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.fact_water_quantity_table
-                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, submission_status)
-                VALUES (1, ?, 11, ?, ?, NOW(), 1)
-                """, schemeId, quantity, date);
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status)
+                VALUES (1, ?, 11, ?, ?, NOW(), NOW(), ?)
+                """, schemeId, quantity, date, submissionStatus);
     }
 }

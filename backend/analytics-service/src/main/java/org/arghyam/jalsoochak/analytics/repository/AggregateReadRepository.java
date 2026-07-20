@@ -17,10 +17,10 @@ import java.util.stream.IntStream;
  * Read side of the KPI pre-aggregation. Serves dashboard metrics from the
  * pre-rolled aggregate tables instead of recomputing from raw facts.
  *
- * <p>Arbitrary day ranges are answered by summing DAY rows of agg_region_metrics
+ * <p>Arbitrary day ranges are answered by summing DAY rows of fact_region_metrics_table
  * for the region (additive measures), exactly as designed — WEEK/MONTH rows are
  * used only by the grain-selected /periodic series. Non-additive KPIs
- * (continuous / critical / distinct) are derived from agg_scheme_daily.</p>
+ * (continuous / critical / distinct) are derived from fact_scheme_daily_table.</p>
  *
  * <p>region_id (lgd/department id) is only unique within a tenant + hierarchy, so
  * every lookup is tenant-scoped.</p>
@@ -43,7 +43,7 @@ public class AggregateReadRepository {
     }
 
     /**
-     * Sum the DAY agg_region_metrics rows for a region over [start, end]. scheme_count
+     * Sum the DAY fact_region_metrics_table rows for a region over [start, end]. scheme_count
      * and household_count are region attributes (constant per day) so they are taken
      * as the max across the days, not summed. Returns empty when no DAY rows are
      * stored for the region/range (caller falls back to the legacy path).
@@ -60,7 +60,7 @@ public class AggregateReadRepository {
                        COALESCE(SUM(supply_days_in_efficient_range), 0) AS eff_days,
                        COALESCE(SUM(compliant_submission_count), 0)     AS compliant,
                        COALESCE(SUM(anomalous_submission_count), 0)     AS anomalous
-                FROM analytics_schema.agg_region_metrics
+                FROM analytics_schema.fact_region_metrics_table
                 WHERE period_scale = 'DAY'
                   AND tenant_id = ?
                   AND hierarchy = ?
@@ -85,7 +85,7 @@ public class AggregateReadRepository {
 
     /**
      * Count schemes under a region that supplied water on EVERY day of [start, end]
-     * (continuous schemes), derived from agg_scheme_daily. Returns empty when the
+     * (continuous schemes), derived from fact_scheme_daily_table. Returns empty when the
      * region has no aggregated activity in the range (caller falls back to legacy),
      * which distinguishes "not yet aggregated" from a genuine zero.
      *
@@ -104,7 +104,7 @@ public class AggregateReadRepository {
                        COUNT(*) FILTER (WHERE supply_days = ?) AS continuous_schemes
                 FROM (
                     SELECT scheme_id, SUM(supplied) AS supply_days
-                    FROM analytics_schema.agg_scheme_daily
+                    FROM analytics_schema.fact_scheme_daily_table
                     WHERE tenant_id = ?
                       AND reading_date BETWEEN ? AND ?
                       AND (%s)
@@ -129,14 +129,12 @@ public class AggregateReadRepository {
         }, params);
     }
 
-    /** One pre-rolled bucket of a region's periodic series. */
+    /** One pre-rolled bucket of a region's periodic series (single unified water figure). */
     public record PeriodicRegionRow(LocalDate periodStart,
                                     LocalDate periodEnd,
                                     int schemeCount,
                                     long totalSupplyDays,
-                                    long totalConfirmedReading,
                                     long totalWaterSuppliedLiters,
-                                    long waterQuantityRowCount,
                                     long totalHouseholdCount,
                                     long totalAchievedFhtc,
                                     long totalPlannedFhtc) {
@@ -162,13 +160,11 @@ public class AggregateReadRepository {
                            (date_trunc('%1$s', period_start)::date + %2$s)::date AS period_end,
                            MAX(scheme_count) AS scheme_count,
                            SUM(total_supply_days) AS total_supply_days,
-                           SUM(total_confirmed_reading) AS total_confirmed_reading,
                            SUM(total_water_supplied_liters) AS total_water_supplied_liters,
-                           SUM(water_quantity_row_count) AS water_quantity_row_count,
                            MAX(total_household_count) AS total_household_count,
                            MAX(total_achieved_fhtc) AS total_achieved_fhtc,
                            MAX(total_planned_fhtc) AS total_planned_fhtc
-                    FROM analytics_schema.agg_region_metrics
+                    FROM analytics_schema.fact_region_metrics_table
                     WHERE period_scale = 'MONTH' AND tenant_id = ? AND hierarchy = ? AND region_id = ?
                       AND period_start <= ? AND period_end >= ?
                     GROUP BY date_trunc('%1$s', period_start)
@@ -177,10 +173,10 @@ public class AggregateReadRepository {
             params = new Object[]{tenantId, hierarchy, regionId, end, start};
         } else {
             sql = """
-                    SELECT period_start, period_end, scheme_count, total_supply_days, total_confirmed_reading,
-                           total_water_supplied_liters, water_quantity_row_count, total_household_count,
+                    SELECT period_start, period_end, scheme_count, total_supply_days,
+                           total_water_supplied_liters, total_household_count,
                            total_achieved_fhtc, total_planned_fhtc
-                    FROM analytics_schema.agg_region_metrics
+                    FROM analytics_schema.fact_region_metrics_table
                     WHERE period_scale = ? AND tenant_id = ? AND hierarchy = ? AND region_id = ?
                       AND period_start <= ? AND period_end >= ?
                     ORDER BY period_start
@@ -192,9 +188,7 @@ public class AggregateReadRepository {
                 rs.getDate("period_end").toLocalDate(),
                 rs.getInt("scheme_count"),
                 rs.getLong("total_supply_days"),
-                rs.getLong("total_confirmed_reading"),
                 rs.getLong("total_water_supplied_liters"),
-                rs.getLong("water_quantity_row_count"),
                 rs.getLong("total_household_count"),
                 rs.getLong("total_achieved_fhtc"),
                 rs.getLong("total_planned_fhtc")),
@@ -226,7 +220,7 @@ public class AggregateReadRepository {
 
         String existsSql = ("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.agg_scheme_daily
+                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
                     WHERE tenant_id = ? AND reading_date BETWEEN ? AND ? AND (%s)
                 )
                 """).formatted(orClause);
@@ -237,7 +231,7 @@ public class AggregateReadRepository {
 
         String sql = ("""
                 SELECT %1$s AS dist_key, COUNT(DISTINCT scheme_id) AS scheme_count
-                FROM analytics_schema.agg_scheme_daily
+                FROM analytics_schema.fact_scheme_daily_table
                 WHERE tenant_id = ? AND reading_date BETWEEN ? AND ? AND (%2$s) AND %1$s IS NOT NULL
                 GROUP BY %1$s
                 ORDER BY %1$s
@@ -255,19 +249,19 @@ public class AggregateReadRepository {
                                        long householdCount,
                                        long achievedFhtc,
                                        long plannedFhtc,
-                                       long totalConfirmedReading,
+                                       long totalWaterSuppliedLiters,
                                        int supplyDays) {
     }
 
     /**
      * Per-scheme water supply for all schemes in a tenant (household_count &gt; 0),
-     * with confirmed-reading totals + supply days from agg_scheme_daily over the range.
+     * with supplied-water totals + supply days from fact_scheme_daily_table over the range.
      * Empty Optional when the tenant has no aggregated rows (fall back to legacy).
      */
     public Optional<List<SchemeWaterSupplyRow>> getSchemeWaterSupply(int tenantId, LocalDate start, LocalDate end) {
         Boolean hasRows = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.agg_scheme_daily
+                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
                     WHERE tenant_id = ? AND reading_date BETWEEN ? AND ?
                 )
                 """, Boolean.class, tenantId, start, end);
@@ -279,16 +273,21 @@ public class AggregateReadRepository {
                        s.house_hold_count::bigint AS households,
                        COALESCE(s.fhtc_count, 0)::bigint AS achieved_fhtc,
                        COALESCE(s.planned_fhtc, 0)::bigint AS planned_fhtc,
-                       COALESCE(a.confirmed, 0) AS confirmed,
+                       COALESCE(a.water_supplied, 0) AS water_supplied,
                        COALESCE(a.supply_days, 0)::int AS supply_days
-                FROM analytics_schema.dim_scheme_table s
+                FROM (
+                    SELECT DISTINCT ON (scheme_id) scheme_id, scheme_name, house_hold_count, fhtc_count, planned_fhtc
+                    FROM analytics_schema.dim_scheme_table
+                    WHERE tenant_id = ?
+                    ORDER BY scheme_id, COALESCE(fhtc_count, 0) DESC, COALESCE(house_hold_count, 0) DESC, COALESCE(planned_fhtc, 0) DESC
+                ) s
                 LEFT JOIN (
-                    SELECT scheme_id, SUM(confirmed_reading_total) AS confirmed, SUM(supplied) AS supply_days
-                    FROM analytics_schema.agg_scheme_daily
+                    SELECT scheme_id, SUM(water_supplied_liters) AS water_supplied, SUM(supplied) AS supply_days
+                    FROM analytics_schema.fact_scheme_daily_table
                     WHERE tenant_id = ? AND reading_date BETWEEN ? AND ?
                     GROUP BY scheme_id
                 ) a ON a.scheme_id = s.scheme_id
-                WHERE s.tenant_id = ? AND s.house_hold_count IS NOT NULL AND s.house_hold_count > 0
+                WHERE s.house_hold_count IS NOT NULL AND s.house_hold_count > 0
                 ORDER BY s.scheme_id
                 """;
         List<SchemeWaterSupplyRow> rows = jdbcTemplate.query(sql, (rs, n) -> new SchemeWaterSupplyRow(
@@ -297,9 +296,9 @@ public class AggregateReadRepository {
                 rs.getLong("households"),
                 rs.getLong("achieved_fhtc"),
                 rs.getLong("planned_fhtc"),
-                rs.getLong("confirmed"),
+                rs.getLong("water_supplied"),
                 rs.getInt("supply_days")),
-                tenantId, start, end, tenantId);
+                tenantId, tenantId, start, end);
         return Optional.of(rows);
     }
 
@@ -327,7 +326,7 @@ public class AggregateReadRepository {
 
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.agg_scheme_daily
+                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
                     WHERE tenant_id = ? AND %s = ? AND reading_date BETWEEN ? AND ?
                 )
                 """).formatted(parentCol), Boolean.class, tenantId, parentRegionId, start, end);
@@ -337,7 +336,7 @@ public class AggregateReadRepository {
 
         String sql = ("""
                 SELECT %1$s AS region_id, %2$s AS reason, COUNT(DISTINCT scheme_id) AS scheme_count
-                FROM analytics_schema.agg_scheme_daily
+                FROM analytics_schema.fact_scheme_daily_table
                 WHERE tenant_id = ? AND %3$s = ? AND reading_date BETWEEN ? AND ?
                   AND %2$s IS NOT NULL AND %1$s IS NOT NULL
                 GROUP BY %1$s, %2$s
@@ -349,15 +348,13 @@ public class AggregateReadRepository {
         return Optional.of(rows);
     }
 
-    /** Per-child-region rollup (one row per child of a parent node). */
+    /** Per-child-region rollup (one row per child of a parent node; single unified water figure). */
     public record ChildRegionAggRow(int regionId,
                                     String title,
                                     int schemeCount,
                                     long totalSupplyDays,
                                     long totalSubmissionDays,
                                     long totalWaterSuppliedLiters,
-                                    long totalConfirmedReading,
-                                    long waterQuantityRowCount,
                                     long supplyDaysInEfficientRange,
                                     long totalHouseholdCount,
                                     long totalAchievedFhtc,
@@ -369,7 +366,7 @@ public class AggregateReadRepository {
     /**
      * Roll up the children (level {@code parentLevel + 1}) of a parent region node.
      * scheme_count + household/FHTC come from dim_scheme (authoritative); activity
-     * (supply/submission/water/efficient) is LEFT-JOINed from agg_scheme_daily.
+     * (supply/submission/water/efficient) is LEFT-JOINed from fact_scheme_daily_table.
      * Returns empty Optional when the parent scope has no aggregated rows at all
      * (caller falls back to legacy), distinguishing "not aggregated" from "no activity".
      */
@@ -389,7 +386,7 @@ public class AggregateReadRepository {
 
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.agg_scheme_daily
+                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
                     WHERE tenant_id = ? AND %s = ? AND reading_date BETWEEN ? AND ?
                 )
                 """).formatted(parentCol), Boolean.class, tenantId, parentRegionId, start, end);
@@ -397,36 +394,48 @@ public class AggregateReadRepository {
             return Optional.empty();
         }
 
+        // Child membership comes from the dim_scheme mapping rows: a multi-mapped scheme counts
+        // once per child region (DISTINCT ON dedup) but appears under every child it maps to,
+        // and its activity is joined per mapping — the same semantics as the legacy queries.
         String sql = ("""
                 SELECT c.region_id, loc.title, c.scheme_count,
                        COALESCE(a.supply_days, 0)     AS supply_days,
                        COALESCE(a.submission_days, 0) AS submission_days,
                        COALESCE(a.water, 0)           AS water,
-                       COALESCE(a.confirmed, 0)       AS confirmed,
-                       COALESCE(a.wq_rows, 0)         AS wq_rows,
                        COALESCE(a.eff_days, 0)        AS eff_days,
                        c.households, c.achieved_fhtc, c.planned_fhtc
                 FROM (
-                    SELECT %2$s AS region_id, tenant_id,
+                    SELECT region_id, tenant_id,
                            COUNT(*) AS scheme_count,
                            SUM(COALESCE(house_hold_count, 0))::bigint AS households,
                            SUM(COALESCE(fhtc_count, 0))::bigint AS achieved_fhtc,
                            SUM(COALESCE(planned_fhtc, 0))::bigint AS planned_fhtc
-                    FROM analytics_schema.dim_scheme_table
-                    WHERE tenant_id = ? AND %1$s = ? AND %2$s IS NOT NULL
-                    GROUP BY %2$s, tenant_id
+                    FROM (
+                        SELECT DISTINCT ON (%2$s, tenant_id, scheme_id)
+                               %2$s AS region_id, tenant_id, scheme_id,
+                               house_hold_count, fhtc_count, planned_fhtc
+                        FROM analytics_schema.dim_scheme_table
+                        WHERE tenant_id = ? AND %1$s = ? AND %2$s IS NOT NULL
+                        ORDER BY %2$s, tenant_id, scheme_id,
+                                 COALESCE(fhtc_count, 0) DESC, COALESCE(house_hold_count, 0) DESC, COALESCE(planned_fhtc, 0) DESC
+                    ) dedup
+                    GROUP BY region_id, tenant_id
                 ) c
                 LEFT JOIN (
-                    SELECT %2$s AS region_id, tenant_id,
-                           SUM(supplied) AS supply_days,
-                           SUM(submitted) AS submission_days,
-                           SUM(water_quantity_liters) AS water,
-                           SUM(confirmed_reading_total) AS confirmed,
-                           SUM(water_quantity_row_count) AS wq_rows,
-                           SUM(in_efficient_range) AS eff_days
-                    FROM analytics_schema.agg_scheme_daily
-                    WHERE tenant_id = ? AND %1$s = ? AND reading_date BETWEEN ? AND ?
-                    GROUP BY %2$s, tenant_id
+                    SELECT m.region_id, sd.tenant_id,
+                           SUM(sd.supplied) AS supply_days,
+                           SUM(sd.submitted) AS submission_days,
+                           SUM(sd.water_supplied_liters) AS water,
+                           SUM(sd.is_supply_efficient) AS eff_days
+                    FROM (
+                        SELECT DISTINCT %2$s AS region_id, tenant_id, scheme_id
+                        FROM analytics_schema.dim_scheme_table
+                        WHERE tenant_id = ? AND %1$s = ? AND %2$s IS NOT NULL
+                    ) m
+                    JOIN analytics_schema.fact_scheme_daily_table sd
+                      ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
+                    WHERE sd.reading_date BETWEEN ? AND ?
+                    GROUP BY m.region_id, sd.tenant_id
                 ) a ON a.region_id = c.region_id AND a.tenant_id = c.tenant_id
                 LEFT JOIN analytics_schema.%3$s loc
                   ON loc.%4$s = c.region_id AND loc.tenant_id = c.tenant_id
@@ -440,8 +449,6 @@ public class AggregateReadRepository {
                 rs.getLong("supply_days"),
                 rs.getLong("submission_days"),
                 rs.getLong("water"),
-                rs.getLong("confirmed"),
-                rs.getLong("wq_rows"),
                 rs.getLong("eff_days"),
                 rs.getLong("households"),
                 rs.getLong("achieved_fhtc"),
@@ -469,7 +476,7 @@ public class AggregateReadRepository {
         }
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.agg_scheme_daily
+                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
                     WHERE tenant_id = ? AND (%s)
                 )
                 """).formatted(orClause), Boolean.class, regionParams);
@@ -485,7 +492,7 @@ public class AggregateReadRepository {
                 ),
                 last_supply AS (
                     SELECT scheme_id, MAX(reading_date) AS last_supplied_date
-                    FROM analytics_schema.agg_scheme_daily
+                    FROM analytics_schema.fact_scheme_daily_table
                     WHERE tenant_id = ? AND supplied = 1
                     GROUP BY scheme_id
                 )
@@ -511,7 +518,7 @@ public class AggregateReadRepository {
                                     int schemeCount,
                                     long totalSupplyDays,
                                     long totalSubmissionDays,
-                                    long totalWaterSubmittedLiters,
+                                    long totalWaterSuppliedLiters,
                                     long supplyDaysInEfficientRange,
                                     long totalHouseholdCount,
                                     long totalAchievedFhtc,
@@ -521,13 +528,13 @@ public class AggregateReadRepository {
     /**
      * National rollup: every LGD region at {@code regionLevel} across all tenants,
      * summed over the DAY rows in [start, end], with state/region metadata joined in.
-     * Water uses the submission-status-filtered measure (national water-supply semantics).
+     * Water is the same unified supplied-water figure the region cards read.
      * Empty Optional when no DAY rows are stored at that level (fall back to legacy).
      */
     public Optional<List<NationalRegionRow>> getNationalRegionMetrics(int regionLevel, LocalDate start, LocalDate end) {
         Boolean hasRows = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.agg_region_metrics
+                    SELECT 1 FROM analytics_schema.fact_region_metrics_table
                     WHERE period_scale = 'DAY' AND hierarchy = 'LGD' AND region_level = ?
                       AND period_start BETWEEN ? AND ?
                 )
@@ -542,12 +549,12 @@ public class AggregateReadRepository {
                        MAX(m.scheme_count) AS scheme_count,
                        SUM(m.total_supply_days) AS supply_days,
                        SUM(m.total_submission_days) AS submission_days,
-                       SUM(m.total_water_submitted_liters) AS water_submitted,
+                       SUM(m.total_water_supplied_liters) AS water_supplied,
                        SUM(m.supply_days_in_efficient_range) AS eff_days,
                        MAX(m.total_household_count) AS households,
                        MAX(m.total_achieved_fhtc) AS achieved_fhtc,
                        MAX(m.total_planned_fhtc) AS planned_fhtc
-                FROM analytics_schema.agg_region_metrics m
+                FROM analytics_schema.fact_region_metrics_table m
                 JOIN analytics_schema.dim_tenant_table t ON t.tenant_id = m.tenant_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table loc
                   ON loc.lgd_id = m.region_id AND loc.tenant_id = m.tenant_id
@@ -566,7 +573,7 @@ public class AggregateReadRepository {
                 rs.getInt("scheme_count"),
                 rs.getLong("supply_days"),
                 rs.getLong("submission_days"),
-                rs.getLong("water_submitted"),
+                rs.getLong("water_supplied"),
                 rs.getLong("eff_days"),
                 rs.getLong("households"),
                 rs.getLong("achieved_fhtc"),

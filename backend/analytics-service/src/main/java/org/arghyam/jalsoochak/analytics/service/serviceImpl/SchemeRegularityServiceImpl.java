@@ -214,7 +214,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     /**
      * Periodic scheme-regularity buckets from the pre-rolled aggregates (DAY/WEEK/MONTH),
      * or {@code null} to fall back to legacy SQL. QUARTER/YEAR are not pre-rolled, so
-     * they always use the legacy path. totalWaterQuantity maps to SUM(confirmed_reading>0).
+     * they always use the legacy path. totalWaterQuantity maps to the unified supplied-water figure.
      */
     private List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> aggregatePeriodicRegularityOrNull(
             Integer tenantId, String hierarchy, Integer regionId,
@@ -231,7 +231,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         return rows.stream()
                 .map(r -> new SchemeRegularityRepository.PeriodicSchemeRegularityMetrics(
                         r.periodStart(), r.periodEnd(), r.schemeCount(), r.totalAchievedFhtc(),
-                        (int) r.totalSupplyDays(), r.totalConfirmedReading()))
+                        (int) r.totalSupplyDays(), r.totalWaterSuppliedLiters()))
                 .toList();
     }
 
@@ -1178,9 +1178,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .totalHouseholdCount(r.totalHouseholdCount())
                         .totalAchievedFhtcCount(r.totalAchievedFhtc())
                         .totalPlannedFhtcCount(r.totalPlannedFhtc())
-                        .totalWaterSuppliedLiters(r.totalWaterSubmittedLiters())
+                        .totalWaterSuppliedLiters(r.totalWaterSuppliedLiters())
                         .avgWaterSupplyPerScheme(r.schemeCount() > 0
-                                ? aggregateRatio(r.totalWaterSubmittedLiters(), r.schemeCount()) : BigDecimal.ZERO)
+                                ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount()) : BigDecimal.ZERO)
                         .supplyDaysInEfficientRange(r.supplyDaysInEfficientRange())
                         .totalSupplyDays((int) r.totalSupplyDays())
                         .averageRegularity(aggregateRatio(r.totalSupplyDays(), (long) r.schemeCount() * daysInRange))
@@ -1216,9 +1216,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .totalHouseholdCount(r.totalHouseholdCount())
                         .totalAchievedFhtcCount(r.totalAchievedFhtc())
                         .totalPlannedFhtcCount(r.totalPlannedFhtc())
-                        .totalWaterSuppliedLiters(r.totalWaterSubmittedLiters())
+                        .totalWaterSuppliedLiters(r.totalWaterSuppliedLiters())
                         .avgWaterSupplyPerScheme(r.schemeCount() > 0
-                                ? aggregateRatio(r.totalWaterSubmittedLiters(), r.schemeCount()) : BigDecimal.ZERO)
+                                ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount()) : BigDecimal.ZERO)
                         .supplyDaysInEfficientRange(r.supplyDaysInEfficientRange())
                         .build())
                 .toList();
@@ -1833,9 +1833,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
         return rows.stream()
                 .map(r -> {
-                    BigDecimal avg = r.waterQuantityRowCount() > 0
+                    // After the de-dup a scheme-day has at most one qualifying water row, so
+                    // the supply-day count IS the qualifying-row count (the average's divisor).
+                    BigDecimal avg = r.totalSupplyDays() > 0
                             ? BigDecimal.valueOf(r.totalWaterSuppliedLiters())
-                                    .divide(BigDecimal.valueOf(r.waterQuantityRowCount()), 4, RoundingMode.HALF_UP)
+                                    .divide(BigDecimal.valueOf(r.totalSupplyDays()), 4, RoundingMode.HALF_UP)
                             : BigDecimal.ZERO;
                     return new SchemeRegularityRepository.PeriodicWaterQuantityMetrics(
                             r.periodStart(), r.periodEnd(), null, avg,
@@ -1958,13 +1960,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .map(rows -> rows.stream()
                         .map(r -> new SchemeRegularityRepository.SchemeWaterSupplyMetrics(
                                 r.schemeId(), r.schemeName(), r.householdCount(),
-                                r.achievedFhtc(), r.plannedFhtc(), r.totalConfirmedReading(), r.supplyDays(),
-                                aggregateRatio(r.totalConfirmedReading(), r.householdCount() * (long) daysInRange)))
+                                r.achievedFhtc(), r.plannedFhtc(), r.totalWaterSuppliedLiters(), r.supplyDays(),
+                                aggregateRatio(r.totalWaterSuppliedLiters(), r.householdCount() * (long) daysInRange)))
                         .toList())
                 .orElse(null);
     }
 
-    /** Per-child water-supply rows (confirmed-reading based) from aggregates, or {@code null} to fall back. */
+    /** Per-child water-supply rows (unified supplied-water figure) from aggregates, or {@code null} to fall back. */
     private List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> aggregateChildWaterSupplyOrNull(
             Integer tenantId, String hierarchy, Integer parentRegionId, Integer parentLevel,
             LocalDate startDate, LocalDate endDate) {
@@ -1980,9 +1982,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                 dept ? r.regionId() : null,
                                 r.title(),
                                 r.totalHouseholdCount(), r.totalAchievedFhtc(), r.totalPlannedFhtc(),
-                                r.totalConfirmedReading(), r.schemeCount(),
+                                r.totalWaterSuppliedLiters(), r.schemeCount(),
                                 r.schemeCount() > 0
-                                        ? aggregateRatio(r.totalConfirmedReading(), r.schemeCount())
+                                        ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount())
                                         : BigDecimal.ZERO))
                         .toList())
                 .orElse(null);

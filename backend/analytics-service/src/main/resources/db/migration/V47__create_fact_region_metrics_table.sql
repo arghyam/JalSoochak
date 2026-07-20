@@ -1,5 +1,5 @@
 -- ============================================================
--- AGG REGION METRICS (pre-rolled region KPIs per period bucket)
+-- FACT REGION METRICS (pre-rolled region KPIs per period bucket)
 -- ============================================================
 -- One row per (period_scale, period_start, hierarchy, region_level, region_id).
 -- Pre-rolled at every node of both hierarchies (LGD/department, levels 1..6) so
@@ -9,13 +9,18 @@
 -- Additive measures may be summed across day rows for an arbitrary range. The
 -- non-additive measures (continuous/critical/distinct) are a per-bucket
 -- convenience only and must NOT be summed across buckets — derive those from
--- agg_scheme_daily for multi-bucket spans.
+-- fact_scheme_daily_table for multi-bucket spans.
+--
+-- ONE water figure: total_water_supplied_liters = SUM(water_supplied_liters).
+-- The national and region-wise cards read this same column; average water per
+-- supply day = total_water_supplied_liters / total_supply_days (after the
+-- de-dup a scheme-day contributes at most one qualifying water row).
 --
 -- NOTE: kept as a plain table for v1; range-partitioning by period_start is a
 -- later optimization if row volume requires it.
 -- ============================================================
 
-CREATE TABLE analytics_schema.agg_region_metrics (
+CREATE TABLE analytics_schema.fact_region_metrics_table (
     id                              BIGSERIAL  PRIMARY KEY,
     period_scale                    VARCHAR(8) NOT NULL,   -- DAY | WEEK | MONTH
     period_start                    DATE       NOT NULL,
@@ -32,10 +37,7 @@ CREATE TABLE analytics_schema.agg_region_metrics (
     total_submission_days           INT        NOT NULL DEFAULT 0,
     active_scheme_count             INT        NOT NULL DEFAULT 0,
     inactive_scheme_count           INT        NOT NULL DEFAULT 0,
-    total_water_supplied_liters     BIGINT     NOT NULL DEFAULT 0,  -- SUM(water_quantity) all rows (region-wise water qty)
-    total_water_submitted_liters    BIGINT     NOT NULL DEFAULT 0,  -- SUM(submitted water_quantity) for national water supply
-    water_quantity_row_count        BIGINT     NOT NULL DEFAULT 0,  -- divisor for averageWaterQuantity
-    total_confirmed_reading         BIGINT     NOT NULL DEFAULT 0,  -- SUM(confirmed_reading>0) for periodic regularity
+    total_water_supplied_liters     BIGINT     NOT NULL DEFAULT 0,  -- SUM(water_supplied_liters) — the only water total
     total_household_count           BIGINT     NOT NULL DEFAULT 0,
     total_achieved_fhtc             BIGINT     NOT NULL DEFAULT 0,
     total_planned_fhtc              BIGINT     NOT NULL DEFAULT 0,
@@ -54,21 +56,21 @@ CREATE TABLE analytics_schema.agg_region_metrics (
     avg_water_supply_per_scheme     NUMERIC(18,2),
 
     -- norm snapshot used for this region/period
-    snap_required_lpcd              INT,
-    snap_persons_per_hh             INT,
-    snap_over_pct                   INT,
-    snap_under_pct                  INT,
+    norm_required_lpcd              INT,
+    norm_persons_per_household      INT,
+    norm_over_supply_pct            INT,
+    norm_under_supply_pct           INT,
 
     computed_at                     TIMESTAMP  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_final                        BOOLEAN    NOT NULL DEFAULT FALSE,
 
     -- region_id (lgd/department id) is only unique within a tenant, so tenant_id
     -- is part of the natural key.
-    CONSTRAINT uq_agg_region_metrics
+    CONSTRAINT uq_fact_region_metrics
         UNIQUE (period_scale, period_start, tenant_id, hierarchy, region_level, region_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agg_region_metrics_lookup
-    ON analytics_schema.agg_region_metrics(period_scale, tenant_id, hierarchy, region_level, region_id, period_start);
-CREATE INDEX IF NOT EXISTS idx_agg_region_metrics_tenant
-    ON analytics_schema.agg_region_metrics(tenant_id, period_scale, period_start);
+CREATE INDEX IF NOT EXISTS idx_fact_region_metrics_lookup
+    ON analytics_schema.fact_region_metrics_table(period_scale, tenant_id, hierarchy, region_level, region_id, period_start);
+CREATE INDEX IF NOT EXISTS idx_fact_region_metrics_tenant
+    ON analytics_schema.fact_region_metrics_table(tenant_id, period_scale, period_start);

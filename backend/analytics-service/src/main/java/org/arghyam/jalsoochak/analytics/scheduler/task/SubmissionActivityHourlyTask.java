@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 /**
- * Top-of-hour aggregation: (1) populates agg_submission_activity_hourly for the hour
+ * Top-of-hour aggregation: (1) populates fact_submission_activity_hourly_table for the hour
  * that just completed, and (2) re-rolls the CURRENT day's aggregates so dashboard
  * counts change every hour as new submissions arrive (today's DAY/WEEK/MONTH region
  * rows stay provisional; the midnight task finalizes the completed day).

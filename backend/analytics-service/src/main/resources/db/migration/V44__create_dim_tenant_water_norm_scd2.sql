@@ -10,7 +10,7 @@
 -- effective_to IS NULL marks the single currently-in-effect row per tenant.
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS analytics_schema.dim_tenant_water_norm (
+CREATE TABLE IF NOT EXISTS analytics_schema.dim_tenant_water_norm_table (
     id                            BIGSERIAL    PRIMARY KEY,
     tenant_id                     INT          NOT NULL
                                       REFERENCES analytics_schema.dim_tenant_table(tenant_id),
@@ -24,20 +24,20 @@ CREATE TABLE IF NOT EXISTS analytics_schema.dim_tenant_water_norm (
 );
 
 -- At most one open (current) row per tenant.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_dim_tenant_water_norm_open
-    ON analytics_schema.dim_tenant_water_norm(tenant_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_dim_tenant_water_norm_table_open
+    ON analytics_schema.dim_tenant_water_norm_table(tenant_id)
     WHERE effective_to IS NULL;
 
 -- Point-in-time lookup by tenant + date.
-CREATE INDEX IF NOT EXISTS idx_dim_tenant_water_norm_lookup
-    ON analytics_schema.dim_tenant_water_norm(tenant_id, effective_from, effective_to);
+CREATE INDEX IF NOT EXISTS idx_dim_tenant_water_norm_table_lookup
+    ON analytics_schema.dim_tenant_water_norm_table(tenant_id, effective_from, effective_to);
 
 -- ------------------------------------------------------------
 -- Seed one open row per existing tenant from the current norms.
 -- effective_from = tenant creation date (norms have applied since the tenant
 -- existed); only insert when the tenant has no open row yet (idempotent).
 -- ------------------------------------------------------------
-INSERT INTO analytics_schema.dim_tenant_water_norm
+INSERT INTO analytics_schema.dim_tenant_water_norm_table
     (tenant_id, effective_from, effective_to, required_lpcd,
      person_count_per_household, over_supply_range_percentage,
      under_supply_range_percentage, created_at)
@@ -52,7 +52,7 @@ SELECT t.tenant_id,
 FROM analytics_schema.dim_tenant_table t
 WHERE NOT EXISTS (
     SELECT 1
-    FROM analytics_schema.dim_tenant_water_norm n
+    FROM analytics_schema.dim_tenant_water_norm_table n
     WHERE n.tenant_id = t.tenant_id
       AND n.effective_to IS NULL
 );

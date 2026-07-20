@@ -39,7 +39,7 @@ public class AggregationService {
         LocalDate today = LocalDate.now(IST_ZONE);
 
         int base = aggregationRepository.upsertSchemeDaily(from, to);
-        log.info("[aggregation] agg_scheme_daily upserted rows={} window={}..{}", base, from, to);
+        log.info("[aggregation] fact_scheme_daily_table upserted rows={} window={}..{}", base, from, to);
 
         // DAY buckets
         for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {

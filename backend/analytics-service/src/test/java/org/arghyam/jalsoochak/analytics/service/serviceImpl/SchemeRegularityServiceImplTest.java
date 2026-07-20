@@ -293,7 +293,7 @@ class SchemeRegularityServiceImplTest {
         when(aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 101, "WEEK", START, END))
                 .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
                         LocalDate.of(2025, 12, 28), LocalDate.of(2026, 1, 3),
-                        2, 3L, 15L, 0L, 0L, 0L, 0L, 0L)));
+                        2, 3L, 15L, 0L, 0L, 0L)));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         PeriodicSchemeRegularityResponse response =
@@ -302,7 +302,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getMetrics()).hasSize(1);
         var metric = response.getMetrics().get(0);
         assertThat(metric.getTotalSupplyDays()).isEqualTo(3);
-        assertThat(metric.getTotalWaterQuantity()).isEqualTo(15L); // SUM(confirmed_reading>0)
+        assertThat(metric.getTotalWaterQuantity()).isEqualTo(15L); // unified supplied-water figure
         // capped 3 days, 2 schemes => 3 / (2*3) = 0.5
         assertThat(metric.getAverageRegularity()).isEqualByComparingTo("0.5000");
         verify(schemeRegularityRepository, never())
@@ -335,11 +335,11 @@ class SchemeRegularityServiceImplTest {
         ReflectionTestUtils.setField(service, "readFromAggregates", true);
         mockRedisValueOps();
         when(valueOperations.get(any())).thenReturn(null);
-        // water 300 over 3 rows => avg 100.0000; households 30, achieved fhtc 20.
+        // water 300 over 3 supply days => avg 100.0000; households 30, achieved fhtc 20.
         when(aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 101, "WEEK", START, END))
                 .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
                         LocalDate.of(2025, 12, 28), LocalDate.of(2026, 1, 3),
-                        2, 0L, 0L, 300L, 3L, 30L, 20L, 25L)));
+                        2, 3L, 300L, 30L, 20L, 25L)));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
         PeriodicWaterQuantityResponse response =

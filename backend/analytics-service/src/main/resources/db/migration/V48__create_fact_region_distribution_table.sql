@@ -1,5 +1,5 @@
 -- ============================================================
--- AGG REGION DISTRIBUTION (long-format distribution KPIs)
+-- FACT REGION DISTRIBUTION (long-format distribution KPIs)
 -- ============================================================
 -- Serves the Map<String,Integer> dashboard cards (outage reasons, non-submission
 -- reasons, submission-status pie, scheme-status counts) without schema churn when
@@ -7,7 +7,7 @@
 -- (period bucket, region node, dist_type, dist_key).
 -- ============================================================
 
-CREATE TABLE analytics_schema.agg_region_distribution (
+CREATE TABLE analytics_schema.fact_region_distribution_table (
     id              BIGSERIAL   PRIMARY KEY,
     period_scale    VARCHAR(8)  NOT NULL,   -- DAY | WEEK | MONTH
     period_start    DATE        NOT NULL,
@@ -23,9 +23,9 @@ CREATE TABLE analytics_schema.agg_region_distribution (
     is_final        BOOLEAN     NOT NULL DEFAULT FALSE,
 
     -- region_id is only unique within a tenant, so tenant_id is part of the key.
-    CONSTRAINT uq_agg_region_distribution
+    CONSTRAINT uq_fact_region_distribution
         UNIQUE (period_scale, period_start, tenant_id, hierarchy, region_level, region_id, dist_type, dist_key)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agg_region_distribution_lookup
-    ON analytics_schema.agg_region_distribution(period_scale, tenant_id, hierarchy, region_level, region_id, period_start, dist_type);
+CREATE INDEX IF NOT EXISTS idx_fact_region_distribution_lookup
+    ON analytics_schema.fact_region_distribution_table(period_scale, tenant_id, hierarchy, region_level, region_id, period_start, dist_type);

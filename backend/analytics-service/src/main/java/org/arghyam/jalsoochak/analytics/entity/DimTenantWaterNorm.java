@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
  * The single row with {@code effectiveTo == null} is the currently-in-effect one.</p>
  */
 @Entity
-@Table(name = "dim_tenant_water_norm", schema = "analytics_schema")
+@Table(name = "dim_tenant_water_norm_table", schema = "analytics_schema")
 @Data
 @Builder
 @NoArgsConstructor
