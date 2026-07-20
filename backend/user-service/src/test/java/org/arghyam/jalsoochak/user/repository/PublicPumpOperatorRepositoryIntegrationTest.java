@@ -17,6 +17,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.List;
 
 import org.springframework.dao.InvalidDataAccessApiUsageException;
@@ -145,6 +147,8 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, null, null);
             assertThat(dto).isNotNull();
             assertThat(dto.schemeId()).isEqualTo((int) schemeId);
+            assertThat(dto.stateSchemeId()).isEqualTo("FPO-1");
+            assertThat(dto.centerSchemeId()).isEqualTo("C-1");
             assertThat(dto.lastSubmissionAt()).isNotNull();
         }
 
@@ -153,6 +157,61 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         void ignoresNonPumpOperator() {
             long soId = insertUser("919876540003", 3, "Section Officer"); // SECTION_OFFICER
             assertThat(repo.findPumpOperatorById(SCHEMA, soId, 1L, null, null)).isNull();
+        }
+
+        @Test
+        @DisplayName("returns missed submission days for requested range even when no readings exist in range")
+        void returnsMissedDaysForRequestedRangeWithoutReadingsInRange() {
+            long poId = insertPumpOperator("919876540017", "PO Historic Reading");
+            long schemeId = insertScheme("FPO-4");
+            mapUserToScheme(poId, schemeId);
+            backdateUserCreatedAt(poId, 90);
+            insertReading(schemeId, poId, 150.0, LocalDate.now().minusDays(200));
+
+            LocalDate startDate = LocalDate.now().minusDays(40);
+            LocalDate endDate = LocalDate.now().minusDays(26);
+
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, startDate, endDate);
+
+            List<LocalDate> expectedMissedDays = IntStream.rangeClosed(0, 14)
+                    .mapToObj(startDate::plusDays)
+                    .collect(Collectors.toList());
+
+            assertThat(dto).isNotNull();
+            assertThat(dto.lastSubmissionAt()).isNull();
+            assertThat(dto.firstSubmissionDate()).isNull();
+            assertThat(dto.submittedDays()).isEqualTo(0);
+            assertThat(dto.totalDaysSinceFirstSubmission()).isEqualTo(15);
+            assertThat(dto.reportingRatePercent()).isNotNull();
+            assertThat(dto.reportingRatePercent()).isEqualByComparingTo("0.00");
+            assertThat(dto.missedSubmissionDays()).containsExactlyElementsOf(expectedMissedDays);
+        }
+
+        @Test
+        @DisplayName("does not count days before onboarding as missed submissions")
+        void doesNotCountDaysBeforeOnboarding() {
+            long poId = insertPumpOperator("919876540018", "PO Onboarded In March");
+            long schemeId = insertScheme("FPO-5");
+            mapUserToScheme(poId, schemeId);
+            jdbc.update("UPDATE tenant_mp.user_table SET created_at = ? WHERE id = ?",
+                    java.sql.Timestamp.valueOf(LocalDate.of(2026, 3, 1).atStartOfDay()), poId);
+            insertReading(schemeId, poId, 150.0, LocalDate.of(2026, 3, 17));
+
+            LocalDate startDate = LocalDate.of(2026, 1, 1);
+            LocalDate endDate = LocalDate.of(2026, 3, 31);
+
+            PumpOperatorDetailsDTO dto = repo.findPumpOperatorById(SCHEMA, poId, schemeId, startDate, endDate);
+
+            List<LocalDate> expectedMissedDays = IntStream.rangeClosed(0, 30)
+                    .mapToObj(LocalDate.of(2026, 3, 1)::plusDays)
+                    .filter(day -> !day.equals(LocalDate.of(2026, 3, 17)))
+                    .collect(Collectors.toList());
+
+            assertThat(dto).isNotNull();
+            assertThat(dto.totalDaysSinceFirstSubmission()).isEqualTo(31);
+            assertThat(dto.submittedDays()).isEqualTo(1);
+            assertThat(dto.reportingRatePercent()).isEqualByComparingTo("3.23");
+            assertThat(dto.missedSubmissionDays()).containsExactlyElementsOf(expectedMissedDays);
         }
 
         @Test

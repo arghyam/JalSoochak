@@ -25,6 +25,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetSystemConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.SystemConfigResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.SystemConfigKeyEnum;
+import org.arghyam.jalsoochak.tenant.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigKeyException;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.exception.ResourceNotFoundException;
@@ -40,6 +41,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -51,6 +53,9 @@ class SystemManagementServiceImplTest {
     @Mock
     private TenantCommonRepository tenantCommonRepository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private SystemManagementServiceImpl systemManagementService;
 
     private MockedStatic<SecurityUtils> mockedSecurityUtils;
@@ -61,7 +66,8 @@ class SystemManagementServiceImplTest {
     void setUp() {
         mockedSecurityUtils = mockStatic(SecurityUtils.class);
         objectMapper = new ObjectMapper();
-        systemManagementService = new SystemManagementServiceImpl(tenantCommonRepository, objectMapper);
+        systemManagementService =
+                new SystemManagementServiceImpl(tenantCommonRepository, objectMapper, eventPublisher);
     }
 
     @AfterEach
@@ -208,6 +214,59 @@ class SystemManagementServiceImplTest {
             assertTrue(configValue instanceof WaterSupplyThresholdConfigDTO);
             assertEquals(20.0, ((WaterSupplyThresholdConfigDTO) configValue).getUndersupplyThresholdPercent());
             assertEquals(30.0, ((WaterSupplyThresholdConfigDTO) configValue).getOversupplyThresholdPercent());
+        }
+
+        @Test
+        @DisplayName("Should publish INCLUDED_WORK_STATUSES_UPDATED event for tenant-0 (national default)")
+        void setSystemConfigs_IncludedWorkStatuses_PublishesNationalEvent() throws Exception {
+            Map<SystemConfigKeyEnum, JsonNode> newConfigs = new HashMap<>();
+            newConfigs.put(SystemConfigKeyEnum.INCLUDED_WORK_STATUSES,
+                    objectMapper.readTree("{\"workStatuses\": [4, 1, 4]}"));
+            SetSystemConfigRequestDTO request = SetSystemConfigRequestDTO.builder().configs(newConfigs).build();
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(SystemConfigKeyEnum.INCLUDED_WORK_STATUSES.name())
+                    .configValue("{\"workStatuses\": [1, 4]}")
+                    .build();
+
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("admin-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("admin-uuid")).thenReturn(Optional.of(1));
+            when(tenantCommonRepository.upsertConfig(eq(0),
+                    eq(SystemConfigKeyEnum.INCLUDED_WORK_STATUSES.name()), anyString(), eq(1)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            systemManagementService.setSystemConfigs(request);
+
+            ArgumentCaptor<IncludedWorkStatusesUpdatedEvent> captor =
+                    ArgumentCaptor.forClass(IncludedWorkStatusesUpdatedEvent.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            IncludedWorkStatusesUpdatedEvent event = captor.getValue();
+            // tenant-0 is the national default; work statuses are validated (deduped + sorted).
+            assertEquals(0, event.getTenantId());
+            assertEquals(List.of(1, 4), event.getWorkStatuses());
+        }
+
+        @Test
+        @DisplayName("Should reject INCLUDED_WORK_STATUSES with a value outside the allowed set")
+        void setSystemConfigs_IncludedWorkStatuses_InvalidValue_Throws() throws Exception {
+            Map<SystemConfigKeyEnum, JsonNode> newConfigs = new HashMap<>();
+            newConfigs.put(SystemConfigKeyEnum.INCLUDED_WORK_STATUSES,
+                    objectMapper.readTree("{\"workStatuses\": [4, 9]}"));
+            SetSystemConfigRequestDTO request = SetSystemConfigRequestDTO.builder().configs(newConfigs).build();
+
+            ConfigDTO savedConfig = ConfigDTO.builder()
+                    .configKey(SystemConfigKeyEnum.INCLUDED_WORK_STATUSES.name())
+                    .configValue("{\"workStatuses\": [4, 9]}")
+                    .build();
+
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("admin-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("admin-uuid")).thenReturn(Optional.of(1));
+            when(tenantCommonRepository.upsertConfig(eq(0),
+                    eq(SystemConfigKeyEnum.INCLUDED_WORK_STATUSES.name()), anyString(), eq(1)))
+                    .thenReturn(Optional.of(savedConfig));
+
+            assertThrows(InvalidConfigValueException.class,
+                    () -> systemManagementService.setSystemConfigs(request));
         }
 
         @Test

@@ -405,6 +405,9 @@ class TenantSchemaRepositoryIntegrationTest {
             jdbcTemplate.update(
                     "INSERT INTO tenant_test.lgd_location_master_table (title, lgd_code, parent_id, status) VALUES (?, ?, ?, ?)",
                     "State B", "02", null, 1);
+            jdbcTemplate.update(
+                    "INSERT INTO tenant_test.lgd_location_master_table (title, lgd_code, parent_id, status, deleted_at) VALUES (?, ?, ?, ?, NOW())",
+                    "Deleted State", "03", null, 1); // soft-deleted – must be excluded
 
             List<LocationResponseDTO> result =
                     tenantSchemaRepository.findLgdLocationsByParentId(SCHEMA, null);
@@ -426,6 +429,9 @@ class TenantSchemaRepositoryIntegrationTest {
             jdbcTemplate.update(
                     "INSERT INTO tenant_test.lgd_location_master_table (title, lgd_code, parent_id, status) VALUES (?, ?, ?, ?)",
                     "Inactive District", "03", 100, 0); // inactive – must be excluded
+            jdbcTemplate.update(
+                    "INSERT INTO tenant_test.lgd_location_master_table (title, lgd_code, parent_id, status, deleted_at) VALUES (?, ?, ?, ?, NOW())",
+                    "Deleted District", "04", 100, 1); // soft-deleted – must be excluded
 
             List<LocationResponseDTO> result =
                     tenantSchemaRepository.findLgdLocationsByParentId(SCHEMA, 100);
@@ -443,6 +449,9 @@ class TenantSchemaRepositoryIntegrationTest {
             jdbcTemplate.update(
                     "INSERT INTO tenant_test.department_location_master_table (title, parent_id, status) VALUES (?, ?, ?)",
                     "Zone B", null, 1);
+            jdbcTemplate.update(
+                    "INSERT INTO tenant_test.department_location_master_table (title, parent_id, status, deleted_at) VALUES (?, ?, ?, NOW())",
+                    "Deleted Zone", null, 1); // soft-deleted – must be excluded
 
             List<LocationResponseDTO> result =
                     tenantSchemaRepository.findDepartmentLocationsByParentId(SCHEMA, null);
@@ -467,6 +476,26 @@ class TenantSchemaRepositoryIntegrationTest {
 
             assertThat(result).hasSize(1);
             assertThat(result.get(0).getTitle()).isEqualTo("Active Zone");
+        }
+
+        @Test
+        @DisplayName("findDepartmentLocationsByParentId excludes soft-deleted records for given parent id")
+        void findDepartmentLocationsByParentId_excludesDeletedRecords_forGivenParent() {
+            jdbcTemplate.update(
+                    "INSERT INTO tenant_test.department_location_master_table (id, title, parent_id, status) VALUES (?, ?, ?, ?)",
+                    200, "Parent Zone", null, 1);
+            jdbcTemplate.update(
+                    "INSERT INTO tenant_test.department_location_master_table (title, parent_id, status) VALUES (?, ?, ?)",
+                    "Child Circle", 200, 1);
+            jdbcTemplate.update(
+                    "INSERT INTO tenant_test.department_location_master_table (title, parent_id, status, deleted_at) VALUES (?, ?, ?, NOW())",
+                    "Deleted Circle", 200, 1); // soft-deleted – must be excluded
+
+            List<LocationResponseDTO> result =
+                    tenantSchemaRepository.findDepartmentLocationsByParentId(SCHEMA, 200);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getTitle()).isEqualTo("Child Circle");
         }
     }
 }

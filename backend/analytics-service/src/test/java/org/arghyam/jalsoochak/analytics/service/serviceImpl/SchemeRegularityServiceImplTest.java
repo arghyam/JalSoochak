@@ -689,7 +689,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getSchemeStatusAndTopReportingByLgd_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
         mockRedisValueOps();
-        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:v1";
+        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v4";
         when(valueOperations.get(key)).thenReturn(null);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -699,7 +699,7 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getSchemeCountByLgdInScope(12, 101)).thenReturn(2L);
         when(schemeRegularityRepository.getParentLgdCNameByLgd(12, 101)).thenReturn("Parent");
         when(schemeRegularityRepository.getParentLgdTitleByLgd(12, 101)).thenReturn("District");
-        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(12, 101, START, END, 5, 0))
+        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(12, 101, START, END, 5, 0, "reportingRate", "desc"))
                 .thenReturn(List.of(new SchemeRegularityRepository.SchemeSubmissionMetrics(
                         1,
                         "Scheme A",
@@ -715,17 +715,24 @@ class SchemeRegularityServiceImplTest {
                         null,
                         null,
                         10, 50, 100, 101, null, null,
-                        2001, 2002, null, null, null, null
+                        2001, 2002, null, null, null, null,
+                        List.of(100, 101),
+                        List.of("Immediate Parent", "Other Parent"),
+                        List.of("Block", "Block"),
+                        List.of(3, 3)
                 )));
 
         SchemeStatusAndTopReportingResponse response =
-                service.getSchemeStatusAndTopReportingByLgd(12, 101, START, END, 1, 5);
+                service.getSchemeStatusAndTopReportingByLgd(12, 101, START, END, 1, 5, "reportingRate", "desc");
 
         assertThat(response.getParentLgdLevel()).isEqualTo(2);
         assertThat(response.getParentDepartmentLevel()).isNull();
         assertThat(response.getTotalCount()).isEqualTo(2L);
         assertThat(response.getTopSchemes()).hasSize(1);
         assertThat(response.getTopSchemes().getFirst().getImmediateParentLgdLevel()).isEqualTo(3);
+        assertThat(response.getTopSchemes().getFirst().getSuppliedLgdLocations())
+                .extracting(SchemeStatusAndTopReportingResponse.SuppliedLgdLocation::getLgdId)
+                .containsExactly(100, 101);
         assertThat(response.getTopSchemes().getFirst().getLgdLadder())
                 .containsEntry("level_1", 10)
                 .containsEntry("level_4", 101)
@@ -744,7 +751,7 @@ class SchemeRegularityServiceImplTest {
         when(schemeRegularityRepository.getSchemeCountByDepartmentInScope(12, 201)).thenReturn(5L);
         when(schemeRegularityRepository.getParentDepartmentCNameByDepartment(12, 201)).thenReturn("Dept");
         when(schemeRegularityRepository.getParentDepartmentTitleByDepartment(12, 201)).thenReturn("Division");
-        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByDepartment(12, 201, START, END, 3, 0))
+        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByDepartment(12, 201, START, END, 3, 0, "reportingRate", "desc"))
                 .thenReturn(List.of(new SchemeRegularityRepository.SchemeSubmissionMetrics(
                         2,
                         "Scheme B",
@@ -760,11 +767,15 @@ class SchemeRegularityServiceImplTest {
                         "SubDivision",
                         5,
                         11, 22, 33, null, null, null,
-                        900, 901, 902, 903, null, null
+                        900, 901, 902, 903, null, null,
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of()
                 )));
 
         SchemeStatusAndTopReportingResponse response =
-                service.getSchemeStatusAndTopReportingByDepartment(12, 201, START, END, 1, 3);
+                service.getSchemeStatusAndTopReportingByDepartment(12, 201, START, END, 1, 3, "reportingRate", "desc");
 
         assertThat(response.getParentLgdLevel()).isNull();
         assertThat(response.getParentDepartmentLevel()).isEqualTo(4);
@@ -887,6 +898,9 @@ class SchemeRegularityServiceImplTest {
                         new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
                                 null, null, 401, null, "Village A", 100L, 90L, 110L, 10000L, 2, new BigDecimal("50.0000"))
                 ));
+        when(schemeRegularityRepository.getRegionOwnWaterSupplyByLgd(10, 101, START, END))
+                .thenReturn(new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                        10, null, 101, null, null, 100L, 90L, 110L, 10000L, 1, new BigDecimal("10000.0000")));
         when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -898,6 +912,9 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getParentLgdLevel()).isEqualTo(3);
         assertThat(response.getChildRegionCount()).isEqualTo(1);
         assertThat(response.getChildRegions().getFirst().getLgdId()).isEqualTo(401);
+        // The focal region's own deduped total is exposed separately for the region's headline figure.
+        assertThat(response.getCurrentRegion().getLgdId()).isEqualTo(101);
+        assertThat(response.getCurrentRegion().getSchemeCount()).isEqualTo(1);
     }
 
     @Test
@@ -1029,6 +1046,9 @@ class SchemeRegularityServiceImplTest {
                         new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
                                 null, null, null, 501, "Dept-1", 120L, 100L, 140L, 9000L, 3, new BigDecimal("3000.0000"))
                 ));
+        when(schemeRegularityRepository.getRegionOwnWaterSupplyByDepartment(10, 201, START, END))
+                .thenReturn(new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                        10, null, null, 201, null, 120L, 100L, 140L, 9000L, 1, new BigDecimal("9000.0000")));
         when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -1038,6 +1058,8 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getParentDepartmentLevel()).isEqualTo(2);
         assertThat(response.getChildRegionCount()).isEqualTo(1);
         assertThat(response.getChildRegions().getFirst().getDepartmentId()).isEqualTo(501);
+        assertThat(response.getCurrentRegion().getDepartmentId()).isEqualTo(201);
+        assertThat(response.getCurrentRegion().getSchemeCount()).isEqualTo(1);
     }
 
     @Test
@@ -1654,6 +1676,9 @@ class SchemeRegularityServiceImplTest {
                                 null, null, 401, null, "Village A", 100L, 90L, 110L, 10000L, 2,
                                 new BigDecimal("50.0000"))
                 ));
+        when(schemeRegularityRepository.getRegionOwnWaterSupplyByLgd(10, 101, START, END))
+                .thenReturn(new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                        10, null, 101, null, null, 100L, 90L, 110L, 10000L, 1, new BigDecimal("10000.0000")));
         when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -1663,6 +1688,8 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isNull();
         assertThat(response.getSchemes()).isNull();
         assertThat(response.getChildRegionCount()).isEqualTo(1);
+        // scope=child still exposes the region's own deduped total for the header.
+        assertThat(response.getCurrentRegion().getLgdId()).isEqualTo(101);
     }
 
     @Test
@@ -1676,6 +1703,9 @@ class SchemeRegularityServiceImplTest {
                                 null, null, null, 501, "Dept-1", 120L, 100L, 140L, 9000L, 3,
                                 new BigDecimal("3000.0000"))
                 ));
+        when(schemeRegularityRepository.getRegionOwnWaterSupplyByDepartment(10, 201, START, END))
+                .thenReturn(new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                        10, null, null, 201, null, 120L, 100L, 140L, 9000L, 1, new BigDecimal("9000.0000")));
         when(dimTenantRepository.findById(10)).thenReturn(Optional.of(tenant(10, "mp")));
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -1685,6 +1715,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isNull();
         assertThat(response.getSchemes()).isNull();
         assertThat(response.getChildRegionCount()).isEqualTo(1);
+        assertThat(response.getCurrentRegion().getDepartmentId()).isEqualTo(201);
     }
 
     @Test

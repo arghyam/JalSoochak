@@ -24,7 +24,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
     /**
      * Warm-cache runs at midnight IST (the shared scheduler cron); today's counts also
      * refresh hourly via the hourly aggregation task + 1h cache TTL. The warm window is
-     * anchored to "yesterday" (IST) for a stable 30-day backfill range.
+     * anchored to "yesterday" (IST) for a stable range that does not drift during the day.
      *
      * Window size is inclusive of both start and end dates.
      */
@@ -78,7 +78,8 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
                 // Warm-cache: non-submission reason distribution (overall + child regions) under this state (last 30 days).
                 schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: schemes dashboard (active/inactive counts + top schemes by reporting rate) for this state (last 30 days).
-                schemeRegularityService.getSchemeStatusAndTopReportingByLgd(tenantId, lgdId, startDate, endDate, 1, null);
+                schemeRegularityService.getSchemeStatusAndTopReportingByLgd(
+                        tenantId, lgdId, startDate, endDate, 1, null, null, null);
                 // Warm the common paginated view (page 1, default count).
                 // Warm-cache: schemes region report (page 1, default count) for this state (last 30 days).
                 schemeRegularityService.getSchemeRegionReportByLgd(tenantId, lgdId, startDate, endDate, 1, null);
@@ -116,4 +117,3 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
         log.info("Scheduler END '{}'", taskName());
     }
 }
-

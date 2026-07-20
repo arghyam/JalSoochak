@@ -63,6 +63,7 @@ class TenantConfigKeyEnumTest {
             assertThat(TenantConfigKeyEnum.TENANT_SUPPORTED_CHANNELS.isPublic()).isFalse();
             assertThat(TenantConfigKeyEnum.TENANT_WATER_QUANTITY_SUPPLY_THRESHOLD.isPublic()).isFalse();
             assertThat(TenantConfigKeyEnum.EMAIL_TEMPLATE_JSON.isPublic()).isFalse();
+            assertThat(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES.isPublic()).isFalse();
         }
     }
 

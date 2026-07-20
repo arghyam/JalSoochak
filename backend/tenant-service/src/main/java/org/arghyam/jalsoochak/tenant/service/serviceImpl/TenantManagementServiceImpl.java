@@ -10,8 +10,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -24,6 +26,7 @@ import org.arghyam.jalsoochak.tenant.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LocationConfigDTO;
@@ -52,8 +55,10 @@ import org.arghyam.jalsoochak.tenant.enums.TenantConfigKeyEnum.ConfigType;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.event.TenantCreatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantDeactivatedEvent;
+import org.arghyam.jalsoochak.tenant.event.TenantConfigUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantLocationHierarchyUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.TenantUpdatedEvent;
+import org.arghyam.jalsoochak.tenant.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.tenant.exception.ConfigurationException;
@@ -107,29 +112,41 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     @Override
     @Transactional
     public TenantResponseDTO createTenant(CreateTenantRequestDTO request) {
-        log.info("Creating tenant – stateCode: {}, name: {}", request.getStateCode(), request.getName());
+        // Normalize to the canonical (upper-case) state code so a mixed-case request still matches
+        // a pre-seeded REGISTERED tenant instead of inserting a duplicate. All downstream repository
+        // calls (findByStateCode, onboardTenant, createTenant) then operate on the same canonical value.
+        request.setStateCode(request.getStateCode().trim().toUpperCase(Locale.ROOT));
+        log.info("Onboarding tenant – stateCode: {}, name: {}", request.getStateCode(), request.getName());
 
-        // Single Tenant Mode: fast-fail before insert. DataIntegrityViolationException is caught
-        // below to convert any concurrent-insert race into a clear error.
-        if (appProperties.isSingleTenantMode()) {
-            int count = tenantCommonRepository.countNonDeletedTenants();
-            if (count > 0) {
-                throw new IllegalStateException(
-                        "A tenant already exists. Only one tenant is allowed in Single Tenant Mode.");
-            }
+        // Single Tenant Mode: fast-fail before any write. DataIntegrityViolationException is caught
+        // below to convert any concurrent-write race into a clear error.
+        if (appProperties.isSingleTenantMode() && tenantCommonRepository.countOnboardedTenants() > 0) {
+            throw new IllegalStateException(
+                    "A tenant already exists. Only one tenant is allowed in Single Tenant Mode.");
         }
 
-        tenantCommonRepository.findByStateCode(request.getStateCode()).ifPresent(existing -> {
+        // A pre-seeded row in REGISTERED status is onboarded in place (id stays stable so it
+        // remains aligned with analytics dim_tenant). Any other existing row is a conflict.
+        // When no row exists (un-seeded environment) we fall back to inserting a new tenant.
+        Optional<TenantResponseDTO> existing = tenantCommonRepository.findByStateCode(request.getStateCode());
+        if (existing.isPresent()
+                && !TenantStatusEnum.REGISTERED.name().equals(existing.get().getStatus())) {
             throw new IllegalStateException(
                     "Tenant with state code '" + request.getStateCode() + "' already exists");
-        });
+        }
 
         Integer currentUserId = resolveCurrentUserId();
 
         TenantResponseDTO tenant;
         try {
-            tenant = tenantCommonRepository.createTenant(request, currentUserId)
-                    .orElseThrow(() -> new RuntimeException("Tenant creation failed – no record returned"));
+            if (existing.isPresent()) {
+                tenant = tenantCommonRepository.onboardTenant(request.getStateCode(), request, currentUserId)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Tenant with state code '" + request.getStateCode() + "' already exists"));
+            } else {
+                tenant = tenantCommonRepository.createTenant(request, currentUserId)
+                        .orElseThrow(() -> new RuntimeException("Tenant creation failed – no record returned"));
+            }
         } catch (DataIntegrityViolationException e) {
             if (appProperties.isSingleTenantMode()) {
                 throw new IllegalStateException(
@@ -138,7 +155,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             throw new IllegalStateException(
                     "Tenant with state code '" + request.getStateCode() + "' already exists", e);
         }
-        log.info("Tenant record created in common_schema with id: {}", tenant.getId());
+        log.info("Tenant record onboarded in common_schema with id: {}", tenant.getId());
 
         String schemaName = "tenant_" + request.getStateCode().toLowerCase();
         tenantCommonRepository.provisionTenantSchema(schemaName);
@@ -214,9 +231,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     public TenantConfigResponseDTO getTenantConfigs(Integer tenantId, Set<TenantConfigKeyEnum> keys) {
         log.info("Fetching tenant configurations [id={}, keys={}]", tenantId, keys);
         validateNotSystemTenant(tenantId);
-        TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        TenantResponseDTO tenant = requireOnboardedTenant(tenantId);
 
         Set<TenantConfigKeyEnum> effectiveKeys = (keys == null || keys.isEmpty())
                 ? EnumSet.allOf(TenantConfigKeyEnum.class)
@@ -284,9 +299,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     public TenantConfigResponseDTO setTenantConfigs(Integer tenantId, SetTenantConfigRequestDTO request) {
         log.info("Setting tenant configurations [id={}]", tenantId);
         validateNotSystemTenant(tenantId);
-        TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        TenantResponseDTO tenant = requireOnboardedTenant(tenantId);
 
         Integer currentUserId = resolveCurrentUserId();
 
@@ -382,6 +395,13 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         }
 
+        eventPublisher.publishEvent(new TenantConfigUpdatedEvent(
+                tenantId,
+                tenant.getStateCode(),
+                request.getConfigs().keySet().stream()
+                        .map(Enum::name)
+                        .collect(Collectors.toSet())));
+
         // Auto-transition ONBOARDED → CONFIGURED once all mandatory keys are present
         TenantStatusEnum currentStatus = TenantStatusEnum.valueOf(tenant.getStatus());
         if (currentStatus == TenantStatusEnum.ONBOARDED) {
@@ -431,6 +451,15 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             }
         }
 
+        if (request.getConfigs().containsKey(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES)) {
+            IncludedWorkStatusesConfigDTO dto =
+                    (IncludedWorkStatusesConfigDTO) results.get(TenantConfigKeyEnum.INCLUDED_WORK_STATUSES);
+            // Enforced validation for JsonNode-bound configs (bean validation does not run on treeToValue).
+            List<Integer> workStatuses = dto.validatedWorkStatuses();
+            eventPublisher.publishEvent(
+                    new IncludedWorkStatusesUpdatedEvent(tenantId, tenant.getStateCode(), workStatuses));
+        }
+
         return TenantConfigResponseDTO.builder()
                 .tenantId(tenantId)
                 .configs(results)
@@ -442,9 +471,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         log.info("Fetching config status [id={}]", tenantId);
         validateNotSystemTenant(tenantId);
 
-        TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        TenantResponseDTO tenant = requireOnboardedTenant(tenantId);
 
         Set<TenantConfigKeyEnum> configuredKeys = fetchConfiguredKeys(tenantId, tenant.getStateCode());
 
@@ -519,9 +546,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         log.info("Fetching location hierarchy [id={}, hierarchyType={}]", tenantId, hierarchyType);
         validateNotSystemTenant(tenantId);
 
-        TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        TenantResponseDTO tenant = requireOnboardedTenant(tenantId);
 
         String schemaName = "tenant_" + tenant.getStateCode().toLowerCase();
 
@@ -554,9 +579,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                 parentId);
         validateNotSystemTenant(tenantId);
 
-        TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        TenantResponseDTO tenant = requireOnboardedTenant(tenantId);
 
         String schemaName = "tenant_" + tenant.getStateCode().toLowerCase();
 
@@ -589,9 +612,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         log.info("Fetching location hierarchy edit constraints [id={}, hierarchyType={}]", tenantId, hierarchyType);
         validateNotSystemTenant(tenantId);
 
-        TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        TenantResponseDTO tenant = requireOnboardedTenant(tenantId);
 
         RegionTypeEnum regionType = resolveRegionType(hierarchyType);
         String schemaName = "tenant_" + tenant.getStateCode().toLowerCase();
@@ -615,9 +636,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
             throw new InvalidConfigValueException("Hierarchy levels cannot be null or empty");
         }
 
-        TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        TenantResponseDTO tenant = requireOnboardedTenant(tenantId);
 
         if (levels.stream().anyMatch(Objects::isNull)
                 || levels.stream().map(LocationLevelConfigDTO::getLevel).anyMatch(Objects::isNull)) {
@@ -689,6 +708,31 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         }
     }
 
+    /**
+     * Rejects operations on a tenant that has been registered (pre-seeded) but not yet onboarded.
+     * Such a tenant has no provisioned schema, so any per-tenant operation would otherwise fail
+     * against a non-existent schema. Treated as "not found" since these tenants are hidden from APIs.
+     */
+    private void validateTenantOnboarded(TenantResponseDTO tenant) {
+        if (TenantStatusEnum.REGISTERED.name().equals(tenant.getStatus())) {
+            throw new ResourceNotFoundException(
+                    "Tenant with tenantId " + tenant.getId() + " is not onboarded");
+        }
+    }
+
+    /**
+     * Resolves a tenant by id, failing with a not-found error if it does not exist or has not
+     * yet been onboarded (still in {@link TenantStatusEnum#REGISTERED}). Use for any per-tenant
+     * operation that touches the tenant schema.
+     */
+    private TenantResponseDTO requireOnboardedTenant(Integer tenantId) {
+        TenantResponseDTO tenant = tenantCommonRepository.findById(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Tenant with tenantId " + tenantId + " does not exist"));
+        validateTenantOnboarded(tenant);
+        return tenant;
+    }
+
     private RegionTypeEnum resolveRegionType(String hierarchyType) {
         try {
             return RegionTypeEnum.valueOf(hierarchyType.toUpperCase());
@@ -703,9 +747,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     public TenantConfigResponseDTO setTenantLogo(Integer tenantId, LogoSource source) {
         log.info("Setting tenant logo [id={}, source={}]", tenantId, source.getClass().getSimpleName());
         validateNotSystemTenant(tenantId);
-        tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        requireOnboardedTenant(tenantId);
 
         String oldValue = tenantCommonRepository
                 .findConfigByTenantAndKey(tenantId, TenantConfigKeyEnum.TENANT_LOGO.name())
@@ -796,9 +838,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     @Override
     public TenantLogoResult resolveTenantLogo(Integer tenantId) {
         validateNotSystemTenant(tenantId);
-        tenantCommonRepository.findById(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant with tenantId " + tenantId + " does not exist"));
+        requireOnboardedTenant(tenantId);
         String logoValue = tenantCommonRepository
                 .findConfigByTenantAndKey(tenantId, TenantConfigKeyEnum.TENANT_LOGO.name())
                 .map(cfg -> parseLogoValue(cfg.getConfigValue()))
@@ -1038,6 +1078,7 @@ public class TenantManagementServiceImpl implements TenantManagementService {
     public GenerateApiTokenResponseDTO generateApiToken(String stateCode) {
         TenantResponseDTO tenant = tenantCommonRepository.findByStateCode(stateCode)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for state code: " + stateCode));
+        validateTenantOnboarded(tenant);
 
         Integer currentUserId = resolveCurrentUserId();
         ApiKeyService.GeneratedApiToken generated = apiKeyService.generate();

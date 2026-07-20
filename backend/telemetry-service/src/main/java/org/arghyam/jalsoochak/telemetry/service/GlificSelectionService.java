@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeOption;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserLanguagePreferenceRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -219,11 +220,9 @@ public class GlificSelectionService {
                     .or(() -> tenantConfigRepository.findChannelSelectionPrompt(tenantId, languageKey))
                     .orElse("Please select your preferred channel by typing the corresponding number:");
 
-            List<GlificMessageTemplatesService.TemplateOption> channelTemplateOptions =
-                    templatesService.resolveScreenOptions(tenantId, "CHANNEL_SELECTION");
-            List<String> channelOptions = resolveSupportedChannelOptions(tenantId, languageKey, channelTemplateOptions);
+            List<String> channelOptions = resolveTenantSupportedChannels(tenantId);
             if (channelOptions.isEmpty()) {
-                throw new IllegalStateException("No channel options configured. Configure TENANT_SUPPORTED_CHANNELS or channel_1/channel_2.");
+                throw new IllegalStateException("No channel options configured. Configure TENANT_SUPPORTED_CHANNELS.");
             }
 
             StringBuilder message = new StringBuilder(prompt.trim());
@@ -272,30 +271,13 @@ public class GlificSelectionService {
 
             String languageKey = localizationService.normalizeLanguageKey(operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId));
 
-            List<GlificMessageTemplatesService.TemplateOption> channelTemplateOptions =
-                    templatesService.resolveScreenOptions(tenantId, "CHANNEL_SELECTION");
-            List<String> channelOptions = resolveSupportedChannelOptions(tenantId, languageKey, channelTemplateOptions);
-            String selectedChannel;
-            int selectedChannelId;
-            if (!channelOptions.isEmpty()) {
-                selectedChannel = resolveSelection(request.getChannel(), channelOptions)
-                        .orElseThrow(() -> new IllegalStateException("Invalid channel selection"));
-                selectedChannelId = channelOptions.indexOf(selectedChannel) + 1;
-            } else if (!channelTemplateOptions.isEmpty()) {
-                int selectedIndex = resolveTemplateSelectionIndex(request.getChannel(), channelTemplateOptions, languageKey)
-                        .orElseThrow(() -> new IllegalStateException("Invalid channel selection"));
-                GlificMessageTemplatesService.TemplateOption selectedOpt = channelTemplateOptions.get(selectedIndex);
-                selectedChannel = selectedOpt.labelForLanguageKey(languageKey);
-                selectedChannelId = selectedOpt.order() > 0 ? selectedOpt.order() : (selectedIndex + 1);
-            } else {
-                List<String> legacyChannelOptions = tenantConfigRepository.findChannelOptions(tenantId, languageKey);
-                if (legacyChannelOptions.isEmpty()) {
-                    throw new IllegalStateException("No channel options configured for tenant");
-                }
-                selectedChannel = resolveSelection(request.getChannel(), legacyChannelOptions)
-                        .orElseThrow(() -> new IllegalStateException("Invalid channel selection"));
-                selectedChannelId = legacyChannelOptions.indexOf(selectedChannel) + 1;
+            List<String> channelOptions = resolveTenantSupportedChannels(tenantId);
+            if (channelOptions.isEmpty()) {
+                throw new IllegalStateException("No channel options configured for tenant");
             }
+            String selectedChannel = resolveSelection(request.getChannel(), channelOptions)
+                    .orElseThrow(() -> new IllegalStateException("Invalid channel selection"));
+            int selectedChannelId = channelOptions.indexOf(selectedChannel) + 1;
             Long schemeId = telemetryTenantRepository
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorWithSchema.operator().id())
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
@@ -402,7 +384,7 @@ public class GlificSelectionService {
                     operatorWithSchema.schemaName(),
                     selectedScheme.id(),
                     operatorWithSchema.operator().id(),
-                    java.time.LocalDateTime.now()
+                    ReadingTime.now()
             );
 
             String schemeName = selectedScheme.name();

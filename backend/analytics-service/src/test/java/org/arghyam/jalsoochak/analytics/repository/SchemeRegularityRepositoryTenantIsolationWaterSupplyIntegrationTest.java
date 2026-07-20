@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.repository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
+import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -43,6 +44,10 @@ class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("spring.flyway.schemas", () -> "analytics_schema");
+        // Aggregation-focused IT: disable the dashboard work_status filter so seeded schemes
+        // (which do not all carry the handed-over work_status) are included. Filter behaviour is
+        // covered separately by SchemeRegularityRepositoryWorkStatusFilterIntegrationTest.
+        registry.add("analytics.dashboard.included-work-statuses", () -> "");
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -60,7 +65,11 @@ class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
         truncateAnalytics();
         seedTwoTenants();
         seedSchemesTwoTenants();
+        insertDate(D1);
+        insertDate(D2);
+        insertDate(D3);
         seedMeterReadingsForBothTenants();
+        seedWaterQuantityForBothTenants();
     }
 
     @Test
@@ -75,13 +84,14 @@ class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
         SchemeRegularityRepository.SchemeWaterSupplyMetrics s2 =
                 tenant1Rows.stream().filter(r -> r.schemeId().equals(2)).findFirst().orElseThrow();
 
-        // Tenant 1 scheme 1 positives at D1 (10) and D3 (5) => total 15, supply_days=2.
-        assertThat(s1.totalWaterSuppliedLiters()).isEqualTo(15L);
+        // Tenant 1 scheme 1 water from fact_water_quantity_table (SUBMITTED only): D1 (30) + D3 (20) => 50.
+        // The D2 NOT_SUBMITTED row (1000) is excluded. supply_days=2 (meter positives at D1, D3).
+        assertThat(s1.totalWaterSuppliedLiters()).isEqualTo(50L);
         assertThat(s1.supplyDays()).isEqualTo(2);
-        // house_hold_count=10, daysInRange=3 => 15 / 30 = 0.5 => 0.5000
-        assertThat(s1.averageLitersPerHousehold()).isEqualByComparingTo("0.5000");
+        // house_hold_count=10, daysInRange=3 => 50 / 30 => 1.6667
+        assertThat(s1.averageLitersPerHousehold()).isEqualByComparingTo("1.6667");
 
-        // Tenant 1 scheme 2 has no positive meter readings inserted => totals remain 0.
+        // Tenant 1 scheme 2 has no water quantity rows => totals remain 0.
         assertThat(s2.totalWaterSuppliedLiters()).isEqualTo(0L);
         assertThat(s2.supplyDays()).isEqualTo(0);
     }
@@ -96,11 +106,11 @@ class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
         SchemeRegularityRepository.SchemeWaterSupplyMetrics s1 =
                 tenant2Rows.stream().filter(r -> r.schemeId().equals(1)).findFirst().orElseThrow();
 
-        // Tenant 2 scheme 1 positives at D1 (100) only => total 100, supply_days=1.
-        assertThat(s1.totalWaterSuppliedLiters()).isEqualTo(100L);
+        // Tenant 2 scheme 1 water from fact_water_quantity_table (SUBMITTED): D1 (80) => 80. supply_days=1.
+        assertThat(s1.totalWaterSuppliedLiters()).isEqualTo(80L);
         assertThat(s1.supplyDays()).isEqualTo(1);
-        // house_hold_count=10, daysInRange=3 => 100 / 30 = 3.3333...
-        assertThat(s1.averageLitersPerHousehold()).isEqualByComparingTo("3.3333");
+        // house_hold_count=10, daysInRange=3 => 80 / 30 => 2.6667
+        assertThat(s1.averageLitersPerHousehold()).isEqualByComparingTo("2.6667");
     }
 
     @Test
@@ -126,13 +136,16 @@ class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
         assertThat(rows.get(2).periodEndDate()).isEqualTo(D3);
         assertThat(rows.get(2).schemeCount()).isEqualTo(4);
         assertThat(rows.get(2).totalSupplyDays()).isEqualTo(1);
-        assertThat(rows.get(2).totalWaterQuantity()).isEqualTo(5L);
+        // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL): D3 tenant1 scheme1 SUBMITTED = 20.
+        assertThat(rows.get(2).totalWaterQuantity()).isEqualTo(20L);
     }
 
     private void truncateAnalytics() {
         jdbcTemplate.execute("""
                 TRUNCATE TABLE
                     analytics_schema.fact_meter_reading_table,
+                    analytics_schema.fact_water_quantity_table,
+                    analytics_schema.dim_date_table,
                     analytics_schema.dim_scheme_table,
                     analytics_schema.dim_user_table,
                     analytics_schema.dim_tenant_table
@@ -227,6 +240,45 @@ class SchemeRegularityRepositoryTenantIsolationWaterSupplyIntegrationTest {
                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, NOW(), ?, ?)
                 """,
                 2, 1, 21, 0, 0, 90, "x", 1, D3, 1, 0);
+    }
+
+    private void insertDate(LocalDate date) {
+        int dateKey = Integer.parseInt(date.toString().replace("-", ""));
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_date_table
+                (date_key, full_date, day, month, month_name, quarter, year, week, is_weekend, fiscal_year)
+                VALUES (?, ?, EXTRACT(DAY FROM ?::date), EXTRACT(MONTH FROM ?::date), TO_CHAR(?::date, 'FMMonth'),
+                        EXTRACT(QUARTER FROM ?::date), EXTRACT(YEAR FROM ?::date), EXTRACT(WEEK FROM ?::date),
+                        EXTRACT(ISODOW FROM ?::date) IN (6,7), EXTRACT(YEAR FROM ?::date))
+                """, dateKey, date, date, date, date, date, date, date, date, date);
+    }
+
+    private void seedWaterQuantityForBothTenants() {
+        // Tenant 1 scheme 1: D1=30 SUBMITTED, D2=1000 NOT_SUBMITTED (excluded), D3=20 SUBMITTED => 50 supplied.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 1, 1, 11, 30, D1, SubmissionStatus.SUBMITTED.getCode(), null, null);
+
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 1, 1, 11, 1000, D2, SubmissionStatus.NOT_SUBMITTED.getCode(), "no_electricity", "network_issue");
+
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 1, 1, 11, 20, D3, SubmissionStatus.SUBMITTED.getCode(), null, null);
+
+        // Tenant 2 scheme 1: D1=80 SUBMITTED => 80 supplied. Confirms the tenant_id filter isolates tenants.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 2, 1, 21, 80, D1, SubmissionStatus.SUBMITTED.getCode(), null, null);
     }
 }
 

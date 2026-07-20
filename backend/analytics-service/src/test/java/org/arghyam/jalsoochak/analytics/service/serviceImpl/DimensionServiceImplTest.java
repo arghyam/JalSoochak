@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
@@ -184,6 +185,71 @@ class DimensionServiceImplTest {
         assertThat(captor.getValue().getSchemeId()).isEqualTo(1001);
         assertThat(captor.getValue().getLevel2LgdId()).isEqualTo(101);
         assertThat(captor.getValue().getLevel2DeptId()).isEqualTo(201);
+    }
+
+    @Test
+    void upsertScheme_persistsWorkStatus() {
+        SchemeEvent event = new SchemeEvent();
+        event.setSchemeId(1001);
+        event.setTenantId(1);
+        event.setSchemeName("Scheme-A");
+        event.setStatus(1);
+        event.setWorkStatus(4);
+        when(dimSchemeRepository.findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc(1, 1001))
+                .thenReturn(Optional.empty());
+
+        service.upsertScheme(event);
+
+        ArgumentCaptor<DimScheme> captor = ArgumentCaptor.forClass(DimScheme.class);
+        verify(dimSchemeRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getWorkStatus()).isEqualTo(4);
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_setsArrayAndSaves() {
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 1, "MP", List.of(1, 4));
+        DimTenant existing = DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build();
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(existing));
+
+        service.updateIncludedWorkStatuses(event);
+
+        ArgumentCaptor<DimTenant> captor = ArgumentCaptor.forClass(DimTenant.class);
+        verify(dimTenantRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getIncludedWorkStatuses()).containsExactly(1, 4);
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_tenantNotFound_throwsIllegalStateException() {
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 99, "XX", List.of(4));
+        when(dimTenantRepository.findById(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updateIncludedWorkStatuses(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("99");
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_nationalTenantMissing_createsConfigRowInsteadOfThrowing() {
+        // tenant-0 is a config-only singleton that no TENANT_CREATED event ever creates, so the
+        // national default must be materialised on first write rather than dead-lettered. (Regression:
+        // findById(0).orElseThrow silently DLQ'd every national update.)
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 0, "NATIONAL", List.of(4));
+        when(dimTenantRepository.findById(0)).thenReturn(Optional.empty());
+
+        service.updateIncludedWorkStatuses(event);
+
+        ArgumentCaptor<DimTenant> captor = ArgumentCaptor.forClass(DimTenant.class);
+        verify(dimTenantRepository, times(1)).save(captor.capture());
+        DimTenant saved = captor.getValue();
+        assertThat(saved.getTenantId()).isZero();
+        assertThat(saved.getStateCode()).isEqualTo("NATIONAL");
+        assertThat(saved.getTitle()).isEqualTo("NATIONAL");
+        assertThat(saved.getStatus()).isEqualTo(1);
+        assertThat(saved.getCreatedAt()).isNotNull();
+        assertThat(saved.getIncludedWorkStatuses()).containsExactly(4);
     }
 
     @Test

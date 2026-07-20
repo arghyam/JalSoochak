@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.analytics.repository;
 
+import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
@@ -43,6 +44,10 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("spring.flyway.schemas", () -> "analytics_schema");
+        // Aggregation-focused IT: disable the dashboard work_status filter so seeded schemes
+        // (which do not all carry the handed-over work_status) are included. Filter behaviour is
+        // covered separately by SchemeRegularityRepositoryWorkStatusFilterIntegrationTest.
+        registry.add("analytics.dashboard.included-work-statuses", () -> "");
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -62,18 +67,26 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
     }
 
     @Test
-    void getSchemeRegularityMetrics_duplicateConfirmedReadingsOnSameDay_doesNotIncreaseSupplyDays() {
-        // Tenant 1 has two schemes under parent LGD=100.
-        seedDuplicateMeterReadingOnSameDay();
+    void getSchemeRegularityMetrics_duplicateWaterRowsOnSameDay_doNotIncreaseSupplyDays() {
+        // Regularity supply days come from fact_water_quantity, de-duplicated to the LATEST row per
+        // (scheme, date) via DISTINCT ON (... ORDER BY updated_at DESC, id DESC). A supply day =
+        // SUBMITTED/legacy-NULL row with water_quantity > 0, evaluated on that latest row only.
+        // scheme 1, D1: an earlier supplied row is superseded by a later NOT_SUBMITTED (outage) row,
+        // so the winning D1 row is non-supplied and D1 must NOT count. A SUBMITTED row on D3 => 1 supply day.
+        // (If the query merely counted distinct dates with any supplied row, D1 would wrongly count => 2,
+        // so this asserts latest-row de-duplication rather than distinct-date counting.)
+        seedWaterQuantity(1, 11, D1, 100, SubmissionStatus.SUBMITTED.getCode()); // earlier row: supplied
+        seedWaterQuantity(1, 11, D1, 0, SubmissionStatus.NOT_SUBMITTED.getCode()); // later row wins: non-supplied
+        seedWaterQuantity(1, 11, D3, 80, SubmissionStatus.SUBMITTED.getCode());
+        // scheme 2: only a NOT_SUBMITTED (outage) row => 0 supply days.
+        seedWaterQuantity(2, 12, D1, 0, SubmissionStatus.NOT_SUBMITTED.getCode());
 
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
                 repository.getSchemeRegularityMetrics(100, D1, D3);
 
         assertThat(metrics.schemeCount()).isEqualTo(2);
-        // supply days are distinct reading_date with confirmed_reading > 0.
-        // scheme 1: D1 and D3 => 2 supply days (duplicate on D1 must not add 1)
-        // scheme 2: no confirmed_reading > 0 within range => 0
-        assertThat(metrics.totalSupplyDays()).isEqualTo(2);
+        // scheme 1: latest D1 row non-supplied (excluded) + D3 => 1; scheme 2: 0 => total 1.
+        assertThat(metrics.totalSupplyDays()).isEqualTo(1);
     }
 
     @Test
@@ -118,9 +131,9 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
     }
 
     @Test
-    void getSchemeRegularityMetrics_lateArrivingConfirmedReading_increasesSupplyDays() {
-        // Initial telemetry: scheme 1 gets only a confirmed reading on D1.
-        seedSingleMeterReadingOnDate(1, 11, D1, 10);
+    void getSchemeRegularityMetrics_lateArrivingWaterSupply_increasesSupplyDays() {
+        // Initial telemetry: scheme 1 supplied water only on D1 (SUBMITTED).
+        seedWaterQuantity(1, 11, D1, 100, SubmissionStatus.SUBMITTED.getCode());
 
         SchemeRegularityRepository.SchemeRegularityMetrics first =
                 repository.getSchemeRegularityMetrics(100, D1, D3);
@@ -129,8 +142,8 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
         assertThat(first.schemeCount()).isEqualTo(2);
         assertThat(first.totalSupplyDays()).isEqualTo(1);
 
-        // Late-arriving telemetry: same scheme gets a confirmed reading on D2.
-        seedSingleMeterReadingOnDate(1, 11, D2, 20);
+        // Late-arriving telemetry: same scheme supplies water on D2.
+        seedWaterQuantity(1, 11, D2, 120, SubmissionStatus.SUBMITTED.getCode());
 
         SchemeRegularityRepository.SchemeRegularityMetrics second =
                 repository.getSchemeRegularityMetrics(100, D1, D3);
@@ -177,13 +190,13 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
 
     @Test
     void getSchemeRegularityMetrics_inclusiveRange_startEqualsEnd_countsOnlyThatDay() {
-        seedSingleMeterReadingOnDate(1, 11, D2, 10);
+        seedWaterQuantity(1, 11, D2, 100, SubmissionStatus.SUBMITTED.getCode());
 
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
                 repository.getSchemeRegularityMetrics(100, D2, D2);
 
         assertThat(metrics.schemeCount()).isEqualTo(2);
-        // scheme 1 has supply on D2; scheme 2 has none => totalSupplyDays=1
+        // scheme 1 supplied water on D2; scheme 2 has none => totalSupplyDays=1
         assertThat(metrics.totalSupplyDays()).isEqualTo(1);
     }
 
@@ -310,6 +323,32 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
                 (1, 1, 'Scheme A', 1001, 2001, 0.0, 0.0, 100, 100, 101, NULL, NULL, NULL, NULL, 200, 200, 201, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW()),
                 (2, 1, 'Scheme B', 1002, 2002, 0.0, 0.0, 100, 100, 102, NULL, NULL, NULL, NULL, 200, 200, 202, NULL, NULL, NULL, NULL, 0, 20, 20, 20, NOW(), NOW())
                 """);
+
+        // fact_water_quantity_table.date has a FK to dim_date_table (V8); seed the dates used here.
+        insertDate(D1);
+        insertDate(D2);
+        insertDate(D3);
+    }
+
+    private void insertDate(LocalDate date) {
+        int dateKey = Integer.parseInt(date.toString().replace("-", ""));
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_date_table
+                (date_key, full_date, day, month, month_name, quarter, year, week, is_weekend, fiscal_year)
+                VALUES (?, ?, EXTRACT(DAY FROM ?::date), EXTRACT(MONTH FROM ?::date), TO_CHAR(?::date, 'FMMonth'),
+                        EXTRACT(QUARTER FROM ?::date), EXTRACT(YEAR FROM ?::date), EXTRACT(WEEK FROM ?::date),
+                        EXTRACT(ISODOW FROM ?::date) IN (6,7), EXTRACT(YEAR FROM ?::date))
+                """, dateKey, date, date, date, date, date, date, date, date, date);
+    }
+
+    private void seedWaterQuantity(
+            int schemeId, int userId, LocalDate date, int waterQuantity, int submissionStatus) {
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?)
+                """,
+                1, schemeId, userId, waterQuantity, date, submissionStatus);
     }
 
     private void seedSingleMeterReadingOnDate(

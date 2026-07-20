@@ -15,5 +15,7 @@ public class CreateReadingResponse {
     private BigDecimal lastConfirmedReading;
 
     private boolean success;
+
+    private TelemetryErrorCode errorCode;
     private String message;
 }

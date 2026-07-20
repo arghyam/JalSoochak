@@ -45,6 +45,10 @@ class SchemeRegularityRepositoryIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("spring.flyway.schemas", () -> "analytics_schema");
+        // Aggregation-focused IT: disable the dashboard work_status filter so seeded schemes
+        // (which do not all carry the handed-over work_status) are included. Filter behaviour is
+        // covered separately by SchemeRegularityRepositoryWorkStatusFilterIntegrationTest.
+        registry.add("analytics.dashboard.included-work-statuses", () -> "");
     }
 
     @Autowired
@@ -127,18 +131,43 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(rows).hasSize(1);
         assertThat(rows.getFirst().tenantId()).isEqualTo(1);
-        // In this test seed, tenant config values default to 0 (via COALESCE),
-        // so only scheme-days with zero daily eWater quantity count as "efficient".
-        assertThat(rows.getFirst().supplyDaysInEfficientRange()).isEqualTo(3L);
+        // Tenant config defaults to 0 (via COALESCE) -> efficient band is [0,0]. The seeded readings
+        // (100/200/50) never fall in [0,0], and days with NO reading no longer count (phantom-day
+        // over-count fix: the efficient CASE now requires an actual reading), so the count is 0.
+        // (Pre-fix this returned 3 -- the three no-reading scheme-days that COALESCE'd to 0.)
+        assertThat(rows.getFirst().supplyDaysInEfficientRange()).isEqualTo(0L);
     }
 
     @Test
-    void getSchemeRegularityMetricsByLgd_countsOnlyPositiveConfirmedReadingDays() {
+    void supplyDaysInEfficientRange_countsRealReadingDaysOnly_notPhantomNoReadingDays() {
+        // Regression for the efficient-range over-count: the query CROSS JOINs every scheme x every
+        // day and LEFT JOINs water, so a day with NO reading used to COALESCE to 0 and -- when the
+        // band includes 0 (fhtc=0 or required_lpcd=0) -- was wrongly counted as "efficient".
+        // Default config here gives band [0,0]; add ONE real zero-water reading (scheme 1, D3) and
+        // assert ONLY it counts (1), not the no-reading phantom days. Pre-fix this returned 3.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 1, 1, 11, 0, D3, SubmissionStatus.NOT_SUBMITTED.getCode(), "draught", "app_issue");
+
+        List<SchemeRegularityRepository.TenantSupplyDaysInEfficientRange> rows =
+                repository.getTenantWiseSupplyDaysInEfficientRange(D1, D3);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().supplyDaysInEfficientRange()).isEqualTo(1L);
+    }
+
+    @Test
+    void getSchemeRegularityMetricsByLgd_countsOnlyWaterSuppliedDays() {
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
                 repository.getSchemeRegularityMetrics(100, D1, D3);
 
+        // Regularity supply days now come from fact_water_quantity (SUBMITTED/legacy-NULL with
+        // water_quantity > 0), not meter readings. Over D1..D3 scheme 1 supplied only on D2 (SUBMITTED 200);
+        // D1 is NOT_SUBMITTED. Scheme 2 supplied 0 days. Total = 1 (was 2 under the reading-based definition).
         assertThat(metrics.schemeCount()).isEqualTo(2);
-        assertThat(metrics.totalSupplyDays()).isEqualTo(2);
+        assertThat(metrics.totalSupplyDays()).isEqualTo(1);
     }
 
     @Test
@@ -158,7 +187,8 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getReadingSubmissionRateMetricsByDepartment(200, D1, D3);
 
         assertThat(regularity.schemeCount()).isEqualTo(2);
-        assertThat(regularity.totalSupplyDays()).isEqualTo(2);
+        // Water-based supply days: scheme 1 supplied only on D2 (SUBMITTED); scheme 2 supplied 0 => 1 total.
+        assertThat(regularity.totalSupplyDays()).isEqualTo(1);
         assertThat(submission.schemeCount()).isEqualTo(2);
         assertThat(submission.totalSupplyDays()).isEqualTo(4);
     }
@@ -193,19 +223,303 @@ class SchemeRegularityRepositoryIntegrationTest {
         List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> byDept =
                 repository.getChildSchemeRegularityMetricsByDepartment(200, D1, D3);
 
+        // Water-based supply days: scheme 1 (child 101/dept 201) supplied only on D2 => 1 day;
+        // averageRegularity = 1 / (1 scheme * 3 days) = 0.3333. Scheme 2 (child 102/dept 202) supplied 0.
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
-        assertThat(byLgd.get(0).totalSupplyDays()).isEqualTo(2);
-        assertThat(byLgd.get(0).averageRegularity()).isEqualByComparingTo("0.6667");
+        assertThat(byLgd.get(0).totalSupplyDays()).isEqualTo(1);
+        assertThat(byLgd.get(0).averageRegularity()).isEqualByComparingTo("0.3333");
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).totalSupplyDays()).isEqualTo(0);
         assertThat(byLgd.get(1).averageRegularity()).isEqualByComparingTo("0.0000");
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
-        assertThat(byDept.get(0).totalSupplyDays()).isEqualTo(2);
+        assertThat(byDept.get(0).totalSupplyDays()).isEqualTo(1);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
         assertThat(byDept.get(1).totalSupplyDays()).isEqualTo(0);
+    }
+
+    @Test
+    void duplicateSchemeMappingRows_doNotInflateRegionRollups() {
+        // A scheme legitimately has multiple dim_scheme_table rows (one per parent LGD/dept mapping;
+        // see migration V24 uq_dim_scheme_tenant_scheme_parent_lgd_dept). Insert a SECOND mapping row
+        // for Scheme A (id 1) in the SAME LGD region (level_2_lgd_id = 101), differing only by
+        // parent_department_location_id so it satisfies the unique constraint. Region rollups must
+        // count the scheme once and must not multiply its supply/submission days.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 1, 1, "Scheme A (duplicate mapping)", 1001, 2001, 0.0, 0.0,
+                100, 100, 101, null, null, null, null,
+                202, 200, 201, null, null, null, null,
+                1, 10, 10, 10);
+
+        // Parent metric already used DISTINCT — stays correct (control).
+        SchemeRegularityRepository.SchemeRegularityMetrics submission =
+                repository.getReadingSubmissionRateMetricsByLgd(100, D1, D3);
+        assertThat(submission.schemeCount()).isEqualTo(2);
+        assertThat(submission.totalSupplyDays()).isEqualTo(4);
+
+        // Child submission-rate rollup must NOT double-count Scheme A's mapping rows.
+        List<SchemeRegularityRepository.ChildRegionReadingSubmissionMetrics> childSubmission =
+                repository.getChildReadingSubmissionRateMetricsByLgd(100, D1, D3);
+        assertThat(childSubmission).hasSize(2);
+        assertThat(childSubmission.get(0).lgdId()).isEqualTo(101);
+        assertThat(childSubmission.get(0).schemeCount()).isEqualTo(1);
+        assertThat(childSubmission.get(0).totalSubmissionDays()).isEqualTo(3);
+        assertThat(childSubmission.get(0).readingSubmissionRate()).isEqualByComparingTo("1.0000");
+
+        // Child regularity rollup must NOT double-count either.
+        List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> childRegularity =
+                repository.getChildSchemeRegularityMetricsByLgd(100, D1, D3);
+        assertThat(childRegularity.get(0).lgdId()).isEqualTo(101);
+        assertThat(childRegularity.get(0).schemeCount()).isEqualTo(1);
+        // Water-based: scheme 1 supplied only on D2 => 1 supply day; 1 / (1 * 3) = 0.3333.
+        assertThat(childRegularity.get(0).totalSupplyDays()).isEqualTo(1);
+        assertThat(childRegularity.get(0).averageRegularity()).isEqualByComparingTo("0.3333");
+
+        // Scheme-count helper stays distinct.
+        assertThat(repository.getSchemeCountByLgdInScope(1, 100)).isEqualTo(2);
+    }
+
+    @Test
+    void crossTenantSchemeIdCollision_isIsolatedByTenantScopedOverloads() {
+        // scheme_id is unique only WITHIN a tenant. The region scope is tenant-scoped, but the fact
+        // join must also constrain tenant_id or another tenant's rows for the same scheme_id leak in.
+        // Seed tenant 2 with the SAME scheme_id (1) and three compliant readings for it.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_tenant_table
+                (tenant_id, state_code, title, country_code, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                """, 2, "up", "Uttar Pradesh", "IN", 1);
+        for (LocalDate d : List.of(D1, D2, D3)) {
+            jdbcTemplate.update("""
+                    INSERT INTO analytics_schema.fact_meter_reading_table
+                    (tenant_id, scheme_id, user_id, extracted_reading, confirmed_reading, confidence, image_url, reading_at, channel,
+                     reading_date, created_at, submission_status, reading_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, NOW(), ?, ?)
+                    """, 2, 1, 11, 7, 7, 90, "x", 1, d, 1, 0);
+        }
+        // Tenant 2 water row reusing scheme_id 2 (in tenant 1's scope) with a sentinel outage reason.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 2, 2, 11, 100, D2, SubmissionStatus.NOT_SUBMITTED.getCode(), "sentinel_tenant2", null);
+
+        // Tenant-scoped overload must isolate tenant 1 (5 compliant in the single-tenant seed), not 8.
+        SchemeRegularityRepository.SubmissionStatusCount status =
+                repository.getSubmissionStatusCountByLgd(1, 100, D1, D3);
+        assertThat(status.compliantSubmissionCount()).isEqualTo(5);
+        assertThat(status.anomalousSubmissionCount()).isEqualTo(0);
+
+        // Outage-reason rollup must not leak tenant 2's rows (the sentinel reason must be absent).
+        List<SchemeRegularityRepository.OutageReasonSchemeCount> outage =
+                repository.getOutageReasonSchemeCountByLgd(1, 100, D1, D3);
+        assertThat(outage).noneMatch(r -> "sentinel_tenant2".equals(r.outageReason()));
+    }
+
+    @Test
+    void overallOutageReasonCount_countsSchemesDistinctlyAcrossTenants() {
+        // The national "overall outage" KPI counts distinct schemes across ALL tenants. scheme_id is
+        // unique only within a tenant, so two different schemes in different tenants that share a
+        // scheme_id and the same outage reason must count as TWO, not collapse to one.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_tenant_table
+                (tenant_id, state_code, title, country_code, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                """, 2, "up", "Uttar Pradesh", "IN", 1);
+        // Tenant 2 reuses scheme_id 1 (same id as tenant 1's Scheme A) with the same outage reason on D1.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 2, 1, 11, 100, D1, SubmissionStatus.NOT_SUBMITTED.getCode(), "draught", "app_issue");
+
+        List<SchemeRegularityRepository.OutageReasonSchemeCount> overall =
+                repository.getOverallOutageReasonSchemeCount(D1, D8);
+        int draught = overall.stream()
+                .filter(r -> "draught".equals(r.outageReason()))
+                .mapToInt(SchemeRegularityRepository.OutageReasonSchemeCount::schemeCount)
+                .findFirst().orElse(0);
+        // tenant 1 Scheme A (D1) + tenant 2 scheme 1 (D1) = two distinct (tenant, scheme) pairs.
+        assertThat(draught).isEqualTo(2);
+    }
+
+    @Test
+    void streamSchemeSubmissionMetricsByDepartment_mapsRowsWithoutMissingColumns() {
+        // Regression: the by-department stream SELECT must expose the four supplied_lgd_location_* array
+        // columns that mapSchemeSubmissionMetrics reads, or row mapping throws SQLException at runtime.
+        List<SchemeRegularityRepository.SchemeSubmissionMetrics> rows = new java.util.ArrayList<>();
+        repository.streamSchemeSubmissionMetricsByDepartment(1, 200, D1, D3, "schemeName", "asc", rows::add);
+
+        assertThat(rows).extracting(SchemeRegularityRepository.SchemeSubmissionMetrics::schemeId)
+                .containsExactlyInAnyOrder(1, 2);
+        // arrays are selected (as empty literals) and mapped to non-null empty lists, not a SQLException
+        assertThat(rows.get(0).suppliedLgdLocationIds()).isNotNull();
+    }
+
+    @Test
+    void duplicateSchemeMappingRows_doNotInflateEfficientSupplyDaysOrWaterTotals() {
+        // Region-wise water/efficient-range scope projects measure columns (fhtc/household/planned).
+        // A multi-mapped scheme (V24) whose mapping rows carry DIFFERING measures must still contribute
+        // ONCE per child region; plain SELECT DISTINCT over the measure projection keeps both rows and
+        // fans out the CROSS JOIN over dates and the SUM of measures. DISTINCT ON (scheme, region) fixes it.
+
+        // Non-zero water norm so the efficient window is meaningful:
+        // target for Scheme A (fhtc=10) = required_lpcd(2) * fhtc(10) * pph(5) = 100; range [100,100].
+        jdbcTemplate.update("""
+                UPDATE analytics_schema.dim_tenant_table
+                SET required_lpcd = 2, person_count_per_household = 5,
+                    over_supply_range_percentage = 0, under_supply_range_percentage = 0
+                WHERE tenant_id = 1
+                """);
+
+        // Baseline (single mapping row): Scheme A daily eWater = D1:100, D2:200, D8:300 -> only D1 hits [100,100]
+        // for the efficient-range band (which uses raw daily volume, dedup-only). The headline waterQuantity
+        // total is now the canonical supplied volume ({{SWS}}): only the SUBMITTED D2 row (200) counts.
+        List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> baseline =
+                repository.getRegionWiseWaterQuantityByLgd(1, 100, D1, D10);
+        assertThat(baseline.get(0).lgdId()).isEqualTo(101);
+        assertThat(baseline.get(0).supplyDaysInEfficientRange()).isEqualTo(1L);
+        assertThat(baseline.get(0).householdCount()).isEqualTo(10L);
+        assertThat(baseline.get(0).waterQuantity()).isEqualTo(200L);
+
+        // Second mapping row for Scheme A in the SAME child region (level_2=101), differing planned_fhtc
+        // and a different parent_department to satisfy the V24 unique key. fhtc stays 10 (threshold unchanged).
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 1, 1, "Scheme A (dup mapping)", 1001, 2001, 0.0, 0.0,
+                100, 100, 101, null, null, null, null,
+                202, 200, 201, null, null, null, null,
+                1, 10, 99, 10);
+
+        List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> withDup =
+                repository.getRegionWiseWaterQuantityByLgd(1, 100, D1, D10);
+        // Must NOT inflate: efficient days stay 1, household stays 10, water stays 200 (not 400).
+        assertThat(withDup.get(0).lgdId()).isEqualTo(101);
+        assertThat(withDup.get(0).supplyDaysInEfficientRange()).isEqualTo(1L);
+        assertThat(withDup.get(0).householdCount()).isEqualTo(10L);
+        assertThat(withDup.get(0).waterQuantity()).isEqualTo(200L);
+    }
+
+    @Test
+    void regionOwnWaterSupply_countsMultiSubRegionSchemeOnce_matchesParentChildRow_notSumOfChildren() {
+        // Reproduces the state-vs-district dashboard mismatch: a region's headline figure must NOT be
+        // derived by summing its child rows. A scheme that serves TWO blocks within one district has two
+        // dim_scheme_table mapping rows (V24). The per-block child rows each carry that scheme's full
+        // water + FHTC (water is attached per scheme), so summing the blocks double-counts it — inflating
+        // the district's total water (-> MLD up) and FHTC (-> LPCD down). getRegionOwnWaterSupplyByLgd
+        // dedups by scheme_id and is the correct value, equal to the row the district shows under its parent.
+
+        // Two level-3 blocks under district 101.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_lgd_location_table
+                (lgd_id, tenant_id, lgd_code, lgd_c_name, title, lgd_level,
+                 level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 geom, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW(), NOW())
+                """, 1011, 1, "L1011", "BlockA1", "Block A1", 3, 100, 101, 1011, null, null, null);
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_lgd_location_table
+                (lgd_id, tenant_id, lgd_code, lgd_c_name, title, lgd_level,
+                 level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 geom, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW(), NOW())
+                """, 1012, 1, "L1012", "BlockA2", "Block A2", 3, 100, 101, 1012, null, null, null);
+
+        // Place Scheme A's original mapping in block 1011, then add a second mapping in block 1012
+        // (same district 101, different block; differing parent_department satisfies the V24 unique key).
+        jdbcTemplate.update(
+                "UPDATE analytics_schema.dim_scheme_table SET level_3_lgd_id = 1011 WHERE scheme_id = 1 AND tenant_id = 1");
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 1, 1, "Scheme A (block 1012 mapping)", 1001, 2001, 0.0, 0.0,
+                100, 100, 101, 1012, null, null, null,
+                202, 200, 201, null, null, null, null,
+                1, 10, 10, 10);
+
+        // Scheme A water over D1..D3 from fact_water_quantity_table (SUBMITTED only): D2=200 => 200.
+        // FHTC = 10, households = 10.
+        // Buggy path — summing the per-block child rows double-counts Scheme A (once per block).
+        List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> blocks =
+                repository.getAverageWaterSupplyPerCurrentRegionByLgd(1, 101, D1, D3);
+        assertThat(blocks).hasSize(2);
+        long blockSumWater = blocks.stream()
+                .mapToLong(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalWaterSuppliedLiters).sum();
+        long blockSumFhtc = blocks.stream()
+                .mapToLong(SchemeRegularityRepository.ChildRegionWaterSupplyMetrics::totalAchievedFhtcCount).sum();
+        assertThat(blockSumWater).isEqualTo(400L);
+        assertThat(blockSumFhtc).isEqualTo(20L);
+
+        // Fix — the district's own deduped total counts Scheme A once.
+        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics own =
+                repository.getRegionOwnWaterSupplyByLgd(1, 101, D1, D3);
+        assertThat(own.lgdId()).isEqualTo(101);
+        assertThat(own.schemeCount()).isEqualTo(1);
+        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(200L);
+        assertThat(own.totalAchievedFhtcCount()).isEqualTo(10L);
+        assertThat(own.totalHouseholdCount()).isEqualTo(10L);
+
+        // And it equals the trustworthy value the district shows as a child of its parent (state 100).
+        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics districtAsChild =
+                repository.getAverageWaterSupplyPerCurrentRegionByLgd(1, 100, D1, D3).stream()
+                        .filter(m -> m.lgdId() == 101)
+                        .findFirst()
+                        .orElseThrow();
+        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(districtAsChild.totalWaterSuppliedLiters());
+        assertThat(own.totalAchievedFhtcCount()).isEqualTo(districtAsChild.totalAchievedFhtcCount());
+        assertThat(own.schemeCount()).isEqualTo(districtAsChild.schemeCount());
+    }
+
+    @Test
+    void getRegionOwnWaterSupplyByDepartment_dedupsSchemeAcrossSubDepartments() {
+        // Department analogue: a scheme mapped to two child departments within one parent department must
+        // be counted once in the parent's own total (not once per child department).
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_department_location_table
+                (department_id, tenant_id, department_c_name, title, department_level,
+                 level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 2011, 1, "Child Dept A1", "Child Dept A1", 3, 200, 201, 2011, null, null, null);
+        // Move Scheme A's original mapping to level_3 dept 2011, then add a second mapping in a different
+        // level_3 dept value within the same parent dept 201 (different parent_lgd satisfies the V24 key).
+        jdbcTemplate.update(
+                "UPDATE analytics_schema.dim_scheme_table SET level_3_dept_id = 2011 WHERE scheme_id = 1 AND tenant_id = 1");
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 1, 1, "Scheme A (dept 2012 mapping)", 1001, 2001, 0.0, 0.0,
+                101, 100, 101, null, null, null, null,
+                201, 200, 201, 2012, null, null, null,
+                1, 10, 10, 10);
+
+        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics own =
+                repository.getRegionOwnWaterSupplyByDepartment(1, 201, D1, D3);
+        assertThat(own.departmentId()).isEqualTo(201);
+        assertThat(own.schemeCount()).isEqualTo(1);
+        assertThat(own.totalWaterSuppliedLiters()).isEqualTo(200L);
+        assertThat(own.totalAchievedFhtcCount()).isEqualTo(10L);
     }
 
     @Test
@@ -230,7 +544,7 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getTopSchemeSubmissionMetricsByLgd(100, D1, D3, 5);
 
         assertThat(rows).hasSize(2);
-        assertThat(rows.get(0).totalWaterSupplied()).isEqualTo(15L);
+        assertThat(rows.get(0).totalWaterSupplied()).isEqualTo(200L);
         assertThat(rows.get(1).totalWaterSupplied()).isEqualTo(0L);
         assertThat(rows.get(0).immediateParentLgdId()).isEqualTo(100);
         assertThat(rows.get(0).immediateParentLgdCName()).isEqualTo("Parent");
@@ -243,7 +557,7 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getTopSchemeSubmissionMetricsByDepartment(200, D1, D3, 5);
 
         assertThat(rows).hasSize(2);
-        assertThat(rows.get(0).totalWaterSupplied()).isEqualTo(15L);
+        assertThat(rows.get(0).totalWaterSupplied()).isEqualTo(200L);
         assertThat(rows.get(1).totalWaterSupplied()).isEqualTo(0L);
         assertThat(rows.get(0).immediateParentDepartmentId()).isEqualTo(200);
         assertThat(rows.get(0).immediateParentDepartmentCName()).isEqualTo("Parent Dept");
@@ -292,12 +606,16 @@ class SchemeRegularityRepositoryIntegrationTest {
         // Jan 4-10 fall in the week starting Sun 2026-01-04.
         assertThat(weekOne.periodStartDate()).isEqualTo(LocalDate.of(2025, 12, 28));
         assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 3));
-        assertThat(weekOne.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("116.6667"));
+        // Unified water figure: only SUBMITTED/NULL rows with positive quantity count.
+        // Week one: scheme 1 D2 (200, SUBMITTED) qualifies; D1 rows (100, 50) are
+        // NOT_SUBMITTED and excluded => avg 200.
+        assertThat(weekOne.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("200.0000"));
         assertThat(weekOne.householdCount()).isEqualTo(30);
 
         assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 4));
         assertThat(weekTwo.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 10));
-        assertThat(weekTwo.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("185.0000"));
+        // Week two (D8 rows 300, 70) has only NOT_SUBMITTED rows => no qualifying water => 0.
+        assertThat(weekTwo.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("0.0000"));
         assertThat(weekTwo.householdCount()).isEqualTo(30);
     }
 
@@ -308,7 +626,8 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
-        assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("144.0000");
+        // Unified water figure: only scheme 1 D2 (200, SUBMITTED) qualifies across the month => avg 200.
+        assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("200.0000");
         assertThat(rows.get(0).householdCount()).isEqualTo(30);
     }
 
@@ -324,8 +643,10 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(weekOne.periodStartDate()).isEqualTo(LocalDate.of(2025, 12, 28));
         assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 3));
         assertThat(weekOne.schemeCount()).isEqualTo(2);
-        assertThat(weekOne.totalSupplyDays()).isEqualTo(2);
-        assertThat(weekOne.totalWaterQuantity()).isEqualTo(15L);
+        // Water-based supply days: scheme 1 supplied only on D2 (SUBMITTED) in week one => 1.
+        assertThat(weekOne.totalSupplyDays()).isEqualTo(1);
+        // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL only): only D2 (200) qualifies.
+        assertThat(weekOne.totalWaterQuantity()).isEqualTo(200L);
 
         SchemeRegularityRepository.PeriodicSchemeRegularityMetrics weekTwo = rows.get(1);
         assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 4));
@@ -344,8 +665,24 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(rows.get(0).periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
         assertThat(rows.get(0).periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 31));
         assertThat(rows.get(0).schemeCount()).isEqualTo(2);
-        assertThat(rows.get(0).totalSupplyDays()).isEqualTo(2);
-        assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(15L);
+        // Water-based supply days: scheme 1 supplied only on D2 (SUBMITTED) => 1.
+        assertThat(rows.get(0).totalSupplyDays()).isEqualTo(1);
+        // total_water_quantity now sums fact_water_quantity (SUBMITTED/NULL only): only D2 (200) qualifies.
+        assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(200L);
+    }
+
+    @Test
+    void getPeriodicSchemeRegularityForNation_monthScale_countsWaterSuppliedDays() {
+        List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> rows =
+                repository.getPeriodicSchemeRegularityForNation(D1, D3, PeriodScale.MONTH);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
+        assertThat(rows.get(0).schemeCount()).isEqualTo(2);
+        // Water-based supply days across all tenants: only scheme 1 / D2 (SUBMITTED) qualifies over D1..D3 => 1.
+        assertThat(rows.get(0).totalSupplyDays()).isEqualTo(1);
+        // total_water_quantity sums SUBMITTED/NULL rows only: D2 (200).
+        assertThat(rows.get(0).totalWaterQuantity()).isEqualTo(200L);
     }
 
     @Test
@@ -724,9 +1061,11 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(current).hasSize(2);
         assertThat(current.get(0).schemeId()).isEqualTo(1);
-        assertThat(current.get(0).totalWaterSuppliedLiters()).isEqualTo(15L);
-        assertThat(current.get(0).supplyDays()).isEqualTo(2);
-        assertThat(current.get(0).averageLitersPerHousehold()).isEqualByComparingTo("0.5000");
+        assertThat(current.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
+        // supply_days now measured off fact_water_quantity: scheme 1 supplied only on D2 (SUBMITTED) => 1.
+        assertThat(current.get(0).supplyDays()).isEqualTo(1);
+        // 200 liters (D2 SUBMITTED) / (households 10 * 3 days) = 6.6667
+        assertThat(current.get(0).averageLitersPerHousehold()).isEqualByComparingTo("6.6667");
         assertThat(current.get(1).schemeId()).isEqualTo(2);
         assertThat(current.get(1).totalWaterSuppliedLiters()).isEqualTo(0L);
         assertThat(current.get(1).averageLitersPerHousehold()).isEqualByComparingTo("0.0000");
@@ -742,16 +1081,53 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
-        assertThat(byLgd.get(0).totalWaterSuppliedLiters()).isEqualTo(15L);
-        assertThat(byLgd.get(0).avgWaterSupplyPerScheme()).isEqualByComparingTo("15.0000");
+        assertThat(byLgd.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
+        assertThat(byLgd.get(0).avgWaterSupplyPerScheme()).isEqualByComparingTo("200.0000");
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).totalWaterSuppliedLiters()).isEqualTo(0L);
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
-        assertThat(byDept.get(0).totalWaterSuppliedLiters()).isEqualTo(15L);
+        assertThat(byDept.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
         assertThat(byDept.get(1).totalWaterSuppliedLiters()).isEqualTo(0L);
+    }
+
+    @Test
+    void suppliedWater_countsNullSubmissionStatusRows() {
+        // Legacy/direct-event water can persist submission_status = NULL; with a positive volume it must
+        // count as supplied (exercises the "submission_status = SUBMITTED OR submission_status IS NULL" branch).
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?)
+                """, 1, 1, 11, 40, D3, null, null, null);
+
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics scheme1 =
+                repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3).stream()
+                        .filter(r -> r.schemeId().equals(1)).findFirst().orElseThrow();
+
+        // D2 SUBMITTED (200) + D3 NULL-status (40) = 240; D1 NOT_SUBMITTED (100) stays excluded.
+        assertThat(scheme1.totalWaterSuppliedLiters()).isEqualTo(240L);
+    }
+
+    @Test
+    void suppliedWater_deduplicatesToLatestRowPerSchemeAndDate() {
+        // fact_water_quantity_table has no uniqueness on (tenant, scheme, date). Insert a stray *newer*
+        // duplicate for (tenant1, scheme1, D2): summing both rows would give 700, so the query must instead
+        // take only the latest row per (tenant, scheme, date) — mirroring ingestion's updated_at DESC, id DESC.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.fact_water_quantity_table
+                (tenant_id, scheme_id, user_id, water_quantity, date, created_at, updated_at, submission_status, outage_reason, non_submission_reason)
+                VALUES (?, ?, ?, ?, ?, NOW(), NOW() + INTERVAL '1 hour', ?, ?, ?)
+                """, 1, 1, 11, 500, D2, SubmissionStatus.SUBMITTED.getCode(), null, null);
+
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics scheme1 =
+                repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3).stream()
+                        .filter(r -> r.schemeId().equals(1)).findFirst().orElseThrow();
+
+        // Latest D2 row wins (500) — not summed with the seeded 200 (=700) and not the stale 200.
+        assertThat(scheme1.totalWaterSuppliedLiters()).isEqualTo(500L);
     }
 
     @Test
@@ -761,19 +1137,23 @@ class SchemeRegularityRepositoryIntegrationTest {
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> byDept =
                 repository.getRegionWiseWaterQuantityByDepartment(200, D1, D10);
 
+        // Region-wise water is now unified on the canonical supplied-volume definition ({{SWS}}): only
+        // SUBMITTED/legacy-NULL rows with positive delta count (H1). Scheme 1 (child 101/dept 201) supplied
+        // only on D2 (200; D1/D8 are NOT_SUBMITTED). Scheme 2 (child 102/dept 202) has only NOT_SUBMITTED
+        // rows -> 0. This now reconciles with the headline getRegionOwnWaterSupply / average-per-region.
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
         assertThat(byLgd.get(0).householdCount()).isEqualTo(10);
-        assertThat(byLgd.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(byLgd.get(0).waterQuantity()).isEqualTo(200L);
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).householdCount()).isEqualTo(20);
-        assertThat(byLgd.get(1).waterQuantity()).isEqualTo(120L);
+        assertThat(byLgd.get(1).waterQuantity()).isEqualTo(0L);
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
-        assertThat(byDept.get(0).waterQuantity()).isEqualTo(600L);
+        assertThat(byDept.get(0).waterQuantity()).isEqualTo(200L);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
-        assertThat(byDept.get(1).waterQuantity()).isEqualTo(120L);
+        assertThat(byDept.get(1).waterQuantity()).isEqualTo(0L);
     }
 
     private void truncateAll() {

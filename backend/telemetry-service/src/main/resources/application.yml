@@ -49,10 +49,18 @@ glific:
   resume:
     enabled: ${GLIFIC_RESUME_ENABLED:true}
     base-url: ${GLIFIC_RESUME_BASE_URL:https://api.arghyam.glific.com}
-    flow-id: ${GLIFIC_RESUME_FLOW_ID:37172}
+    flow-id: ${GLIFIC_RESUME_FLOW_ID:40368}
     user:
       phone: ${GLIFIC_RESUME_USER_PHONE:${GLIFIC_SYNC_USER_PHONE:}}
       password: ${GLIFIC_RESUME_USER_PASSWORD:${GLIFIC_SYNC_USER_PASSWORD:}}
+
+# LENIENT-INGEST: when true, Assam meter-reading submissions whose scheme id or operator phone is
+# missing from the tenant master data are still recorded (against a placeholder scheme / sentinel
+# operator) and tagged on flow_reading_table.ingestion_source, instead of being rejected. Set to
+# false to restore the original reject behaviour once the underlying data gaps are fixed.
+telemetry:
+  lenient-ingestion:
+    enabled: ${TELEMETRY_LENIENT_INGESTION_ENABLED:true}
 
 flowvision:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
@@ -60,9 +68,30 @@ flowvision:
   http:
     connect-timeout-ms: ${FLOWVISION_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${FLOWVISION_READ_TIMEOUT_MS:10000}
+
+resilience4j:
   retry:
-    max-attempts: ${FLOWVISION_RETRY_MAX_ATTEMPTS:3}
-    initial-backoff-ms: ${FLOWVISION_RETRY_INITIAL_BACKOFF_MS:300}
+    instances:
+      flowvisionReadings:
+        max-attempts: ${FLOWVISION_READINGS_RETRY_MAX_ATTEMPTS:3}
+        wait-duration: ${FLOWVISION_READINGS_RETRY_WAIT_DURATION:300ms}
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: ${FLOWVISION_READINGS_RETRY_BACKOFF_MULTIPLIER:2}
+        enable-randomized-wait: true
+        randomized-wait-factor: ${FLOWVISION_READINGS_RETRY_RANDOMIZED_WAIT_FACTOR:0.5}
+  circuitbreaker:
+    instances:
+      flowvisionReadings:
+        sliding-window-size: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_WINDOW_SIZE:100}
+        minimum-number-of-calls: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_MIN_CALLS:20}
+        failure-rate-threshold: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_FAILURE_RATE:50}
+        wait-duration-in-open-state: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_OPEN_WAIT:30s}
+        permitted-number-of-calls-in-half-open-state: ${FLOWVISION_READINGS_CIRCUIT_BREAKER_HALF_OPEN_CALLS:10}
+  bulkhead:
+    instances:
+      flowvisionReadings:
+        max-concurrent-calls: ${FLOWVISION_READINGS_BULKHEAD_MAX_CONCURRENT_CALLS:50}
+        max-wait-duration: ${FLOWVISION_READINGS_BULKHEAD_MAX_WAIT_DURATION:0ms}
 
 media-download:
   retry:

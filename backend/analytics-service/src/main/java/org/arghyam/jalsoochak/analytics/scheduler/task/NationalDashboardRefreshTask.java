@@ -36,8 +36,9 @@ public class NationalDashboardRefreshTask implements AnalyticsScheduledTask {
     public void runTask() {
         log.info("Scheduler START '{}'", taskName());
         int sanitizedLookbackDays = Math.max(0, lookbackDays);
-        // Stable warm window: anchor to yesterday (IST). Today updates hourly via the
-        // hourly aggregation task + 1h cache TTL (recompute-on-expiry from aggregates).
+        // Anchor to yesterday (IST): at the midnight run, that is the day that just completed.
+        // Today updates hourly via the hourly aggregation task + 1h cache TTL
+        // (recompute-on-expiry from aggregates).
         LocalDate endDate = LocalDate.now(IST_ZONE).minusDays(1);
         LocalDate startDate = (sanitizedLookbackDays <= 0)
                 ? endDate

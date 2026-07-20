@@ -50,9 +50,11 @@ public class TenantSchedulerManager {
             .filter(t -> {
                 String s = t.getStatus();
                 if (s == null) return false;
+                // REGISTERED tenants are pre-seeded with no schema — never schedule jobs for them.
                 return !TenantStatusEnum.INACTIVE.name().equals(s)
                     && !TenantStatusEnum.SUSPENDED.name().equals(s)
-                    && !TenantStatusEnum.ARCHIVED.name().equals(s);
+                    && !TenantStatusEnum.ARCHIVED.name().equals(s)
+                    && !TenantStatusEnum.REGISTERED.name().equals(s);
             })
             .forEach(t -> {
                 Integer tenantId = t.getId();

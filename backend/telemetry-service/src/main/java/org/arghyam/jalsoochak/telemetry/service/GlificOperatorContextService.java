@@ -7,6 +7,7 @@ import org.arghyam.jalsoochak.telemetry.repository.UserLanguagePreferenceReposit
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class GlificOperatorContextService {
@@ -34,6 +35,24 @@ public class GlificOperatorContextService {
         return resolveOperatorWithSchema(contactId, preferredTenantId);
     }
 
+    /**
+     * LENIENT-INGEST: non-throwing variant of {@link #resolveOperatorWithSchema(String, Integer)}.
+     * Returns empty (instead of throwing) when no operator is registered for the contact, so the
+     * caller can fall back to recording the submission against a sentinel operator.
+     */
+    public Optional<TelemetryOperatorWithSchema> tryResolveOperatorWithSchema(String contactId, Integer preferredTenantId) {
+        if (contactId == null || contactId.isBlank()) {
+            // A missing contactId is a validation error, not a lookup miss — let it propagate so the
+            // submission is rejected rather than silently recorded against the sentinel operator.
+            throw new IllegalStateException("contactId is required");
+        }
+        try {
+            return Optional.of(resolveOperatorWithSchema(contactId, preferredTenantId));
+        } catch (IllegalStateException notFound) {
+            return Optional.empty();
+        }
+    }
+
     public TelemetryOperatorWithSchema resolveOperatorWithSchema(String contactId, Integer preferredTenantId) {
         if (contactId == null || contactId.isBlank()) {
             throw new IllegalStateException("contactId is required");
@@ -44,7 +63,7 @@ public class GlificOperatorContextService {
         if (looksLikePhoneHash(trimmed)) {
             return telemetryTenantRepository
                     .findOperatorByPhoneHashAcrossTenants(trimmed, preferredTenantId)
-                    .orElseThrow(() -> new IllegalStateException("No operator found for contactId " + contactId));
+                    .orElseThrow(() -> new IllegalStateException("No operator found for the provided contactId"));
         }
 
         if (looksLikeEncryptedValue(trimmed)) {

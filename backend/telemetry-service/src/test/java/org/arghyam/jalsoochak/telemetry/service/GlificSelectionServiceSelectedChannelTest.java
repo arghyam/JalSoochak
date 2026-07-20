@@ -67,7 +67,6 @@ class GlificSelectionServiceSelectedChannelTest {
         when(operatorContextService.resolveOperatorWithSchema(eq(contactId))).thenReturn(operatorWithSchema);
         when(operatorContextService.resolveOperatorLanguage(eq(operatorWithSchema), eq(tenantId))).thenReturn("English");
         when(localizationService.normalizeLanguageKey(eq("English"))).thenReturn("english");
-        when(templatesService.resolveScreenOptions(eq(tenantId), eq("CHANNEL_SELECTION"))).thenReturn(List.of());
         when(tenantConfigRepository.findConfigValue(eq(tenantId), eq("TENANT_SUPPORTED_CHANNELS")))
                 .thenReturn(Optional.of("{\"channels\":[\"Bfm\",\"Iot\"]}"));
         when(telemetryTenantRepository.findFirstSchemeForUser(eq("tenant_test"), eq(1L))).thenReturn(Optional.of(99L));

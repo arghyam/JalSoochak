@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "anomaly_table", schema = "analytics_schema")
@@ -79,17 +79,17 @@ public class Anomaly {
     private Integer resolvedBy;
 
     @Column(name = "resolved_at")
-    private OffsetDateTime resolvedAt;
+    private LocalDateTime resolvedAt;
 
     @Column(name = "deleted_at")
-    private OffsetDateTime deletedAt;
+    private LocalDateTime deletedAt;
 
     @Column(name = "deleted_by")
     private Integer deletedBy;
 
     @Column(name = "created_at", nullable = false)
-    private OffsetDateTime createdAt;
+    private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
-    private OffsetDateTime updatedAt;
+    private LocalDateTime updatedAt;
 }

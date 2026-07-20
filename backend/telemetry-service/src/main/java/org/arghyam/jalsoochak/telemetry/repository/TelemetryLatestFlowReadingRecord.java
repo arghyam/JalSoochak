@@ -13,6 +13,7 @@ public record TelemetryLatestFlowReadingRecord(
         BigDecimal confirmedReading,
         String imageUrl,
         LocalDate readingDate,
-        LocalDateTime readingAt
+        LocalDateTime readingAt,
+        String channel
 ) {
 }

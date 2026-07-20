@@ -47,6 +47,7 @@ class TenantConfigRepositoryCacheTest {
         assertEquals(Optional.of("Welcome"), first);
         assertEquals(Optional.of("Welcome"), second);
         verify(jdbcTemplate, times(1)).query(contains("SELECT config_key, config_value"), any(RowMapper.class), eq(7));
+        verify(jdbcTemplate).query(contains("deleted_at IS NULL"), any(RowMapper.class), eq(7));
     }
 
     @Test
@@ -77,5 +78,21 @@ class TenantConfigRepositoryCacheTest {
         repository.findConfigValue(11, "closing_message");
 
         verify(jdbcTemplate, times(2)).query(contains("SELECT config_key, config_value"), any(RowMapper.class), eq(11));
+    }
+
+    @Test
+    void tenantSupportedChannelsBypassesTenantConfigCache() {
+        when(jdbcTemplate.query(contains("SELECT config_value"), any(RowMapper.class), eq(17),
+                eq("TENANT_SUPPORTED_CHANNELS")))
+                .thenReturn(List.of("{\"channels\":[\"BFM\"]}"))
+                .thenReturn(List.of("{\"channels\":[\"BFM\",\"ELM\"]}"));
+
+        Optional<String> first = repository.findConfigValue(17, "TENANT_SUPPORTED_CHANNELS");
+        Optional<String> second = repository.findConfigValue(17, "TENANT_SUPPORTED_CHANNELS");
+
+        assertEquals(Optional.of("{\"channels\":[\"BFM\"]}"), first);
+        assertEquals(Optional.of("{\"channels\":[\"BFM\",\"ELM\"]}"), second);
+        verify(jdbcTemplate, times(2)).query(contains("SELECT config_value"), any(RowMapper.class), eq(17),
+                eq("TENANT_SUPPORTED_CHANNELS"));
     }
 }

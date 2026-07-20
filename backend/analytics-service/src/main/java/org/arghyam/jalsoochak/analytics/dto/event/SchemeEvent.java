@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.dto.event;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -35,4 +36,7 @@ public class SchemeEvent {
     private Integer level6DeptId;
 
     private Integer status;
+
+    @JsonProperty("work_status")
+    private Integer workStatus;
 }

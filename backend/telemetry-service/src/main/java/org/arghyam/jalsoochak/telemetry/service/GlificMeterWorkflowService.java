@@ -21,12 +21,14 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryPendingMeterChangeRe
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSelectionRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -121,6 +123,7 @@ public class GlificMeterWorkflowService {
     private final TenantConfigRepository tenantConfigRepository;
     private final GlificMessageTemplatesService templatesService;
     private final TelemetryTenantRepository telemetryTenantRepository;
+    private final UserChannelPreferenceRepository userChannelPreferenceRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
     private final ObjectMapper objectMapper;
 
@@ -129,6 +132,7 @@ public class GlificMeterWorkflowService {
                                       TenantConfigRepository tenantConfigRepository,
                                       GlificMessageTemplatesService templatesService,
                                       TelemetryTenantRepository telemetryTenantRepository,
+                                      UserChannelPreferenceRepository userChannelPreferenceRepository,
                                       TelemetryEventPublisher telemetryEventPublisher,
                                       ObjectMapper objectMapper) {
         this.operatorContextService = operatorContextService;
@@ -136,6 +140,7 @@ public class GlificMeterWorkflowService {
         this.tenantConfigRepository = tenantConfigRepository;
         this.templatesService = templatesService;
         this.telemetryTenantRepository = telemetryTenantRepository;
+        this.userChannelPreferenceRepository = userChannelPreferenceRepository;
         this.telemetryEventPublisher = telemetryEventPublisher;
         this.objectMapper = objectMapper;
     }
@@ -223,7 +228,7 @@ public class GlificMeterWorkflowService {
                     operatorWithSchema.schemaName(),
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDateTime.now(),
+                    ReadingTime.now(),
                     selectedReason
             );
 
@@ -486,7 +491,7 @@ public class GlificMeterWorkflowService {
                     operatorWithSchema.schemaName(),
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDateTime.now(),
+                    ReadingTime.now(),
                     selectedReason
             );
 
@@ -494,7 +499,7 @@ public class GlificMeterWorkflowService {
                     tenantId,
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDate.now(),
+                    ReadingTime.today(),
                     selectedReason
             );
 
@@ -538,7 +543,6 @@ public class GlificMeterWorkflowService {
             String languageKey = localizationService.normalizeLanguageKey(
                     operatorContextService.resolveOperatorLanguage(operatorWithSchema, tenantId)
             );
-
             String rawIssueReason = request.getIssueReason().trim();
 
             List<GlificMessageTemplatesService.TemplateOption> templateReasons =
@@ -631,7 +635,7 @@ public class GlificMeterWorkflowService {
                         tenantId,
                         schemeId,
                         operatorWithSchema.operator().id(),
-                        LocalDate.now(),
+                        ReadingTime.today(),
                         anomalyType,
                         resolvedIssueReason
                 );
@@ -640,7 +644,7 @@ public class GlificMeterWorkflowService {
                         operatorWithSchema.schemaName(),
                         schemeId,
                         operatorWithSchema.operator().id(),
-                        LocalDateTime.now(),
+                        ReadingTime.now(),
                         correlationId,
                         resolvedIssueReason
                 );
@@ -827,7 +831,7 @@ public class GlificMeterWorkflowService {
                     operatorWithSchema.schemaName(),
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDateTime.now(),
+                    ReadingTime.now(),
                     resolvedIssueReason
             );
             int anomalyType = AnomalyConstants.TYPE_NO_WATER_SUPPLY;
@@ -847,7 +851,7 @@ public class GlificMeterWorkflowService {
                     tenantId,
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDate.now(),
+                    ReadingTime.today(),
                     anomalyType,
                     resolvedIssueReason
             );
@@ -938,7 +942,7 @@ public class GlificMeterWorkflowService {
                     tenantId,
                     schemeId,
                     operatorWithSchema.operator().id(),
-                    LocalDate.now(),
+                    ReadingTime.today(),
                     AnomalyConstants.TYPE_NO_SUBMISSION,
                     issueReason
             );
@@ -1005,7 +1009,7 @@ public class GlificMeterWorkflowService {
                     .findLatestPendingSchemeSelectionForDate(
                             operatorWithSchema.schemaName(),
                             operatorWithSchema.operator().id(),
-                            LocalDate.now()
+                            ReadingTime.today()
                     )
                     .map(TelemetrySchemeSelectionRecord::schemeId)
                     .or(() -> telemetryTenantRepository.findFirstSchemeForUser(
@@ -1032,7 +1036,7 @@ public class GlificMeterWorkflowService {
             // - If the meter is not replaced, compare against the most recent confirmed reading by default.
             // - If isManualReading=false, compare against the most recent confirmed reading strictly before today.
             // - If the meter is replaced, load latest snapshot for anomaly/audit context only.
-            LocalDate today = LocalDate.now();
+            LocalDate today = ReadingTime.today();
             boolean compareWithLatest = request.getIsManualReading() == null || Boolean.TRUE.equals(request.getIsManualReading());
             Optional<TelemetryConfirmedReadingSnapshot> previousSnapshotOpt = isMeterReplaced
                     ? telemetryTenantRepository.findLatestConfirmedReadingSnapshot(operatorWithSchema.schemaName(), schemeId, null)
@@ -1254,7 +1258,7 @@ public class GlificMeterWorkflowService {
                             operatorWithSchema.schemaName(),
                             schemeId,
                             operatorWithSchema.operator().id(),
-                            LocalDateTime.now(),
+                            ReadingTime.now(),
                             BigDecimal.ZERO,
                             effectiveConfirmedReading,
                             correlationId,
@@ -1304,7 +1308,7 @@ public class GlificMeterWorkflowService {
                             AnomalyConstants.TYPE_MANUAL_OVERRIDE,
                             10
                     ),
-                    LocalDate.now()
+                    ReadingTime.today()
             );
 
             if (consecutiveOverrideDays >= 5) {
@@ -1400,7 +1404,7 @@ public class GlificMeterWorkflowService {
                     operatorWithSchema.schemaName(),
                     schemeId,
                     operatorId,
-                    LocalDate.now()
+                    ReadingTime.today()
             );
             if (today.isPresent()) {
                 readingId = today.get().id();
@@ -1413,7 +1417,7 @@ public class GlificMeterWorkflowService {
                         operatorWithSchema.schemaName(),
                         schemeId,
                         operatorId,
-                        LocalDateTime.now(),
+                        ReadingTime.now(),
                         BigDecimal.ZERO,
                         BigDecimal.ZERO,
                         correlationId,
@@ -1481,7 +1485,7 @@ public class GlificMeterWorkflowService {
                     .findFirstSchemeForUser(operatorWithSchema.schemaName(), operatorId)
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
 
-            LocalDate today = LocalDate.now();
+            LocalDate today = ReadingTime.today();
 
             Optional<TelemetryCompletedFlowReading> targetDayRecordOpt = telemetryTenantRepository
                     .findLatestCompletedFlowReadingBeforeDate(operatorWithSchema.schemaName(), schemeId, operatorId, today);

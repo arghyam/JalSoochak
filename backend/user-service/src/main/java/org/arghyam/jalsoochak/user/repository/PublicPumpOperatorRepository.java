@@ -137,6 +137,8 @@ public class PublicPumpOperatorRepository {
             schemeJoin = String.format("""
                     LEFT JOIN LATERAL (
                         SELECT sm.id AS scheme_id,
+                               sm.state_scheme_id,
+                               sm.centre_scheme_id,
                                sm.scheme_name,
                                sm.latitude,
                                sm.longitude
@@ -156,6 +158,8 @@ public class PublicPumpOperatorRepository {
             schemeJoin = """
                     LEFT JOIN LATERAL (
                         SELECT NULL::integer AS scheme_id,
+                               NULL::text AS state_scheme_id,
+                               NULL::text AS centre_scheme_id,
                                NULL::text AS scheme_name,
                                NULL::double precision AS latitude,
                                NULL::double precision AS longitude
@@ -169,8 +173,11 @@ public class PublicPumpOperatorRepository {
                        u.email,
                        u.phone_number,
                        u.status,
+                       u.created_at::date AS onboarding_date,
                        ut.c_name AS role,
                        sch.scheme_id,
+                       sch.state_scheme_id,
+                       sch.centre_scheme_id,
                        sch.scheme_name,
                        sch.latitude AS scheme_latitude,
                        sch.longitude AS scheme_longitude,
@@ -197,12 +204,24 @@ public class PublicPumpOperatorRepository {
                 ) rs ON true
                 LEFT JOIN LATERAL (
                     WITH bounds AS (
+                        WITH requested AS (
+                            SELECT
+                                CAST(? AS date) AS requested_start_date,
+                                CAST(? AS date) AS requested_end_date
+                        )
                         SELECT
-                            GREATEST(rs.first_submission_date, COALESCE(CAST(? AS date), rs.first_submission_date)) AS start_date,
-                            LEAST(CURRENT_DATE, COALESCE(CAST(? AS date), CURRENT_DATE)) AS end_date
-                        WHERE rs.first_submission_date IS NOT NULL
-                          AND GREATEST(rs.first_submission_date, COALESCE(CAST(? AS date), rs.first_submission_date))
-                              <= LEAST(CURRENT_DATE, COALESCE(CAST(? AS date), CURRENT_DATE))
+                            GREATEST(
+                                u.created_at::date,
+                                COALESCE(requested.requested_start_date, u.created_at::date)
+                            ) AS start_date,
+                            LEAST(CURRENT_DATE, COALESCE(requested.requested_end_date, CURRENT_DATE)) AS end_date
+                        FROM requested
+                        WHERE u.created_at IS NOT NULL
+                          AND GREATEST(
+                                u.created_at::date,
+                                COALESCE(requested.requested_start_date, u.created_at::date)
+                              )
+                              <= LEAST(CURRENT_DATE, COALESCE(requested.requested_end_date, CURRENT_DATE))
                     ),
                     days AS (
                         SELECT (bounds.start_date + gs) AS d
@@ -238,8 +257,6 @@ public class PublicPumpOperatorRepository {
                 LIMIT 1
                 """, schemaName, schemeJoin, timeColumn, schemaName, schemaName, schemeRequiredSql);
         try {
-            params.add(startDate);
-            params.add(endDate);
             params.add(startDate);
             params.add(endDate);
             params.add(startDate);
@@ -290,6 +307,8 @@ public class PublicPumpOperatorRepository {
                         .phoneNumber(pii.safeDecrypt(rs.getString("phone_number")))
                         .status(mapStatus(getNullableInt(rs, "status")))
                         .schemeId(getNullableInt(rs, "scheme_id"))
+                        .stateSchemeId(rs.getString("state_scheme_id"))
+                        .centerSchemeId(rs.getString("centre_scheme_id"))
                         .schemeName(rs.getString("scheme_name"))
                         .schemeLatitude(getNullableDouble(rs, "scheme_latitude"))
                         .schemeLongitude(getNullableDouble(rs, "scheme_longitude"))
@@ -314,6 +333,8 @@ public class PublicPumpOperatorRepository {
             schemeJoin = String.format("""
                     LEFT JOIN LATERAL (
                         SELECT sm.id AS scheme_id,
+                               sm.state_scheme_id,
+                               sm.centre_scheme_id,
                                sm.scheme_name,
                                sm.latitude,
                                sm.longitude
@@ -332,6 +353,8 @@ public class PublicPumpOperatorRepository {
             schemeJoin = """
                     LEFT JOIN LATERAL (
                         SELECT NULL::integer AS scheme_id,
+                               NULL::text AS state_scheme_id,
+                               NULL::text AS centre_scheme_id,
                                NULL::text AS scheme_name,
                                NULL::double precision AS latitude,
                                NULL::double precision AS longitude
@@ -347,6 +370,8 @@ public class PublicPumpOperatorRepository {
                        u.status,
                        ut.c_name AS role,
                        sch.scheme_id,
+                       sch.state_scheme_id,
+                       sch.centre_scheme_id,
                        sch.scheme_name,
                        sch.latitude AS scheme_latitude,
                        sch.longitude AS scheme_longitude,
@@ -452,6 +477,8 @@ public class PublicPumpOperatorRepository {
                         .phoneNumber(pii.safeDecrypt(rs.getString("phone_number")))
                         .status(mapStatus(getNullableInt(rs, "status")))
                         .schemeId(getNullableInt(rs, "scheme_id"))
+                        .stateSchemeId(rs.getString("state_scheme_id"))
+                        .centerSchemeId(rs.getString("centre_scheme_id"))
                         .schemeName(rs.getString("scheme_name"))
                         .schemeLatitude(getNullableDouble(rs, "scheme_latitude"))
                         .schemeLongitude(getNullableDouble(rs, "scheme_longitude"))
@@ -842,7 +869,7 @@ public class PublicPumpOperatorRepository {
     public List<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
             String schemaName,
             long schemeId,
-            long pumpOperatorId,
+            Long pumpOperatorId,
             LocalDate startDate,
             LocalDate endDate,
             int offset,
@@ -879,7 +906,7 @@ public class PublicPumpOperatorRepository {
                       ON ut.id = u.user_type
                     WHERE usm.deleted_at IS NULL
                       AND sm.id = ?
-                      AND u.id = ?
+                      AND (CAST(? AS BIGINT) IS NULL OR u.id = ?)
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 ),
@@ -893,7 +920,8 @@ public class PublicPumpOperatorRepository {
                           <= LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE))
                 ),
                 readings AS (
-                    SELECT fr.id AS reading_id,
+                    SELECT DISTINCT ON (fr.id)
+                           fr.id AS reading_id,
                            fr.created_by,
                            fr.reading_date,
                            fr.%s AS reading_at,
@@ -902,7 +930,9 @@ public class PublicPumpOperatorRepository {
                     JOIN windowed_mapping l
                       ON l.id = fr.created_by
                     WHERE fr.deleted_at IS NULL
+                      AND fr.scheme_id = ?
                       AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
+                    ORDER BY fr.id, fr.reading_date DESC
                 ),
                 paged AS (
                     SELECT *
@@ -924,6 +954,7 @@ public class PublicPumpOperatorRepository {
                     JOIN windowed_mapping l
                       ON l.id = fr.created_by
                     WHERE fr.deleted_at IS NULL
+                      AND fr.scheme_id = ?
                       AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
                     GROUP BY fr.created_by
                 )
@@ -1027,7 +1058,7 @@ public class PublicPumpOperatorRepository {
                     lastSubmissionAt,
                     confirmed
             );
-        }, schemeId, pumpOperatorId, startDate, endDate, startDate, endDate, limit, offset);
+        }, schemeId, pumpOperatorId, pumpOperatorId, startDate, endDate, startDate, endDate, schemeId, limit, offset, schemeId);
 
         if (rows.isEmpty()) {
             return List.of();
@@ -1065,7 +1096,7 @@ public class PublicPumpOperatorRepository {
     public long countPumpOperatorsBySchemeWithCompliance(
             String schemaName,
             long schemeId,
-            long pumpOperatorId,
+            Long pumpOperatorId,
             LocalDate startDate,
             LocalDate endDate
     ) {
@@ -1089,7 +1120,7 @@ public class PublicPumpOperatorRepository {
                       ON ut.id = u.user_type
                     WHERE usm.deleted_at IS NULL
                       AND sm.id = ?
-                      AND u.id = ?
+                      AND (CAST(? AS BIGINT) IS NULL OR u.id = ?)
                       AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
                     ORDER BY u.id DESC, usm.id DESC
                 ),
@@ -1107,6 +1138,7 @@ public class PublicPumpOperatorRepository {
                 JOIN %s.flow_reading_table fr
                   ON fr.created_by = l.id
                 WHERE fr.deleted_at IS NULL
+                  AND fr.scheme_id = ?
                   AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
                 """, schemaName, schemaName, schemaName, schemaName);
         Long total = jdbcTemplate.queryForObject(
@@ -1114,10 +1146,12 @@ public class PublicPumpOperatorRepository {
                 Long.class,
                 schemeId,
                 pumpOperatorId,
+                pumpOperatorId,
                 startDate,
                 endDate,
                 startDate,
-                endDate
+                endDate,
+                schemeId
         );
         return total == null ? 0 : total;
     }
