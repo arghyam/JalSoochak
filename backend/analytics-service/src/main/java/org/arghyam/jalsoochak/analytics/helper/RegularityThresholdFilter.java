@@ -169,4 +169,17 @@ public final class RegularityThresholdFilter {
         return "((" + supplyDaysExpr + ")::numeric >= GREATEST(1::numeric, ROUND("
                 + "(" + pctExpr + ")::numeric * (" + daysExpr + ")::numeric / 100.0)))";
     }
+
+    /**
+     * The regularity KPI: the share of schemes in scope that are regular, to 4 decimal places (HALF_UP).
+     * {@link BigDecimal#ZERO} when no schemes are in scope. Single definition shared by the repository row
+     * mappers and the service aggregates so the KPI cannot drift between screens.
+     */
+    public static BigDecimal regularityRate(int regularSchemeCount, int schemeCount) {
+        if (schemeCount <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return BigDecimal.valueOf(regularSchemeCount)
+                .divide(BigDecimal.valueOf(schemeCount), 4, RoundingMode.HALF_UP);
+    }
 }
