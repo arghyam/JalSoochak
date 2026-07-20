@@ -98,9 +98,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private int criticalAfterDays;
 
     /**
-     * Trailing window (in days, inclusive) that a single-day {@code /scheme-regularity/average} request
-     * expands to: a share-of-days KPI is meaningless over one day, so {@code start == end} widens to this
-     * many trailing days. Env-only (not per-tenant). Periodic buckets are never expanded.
+     * Trailing window (in days, inclusive) that a single-day regularity request expands to: a share-of-days
+     * KPI is meaningless over one day, so {@code start == end} widens to this many trailing days. Applied to
+     * the {@code /scheme-regularity/average} endpoints (whole response) and to the regularity slice of the
+     * national dashboard (state- and district-wise; other KPIs stay on the literal window). Env-only (not
+     * per-tenant). The {@code /periodic} endpoints never expand — their buckets stay literal.
      */
     @Value("${analytics.dashboard.regularity.single-day-lookback-days:30}")
     private int regularitySingleDayLookbackDays;
@@ -943,8 +945,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 schemeRegularityRepository.getLgdLevel2WiseWaterSupplyMetricsForNation(startDate, endDate);
         List<SchemeRegularityRepository.Level2SupplyDaysInEfficientRange> efficientRangeRows =
                 schemeRegularityRepository.getLgdLevel2WiseSupplyDaysInEfficientRangeForNation(startDate, endDate);
+        // Regularity over a single day is a degenerate share-of-days KPI, so widen just the regularity
+        // window to a trailing lookback (water-quantity and reading-submission stay on the literal
+        // requested range). The scheme-count denominator is window-independent, so the rate stays in [0,1].
+        LocalDate regularityStartDate = expandSingleDayWindowStart(startDate, endDate);
         List<SchemeRegularityRepository.Level2RegularityMetrics> regularityRows =
-                schemeRegularityRepository.getLgdLevel2WiseRegularityMetricsForNation(startDate, endDate);
+                schemeRegularityRepository.getLgdLevel2WiseRegularityMetricsForNation(regularityStartDate, endDate);
         List<SchemeRegularityRepository.Level2ReadingSubmissionMetrics> submissionRows =
                 schemeRegularityRepository.getLgdLevel2WiseReadingSubmissionMetricsForNation(startDate, endDate);
 
@@ -1029,6 +1035,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .startDate(startDate)
                 .endDate(endDate)
                 .daysInRange(daysInRange)
+                .regularityStartDate(regularityStartDate)
+                .regularityDaysInRange((int) ChronoUnit.DAYS.between(regularityStartDate, endDate) + 1)
                 .overallOutageReasonDistribution(overallOutageReasonDistribution)
                 .districts(districts)
                 .build();
@@ -1056,8 +1064,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                 r -> r.supplyDaysInEfficientRange() != null ? r.supplyDaysInEfficientRange() : 0L,
                                 (a, b) -> a,
                                 LinkedHashMap::new));
+        // Regularity over a single day is a degenerate share-of-days KPI, so widen just the regularity
+        // window to a trailing lookback (water-quantity and reading-submission stay on the literal
+        // requested range). The scheme-count denominator is window-independent, so the rate stays in [0,1].
+        LocalDate regularityStartDate = expandSingleDayWindowStart(startDate, endDate);
         List<SchemeRegularityRepository.StateSchemeRegularityMetrics> regularityMetrics =
-                schemeRegularityRepository.getStateWiseRegularityMetrics(startDate, endDate);
+                schemeRegularityRepository.getStateWiseRegularityMetrics(regularityStartDate, endDate);
         List<SchemeRegularityRepository.StateReadingSubmissionMetrics> submissionMetrics =
                 schemeRegularityRepository.getStateWiseReadingSubmissionMetrics(startDate, endDate);
         List<SchemeRegularityRepository.OutageReasonSchemeCount> outageRows =
@@ -1140,6 +1152,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .startDate(startDate)
                 .endDate(endDate)
                 .daysInRange(daysInRange)
+                .regularityStartDate(regularityStartDate)
+                .regularityDaysInRange((int) ChronoUnit.DAYS.between(regularityStartDate, endDate) + 1)
                 .stateWiseQuantityPerformance(stateWiseQuantityPerformance)
                 .stateWiseRegularity(stateWiseRegularity)
                 .stateWiseReadingSubmissionRate(stateWiseReadingSubmissionRate)
@@ -2995,10 +3009,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     }
 
     /**
-     * For {@code /scheme-regularity/average} only: a single-day request ({@code start == end}) is too small
-     * a sample for a share-of-days KPI, so it expands to a trailing {@link #regularitySingleDayLookbackDays}
-     * window (inclusive of the requested day). Returns the (possibly widened) start date; the caller must
-     * use it for the cache key, the query, and the reported window so all three agree. Multi-day requests
+     * A single-day regularity request ({@code start == end}) is too small a sample for a share-of-days KPI,
+     * so it expands to a trailing {@link #regularitySingleDayLookbackDays} window (inclusive of the requested
+     * day). Returns the (possibly widened) start date. On the {@code /scheme-regularity/average} endpoints the
+     * caller uses it for the cache key, the query, and the reported window so all three agree; on the national
+     * dashboard it widens only the regularity query (other KPIs keep the literal window). Multi-day requests
      * pass through unchanged.
      */
     private LocalDate expandSingleDayWindowStart(LocalDate startDate, LocalDate endDate) {

@@ -704,6 +704,8 @@ public final class SwaggerExamples {
                 "startDate": "2026-01-01",
                 "endDate": "2026-01-31",
                 "daysInRange": 31,
+                "regularityStartDate": "2026-01-01",
+                "regularityDaysInRange": 31,
                 "stateWiseQuantityPerformance": [
                   {
                     "tenantId": 10,
@@ -807,6 +809,8 @@ public final class SwaggerExamples {
                 "startDate": "2026-01-01",
                 "endDate": "2026-01-31",
                 "daysInRange": 31,
+                "regularityStartDate": "2026-01-01",
+                "regularityDaysInRange": 31,
                 "overallOutageReasonDistribution": {
                   "power_failure": 12,
                   "no_electricity": 4
