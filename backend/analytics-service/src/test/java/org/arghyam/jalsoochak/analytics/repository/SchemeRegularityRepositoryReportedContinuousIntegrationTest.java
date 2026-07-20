@@ -22,12 +22,13 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * REPORTED-METRIC: validates the reported-days SQL of getContinuousSchemeCountByLgd against a real
- * Postgres. A scheme is continuous when it reported on AT LEAST ONE day in the range
- * (reported_days &gt;= 1). Exercises the three UNION branches (readings / image-reject anomalies /
- * submission_attempt) each in isolation, the IST day-boundary shift, lever A (any reading — even a
- * 0-supply reading — counts as reported), a scheme with no events (not continuous), and that the
- * count (list=false) agrees with the list (list=true).
+ * REPORTED-METRIC: validates the reported-days continuous SQL against a real Postgres for ALL THREE
+ * scopes — LGD, department and user — which now share one "reported day" definition. A scheme is
+ * continuous when it reported on AT LEAST ONE day in the range (reported_days &gt;= 1). Exercises the
+ * three UNION branches (readings / image-reject anomalies / submission_attempt) each in isolation, the
+ * IST day-boundary shift, lever A (any reading — even a 0-supply reading — counts as reported), a
+ * scheme with no events (not continuous), that the count (list=false) agrees with the list (list=true),
+ * and that LGD / department / user scopes return the same schemes.
  */
 @JdbcTest
 @Testcontainers
@@ -64,6 +65,8 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
 
     private static final int TENANT = 1;
     private static final int LGD = 100;                 // level 1
+    private static final int DEPARTMENT = 1;            // level 1 (schemes carry level_1_dept_id = 1)
+    private static final int USER = 11;
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D3 = LocalDate.of(2026, 1, 3);
 
@@ -74,13 +77,18 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
                     analytics_schema.submission_attempt_table,
                     analytics_schema.anomaly_table,
                     analytics_schema.fact_meter_reading_table,
+                    analytics_schema.dim_user_scheme_mapping_table,
+                    analytics_schema.dim_user_table,
                     analytics_schema.dim_scheme_table,
+                    analytics_schema.dim_department_location_table,
                     analytics_schema.dim_lgd_location_table,
                     analytics_schema.dim_tenant_table
                 RESTART IDENTITY CASCADE
                 """);
         seedTenantAndLgd();
+        seedDepartment();
         seedSchemes(10, 20, 30, 40, 50);
+        seedUserAndMappings(10, 20, 30, 40, 50);
 
         // New definition: continuous = reported on AT LEAST ONE day in the range. Each scheme qualifies
         // (or not) via exactly one lever so the branches stay independently covered.
@@ -115,6 +123,38 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
         assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
     }
 
+    @Test
+    void reportedContinuousCount_byDepartment_matchesLgdDefinition() {
+        // Department scope now uses the same reported_events levers A/B/C as LGD -> same 4 schemes.
+        long count = repository.getContinuousSchemeCountByDepartment(TENANT, DEPARTMENT, D1, D3);
+        assertThat(count).isEqualTo(4L);
+    }
+
+    @Test
+    void listMatchesCount_byDepartment_sameReportedContinuitySchemes() {
+        List<Integer> ids = repository.getContinuousSchemesByDepartment(TENANT, DEPARTMENT, D1, D3, 100, 0)
+                .stream()
+                .map(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
+                .collect(Collectors.toList());
+        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
+    }
+
+    @Test
+    void reportedContinuousCount_byUser_matchesLgdDefinition() {
+        // User scope now uses the same reported_events levers A/B/C as LGD -> same 4 schemes.
+        long count = repository.getContinuousSchemeCountByUserSchemes(TENANT, USER, D1, D3);
+        assertThat(count).isEqualTo(4L);
+    }
+
+    @Test
+    void listMatchesCount_byUser_sameReportedContinuitySchemes() {
+        List<Integer> ids = repository.getContinuousSchemesByUserSchemes(TENANT, USER, D1, D3, 100, 0)
+                .stream()
+                .map(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
+                .collect(Collectors.toList());
+        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
+    }
+
     // ---- seed helpers ----
 
     private void seedTenantAndLgd() {
@@ -131,6 +171,31 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
                  created_at, updated_at)
                 VALUES (?, ?, 'L100', 'District', 'District', 1, ?, ?, NULL, NULL, NULL, NULL, NOW(), NOW())
                 """, LGD, TENANT, LGD, LGD);
+    }
+
+    private void seedDepartment() {
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_department_location_table
+                (department_id, tenant_id, department_c_name, title, department_level,
+                 level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 created_at, updated_at)
+                VALUES (?, ?, 'Dept', 'Dept', 1, ?, NULL, NULL, NULL, NULL, NULL, NOW(), NOW())
+                """, DEPARTMENT, TENANT, DEPARTMENT);
+    }
+
+    private void seedUserAndMappings(int... schemeIds) {
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_user_table
+                (user_id, tenant_id, email, user_type, created_at, updated_at)
+                VALUES (?, ?, ?, 1, NOW(), NOW())
+                """, USER, TENANT, "user" + USER + "@example.com");
+        for (int s : schemeIds) {
+            jdbcTemplate.update("""
+                    INSERT INTO analytics_schema.dim_user_scheme_mapping_table
+                    (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
+                    VALUES (gen_random_uuid(), ?, ?, ?, NULL, NOW(), NOW(), 1)
+                    """, TENANT, USER, s);
+        }
     }
 
     private void seedSchemes(int... schemeIds) {

@@ -3287,6 +3287,9 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
+        // REPORTED-METRIC: same "reported day" definition as getContinuousSchemeCountByLgd (levers A/B/C:
+        // any reading incl. 0-supply / image rejects / submission attempts). Continuous = reported on at
+        // least one day (reported_days >= 1). See getContinuousSchemeCountByLgd for the full lever notes.
         String sql = withContinuousSchemesDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
@@ -3294,32 +3297,60 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings in fact.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN schemes_in_scope ss
-                      ON ss.scheme_id = m.scheme_id
+                    JOIN schemes_in_scope ss ON ss.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects (validation/auth) captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT COUNT(*)::bigint AS continuous_count
                 FROM schemes_in_scope ss
-                LEFT JOIN supply_days sd
-                  ON sd.scheme_id = ss.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) >= 1
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = ss.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 """, schemeDepartmentColumn));
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
                 Long.class,
-                departmentId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate
+                departmentId,   // schemes_in_scope: region
+                tenantId,       // schemes_in_scope: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate         // (C) range end
         );
         return count == null ? 0L : count;
     }
@@ -3330,6 +3361,9 @@ public class SchemeRegularityRepository {
             LocalDate startDate,
             LocalDate endDate
     ) {
+        // REPORTED-METRIC: same "reported day" definition as getContinuousSchemeCountByLgd (levers A/B/C:
+        // any reading incl. 0-supply / image rejects / submission attempts). Continuous = reported on at
+        // least one day (reported_days >= 1). See getContinuousSchemeCountByLgd for the full lever notes.
         String sql = withContinuousSchemesDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
@@ -3339,32 +3373,60 @@ public class SchemeRegularityRepository {
                     WHERE usm.user_id = ?
                       AND s.tenant_id = ?{{WS}}
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings in fact.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN user_schemes us
-                      ON us.scheme_id = m.scheme_id
+                    JOIN user_schemes us ON us.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN user_schemes us ON us.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects (validation/auth) captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN user_schemes us ON us.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT COUNT(*)::bigint AS continuous_count
                 FROM user_schemes us
-                LEFT JOIN supply_days sd
-                  ON sd.scheme_id = us.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) >= 1
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = us.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 """);
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
                 Long.class,
-                userId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate
+                userId,         // user_schemes: user
+                tenantId,       // user_schemes: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate         // (C) range end
         );
         return count == null ? 0L : count;
     }
@@ -3467,6 +3529,8 @@ public class SchemeRegularityRepository {
             Integer limit,
             Integer offset
     ) {
+        // REPORTED-METRIC: must use the SAME "reported day" definition as getContinuousSchemeCountByUserSchemes
+        // so the count (list=false) and the list (list=true) agree. Levers A/B/C mirror the count method.
         String sql = withContinuousSchemesDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
@@ -3485,24 +3549,46 @@ public class SchemeRegularityRepository {
                       ON us.scheme_id = s.scheme_id
                     WHERE s.tenant_id = ?
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN user_schemes us
-                      ON us.scheme_id = m.scheme_id
+                    JOIN user_schemes us ON us.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN user_schemes us ON us.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN user_schemes us ON us.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT
                     sd.scheme_id,
                     sd.scheme_name
                 FROM scheme_details sd
-                LEFT JOIN supply_days sdy
-                  ON sdy.scheme_id = sd.scheme_id
-                WHERE COALESCE(sdy.supply_days, 0) >= 1
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = sd.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 ORDER BY sd.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3514,12 +3600,18 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name")
                 ),
-                userId,
-                tenantId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate,
+                userId,         // user_schemes: user
+                tenantId,       // user_schemes: tenant
+                tenantId,       // scheme_details: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate,        // (C) range end
                 limit,
                 offset
         );
@@ -3539,6 +3631,8 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
+        // REPORTED-METRIC: must use the SAME "reported day" definition as getContinuousSchemeCountByDepartment
+        // so the count (list=false) and the list (list=true) agree. Levers A/B/C mirror the count method.
         String sql = withContinuousSchemesDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
@@ -3546,24 +3640,46 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN schemes_in_scope ss
-                      ON ss.scheme_id = m.scheme_id
+                    JOIN schemes_in_scope ss ON ss.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name
                 FROM schemes_in_scope ss
-                LEFT JOIN supply_days sd
-                  ON sd.scheme_id = ss.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) >= 1
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = ss.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 ORDER BY ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3575,11 +3691,17 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name")
                 ),
-                departmentId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate,
+                departmentId,   // schemes_in_scope: region
+                tenantId,       // schemes_in_scope: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate,        // (C) range end
                 limit,
                 offset
         );
