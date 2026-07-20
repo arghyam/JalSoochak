@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.kafka;
 import org.arghyam.jalsoochak.analytics.dto.event.DepartmentLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.RegularityThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
@@ -64,6 +65,11 @@ public class AnalyticsKafkaConsumer {
                     IncludedWorkStatusesUpdatedEvent event =
                             objectMapper.readValue(message, IncludedWorkStatusesUpdatedEvent.class);
                     dimensionService.updateIncludedWorkStatuses(event);
+                }
+                case "REGULARITY_THRESHOLD_UPDATED" -> {
+                    RegularityThresholdUpdatedEvent event =
+                            objectMapper.readValue(message, RegularityThresholdUpdatedEvent.class);
+                    dimensionService.updateRegularityThreshold(event);
                 }
                 case "TENANT_LOCATION_HIERARCHY_UPDATED" -> {
                     TenantLocationHierarchyUpdatedEvent event = objectMapper.readValue(message,

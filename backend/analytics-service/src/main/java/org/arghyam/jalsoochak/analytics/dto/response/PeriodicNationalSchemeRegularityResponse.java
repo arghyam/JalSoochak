@@ -34,6 +34,7 @@ public class PeriodicNationalSchemeRegularityResponse {
         private LocalDate periodEndDate;
         private Integer schemeCount;
         private Integer totalSupplyDays;
+        private Integer regularSchemeCount;
         private Long totalWaterQuantity;
         private BigDecimal averageRegularity;
     }

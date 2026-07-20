@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.MessageBrokerConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.LanguageListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.StateITSystemConfigDTO;
@@ -244,7 +245,15 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Codes: 1=Ongoing, 2=Completed, 3=Not Started, 4=Handed Over. Example: [4] restricts dashboards
      * to handed-over schemes. Published to analytics via INCLUDED_WORK_STATUSES_UPDATED.
      */
-    INCLUDED_WORK_STATUSES(ConfigType.GENERIC, IncludedWorkStatusesConfigDTO.class, false, false, false);
+    INCLUDED_WORK_STATUSES(ConfigType.GENERIC, IncludedWorkStatusesConfigDTO.class, false, false, false),
+
+    /**
+     * Percentage of days in a window on which a scheme must supply water to count as regular in this
+     * tenant's analytics dashboards. E.g. 90 means a scheme must supply on at least 90% of the window's
+     * days (rounded half-up, minimum 1 day). Falls back to the national default, then the analytics env
+     * default, when unset. Published to analytics via REGULARITY_THRESHOLD_UPDATED.
+     */
+    REGULARITY_THRESHOLD_PERCENT(ConfigType.GENERIC, RegularityThresholdConfigDTO.class, false, false, false);
 
     private final ConfigType type;
     private final Class<? extends ConfigValueDTO> dtoClass;

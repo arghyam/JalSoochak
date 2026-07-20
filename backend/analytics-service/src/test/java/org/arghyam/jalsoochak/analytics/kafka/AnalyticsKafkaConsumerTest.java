@@ -11,6 +11,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.EscalationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.LgdLocationEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.MeterReadingEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.RegularityThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemeEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.SchemePerformanceEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.TenantEscalationEvent;
@@ -27,6 +28,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Field;
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -107,6 +109,38 @@ class AnalyticsKafkaConsumerTest {
         verify(dimensionService).updateIncludedWorkStatuses(captor.capture());
         assertThat(captor.getValue().getTenantId()).isZero();
         assertThat(captor.getValue().getWorkStatuses()).containsExactly(1);
+    }
+
+    @Test
+    void consumeTenantEvents_regularityThresholdUpdated_routesToUpdateRegularityThreshold() {
+        String message = """
+                {"eventType":"REGULARITY_THRESHOLD_UPDATED","tenantId":1,"stateCode":"MP","thresholdPercent":87.5}
+                """;
+
+        consumer.consumeTenantEvents(message);
+
+        ArgumentCaptor<RegularityThresholdUpdatedEvent> captor =
+                ArgumentCaptor.forClass(RegularityThresholdUpdatedEvent.class);
+        verify(dimensionService).updateRegularityThreshold(captor.capture());
+        RegularityThresholdUpdatedEvent event = captor.getValue();
+        assertThat(event.getTenantId()).isEqualTo(1);
+        assertThat(event.getStateCode()).isEqualTo("MP");
+        assertThat(event.getThresholdPercent()).isEqualByComparingTo(new BigDecimal("87.5"));
+    }
+
+    @Test
+    void consumeTenantEvents_regularityThresholdUpdated_nationalTenantZero_routesWithNationalSentinel() {
+        String message = """
+                {"eventType":"REGULARITY_THRESHOLD_UPDATED","tenantId":0,"stateCode":"NATIONAL","thresholdPercent":90}
+                """;
+
+        consumer.consumeTenantEvents(message);
+
+        ArgumentCaptor<RegularityThresholdUpdatedEvent> captor =
+                ArgumentCaptor.forClass(RegularityThresholdUpdatedEvent.class);
+        verify(dimensionService).updateRegularityThreshold(captor.capture());
+        assertThat(captor.getValue().getTenantId()).isZero();
+        assertThat(captor.getValue().getThresholdPercent()).isEqualByComparingTo(new BigDecimal("90"));
     }
 
     @Test

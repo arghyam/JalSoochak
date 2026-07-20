@@ -19,6 +19,11 @@ public class NationalDashboardResponse {
     private LocalDate startDate;
     private LocalDate endDate;
     private Integer daysInRange;
+    // The window the regularity KPI (stateWiseRegularity, incl. its totalSupplyDays / regularSchemeCount)
+    // was computed over. Equals [startDate, endDate] for multi-day requests; for a single-day request it
+    // widens to a trailing lookback so a share-of-days KPI isn't judged on one day. endDate is shared.
+    private LocalDate regularityStartDate;
+    private Integer regularityDaysInRange;
     private List<StateQuantityPerformance> stateWiseQuantityPerformance;
     private List<StateRegularity> stateWiseRegularity;
     private List<StateReadingSubmissionRate> stateWiseReadingSubmissionRate;
@@ -55,6 +60,7 @@ public class NationalDashboardResponse {
         private String stateTitle;
         private Integer schemeCount;
         private Integer totalSupplyDays;
+        private Integer regularSchemeCount;
         private BigDecimal averageRegularity;
     }
 
