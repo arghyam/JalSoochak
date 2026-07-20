@@ -7164,11 +7164,15 @@ public class SchemeRegularityRepository {
                          generate_series(?::date, ?::date, INTERVAL '1 day') AS g(day_date)
                 ),
                 water_by_period AS (
+                    -- Average over qualifying supplied rows only (the shared supplied-water-day
+                    -- predicate over the de-duplicated latest-row source), so this series uses the
+                    -- same water figure as every other water KPI (national, region-wise, periodic
+                    -- regularity) instead of a raw average that also counted NOT_SUBMITTED rows.
                     SELECT
                         %5$s AS period_start_date,
-                        AVG(f.water_quantity::numeric) AS avg_water_quantity
+                        AVG(f.water_quantity::numeric) FILTER (WHERE {{SWD}}) AS avg_water_quantity
                     FROM params,
-                         analytics_schema.fact_water_quantity_table f
+                         {{LWQ}} f
                     JOIN schemes_in_scope s
                         ON s.scheme_id = f.scheme_id
                     WHERE f.date BETWEEN ? AND ?

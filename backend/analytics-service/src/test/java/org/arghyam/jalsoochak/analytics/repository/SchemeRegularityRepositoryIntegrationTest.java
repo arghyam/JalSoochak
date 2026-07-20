@@ -604,12 +604,16 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(weekOne.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
         assertThat(weekOne.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 7));
-        assertThat(weekOne.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("116.6667"));
+        // Unified water figure ({{SWS}}/{{SWD}} semantics): only SUBMITTED/NULL rows with positive
+        // quantity count. Week one: scheme 1 D2 (200, SUBMITTED) qualifies; D1 rows (100, 50) are
+        // NOT_SUBMITTED and excluded => avg 200.
+        assertThat(weekOne.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("200.0000"));
         assertThat(weekOne.householdCount()).isEqualTo(30);
 
         assertThat(weekTwo.periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 8));
         assertThat(weekTwo.periodEndDate()).isEqualTo(LocalDate.of(2026, 1, 14));
-        assertThat(weekTwo.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("185.0000"));
+        // Week two has only NOT_SUBMITTED rows (300, 70) => no qualifying water => 0.
+        assertThat(weekTwo.averageWaterQuantity()).isEqualByComparingTo(new BigDecimal("0.0000"));
         assertThat(weekTwo.householdCount()).isEqualTo(30);
     }
 
@@ -620,7 +624,8 @@ class SchemeRegularityRepositoryIntegrationTest {
 
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).periodStartDate()).isEqualTo(LocalDate.of(2026, 1, 1));
-        assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("144.0000");
+        // Unified water figure: only scheme 1 D2 (200, SUBMITTED) qualifies across the month => avg 200.
+        assertThat(rows.get(0).averageWaterQuantity()).isEqualByComparingTo("200.0000");
         assertThat(rows.get(0).householdCount()).isEqualTo(30);
     }
 
