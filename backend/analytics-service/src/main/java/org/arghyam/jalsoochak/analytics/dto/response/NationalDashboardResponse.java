@@ -55,6 +55,7 @@ public class NationalDashboardResponse {
         private String stateTitle;
         private Integer schemeCount;
         private Integer totalSupplyDays;
+        private Integer regularSchemeCount;
         private BigDecimal averageRegularity;
     }
 

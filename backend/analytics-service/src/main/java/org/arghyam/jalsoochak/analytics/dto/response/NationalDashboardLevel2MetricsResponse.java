@@ -46,6 +46,7 @@ public class NationalDashboardLevel2MetricsResponse {
 
         // Regularity (same fields as NationalDashboardResponse.StateRegularity)
         private Integer totalSupplyDays;
+        private Integer regularSchemeCount;
         private BigDecimal averageRegularity;
 
         // Reading submission (same fields as NationalDashboardResponse.StateReadingSubmissionRate)
