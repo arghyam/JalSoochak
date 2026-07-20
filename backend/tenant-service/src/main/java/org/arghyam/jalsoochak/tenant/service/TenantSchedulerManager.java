@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.service;
 
+import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
@@ -39,6 +40,10 @@ public class TenantSchedulerManager {
     private final TenantConfigService tenantConfigService;
     private final NudgeSchedulerService nudgeSchedulerService;
     private final EscalationSchedulerService escalationSchedulerService;
+    private final DailySituationReportSchedulerService dailySituationReportSchedulerService;
+
+    private static final String DAILY_CRON_FORMAT = "0 %d %d * * ?";
+    private static final String IST_ZONE = "Asia/Kolkata";
 
     private final ConcurrentHashMap<String, ScheduledFuture<?>> futures = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, Object> tenantLocks = new ConcurrentHashMap<>();
@@ -82,26 +87,29 @@ public class TenantSchedulerManager {
             // Validate first — throws before touching existing futures if config is invalid.
             NudgeScheduleConfig nudgeCfg = tenantConfigService.getNudgeConfig(tenantId);
             EscalationScheduleConfig escalCfg = tenantConfigService.getEscalationConfig(tenantId);
-            validateScheduleConfig(nudgeCfg, escalCfg, tenantId);
+            DailyReportScheduleConfig dailyCfg = tenantConfigService.getDailyReportConfig(tenantId);
+            validateScheduleConfig(nudgeCfg, escalCfg, dailyCfg, tenantId);
 
             cancelFutures(tenantId);
-            scheduleForTenant(tenantId, stateCode, nudgeCfg, escalCfg);
+            scheduleForTenant(tenantId, stateCode, nudgeCfg, escalCfg, dailyCfg);
         }
     }
 
     private void scheduleForTenant(int tenantId, String stateCode) {
         NudgeScheduleConfig nudgeCfg = tenantConfigService.getNudgeConfig(tenantId);
         EscalationScheduleConfig escalCfg = tenantConfigService.getEscalationConfig(tenantId);
-        validateScheduleConfig(nudgeCfg, escalCfg, tenantId);
-        scheduleForTenant(tenantId, stateCode, nudgeCfg, escalCfg);
+        DailyReportScheduleConfig dailyCfg = tenantConfigService.getDailyReportConfig(tenantId);
+        validateScheduleConfig(nudgeCfg, escalCfg, dailyCfg, tenantId);
+        scheduleForTenant(tenantId, stateCode, nudgeCfg, escalCfg, dailyCfg);
     }
 
     private void scheduleForTenant(int tenantId, String stateCode,
-            NudgeScheduleConfig nudgeCfg, EscalationScheduleConfig escalCfg) {
+            NudgeScheduleConfig nudgeCfg, EscalationScheduleConfig escalCfg, DailyReportScheduleConfig dailyCfg) {
         String schema = "tenant_" + stateCode.toLowerCase(java.util.Locale.ROOT);
 
-        String nudgeCron = String.format("0 %d %d * * ?", nudgeCfg.getMinute(), nudgeCfg.getHour());
-        String escalCron = String.format("0 %d %d * * ?", escalCfg.getMinute(), escalCfg.getHour());
+        String nudgeCron = String.format(DAILY_CRON_FORMAT, nudgeCfg.getMinute(), nudgeCfg.getHour());
+        String escalCron = String.format(DAILY_CRON_FORMAT, escalCfg.getMinute(), escalCfg.getHour());
+        String dailyCron = String.format(DAILY_CRON_FORMAT, dailyCfg.getMinute(), dailyCfg.getHour());
 
         futures.put("nudge_" + tenantId,
                 taskScheduler.schedule(
@@ -112,7 +120,7 @@ public class TenantSchedulerManager {
                                 log.error("[Scheduler] Nudge job failed for tenant={}: {}", tenantId, e.getMessage(), e);
                             }
                         },
-                        new CronTrigger(nudgeCron, TimeZone.getTimeZone("Asia/Kolkata"))));
+                        new CronTrigger(nudgeCron, TimeZone.getTimeZone(IST_ZONE))));
 
         futures.put("escalation_" + tenantId,
                 taskScheduler.schedule(
@@ -123,22 +131,38 @@ public class TenantSchedulerManager {
                                 log.error("[Scheduler] Escalation job failed for tenant={}: {}", tenantId, e.getMessage(), e);
                             }
                         },
-                        new CronTrigger(escalCron, TimeZone.getTimeZone("Asia/Kolkata"))));
+                        new CronTrigger(escalCron, TimeZone.getTimeZone(IST_ZONE))));
 
-        log.info("[Scheduler] Tenant {} ({}): nudge={}, escalation={}", tenantId, stateCode, nudgeCron, escalCron);
+        futures.put("dailyReport_" + tenantId,
+                taskScheduler.schedule(
+                        () -> {
+                            try {
+                                dailySituationReportSchedulerService.processDailyReportsForTenant(schema, tenantId);
+                            } catch (Exception e) {
+                                log.error("[Scheduler] Daily report job failed for tenant={}: {}", tenantId, e.getMessage(), e);
+                            }
+                        },
+                        new CronTrigger(dailyCron, TimeZone.getTimeZone(IST_ZONE))));
+
+        log.info("[Scheduler] Tenant {} ({}): nudge={}, escalation={}, dailyReport={}",
+                tenantId, stateCode, nudgeCron, escalCron, dailyCron);
     }
 
-    private void validateScheduleConfig(NudgeScheduleConfig nudgeCfg, EscalationScheduleConfig escalCfg, int tenantId) {
+    private void validateScheduleConfig(NudgeScheduleConfig nudgeCfg, EscalationScheduleConfig escalCfg,
+            DailyReportScheduleConfig dailyCfg, int tenantId) {
         if (nudgeCfg.getHour() < 0 || nudgeCfg.getHour() > 23 || nudgeCfg.getMinute() < 0 || nudgeCfg.getMinute() > 59) {
             throw new IllegalArgumentException("Invalid nudge schedule for tenantId=" + tenantId);
         }
         if (escalCfg.getHour() < 0 || escalCfg.getHour() > 23 || escalCfg.getMinute() < 0 || escalCfg.getMinute() > 59) {
             throw new IllegalArgumentException("Invalid escalation schedule for tenantId=" + tenantId);
         }
+        if (dailyCfg.getHour() < 0 || dailyCfg.getHour() > 23 || dailyCfg.getMinute() < 0 || dailyCfg.getMinute() > 59) {
+            throw new IllegalArgumentException("Invalid daily-report schedule for tenantId=" + tenantId);
+        }
     }
 
     private void cancelFutures(int tenantId) {
-        for (String prefix : List.of("nudge_", "escalation_")) {
+        for (String prefix : List.of("nudge_", "escalation_", "dailyReport_")) {
             ScheduledFuture<?> f = futures.remove(prefix + tenantId);
             if (f != null) f.cancel(false);
         }

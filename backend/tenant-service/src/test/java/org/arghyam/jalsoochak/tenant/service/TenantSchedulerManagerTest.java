@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.tenant.service;
 
+import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
@@ -44,6 +45,9 @@ class TenantSchedulerManagerTest {
     @Mock
     private EscalationSchedulerService escalationSchedulerService;
 
+    @Mock
+    private DailySituationReportSchedulerService dailySituationReportSchedulerService;
+
     @InjectMocks
     private TenantSchedulerManager manager;
 
@@ -61,7 +65,7 @@ class TenantSchedulerManagerTest {
     // ── loadAndScheduleAll ──────────────────────────────────────────────────────
 
     @Test
-    void loadAndScheduleAll_schedulesNudgeAndEscalation_forEachActiveTenant() {
+    void loadAndScheduleAll_schedulesNudgeEscalationAndDailyReport_forEachActiveTenant() {
         TenantResponseDTO t1 = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
         TenantResponseDTO t2 = TenantResponseDTO.builder().id(2).stateCode("UP").status(TenantStatusEnum.ACTIVE.name()).build();
         when(tenantCommonRepository.findAll()).thenReturn(List.of(t1, t2));
@@ -71,8 +75,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // 2 nudge + 2 escalation = 4 schedule calls
-        verify(taskScheduler, times(4)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // per tenant: nudge + escalation + dailyReport = 3; 2 tenants = 6 schedule calls
+        verify(taskScheduler, times(6)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -85,8 +89,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // Only 2 calls for the active tenant
-        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // Only 3 calls for the active tenant (nudge + escalation + dailyReport)
+        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -99,8 +103,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // Only 2 calls for the active tenant; the pre-seeded REGISTERED tenant (no schema) is excluded
-        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // Only 3 calls for the active tenant (nudge + escalation + dailyReport); the pre-seeded REGISTERED tenant (no schema) is excluded
+        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -113,8 +117,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // Only 2 calls for the active tenant; null-status tenant is excluded
-        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // Only 3 calls for the active tenant (nudge + escalation + dailyReport); null-status tenant is excluded
+        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -127,7 +131,7 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         ArgumentCaptor<CronTrigger> triggerCaptor = ArgumentCaptor.forClass(CronTrigger.class);
-        verify(taskScheduler, times(2)).schedule(any(Runnable.class), triggerCaptor.capture());
+        verify(taskScheduler, times(3)).schedule(any(Runnable.class), triggerCaptor.capture());
 
         List<CronTrigger> triggers = triggerCaptor.getAllValues();
         // nudge cron: 0 30 10 * * ?
@@ -151,10 +155,10 @@ class TenantSchedulerManagerTest {
         stubConfigs(1, 10, 30, 11, 0);
         manager.rescheduleForTenant(1, "MP");
 
-        // Old futures should have been cancelled (2 from initial schedule)
-        verify(future, times(2)).cancel(false);
-        // And 2 new futures scheduled (total 4 schedule calls: 2 initial + 2 new)
-        verify(taskScheduler, times(4)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // Old futures should have been cancelled (3 from initial schedule)
+        verify(future, times(3)).cancel(false);
+        // And 3 new futures scheduled (total 6 schedule calls: 3 initial + 3 new)
+        verify(taskScheduler, times(6)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -166,8 +170,8 @@ class TenantSchedulerManagerTest {
 
         // No cancel calls – no existing futures
         verify(future, never()).cancel(anyBoolean());
-        // But 2 new futures should be scheduled
-        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // But 3 new futures should be scheduled
+        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     // ── isolation / security tests ───────────────────────────────────────────────
@@ -181,7 +185,7 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
-        verify(taskScheduler, times(2)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
+        verify(taskScheduler, times(3)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
 
         runnableCaptor.getAllValues().get(0).run(); // nudge runnable
 
@@ -198,7 +202,7 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
-        verify(taskScheduler, times(2)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
+        verify(taskScheduler, times(3)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
 
         runnableCaptor.getAllValues().get(1).run(); // escalation runnable
 
@@ -217,11 +221,11 @@ class TenantSchedulerManagerTest {
         manager.loadAndScheduleAll();
 
         ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
-        verify(taskScheduler, times(4)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
+        verify(taskScheduler, times(6)).schedule(runnableCaptor.capture(), any(CronTrigger.class));
 
         List<Runnable> runnables = runnableCaptor.getAllValues();
         runnables.get(0).run(); // nudge for MP
-        runnables.get(2).run(); // nudge for UP
+        runnables.get(3).run(); // nudge for UP
 
         verify(nudgeSchedulerService).processNudgesForTenant("tenant_mp", 1);
         verify(nudgeSchedulerService).processNudgesForTenant("tenant_up", 2);
@@ -296,8 +300,8 @@ class TenantSchedulerManagerTest {
 
         manager.loadAndScheduleAll();
 
-        // good tenant still scheduled
-        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(CronTrigger.class));
+        // good tenant still scheduled (3 jobs)
+        verify(taskScheduler, times(3)).schedule(any(Runnable.class), any(CronTrigger.class));
     }
 
     @Test
@@ -355,5 +359,7 @@ class TenantSchedulerManagerTest {
                         .level1Days(3).level1OfficerType("SECTION_OFFICER")
                         .level2Days(7).level2OfficerType("DISTRICT_OFFICER")
                         .build());
+        when(tenantConfigService.getDailyReportConfig(tenantId))
+                .thenReturn(DailyReportScheduleConfig.builder().hour(6).minute(0).build());
     }
 }

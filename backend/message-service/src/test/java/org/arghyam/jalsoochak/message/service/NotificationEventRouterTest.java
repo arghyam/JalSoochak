@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.message.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -10,6 +11,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -17,17 +19,21 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.sql.ResultSet;
 import java.util.List;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsCountryService;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
+import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
+import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
 import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -57,6 +63,9 @@ class NotificationEventRouterTest {
 
     @Mock
     private EscalationPdfService escalationPdfService;
+
+    @Mock
+    private DailyReportPdfService dailyReportPdfService;
 
     @Mock
     private MinioStorageService minioStorageService;
@@ -1093,5 +1102,257 @@ class NotificationEventRouterTest {
         verify(accountEmailService).sendInviteEmail(
                 "sa@mp.gov.in", "Priya Sharma", "STATE_ADMIN", "https://link", 24);
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
+    }
+
+    // ── DAILY_REPORT_KPIS ────────────────────────────────────────────────────────
+
+    private static final String DAILY_REPORT_JSON = """
+            {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+             "officerUserId":500,"officerUserType":"SECTION_OFFICER",
+             "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
+                     "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,
+                                  "regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                     "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,
+                                    "regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4}}}
+            """;
+
+    @SuppressWarnings("unchecked")
+    private void stubOfficerContact(Long whatsappId, String encTitle, String encPhone) {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getObject("whatsapp_connection_id", Long.class)).thenReturn(whatsappId);
+                    when(rs.getString("title")).thenReturn(encTitle);
+                    when(rs.getString("phone_number")).thenReturn(encPhone);
+                    return List.of(rm.mapRow(rs, 0));
+                });
+    }
+
+    @Test
+    void handleDailyReport_generatesPdfAndSendsToSectionOfficer() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER"))
+                .thenReturn(true);
+
+        router.route(DAILY_REPORT_JSON);
+
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
+        verify(minioStorageService).upload(any(Path.class));
+        verify(whatsAppChannel).sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER");
+        // Stored contact present → no opt-in, no contact-registered event.
+        verify(glificWhatsAppService, never()).optIn(anyString());
+    }
+
+    @Test
+    void handleDailyReport_skipsSubDivisionalOfficerWhenSdoDisabled() {
+        // Kill-switch: field left false in this test (default true in prod via @Value).
+        ReflectionTestUtils.setField(router, "dailyReportSdoEnabled", false);
+        String sdoJson = DAILY_REPORT_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER");
+
+        router.route(sdoJson);
+
+        verifyNoInteractions(dailyReportPdfService);
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void handleDailyReport_sdoEnabled_resolvesSectionOfficerRowsAndSends() throws Exception {
+        ReflectionTestUtils.setField(router, "dailyReportSdoEnabled", true);
+        String sdoJson = """
+                {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+                 "officerUserId":500,"officerUserType":"SUB_DIVISIONAL_OFFICER",
+                 "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
+                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
+                         "sectionOfficerSummaries":[
+                           {"officerUserId":601,"totalSchemes":154,"schemesSupplying":148,"schemesNotSupplying":6,"avgLpcd":67.0,"avgMld":678.0,"regularSupplyPctWeek":32.0,"readingSubmissionPct":78.0,"anomalousCount":8},
+                           {"officerUserId":602,"totalSchemes":90,"schemesSupplying":80,"schemesNotSupplying":10,"avgLpcd":55.0,"avgMld":400.0,"regularSupplyPctWeek":60.0,"readingSubmissionPct":88.0,"anomalousCount":2}]}}
+                """;
+
+        // SDO's own contact (WHERE id = ?) — stored WhatsApp id.
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id = ?")),
+                any(RowMapper.class), eq(500L)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getObject("whatsapp_connection_id", Long.class)).thenReturn(999L);
+                    when(rs.getString("title")).thenReturn("enc-sdo");
+                    when(rs.getString("phone_number")).thenReturn(null);
+                    return List.of(rm.mapRow(rs, 0));
+                });
+        // Section Officer contacts (WHERE id IN (...)) — two rows.
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id IN")),
+                any(RowMapper.class), any(Object[].class)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet r1 = mock(ResultSet.class);
+                    when(r1.getLong("id")).thenReturn(601L);
+                    when(r1.getObject("whatsapp_connection_id", Long.class)).thenReturn(null);
+                    when(r1.getString("title")).thenReturn("enc-alice");
+                    when(r1.getString("phone_number")).thenReturn("enc-alice-p");
+                    ResultSet r2 = mock(ResultSet.class);
+                    when(r2.getLong("id")).thenReturn(602L);
+                    when(r2.getObject("whatsapp_connection_id", Long.class)).thenReturn(null);
+                    when(r2.getString("title")).thenReturn("enc-bob");
+                    when(r2.getString("phone_number")).thenReturn("enc-bob-p");
+                    return List.of(rm.mapRow(r1, 0), rm.mapRow(r2, 1));
+                });
+        when(piiEncryptionService.safeDecrypt(any())).thenAnswer(inv -> {
+            String v = inv.getArgument(0);
+            if (v == null) {
+                return null;
+            }
+            return switch (v) {
+                case "enc-sdo" -> "SDO Kumar";
+                case "enc-alice" -> "Alice";
+                case "enc-alice-p" -> "919868595001";
+                case "enc-bob" -> "Bob";
+                case "enc-bob-p" -> "919868595002";
+                default -> v;
+            };
+        });
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), anyList()))
+                .thenReturn("sdo.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/sdo.pdf");
+        when(whatsAppChannel.sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER")).thenReturn(true);
+
+        router.route(sdoJson);
+
+        ArgumentCaptor<List<DailyReportSectionOfficerRow>> cap = ArgumentCaptor.forClass(List.class);
+        verify(dailyReportPdfService).generate(
+                any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), cap.capture());
+        verify(whatsAppChannel).sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER");
+
+        List<DailyReportSectionOfficerRow> soRows = cap.getValue();
+        assertThat(soRows).hasSize(2);
+        assertThat(soRows).extracting(DailyReportSectionOfficerRow::getOfficerName)
+                .containsExactly("Alice", "Bob");
+        assertThat(soRows.get(0).getOfficerMobile()).isEqualTo("919868595001");
+        assertThat(soRows.get(0).getTotalSchemes()).isEqualTo(154);
+        assertThat(soRows.get(0).getSchemesNotSupplying()).isEqualTo(6);
+    }
+
+    @Test
+    void handleDailyReport_skipsWhenNoContactResolvable() {
+        stubOfficerContact(null, null, null); // no whatsapp id, no phone
+        when(piiEncryptionService.safeDecrypt(any())).thenReturn(null);
+
+        router.route(DAILY_REPORT_JSON);
+
+        verifyNoInteractions(dailyReportPdfService);
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void handleDailyReport_fallsBackToOptIn_andPublishesEvent_whenNoStoredContactId() throws Exception {
+        // No stored whatsapp_connection_id, but an encrypted phone is present → opt-in fallback.
+        stubOfficerContact(null, "enc-title", "enc-phone");
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500024");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
+        when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER"))
+                .thenReturn(true);
+
+        router.route(DAILY_REPORT_JSON);
+
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
+        verify(glificWhatsAppService).optIn("919876500024");
+        verify(whatsAppChannel).sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER");
+        verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
+            String s = event.toString();
+            return s.contains("WHATSAPP_CONTACT_REGISTERED") && s.contains("88");
+        }));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void handleDailyReport_enrichesPriorityRowsFromOperationalSchema() throws Exception {
+        String json = """
+                {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+                 "officerUserId":500,"officerUserType":"SECTION_OFFICER",
+                 "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
+                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
+                         "priorityActions":[{"schemeId":7,"issue":"Pump Failure","daysNoSupply":5}]}}
+                """;
+
+        // Officer contact (by id) — has a stored WhatsApp id, so no opt-in.
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id = ?")),
+                any(RowMapper.class), eq(500L)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getObject("whatsapp_connection_id", Long.class)).thenReturn(12345L);
+                    when(rs.getString("title")).thenReturn("enc-officer");
+                    when(rs.getString("phone_number")).thenReturn(null);
+                    return List.of(rm.mapRow(rs, 0));
+                });
+        // Scheme labels (batched by id).
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".scheme_master_table WHERE id IN")),
+                any(RowMapper.class), eq(7)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getInt("id")).thenReturn(7);
+                    when(rs.getString("scheme_name")).thenReturn("Rampur WSS");
+                    when(rs.getString("centre_scheme_id")).thenReturn("IMIS-7");
+                    return List.of(rm.mapRow(rs, 0));
+                });
+        // Pump operators (batched by scheme) — two operators.
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains("PUMP_OPERATOR")),
+                any(RowMapper.class), eq(7)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet r1 = mock(ResultSet.class);
+                    when(r1.getInt("scheme_id")).thenReturn(7);
+                    when(r1.getString("title")).thenReturn("enc-n1");
+                    when(r1.getString("phone_number")).thenReturn("enc-p1");
+                    ResultSet r2 = mock(ResultSet.class);
+                    when(r2.getInt("scheme_id")).thenReturn(7);
+                    when(r2.getString("title")).thenReturn("enc-n2");
+                    when(r2.getString("phone_number")).thenReturn("enc-p2");
+                    return List.of(rm.mapRow(r1, 0), rm.mapRow(r2, 1));
+                });
+        when(piiEncryptionService.safeDecrypt(any())).thenAnswer(inv -> {
+            String v = inv.getArgument(0);
+            if (v == null) {
+                return null;
+            }
+            return switch (v) {
+                case "enc-officer" -> "Binod";
+                case "enc-n1" -> "Ramesh";
+                case "enc-p1" -> "919000000001";
+                case "enc-n2" -> "Suresh";
+                case "enc-p2" -> "919000000002";
+                default -> v;
+            };
+        });
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("f.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER")).thenReturn(true);
+
+        router.route(json);
+
+        ArgumentCaptor<List<DailyReportPriorityRow>> cap = ArgumentCaptor.forClass(List.class);
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), cap.capture(), anyList());
+        List<DailyReportPriorityRow> rows = cap.getValue();
+        assertThat(rows).hasSize(1);
+        DailyReportPriorityRow row = rows.get(0);
+        assertThat(row.getScheme()).isEqualTo("Rampur WSS");
+        assertThat(row.getImisId()).isEqualTo("IMIS-7");
+        assertThat(row.getJalMitraNames()).isEqualTo("Ramesh, Suresh");
+        assertThat(row.getJalMitraMobiles()).isEqualTo("919000000001, 919000000002");
+        assertThat(row.getIssue()).isEqualTo("Pump Failure");
+        assertThat(row.getRemarks()).isEqualTo("No water supply for past 5 days");
     }
 }
