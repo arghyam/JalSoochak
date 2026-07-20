@@ -15,7 +15,7 @@ import java.util.function.Supplier;
 @Slf4j
 public class FlowVisionReadingsRetryService {
 
-    private static final String INSTANCE_NAME = "flowvisionReadings";
+    static final String INSTANCE_NAME = "flowvisionReadings";
     private final FlowVisionService flowVisionService;
     private final Retry retry;
     private final CircuitBreaker circuitBreaker;

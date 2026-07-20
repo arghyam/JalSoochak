@@ -14,4 +14,11 @@ public class LoginRequestDTO {
 
     @NotBlank(message = "Password is required")
     private String password;
+
+    /**
+     * Optional reCAPTCHA token. Intentionally not {@code @NotBlank}: when {@code captcha.enabled=false}
+     * (dark rollout) and for existing clients it may be absent; emptiness is enforced inside
+     * {@code CaptchaVerificationService.verify(...)} only when CAPTCHA is enabled.
+     */
+    private String captchaToken;
 }

@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -127,17 +128,26 @@ class FlowVisionReadingsRetryServiceTest {
             return secondResult;
         });
 
+        BulkheadRegistry bulkheadRegistry = BulkheadRegistry.of(bulkheadConfig(1));
         FlowVisionReadingsRetryService service = newService(
                 flowVisionService,
-                1,
+                bulkheadRegistry,
                 Duration.ofMillis(300)
         );
+        // Same instance the service resolved, so a rename cannot leave this watching an idle bulkhead.
+        Bulkhead bulkhead = bulkheadRegistry.bulkhead(FlowVisionReadingsRetryService.INSTANCE_NAME);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             Future<FlowVisionResult> firstFuture = executor.submit(
                     () -> service.extractReading("https://example.com/first.jpg")
             );
             assertTrue(firstAttemptFailed.await(1, TimeUnit.SECONDS));
+
+            // The latch fires from inside the supplier, so the permit is still held when it returns — it
+            // is only released as the failure unwinds out of the bulkhead. Wait for that release rather
+            // than assume it, or the call below races the worker thread for the single permit.
+            assertTrue(awaitFreePermit(bulkhead, Duration.ofSeconds(1)),
+                    "the failed attempt should release its bulkhead permit before the retry backoff");
 
             FlowVisionResult secondActual = service.extractReading("https://example.com/second.jpg");
             FlowVisionResult firstActual = firstFuture.get(1, TimeUnit.SECONDS);
@@ -149,21 +159,29 @@ class FlowVisionReadingsRetryServiceTest {
         }
     }
 
+    /** Waits for the bulkhead to report a free permit, which is the observable signal that a call released it. */
+    private static boolean awaitFreePermit(Bulkhead bulkhead, Duration timeout) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadlineNanos) {
+            if (bulkhead.getMetrics().getAvailableConcurrentCalls() > 0) {
+                return true;
+            }
+            Thread.sleep(5);
+        }
+        return false;
+    }
+
     private FlowVisionReadingsRetryService newService(FlowVisionService flowVisionService) {
-        return newService(flowVisionService, 10, Duration.ZERO);
+        return newService(flowVisionService, BulkheadRegistry.of(bulkheadConfig(10)), Duration.ZERO);
     }
 
     private FlowVisionReadingsRetryService newService(FlowVisionService flowVisionService,
-                                                      int maxConcurrentCalls,
+                                                      BulkheadRegistry bulkheadRegistry,
                                                       Duration waitDuration) {
         RetryConfig retryConfig = RetryConfig.custom()
                 .maxAttempts(3)
                 .waitDuration(waitDuration)
                 .retryExceptions(FlowVisionTransientFailures.retriableExceptions())
-                .build();
-        BulkheadConfig bulkheadConfig = BulkheadConfig.custom()
-                .maxConcurrentCalls(maxConcurrentCalls)
-                .maxWaitDuration(Duration.ZERO)
                 .build();
         CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom()
                 .recordExceptions(FlowVisionTransientFailures.retriableExceptions())
@@ -172,8 +190,15 @@ class FlowVisionReadingsRetryServiceTest {
                 flowVisionService,
                 RetryRegistry.of(retryConfig),
                 CircuitBreakerRegistry.of(circuitBreakerConfig),
-                BulkheadRegistry.of(bulkheadConfig)
+                bulkheadRegistry
         );
+    }
+
+    private static BulkheadConfig bulkheadConfig(int maxConcurrentCalls) {
+        return BulkheadConfig.custom()
+                .maxConcurrentCalls(maxConcurrentCalls)
+                .maxWaitDuration(Duration.ZERO)
+                .build();
     }
 
     private static Stream<RuntimeException> retriableHttpExceptions() {
