@@ -1,7 +1,8 @@
 package org.arghyam.jalsoochak.analytics.repository;
 
-import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
+import org.arghyam.jalsoochak.analytics.helper.DashboardWorkStatusFilter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -19,12 +20,35 @@ import java.util.Set;
  *
  * <p>scheme_id and lgd/department ids are only unique within a tenant, so every
  * grain key and every join is tenant-scoped.</p>
+ *
+ * <p><b>Work-status filter:</b> the base grain ({@code fact_scheme_daily_table}) is built
+ * <em>unfiltered</em> — one row per scheme-day regardless of {@code work_status} — so a
+ * filter change never requires rebuilding it. The filter is applied when rolling up into
+ * {@code fact_region_metrics_table} / {@code fact_region_distribution_table}, using the
+ * SCD-2 history row ({@code dim_tenant_work_status_filter_table}) in force on the bucket's
+ * {@code period_end}. Region-metric rows are built per {@code work_status_scope}:
+ * {@code TENANT} (own tenant → national → env chain; all hierarchies/levels — what tenant
+ * dashboards read) and {@code NATIONAL} (national → env chain, uniform; LGD levels 1-2 —
+ * what the national dashboard reads). This mirrors the legacy SQL's {@code {{WS}}} vs
+ * {@code {{NWS}}} split while keeping stored history reproducible.</p>
  */
 @Repository
-@RequiredArgsConstructor
 public class AggregationRepository {
 
+    /** Scope value for rows built with the tenant-chain filter (tenant dashboards). */
+    public static final String SCOPE_TENANT = "TENANT";
+    /** Scope value for rows built with the uniform national-chain filter (national dashboard). */
+    public static final String SCOPE_NATIONAL = "NATIONAL";
+
     private final JdbcTemplate jdbcTemplate;
+    private final DashboardWorkStatusFilter workStatusFilter;
+
+    public AggregationRepository(
+            JdbcTemplate jdbcTemplate,
+            @Value("${analytics.dashboard.included-work-statuses:4}") String includedWorkStatusesCsv) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.workStatusFilter = new DashboardWorkStatusFilter(includedWorkStatusesCsv);
+    }
 
     /** Whitelisted hierarchy level columns on dim_scheme_table / fact_scheme_daily_table. */
     private static final Set<String> ALLOWED_LEVEL_COLUMNS = Set.of(
@@ -32,6 +56,11 @@ public class AggregationRepository {
             "level_4_lgd_id", "level_5_lgd_id", "level_6_lgd_id",
             "level_1_dept_id", "level_2_dept_id", "level_3_dept_id",
             "level_4_dept_id", "level_5_dept_id", "level_6_dept_id");
+
+    /** {@code DATE '...'} literal for a typed LocalDate (ISO format; never user-supplied text). */
+    private static String dateLiteral(LocalDate date) {
+        return "DATE '" + date + "'";
+    }
 
     // ============================================================
     // Tier 1 — base scheme x day summary
@@ -183,22 +212,46 @@ public class AggregationRepository {
     // Tier 2 — region rollups (both hierarchies, all 6 levels)
     // ============================================================
 
-    /** Roll fact_scheme_daily_table into fact_region_metrics_table for one bucket, across both hierarchies and all levels. */
+    /**
+     * Roll fact_scheme_daily_table into fact_region_metrics_table for one bucket:
+     * TENANT-scope rows across both hierarchies and all levels (what tenant dashboards
+     * read), plus NATIONAL-scope rows at LGD levels 1-2 (all the national dashboard
+     * reads). Each scope applies its own work-status filter chain, resolved from the
+     * SCD-2 history as of the bucket's period_end.
+     */
     public int upsertRegionMetrics(PeriodScale scale, LocalDate periodStart, LocalDate periodEnd, boolean isFinal) {
+        // Clear the bucket first (transactional with the rebuild): an UPSERT alone would leave a
+        // stale row behind when a filter/mapping change removes every qualifying scheme from a
+        // region, since the INSERT no longer emits that region at all.
+        jdbcTemplate.update("""
+                DELETE FROM analytics_schema.fact_region_metrics_table
+                WHERE period_scale = ? AND period_start = ?
+                """, scale.name(), periodStart);
         int total = 0;
         for (int level = 1; level <= 6; level++) {
             total += upsertRegionMetricsForLevel(scale, periodStart, periodEnd, "LGD",
-                    "level_" + level + "_lgd_id", level, isFinal);
+                    "level_" + level + "_lgd_id", level, isFinal, SCOPE_TENANT);
             total += upsertRegionMetricsForLevel(scale, periodStart, periodEnd, "DEPT",
-                    "level_" + level + "_dept_id", level, isFinal);
+                    "level_" + level + "_dept_id", level, isFinal, SCOPE_TENANT);
+        }
+        for (int level = 1; level <= 2; level++) {
+            total += upsertRegionMetricsForLevel(scale, periodStart, periodEnd, "LGD",
+                    "level_" + level + "_lgd_id", level, isFinal, SCOPE_NATIONAL);
         }
         return total;
     }
 
     private int upsertRegionMetricsForLevel(PeriodScale scale, LocalDate periodStart, LocalDate periodEnd,
-                                            String hierarchy, String levelColumn, int level, boolean isFinal) {
+                                            String hierarchy, String levelColumn, int level, boolean isFinal,
+                                            String workStatusScope) {
         requireAllowedColumn(levelColumn);
         long daysInRange = java.time.temporal.ChronoUnit.DAYS.between(periodStart, periodEnd) + 1;
+        // Filter in force for this bucket (as of period_end), per scope. Rendered against the
+        // dim_scheme_table alias "ds" used by every scheme-scope subquery below.
+        String asOf = dateLiteral(periodEnd);
+        String schemeFilter = SCOPE_NATIONAL.equals(workStatusScope)
+                ? workStatusFilter.andNationalHistoryPredicate("ds", asOf)
+                : workStatusFilter.andHistoryPredicate("ds", asOf);
 
         // s = scheme set per region (from dim_scheme — authoritative, includes inactive / no-activity schemes).
         //     dim_scheme_table holds one row per parent mapping, so schemes are de-duplicated per region
@@ -212,6 +265,7 @@ public class AggregationRepository {
         String sql = ("""
                 INSERT INTO analytics_schema.fact_region_metrics_table (
                     period_scale, period_start, period_end, tenant_id, hierarchy, region_level, region_id,
+                    work_status_scope,
                     days_in_range, scheme_count, total_supply_days, total_submission_days,
                     active_scheme_count, inactive_scheme_count, total_water_supplied_liters,
                     total_household_count, total_achieved_fhtc, total_planned_fhtc,
@@ -222,6 +276,7 @@ public class AggregationRepository {
                     computed_at, is_final
                 )
                 SELECT ?, ?, ?, s.tenant_id, ?, ?, s.region_id,
+                       ?,
                        ?, s.scheme_count,
                        COALESCE(a.total_supply_days, 0), COALESCE(a.total_submission_days, 0),
                        s.active_scheme_count, s.inactive_scheme_count,
@@ -256,7 +311,7 @@ public class AggregationRepository {
                                %1$s AS region_id, ds.tenant_id, ds.scheme_id,
                                ds.operating_status, ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
                         FROM analytics_schema.dim_scheme_table ds
-                        WHERE %1$s IS NOT NULL
+                        WHERE %1$s IS NOT NULL%2$s
                         ORDER BY %1$s, ds.tenant_id, ds.scheme_id,
                                  COALESCE(ds.fhtc_count, 0) DESC, COALESCE(ds.house_hold_count, 0) DESC, COALESCE(ds.planned_fhtc, 0) DESC
                     ) dedup
@@ -275,9 +330,9 @@ public class AggregationRepository {
                            MAX(sd.norm_over_supply_pct) AS norm_over_supply_pct,
                            MAX(sd.norm_under_supply_pct) AS norm_under_supply_pct
                     FROM (
-                        SELECT DISTINCT %1$s AS region_id, tenant_id, scheme_id
-                        FROM analytics_schema.dim_scheme_table
-                        WHERE %1$s IS NOT NULL
+                        SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
+                        FROM analytics_schema.dim_scheme_table ds
+                        WHERE %1$s IS NOT NULL%2$s
                     ) m
                     JOIN analytics_schema.fact_scheme_daily_table sd
                       ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
@@ -294,9 +349,9 @@ public class AggregationRepository {
                                SUM(sd.supplied) AS supply_days,
                                SUM(sd.submitted) AS submission_days
                         FROM (
-                            SELECT DISTINCT %1$s AS region_id, tenant_id, scheme_id
-                            FROM analytics_schema.dim_scheme_table
-                            WHERE %1$s IS NOT NULL
+                            SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
+                            FROM analytics_schema.dim_scheme_table ds
+                            WHERE %1$s IS NOT NULL%2$s
                         ) m
                         JOIN analytics_schema.fact_scheme_daily_table sd
                           ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
@@ -305,7 +360,7 @@ public class AggregationRepository {
                     ) ps
                     GROUP BY region_id, tenant_id
                 ) c ON c.region_id = s.region_id AND c.tenant_id = s.tenant_id
-                ON CONFLICT (period_scale, period_start, tenant_id, hierarchy, region_level, region_id) DO UPDATE SET
+                ON CONFLICT (period_scale, period_start, tenant_id, hierarchy, region_level, region_id, work_status_scope) DO UPDATE SET
                     period_end = EXCLUDED.period_end,
                     days_in_range = EXCLUDED.days_in_range, scheme_count = EXCLUDED.scheme_count,
                     total_supply_days = EXCLUDED.total_supply_days, total_submission_days = EXCLUDED.total_submission_days,
@@ -325,10 +380,11 @@ public class AggregationRepository {
                     norm_required_lpcd = EXCLUDED.norm_required_lpcd, norm_persons_per_household = EXCLUDED.norm_persons_per_household,
                     norm_over_supply_pct = EXCLUDED.norm_over_supply_pct, norm_under_supply_pct = EXCLUDED.norm_under_supply_pct,
                     computed_at = EXCLUDED.computed_at, is_final = EXCLUDED.is_final
-                """).formatted(levelColumn);
+                """).formatted(levelColumn, schemeFilter);
 
         return jdbcTemplate.update(sql,
                 scale.name(), periodStart, periodEnd, hierarchy, level,
+                workStatusScope,
                 daysInRange,
                 daysInRange, daysInRange,   // average_regularity denominators
                 daysInRange, daysInRange,   // reading_submission_rate denominators
@@ -338,8 +394,17 @@ public class AggregationRepository {
                 periodStart, periodEnd);    // per-scheme window
     }
 
-    /** Roll fact_scheme_daily_table reason/status columns into the long-format distribution table for one bucket. */
+    /**
+     * Roll fact_scheme_daily_table reason/status columns into the long-format distribution
+     * table for one bucket. Distributions serve tenant screens, so the TENANT-chain filter
+     * (as of the bucket's period_end) restricts the scheme set; the bucket is cleared first
+     * so reason keys that disappear on re-aggregation don't leave stale slices behind.
+     */
     public int upsertRegionDistribution(PeriodScale scale, LocalDate periodStart, LocalDate periodEnd, boolean isFinal) {
+        jdbcTemplate.update("""
+                DELETE FROM analytics_schema.fact_region_distribution_table
+                WHERE period_scale = ? AND period_start = ?
+                """, scale.name(), periodStart);
         int total = 0;
         for (int level = 1; level <= 6; level++) {
             total += upsertDistributionForLevel(scale, periodStart, periodEnd, "LGD",
@@ -353,6 +418,7 @@ public class AggregationRepository {
     private int upsertDistributionForLevel(PeriodScale scale, LocalDate periodStart, LocalDate periodEnd,
                                            String hierarchy, String levelColumn, int level, boolean isFinal) {
         requireAllowedColumn(levelColumn);
+        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(periodEnd));
         // OUTAGE_REASON and NON_SUBMISSION_REASON: distinct schemes per reason in the bucket.
         // Region membership comes from the dim_scheme mapping rows (a multi-mapped scheme
         // belongs to every region it maps to), not from the daily row's single stored chain.
@@ -367,9 +433,9 @@ public class AggregationRepository {
                     SELECT m.region_id, sd.tenant_id, sd.scheme_id,
                            'OUTAGE_REASON' AS dist_type, sd.outage_reason_code AS dist_key
                     FROM (
-                        SELECT DISTINCT %1$s AS region_id, tenant_id, scheme_id
-                        FROM analytics_schema.dim_scheme_table
-                        WHERE %1$s IS NOT NULL
+                        SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
+                        FROM analytics_schema.dim_scheme_table ds
+                        WHERE %1$s IS NOT NULL%2$s
                     ) m
                     JOIN analytics_schema.fact_scheme_daily_table sd
                       ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
@@ -378,9 +444,9 @@ public class AggregationRepository {
                     SELECT m.region_id, sd.tenant_id, sd.scheme_id,
                            'NON_SUBMISSION_REASON' AS dist_type, sd.non_submission_reason_code AS dist_key
                     FROM (
-                        SELECT DISTINCT %1$s AS region_id, tenant_id, scheme_id
-                        FROM analytics_schema.dim_scheme_table
-                        WHERE %1$s IS NOT NULL
+                        SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
+                        FROM analytics_schema.dim_scheme_table ds
+                        WHERE %1$s IS NOT NULL%2$s
                     ) m
                     JOIN analytics_schema.fact_scheme_daily_table sd
                       ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
@@ -392,7 +458,7 @@ public class AggregationRepository {
                               scheme_count = EXCLUDED.scheme_count,
                               computed_at = EXCLUDED.computed_at,
                               is_final = EXCLUDED.is_final
-                """).formatted(levelColumn);
+                """).formatted(levelColumn, schemeFilter);
         return jdbcTemplate.update(sql,
                 scale.name(), periodStart, periodEnd, hierarchy, level, isFinal,
                 periodStart, periodEnd, periodStart, periodEnd);

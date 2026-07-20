@@ -15,12 +15,14 @@ import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.entity.DimTenantWaterNorm;
+import org.arghyam.jalsoochak.analytics.entity.DimTenantWorkStatusFilter;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.repository.DimDepartmentLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantWaterNormRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimTenantWorkStatusFilterRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -61,6 +63,8 @@ class DimensionServiceImplTest {
     private DimDepartmentLocationRepository dimDepartmentLocationRepository;
     @Mock
     private DimTenantWaterNormRepository dimTenantWaterNormRepository;
+    @Mock
+    private DimTenantWorkStatusFilterRepository dimTenantWorkStatusFilterRepository;
     @Mock
     private JdbcTemplate jdbcTemplate;
 
@@ -250,6 +254,74 @@ class DimensionServiceImplTest {
         assertThat(saved.getStatus()).isEqualTo(1);
         assertThat(saved.getCreatedAt()).isNotNull();
         assertThat(saved.getIncludedWorkStatuses()).containsExactly(4);
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_opensScd2HistoryRow() {
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 1, "MP", List.of(1, 4));
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(
+                DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
+        when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.empty());
+
+        service.updateIncludedWorkStatuses(event);
+
+        ArgumentCaptor<DimTenantWorkStatusFilter> captor =
+                ArgumentCaptor.forClass(DimTenantWorkStatusFilter.class);
+        verify(dimTenantWorkStatusFilterRepository, times(1)).save(captor.capture());
+        DimTenantWorkStatusFilter opened = captor.getValue();
+        assertThat(opened.getTenantId()).isEqualTo(1);
+        assertThat(opened.getEffectiveFrom()).isEqualTo(LocalDate.now());
+        assertThat(opened.getEffectiveTo()).isNull();
+        assertThat(opened.getIncludedWorkStatuses()).containsExactly(1, 4);
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_changedSet_closesOpenHistoryRowThenOpensNew() {
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 1, "MP", List.of(4));
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(
+                DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
+        DimTenantWorkStatusFilter open = DimTenantWorkStatusFilter.builder()
+                .tenantId(1)
+                .effectiveFrom(LocalDate.now().minusDays(30))
+                .includedWorkStatuses(List.of(1, 4))
+                .build();
+        when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.of(open));
+
+        service.updateIncludedWorkStatuses(event);
+
+        assertThat(open.getEffectiveTo()).isEqualTo(LocalDate.now());
+        verify(dimTenantWorkStatusFilterRepository, times(1)).saveAndFlush(open);
+        ArgumentCaptor<DimTenantWorkStatusFilter> captor =
+                ArgumentCaptor.forClass(DimTenantWorkStatusFilter.class);
+        verify(dimTenantWorkStatusFilterRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getIncludedWorkStatuses()).containsExactly(4);
+        assertThat(captor.getValue().getEffectiveTo()).isNull();
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_unchangedSet_keepsHistoryTimelineStable() {
+        // Same set in a different order: the timeline must not churn.
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 1, "MP", List.of(4, 1));
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(
+                DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
+        DimTenantWorkStatusFilter open = DimTenantWorkStatusFilter.builder()
+                .tenantId(1)
+                .effectiveFrom(LocalDate.now().minusDays(30))
+                .includedWorkStatuses(List.of(1, 4))
+                .build();
+        when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.of(open));
+
+        service.updateIncludedWorkStatuses(event);
+
+        assertThat(open.getEffectiveTo()).isNull();
+        verify(dimTenantWorkStatusFilterRepository, times(0)).save(any(DimTenantWorkStatusFilter.class));
+        verify(dimTenantWorkStatusFilterRepository, times(0)).saveAndFlush(any(DimTenantWorkStatusFilter.class));
     }
 
     @Test

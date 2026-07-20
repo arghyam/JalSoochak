@@ -18,6 +18,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +55,10 @@ class AggregationPipelineIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("spring.flyway.schemas", () -> "analytics_schema");
+        // Env tier of the work-status filter off: base pipeline tests assert unfiltered
+        // aggregation; the filter tests below configure the SCD-2 history tiers instead
+        // (which take precedence over env regardless of this setting).
+        registry.add("analytics.dashboard.included-work-statuses", () -> "");
     }
 
     @Autowired
@@ -127,7 +132,8 @@ class AggregationPipelineIntegrationTest {
                 SELECT scheme_count, total_supply_days, total_submission_days, total_water_supplied_liters,
                        supply_days_in_efficient_range, continuous_scheme_count
                 FROM analytics_schema.fact_region_metrics_table
-                WHERE period_scale = 'DAY' AND tenant_id = 1 AND hierarchy = 'LGD'
+                WHERE period_scale = 'DAY' AND work_status_scope = 'TENANT'
+                  AND tenant_id = 1 AND hierarchy = 'LGD'
                   AND region_level = 1 AND region_id = 1 AND period_start = ?
                 """, D1);
         assertThat(day1.get("scheme_count")).isEqualTo(2);
@@ -142,7 +148,8 @@ class AggregationPipelineIntegrationTest {
         Map<String, Object> week = jdbcTemplate.queryForMap("""
                 SELECT total_supply_days, total_submission_days, total_water_supplied_liters
                 FROM analytics_schema.fact_region_metrics_table
-                WHERE period_scale = 'WEEK' AND tenant_id = 1 AND hierarchy = 'LGD'
+                WHERE period_scale = 'WEEK' AND work_status_scope = 'TENANT'
+                  AND tenant_id = 1 AND hierarchy = 'LGD'
                   AND region_level = 1 AND region_id = 1 AND period_start = ?
                 """, LocalDate.of(2026, 1, 4));
         assertThat(week.get("total_supply_days")).isEqualTo(3);
@@ -205,6 +212,112 @@ class AggregationPipelineIntegrationTest {
         assertThat(s2.supplyDays()).isEqualTo(1);
     }
 
+    @Test
+    void regionRollup_buildsScopedRows_withPeriodEffectiveFilters() {
+        // Tenant tier: {4} in force through D1, then {1,4} from D2 on.
+        insertFilterHistory(1, LocalDate.of(2020, 1, 1), D2, List.of(4));
+        insertFilterHistory(1, D2, null, List.of(1, 4));
+        // National tier: {1} the whole time.
+        insertFilterHistory(0, LocalDate.of(2020, 1, 1), null, List.of(1));
+
+        aggregationRepository.upsertSchemeDaily(D1, D2);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D1, D1, true);
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D2, D2, true);
+
+        // TENANT scope, D1 bucket (filter {4} in force on its period_end): only scheme1 counts —
+        // water 10, supply day 1, efficient 1.
+        Map<String, Object> tenantD1 = jdbcTemplate.queryForMap("""
+                SELECT scheme_count, total_supply_days, total_water_supplied_liters, supply_days_in_efficient_range
+                FROM analytics_schema.fact_region_metrics_table
+                WHERE period_scale = 'DAY' AND work_status_scope = 'TENANT'
+                  AND tenant_id = 1 AND hierarchy = 'LGD'
+                  AND region_level = 1 AND region_id = 1 AND period_start = ?
+                """, D1);
+        assertThat(tenantD1.get("scheme_count")).isEqualTo(1);
+        assertThat(tenantD1.get("total_supply_days")).isEqualTo(1);
+        assertThat(((Number) tenantD1.get("total_water_supplied_liters")).longValue()).isEqualTo(10L);
+        assertThat(tenantD1.get("supply_days_in_efficient_range")).isEqualTo(1);
+
+        // TENANT scope, D2 bucket ({1,4} in force): both schemes count, but scheme2's D2 water
+        // is NOT_SUBMITTED so only scheme1's 10 qualifies.
+        Map<String, Object> tenantD2 = jdbcTemplate.queryForMap("""
+                SELECT scheme_count, total_supply_days, total_water_supplied_liters
+                FROM analytics_schema.fact_region_metrics_table
+                WHERE period_scale = 'DAY' AND work_status_scope = 'TENANT'
+                  AND tenant_id = 1 AND hierarchy = 'LGD'
+                  AND region_level = 1 AND region_id = 1 AND period_start = ?
+                """, D2);
+        assertThat(tenantD2.get("scheme_count")).isEqualTo(2);
+        assertThat(tenantD2.get("total_supply_days")).isEqualTo(1);
+        assertThat(((Number) tenantD2.get("total_water_supplied_liters")).longValue()).isEqualTo(10L);
+
+        // NATIONAL scope, D1 bucket (uniform national {1}): only scheme2 counts — water 999.
+        Map<String, Object> nationalD1 = jdbcTemplate.queryForMap("""
+                SELECT scheme_count, total_supply_days, total_water_supplied_liters
+                FROM analytics_schema.fact_region_metrics_table
+                WHERE period_scale = 'DAY' AND work_status_scope = 'NATIONAL'
+                  AND tenant_id = 1 AND hierarchy = 'LGD'
+                  AND region_level = 1 AND region_id = 1 AND period_start = ?
+                """, D1);
+        assertThat(nationalD1.get("scheme_count")).isEqualTo(1);
+        assertThat(nationalD1.get("total_supply_days")).isEqualTo(1);
+        assertThat(((Number) nationalD1.get("total_water_supplied_liters")).longValue()).isEqualTo(999L);
+
+        // NATIONAL rows exist only at LGD levels 1-2 (all the national dashboard reads).
+        Integer nationalDeptRows = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM analytics_schema.fact_region_metrics_table
+                WHERE work_status_scope = 'NATIONAL' AND hierarchy = 'DEPT'
+                """, Integer.class);
+        assertThat(nationalDeptRows).isZero();
+
+        // The national read path returns the NATIONAL-scope figures.
+        var national = aggregateReadRepository.getNationalRegionMetrics(1, D1, D1);
+        assertThat(national).isPresent();
+        assertThat(national.get()).hasSize(1);
+        assertThat(national.get().get(0).schemeCount()).isEqualTo(1);
+        assertThat(national.get().get(0).totalWaterSuppliedLiters()).isEqualTo(999L);
+    }
+
+    @Test
+    void derivedReads_applyTenantFilterInForceAtRangeEnd() {
+        insertFilterHistory(1, LocalDate.of(2020, 1, 1), null, List.of(4));
+        aggregationRepository.upsertSchemeDaily(D1, D2);
+
+        // Continuous over [D1, D2]: only scheme1 is in filter; it supplied both days => 1.
+        var continuous = aggregateReadRepository.getContinuousSchemeCount(1, "LGD", 1, D1, D2, 2);
+        assertThat(continuous).isPresent();
+        assertThat(continuous.getAsLong()).isEqualTo(1L);
+
+        // Child rollup: child region 10 counts only scheme1 (water 10+10, 2 supply days).
+        var children = aggregateReadRepository.getChildRegionMetrics(1, "LGD", 1, 1, D1, D2);
+        assertThat(children).isPresent();
+        assertThat(children.get()).hasSize(1);
+        assertThat(children.get().get(0).schemeCount()).isEqualTo(1);
+        assertThat(children.get().get(0).totalSupplyDays()).isEqualTo(2L);
+        assertThat(children.get().get(0).totalWaterSuppliedLiters()).isEqualTo(20L);
+
+        // Per-scheme water supply: only the handed-over scheme is listed.
+        var schemes = aggregateReadRepository.getSchemeWaterSupply(1, D1, D2);
+        assertThat(schemes).isPresent();
+        assertThat(schemes.get()).hasSize(1);
+        assertThat(schemes.get().get(0).schemeId()).isEqualTo(1);
+
+        // Critical at cutoff D2: scheme1 (the only in-filter scheme) last supplied D2 => 0 critical.
+        var critical = aggregateReadRepository.getCriticalSchemeCount(1, "LGD", 1, D2);
+        assertThat(critical).isPresent();
+        assertThat(critical.getAsLong()).isZero();
+    }
+
+    private void insertFilterHistory(int tenantId, LocalDate from, LocalDate to, List<Integer> statuses) {
+        String array = "{" + statuses.stream().map(String::valueOf)
+                .collect(java.util.stream.Collectors.joining(",")) + "}";
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_tenant_work_status_filter_table
+                (tenant_id, effective_from, effective_to, included_work_statuses, created_at)
+                VALUES (?, ?, ?, ?::int[], NOW())
+                """, tenantId, from, to, array);
+    }
+
     private void truncateAll() {
         jdbcTemplate.execute("""
                 TRUNCATE
@@ -212,6 +325,7 @@ class AggregationPipelineIntegrationTest {
                     analytics_schema.fact_region_metrics_table,
                     analytics_schema.fact_scheme_daily_table,
                     analytics_schema.dim_tenant_water_norm_table,
+                    analytics_schema.dim_tenant_work_status_filter_table,
                     analytics_schema.fact_meter_reading_table,
                     analytics_schema.fact_water_quantity_table,
                     analytics_schema.dim_scheme_table,
@@ -258,15 +372,17 @@ class AggregationPipelineIntegrationTest {
                 VALUES (11, 1, 'u11@test.local', 1, NOW(), NOW(), 'User 11')
                 """);
 
+        // work_status: scheme1 = 4 (handed over), scheme2 = 1 (in progress) — inert while
+        // no filter tier is configured (env off), exercised by the filter-scope tests.
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_scheme_table
                 (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
                  parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
                  parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
-                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                 operating_status, work_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
                 VALUES
-                (1, 1, 'S1', 1001, 2001, 0.0, 0.0, 1, 1, 10, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW()),
-                (2, 1, 'S2', 1002, 2002, 0.0, 0.0, 1, 1, 10, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 10, 10, 10, NOW(), NOW())
+                (1, 1, 'S1', 1001, 2001, 0.0, 0.0, 1, 1, 10, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 4, 10, 10, 10, NOW(), NOW()),
+                (2, 1, 'S2', 1002, 2002, 0.0, 0.0, 1, 1, 10, NULL, NULL, NULL, NULL, 1, 1, 1, NULL, NULL, NULL, NULL, 1, 1, 10, 10, 10, NOW(), NOW())
                 """);
 
         // Meter readings drive `submitted` and the compliant/anomalous counts only

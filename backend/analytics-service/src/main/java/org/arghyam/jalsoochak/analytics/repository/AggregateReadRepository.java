@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.analytics.repository;
 
-import lombok.RequiredArgsConstructor;
+import org.arghyam.jalsoochak.analytics.helper.DashboardWorkStatusFilter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -24,12 +25,34 @@ import java.util.stream.IntStream;
  *
  * <p>region_id (lgd/department id) is only unique within a tenant + hierarchy, so
  * every lookup is tenant-scoped.</p>
+ *
+ * <p><b>Work-status filter:</b> pre-rolled fact_region_metrics_table rows carry a
+ * {@code work_status_scope} — tenant-facing reads select the {@code TENANT} rows, the
+ * national dashboard selects the {@code NATIONAL} rows. KPIs derived at read time from
+ * the (unfiltered) base grain apply the tenant-chain filter from the SCD-2 history
+ * ({@code dim_tenant_work_status_filter_table}) themselves, using the filter in force
+ * at the end of the requested range — matching what the bucket build would have baked
+ * in. Region membership for those derived reads comes from the dim_scheme mapping rows
+ * (a multi-mapped scheme belongs to every region it maps to), not the single location
+ * chain stored on the daily row.</p>
  */
 @Repository
-@RequiredArgsConstructor
 public class AggregateReadRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final DashboardWorkStatusFilter workStatusFilter;
+
+    public AggregateReadRepository(
+            JdbcTemplate jdbcTemplate,
+            @Value("${analytics.dashboard.included-work-statuses:4}") String includedWorkStatusesCsv) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.workStatusFilter = new DashboardWorkStatusFilter(includedWorkStatusesCsv);
+    }
+
+    /** {@code DATE '...'} literal for a typed LocalDate (ISO format; never user-supplied text). */
+    private static String dateLiteral(LocalDate date) {
+        return "DATE '" + date + "'";
+    }
 
     /** Additive region metrics summed over the DAY rows in [start, end]. */
     public record RegionPeriodMetrics(int schemeCount,
@@ -62,6 +85,7 @@ public class AggregateReadRepository {
                        COALESCE(SUM(anomalous_submission_count), 0)     AS anomalous
                 FROM analytics_schema.fact_region_metrics_table
                 WHERE period_scale = 'DAY'
+                  AND work_status_scope = 'TENANT'
                   AND tenant_id = ?
                   AND hierarchy = ?
                   AND region_id = ?
@@ -95,31 +119,37 @@ public class AggregateReadRepository {
      */
     public OptionalLong getContinuousSchemeCount(int tenantId, String hierarchy, int regionId,
                                                 LocalDate start, LocalDate end, int daysInRange) {
-        String suffix = "DEPT".equalsIgnoreCase(hierarchy) ? "dept" : "lgd";
-        String orClause = IntStream.rangeClosed(1, 6)
-                .mapToObj(i -> "level_" + i + "_" + suffix + "_id = ?")
-                .collect(Collectors.joining(" OR "));
+        String orClause = regionMembershipOrClause(hierarchy, "ds");
+        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(end));
+        // Region membership from the dim_scheme mapping rows (multi-mapped schemes are
+        // visible under every region they map to), filtered by the tenant work-status
+        // chain in force at the end of the range; per-day activity joined from the base grain.
         String sql = ("""
                 SELECT COUNT(*) AS active_schemes,
                        COUNT(*) FILTER (WHERE supply_days = ?) AS continuous_schemes
                 FROM (
-                    SELECT scheme_id, SUM(supplied) AS supply_days
-                    FROM analytics_schema.fact_scheme_daily_table
-                    WHERE tenant_id = ?
-                      AND reading_date BETWEEN ? AND ?
-                      AND (%s)
-                    GROUP BY scheme_id
+                    SELECT sd.scheme_id, SUM(sd.supplied) AS supply_days
+                    FROM (
+                        SELECT DISTINCT ds.tenant_id, ds.scheme_id
+                        FROM analytics_schema.dim_scheme_table ds
+                        WHERE ds.tenant_id = ?
+                          AND (%s)%s
+                    ) m
+                    JOIN analytics_schema.fact_scheme_daily_table sd
+                      ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
+                    WHERE sd.reading_date BETWEEN ? AND ?
+                    GROUP BY sd.scheme_id
                 ) t
-                """).formatted(orClause);
+                """).formatted(orClause, schemeFilter);
 
         Object[] params = new Object[4 + 6];
         params[0] = daysInRange;
         params[1] = tenantId;
-        params[2] = start;
-        params[3] = end;
         for (int i = 0; i < 6; i++) {
-            params[4 + i] = regionId;
+            params[2 + i] = regionId;
         }
+        params[8] = start;
+        params[9] = end;
 
         return jdbcTemplate.query(sql, rs -> {
             if (rs.next() && rs.getLong("active_schemes") > 0) {
@@ -127,6 +157,14 @@ public class AggregateReadRepository {
             }
             return OptionalLong.empty();
         }, params);
+    }
+
+    /** OR over the six level columns of {@code alias}: a region id matches exactly one level. */
+    private static String regionMembershipOrClause(String hierarchy, String alias) {
+        String suffix = "DEPT".equalsIgnoreCase(hierarchy) ? "dept" : "lgd";
+        return IntStream.rangeClosed(1, 6)
+                .mapToObj(i -> alias + ".level_" + i + "_" + suffix + "_id = ?")
+                .collect(Collectors.joining(" OR "));
     }
 
     /** One pre-rolled bucket of a region's periodic series (single unified water figure). */
@@ -165,7 +203,8 @@ public class AggregateReadRepository {
                            MAX(total_achieved_fhtc) AS total_achieved_fhtc,
                            MAX(total_planned_fhtc) AS total_planned_fhtc
                     FROM analytics_schema.fact_region_metrics_table
-                    WHERE period_scale = 'MONTH' AND tenant_id = ? AND hierarchy = ? AND region_id = ?
+                    WHERE period_scale = 'MONTH' AND work_status_scope = 'TENANT'
+                      AND tenant_id = ? AND hierarchy = ? AND region_id = ?
                       AND period_start <= ? AND period_end >= ?
                     GROUP BY date_trunc('%1$s', period_start)
                     ORDER BY date_trunc('%1$s', period_start)
@@ -177,7 +216,8 @@ public class AggregateReadRepository {
                            total_water_supplied_liters, total_household_count,
                            total_achieved_fhtc, total_planned_fhtc
                     FROM analytics_schema.fact_region_metrics_table
-                    WHERE period_scale = ? AND tenant_id = ? AND hierarchy = ? AND region_id = ?
+                    WHERE period_scale = ? AND work_status_scope = 'TENANT'
+                      AND tenant_id = ? AND hierarchy = ? AND region_id = ?
                       AND period_start <= ? AND period_end >= ?
                     ORDER BY period_start
                     """;
@@ -204,42 +244,58 @@ public class AggregateReadRepository {
      */
     public Optional<Map<String, Integer>> getReasonDistribution(int tenantId, String hierarchy, int regionId,
                                                                boolean outage, LocalDate start, LocalDate end) {
-        String suffix = "DEPT".equalsIgnoreCase(hierarchy) ? "dept" : "lgd";
-        String orClause = IntStream.rangeClosed(1, 6)
-                .mapToObj(i -> "level_" + i + "_" + suffix + "_id = ?")
-                .collect(Collectors.joining(" OR "));
+        String orClause = regionMembershipOrClause(hierarchy, "ds");
+        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(end));
         String reasonColumn = outage ? "outage_reason_code" : "non_submission_reason_code";
 
-        Object[] regionParams = new Object[3 + 6];
-        regionParams[0] = tenantId;
-        regionParams[1] = start;
-        regionParams[2] = end;
+        // Existence probe (fallback decision) stays unfiltered: it answers "is this
+        // region aggregated at all", not "does it have qualifying schemes".
+        Object[] existsParams = new Object[3 + 6];
+        existsParams[0] = tenantId;
+        existsParams[1] = start;
+        existsParams[2] = end;
         for (int i = 0; i < 6; i++) {
-            regionParams[3 + i] = regionId;
+            existsParams[3 + i] = regionId;
         }
-
         String existsSql = ("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
-                    WHERE tenant_id = ? AND reading_date BETWEEN ? AND ? AND (%s)
+                    SELECT 1
+                    FROM analytics_schema.dim_scheme_table ds
+                    JOIN analytics_schema.fact_scheme_daily_table sd
+                      ON sd.tenant_id = ds.tenant_id AND sd.scheme_id = ds.scheme_id
+                    WHERE ds.tenant_id = ? AND sd.reading_date BETWEEN ? AND ? AND (%s)
                 )
                 """).formatted(orClause);
-        Boolean hasRows = jdbcTemplate.queryForObject(existsSql, Boolean.class, regionParams);
+        Boolean hasRows = jdbcTemplate.queryForObject(existsSql, Boolean.class, existsParams);
         if (hasRows == null || !hasRows) {
             return Optional.empty();
         }
 
+        // Membership via mapping rows + tenant-chain filter as of the range end.
+        Object[] params = new Object[1 + 6 + 2];
+        params[0] = tenantId;
+        for (int i = 0; i < 6; i++) {
+            params[1 + i] = regionId;
+        }
+        params[7] = start;
+        params[8] = end;
         String sql = ("""
-                SELECT %1$s AS dist_key, COUNT(DISTINCT scheme_id) AS scheme_count
-                FROM analytics_schema.fact_scheme_daily_table
-                WHERE tenant_id = ? AND reading_date BETWEEN ? AND ? AND (%2$s) AND %1$s IS NOT NULL
-                GROUP BY %1$s
-                ORDER BY %1$s
-                """).formatted(reasonColumn, orClause);
+                SELECT sd.%1$s AS dist_key, COUNT(DISTINCT sd.scheme_id) AS scheme_count
+                FROM (
+                    SELECT DISTINCT ds.tenant_id, ds.scheme_id
+                    FROM analytics_schema.dim_scheme_table ds
+                    WHERE ds.tenant_id = ? AND (%2$s)%3$s
+                ) m
+                JOIN analytics_schema.fact_scheme_daily_table sd
+                  ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
+                WHERE sd.reading_date BETWEEN ? AND ? AND sd.%1$s IS NOT NULL
+                GROUP BY sd.%1$s
+                ORDER BY sd.%1$s
+                """).formatted(reasonColumn, orClause, schemeFilter);
         Map<String, Integer> dist = new LinkedHashMap<>();
         jdbcTemplate.query(sql, rs -> {
             dist.put(rs.getString("dist_key"), rs.getInt("scheme_count"));
-        }, regionParams);
+        }, params);
         return Optional.of(dist);
     }
 
@@ -276,10 +332,10 @@ public class AggregateReadRepository {
                        COALESCE(a.water_supplied, 0) AS water_supplied,
                        COALESCE(a.supply_days, 0)::int AS supply_days
                 FROM (
-                    SELECT DISTINCT ON (scheme_id) scheme_id, scheme_name, house_hold_count, fhtc_count, planned_fhtc
-                    FROM analytics_schema.dim_scheme_table
-                    WHERE tenant_id = ?
-                    ORDER BY scheme_id, COALESCE(fhtc_count, 0) DESC, COALESCE(house_hold_count, 0) DESC, COALESCE(planned_fhtc, 0) DESC
+                    SELECT DISTINCT ON (ds.scheme_id) ds.scheme_id, ds.scheme_name, ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
+                    FROM analytics_schema.dim_scheme_table ds
+                    WHERE ds.tenant_id = ?%s
+                    ORDER BY ds.scheme_id, COALESCE(ds.fhtc_count, 0) DESC, COALESCE(ds.house_hold_count, 0) DESC, COALESCE(ds.planned_fhtc, 0) DESC
                 ) s
                 LEFT JOIN (
                     SELECT scheme_id, SUM(water_supplied_liters) AS water_supplied, SUM(supplied) AS supply_days
@@ -289,7 +345,7 @@ public class AggregateReadRepository {
                 ) a ON a.scheme_id = s.scheme_id
                 WHERE s.house_hold_count IS NOT NULL AND s.house_hold_count > 0
                 ORDER BY s.scheme_id
-                """;
+                """.formatted(workStatusFilter.andHistoryPredicate("ds", dateLiteral(end)));
         List<SchemeWaterSupplyRow> rows = jdbcTemplate.query(sql, (rs, n) -> new SchemeWaterSupplyRow(
                 rs.getInt("scheme_id"),
                 rs.getString("scheme_name"),
@@ -326,22 +382,34 @@ public class AggregateReadRepository {
 
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
-                    WHERE tenant_id = ? AND %s = ? AND reading_date BETWEEN ? AND ?
+                    SELECT 1
+                    FROM analytics_schema.dim_scheme_table ds
+                    JOIN analytics_schema.fact_scheme_daily_table sd
+                      ON sd.tenant_id = ds.tenant_id AND sd.scheme_id = ds.scheme_id
+                    WHERE ds.tenant_id = ? AND ds.%s = ? AND sd.reading_date BETWEEN ? AND ?
                 )
                 """).formatted(parentCol), Boolean.class, tenantId, parentRegionId, start, end);
         if (hasRows == null || !hasRows) {
             return Optional.empty();
         }
 
+        // Child membership from the dim_scheme mapping rows (a multi-mapped scheme surfaces
+        // under every child it maps to), filtered by the tenant chain as of the range end.
+        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(end));
         String sql = ("""
-                SELECT %1$s AS region_id, %2$s AS reason, COUNT(DISTINCT scheme_id) AS scheme_count
-                FROM analytics_schema.fact_scheme_daily_table
-                WHERE tenant_id = ? AND %3$s = ? AND reading_date BETWEEN ? AND ?
-                  AND %2$s IS NOT NULL AND %1$s IS NOT NULL
-                GROUP BY %1$s, %2$s
-                ORDER BY %1$s, %2$s
-                """).formatted(childCol, reasonCol, parentCol);
+                SELECT m.region_id, sd.%2$s AS reason, COUNT(DISTINCT sd.scheme_id) AS scheme_count
+                FROM (
+                    SELECT DISTINCT ds.%1$s AS region_id, ds.tenant_id, ds.scheme_id
+                    FROM analytics_schema.dim_scheme_table ds
+                    WHERE ds.tenant_id = ? AND ds.%3$s = ? AND ds.%1$s IS NOT NULL%4$s
+                ) m
+                JOIN analytics_schema.fact_scheme_daily_table sd
+                  ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
+                WHERE sd.reading_date BETWEEN ? AND ?
+                  AND sd.%2$s IS NOT NULL
+                GROUP BY m.region_id, sd.%2$s
+                ORDER BY m.region_id, sd.%2$s
+                """).formatted(childCol, reasonCol, parentCol, schemeFilter);
         List<ChildReasonRow> rows = jdbcTemplate.query(sql, (rs, n) -> new ChildReasonRow(
                 rs.getInt("region_id"), rs.getString("reason"), rs.getInt("scheme_count")),
                 tenantId, parentRegionId, start, end);
@@ -386,8 +454,11 @@ public class AggregateReadRepository {
 
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
-                    WHERE tenant_id = ? AND %s = ? AND reading_date BETWEEN ? AND ?
+                    SELECT 1
+                    FROM analytics_schema.dim_scheme_table ds
+                    JOIN analytics_schema.fact_scheme_daily_table sd
+                      ON sd.tenant_id = ds.tenant_id AND sd.scheme_id = ds.scheme_id
+                    WHERE ds.tenant_id = ? AND ds.%s = ? AND sd.reading_date BETWEEN ? AND ?
                 )
                 """).formatted(parentCol), Boolean.class, tenantId, parentRegionId, start, end);
         if (hasRows == null || !hasRows) {
@@ -397,6 +468,8 @@ public class AggregateReadRepository {
         // Child membership comes from the dim_scheme mapping rows: a multi-mapped scheme counts
         // once per child region (DISTINCT ON dedup) but appears under every child it maps to,
         // and its activity is joined per mapping — the same semantics as the legacy queries.
+        // Both subqueries apply the tenant-chain filter as of the range end.
+        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(end));
         String sql = ("""
                 SELECT c.region_id, loc.title, c.scheme_count,
                        COALESCE(a.supply_days, 0)     AS supply_days,
@@ -411,13 +484,13 @@ public class AggregateReadRepository {
                            SUM(COALESCE(fhtc_count, 0))::bigint AS achieved_fhtc,
                            SUM(COALESCE(planned_fhtc, 0))::bigint AS planned_fhtc
                     FROM (
-                        SELECT DISTINCT ON (%2$s, tenant_id, scheme_id)
-                               %2$s AS region_id, tenant_id, scheme_id,
-                               house_hold_count, fhtc_count, planned_fhtc
-                        FROM analytics_schema.dim_scheme_table
-                        WHERE tenant_id = ? AND %1$s = ? AND %2$s IS NOT NULL
-                        ORDER BY %2$s, tenant_id, scheme_id,
-                                 COALESCE(fhtc_count, 0) DESC, COALESCE(house_hold_count, 0) DESC, COALESCE(planned_fhtc, 0) DESC
+                        SELECT DISTINCT ON (ds.%2$s, ds.tenant_id, ds.scheme_id)
+                               ds.%2$s AS region_id, ds.tenant_id, ds.scheme_id,
+                               ds.house_hold_count, ds.fhtc_count, ds.planned_fhtc
+                        FROM analytics_schema.dim_scheme_table ds
+                        WHERE ds.tenant_id = ? AND ds.%1$s = ? AND ds.%2$s IS NOT NULL%5$s
+                        ORDER BY ds.%2$s, ds.tenant_id, ds.scheme_id,
+                                 COALESCE(ds.fhtc_count, 0) DESC, COALESCE(ds.house_hold_count, 0) DESC, COALESCE(ds.planned_fhtc, 0) DESC
                     ) dedup
                     GROUP BY region_id, tenant_id
                 ) c
@@ -428,9 +501,9 @@ public class AggregateReadRepository {
                            SUM(sd.water_supplied_liters) AS water,
                            SUM(sd.is_supply_efficient) AS eff_days
                     FROM (
-                        SELECT DISTINCT %2$s AS region_id, tenant_id, scheme_id
-                        FROM analytics_schema.dim_scheme_table
-                        WHERE tenant_id = ? AND %1$s = ? AND %2$s IS NOT NULL
+                        SELECT DISTINCT ds.%2$s AS region_id, ds.tenant_id, ds.scheme_id
+                        FROM analytics_schema.dim_scheme_table ds
+                        WHERE ds.tenant_id = ? AND ds.%1$s = ? AND ds.%2$s IS NOT NULL%5$s
                     ) m
                     JOIN analytics_schema.fact_scheme_daily_table sd
                       ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
@@ -440,7 +513,7 @@ public class AggregateReadRepository {
                 LEFT JOIN analytics_schema.%3$s loc
                   ON loc.%4$s = c.region_id AND loc.tenant_id = c.tenant_id
                 ORDER BY c.region_id
-                """).formatted(parentCol, childCol, locTable, locIdCol);
+                """).formatted(parentCol, childCol, locTable, locIdCol, schemeFilter);
 
         List<ChildRegionAggRow> rows = jdbcTemplate.query(sql, (rs, n) -> new ChildRegionAggRow(
                 rs.getInt("region_id"),
@@ -464,31 +537,33 @@ public class AggregateReadRepository {
      * so a not-yet-backfilled tenant isn't reported as all-critical).
      */
     public OptionalLong getCriticalSchemeCount(int tenantId, String hierarchy, int regionId, LocalDate cutoffDate) {
-        String suffix = "DEPT".equalsIgnoreCase(hierarchy) ? "dept" : "lgd";
-        String orClause = IntStream.rangeClosed(1, 6)
-                .mapToObj(i -> "level_" + i + "_" + suffix + "_id = ?")
-                .collect(Collectors.joining(" OR "));
+        String orClause = regionMembershipOrClause(hierarchy, "ds");
+        // Critical is a current-state KPI, so the filter in force today applies.
+        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", "CURRENT_DATE");
 
-        Object[] regionParams = new Object[1 + 6];
-        regionParams[0] = tenantId;
+        Object[] existsParams = new Object[1 + 6];
+        existsParams[0] = tenantId;
         for (int i = 0; i < 6; i++) {
-            regionParams[1 + i] = regionId;
+            existsParams[1 + i] = regionId;
         }
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
-                    SELECT 1 FROM analytics_schema.fact_scheme_daily_table
-                    WHERE tenant_id = ? AND (%s)
+                    SELECT 1
+                    FROM analytics_schema.dim_scheme_table ds
+                    JOIN analytics_schema.fact_scheme_daily_table sd
+                      ON sd.tenant_id = ds.tenant_id AND sd.scheme_id = ds.scheme_id
+                    WHERE ds.tenant_id = ? AND (%s)
                 )
-                """).formatted(orClause), Boolean.class, regionParams);
+                """).formatted(orClause), Boolean.class, existsParams);
         if (hasRows == null || !hasRows) {
             return OptionalLong.empty();
         }
 
         String sql = ("""
                 WITH scope AS (
-                    SELECT scheme_id
-                    FROM analytics_schema.dim_scheme_table
-                    WHERE tenant_id = ? AND (%s)
+                    SELECT DISTINCT ds.scheme_id
+                    FROM analytics_schema.dim_scheme_table ds
+                    WHERE ds.tenant_id = ? AND (%s)%s
                 ),
                 last_supply AS (
                     SELECT scheme_id, MAX(reading_date) AS last_supplied_date
@@ -500,7 +575,7 @@ public class AggregateReadRepository {
                 FROM scope s
                 LEFT JOIN last_supply ls ON ls.scheme_id = s.scheme_id
                 WHERE ls.last_supplied_date IS NULL OR ls.last_supplied_date < ?
-                """).formatted(orClause);
+                """).formatted(orClause, schemeFilter);
 
         // Param order: scope (tenant_id, 6x regionId in OR), last_supply (tenant_id), cutoff.
         Object[] params = new Object[]{tenantId, regionId, regionId, regionId, regionId, regionId, regionId, tenantId, cutoffDate};
@@ -535,7 +610,8 @@ public class AggregateReadRepository {
         Boolean hasRows = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
                     SELECT 1 FROM analytics_schema.fact_region_metrics_table
-                    WHERE period_scale = 'DAY' AND hierarchy = 'LGD' AND region_level = ?
+                    WHERE period_scale = 'DAY' AND work_status_scope = 'NATIONAL'
+                      AND hierarchy = 'LGD' AND region_level = ?
                       AND period_start BETWEEN ? AND ?
                 )
                 """, Boolean.class, regionLevel, start, end);
@@ -558,7 +634,8 @@ public class AggregateReadRepository {
                 JOIN analytics_schema.dim_tenant_table t ON t.tenant_id = m.tenant_id
                 LEFT JOIN analytics_schema.dim_lgd_location_table loc
                   ON loc.lgd_id = m.region_id AND loc.tenant_id = m.tenant_id
-                WHERE m.period_scale = 'DAY' AND m.hierarchy = 'LGD' AND m.region_level = ?
+                WHERE m.period_scale = 'DAY' AND m.work_status_scope = 'NATIONAL'
+                  AND m.hierarchy = 'LGD' AND m.region_level = ?
                   AND m.period_start BETWEEN ? AND ?
                 GROUP BY m.tenant_id, m.region_id, t.state_code, t.title, t.status, loc.title
                 ORDER BY m.tenant_id, m.region_id

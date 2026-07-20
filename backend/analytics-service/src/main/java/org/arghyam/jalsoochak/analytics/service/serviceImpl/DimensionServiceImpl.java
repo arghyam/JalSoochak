@@ -15,12 +15,14 @@ import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
 import org.arghyam.jalsoochak.analytics.entity.DimTenantWaterNorm;
+import org.arghyam.jalsoochak.analytics.entity.DimTenantWorkStatusFilter;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.repository.DimDepartmentLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantWaterNormRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimTenantWorkStatusFilterRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +58,7 @@ public class DimensionServiceImpl implements DimensionService {
     private final DimLgdLocationRepository dimLgdLocationRepository;
     private final DimDepartmentLocationRepository dimDepartmentLocationRepository;
     private final DimTenantWaterNormRepository dimTenantWaterNormRepository;
+    private final DimTenantWorkStatusFilterRepository dimTenantWorkStatusFilterRepository;
     private final JdbcTemplate jdbcTemplate;
 
     @Override
@@ -328,8 +331,50 @@ public class DimensionServiceImpl implements DimensionService {
         tenant.setIncludedWorkStatuses(event.getWorkStatuses());
         tenant.setUpdatedAt(LocalDateTime.now());
         dimTenantRepository.save(tenant);
+
+        // Maintain the SCD-2 filter history (mirrors applyWaterNormChange) so aggregation
+        // rebuilds keep using the filter that was in force for each historical period.
+        applyWorkStatusFilterChange(event.getTenantId(), event.getWorkStatuses());
+
         log.info("Updated dim_tenant_table.included_work_statuses={} [tenantId={}]",
                 event.getWorkStatuses(), event.getTenantId());
+    }
+
+    /**
+     * Record a work-status filter change in the SCD-2 history: when the set actually
+     * changes, close the open row (half-open interval) and open a new one effective
+     * today. Applies to both the per-tenant tier ({@code tenantId > 0}) and the
+     * national tier ({@code tenantId == 0}). The close is flushed before the insert
+     * so the "one open row per tenant" partial unique index never sees two open rows.
+     */
+    private void applyWorkStatusFilterChange(Integer tenantId, List<Integer> newStatuses) {
+        LocalDate today = LocalDate.now();
+        DimTenantWorkStatusFilter open =
+                dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(tenantId).orElse(null);
+
+        if (open != null) {
+            if (Objects.equals(normalized(open.getIncludedWorkStatuses()), normalized(newStatuses))) {
+                return; // no real change — keep the timeline stable
+            }
+            open.setEffectiveTo(today);
+            dimTenantWorkStatusFilterRepository.saveAndFlush(open);
+        }
+
+        dimTenantWorkStatusFilterRepository.save(DimTenantWorkStatusFilter.builder()
+                .tenantId(tenantId)
+                .effectiveFrom(today)
+                .effectiveTo(null)
+                .includedWorkStatuses(newStatuses)
+                .createdAt(LocalDateTime.now())
+                .build());
+    }
+
+    /** Order-insensitive comparison basis for the filter set (null and empty are equivalent). */
+    private static List<Integer> normalized(List<Integer> statuses) {
+        if (statuses == null) {
+            return List.of();
+        }
+        return statuses.stream().filter(Objects::nonNull).distinct().sorted().toList();
     }
 
     @Override

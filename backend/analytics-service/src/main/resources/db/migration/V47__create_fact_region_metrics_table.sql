@@ -16,6 +16,16 @@
 -- supply day = total_water_supplied_liters / total_supply_days (after the
 -- de-dup a scheme-day contributes at most one qualifying water row).
 --
+-- work_status_scope: rows exist per filter policy, because tenant screens and the
+-- national dashboard intentionally judge schemes against different work_status
+-- filter tiers (own tenant → national → env vs national → env):
+--   TENANT   = built with the scheme's own-tenant filter chain (all hierarchies/levels)
+--   NATIONAL = built with the uniform national chain (LGD levels 1-2 only — all the
+--              national dashboard reads)
+-- The filter applied is the SCD-2 history row (dim_tenant_work_status_filter_table)
+-- in force on the bucket's period_end, so stored history remains reproducible when
+-- the filter changes later.
+--
 -- NOTE: kept as a plain table for v1; range-partitioning by period_start is a
 -- later optimization if row volume requires it.
 -- ============================================================
@@ -29,6 +39,7 @@ CREATE TABLE analytics_schema.fact_region_metrics_table (
     hierarchy                       VARCHAR(8) NOT NULL,   -- LGD | DEPT
     region_level                    SMALLINT   NOT NULL,   -- 1..6
     region_id                       INT        NOT NULL,
+    work_status_scope               VARCHAR(8) NOT NULL DEFAULT 'TENANT',  -- TENANT | NATIONAL
 
     -- additive measures (safe to sum across days / nodes)
     days_in_range                   INT        NOT NULL DEFAULT 0,
@@ -65,12 +76,12 @@ CREATE TABLE analytics_schema.fact_region_metrics_table (
     is_final                        BOOLEAN    NOT NULL DEFAULT FALSE,
 
     -- region_id (lgd/department id) is only unique within a tenant, so tenant_id
-    -- is part of the natural key.
+    -- is part of the natural key; one row per filter scope.
     CONSTRAINT uq_fact_region_metrics
-        UNIQUE (period_scale, period_start, tenant_id, hierarchy, region_level, region_id)
+        UNIQUE (period_scale, period_start, tenant_id, hierarchy, region_level, region_id, work_status_scope)
 );
 
 CREATE INDEX IF NOT EXISTS idx_fact_region_metrics_lookup
-    ON analytics_schema.fact_region_metrics_table(period_scale, tenant_id, hierarchy, region_level, region_id, period_start);
+    ON analytics_schema.fact_region_metrics_table(period_scale, tenant_id, hierarchy, region_level, region_id, period_start, work_status_scope);
 CREATE INDEX IF NOT EXISTS idx_fact_region_metrics_tenant
     ON analytics_schema.fact_region_metrics_table(tenant_id, period_scale, period_start);
