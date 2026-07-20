@@ -188,17 +188,17 @@ public final class SwaggerExamples {
               "data": {
                 "lgdId": 101,
                 "departmentId": null,
-                "schemeCount": 1,
+                "schemeCount": 5,
                 "scale": "day",
                 "startDate": "2026-01-01",
                 "endDate": "2026-01-31",
-                "periodCount": 0,
+                "periodCount": 1,
                 "metrics": [
                   {
                     "periodStartDate": "2026-01-01",
                     "periodEndDate": "2026-01-01",
-                    "totalSupplyDays": 1,
-                    "regularSchemeCount": 1,
+                    "totalSupplyDays": 4,
+                    "regularSchemeCount": 4,
                     "totalWaterQuantity": 1500,
                     "averageRegularity": 0.8
                   }
