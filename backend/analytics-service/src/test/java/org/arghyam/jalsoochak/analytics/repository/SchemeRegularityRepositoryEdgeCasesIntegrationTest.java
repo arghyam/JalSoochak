@@ -202,7 +202,9 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
 
     @Test
     void getAverageWaterSupplyPerCurrentRegion_nonPositiveHouseHoldCount_doesNotDivideByZero() {
-        // Make all schemes have non-positive house_hold_count so schemes_in_tenant becomes empty.
+        // Zero-household schemes are intentionally kept in scope so the current-scope totals reconcile
+        // with the region-own rollup (which always counts them). The per-household division must not
+        // throw on the zero denominator: such schemes report a 0 average.
         jdbcTemplate.update("""
                 UPDATE analytics_schema.dim_scheme_table
                 SET house_hold_count = 0
@@ -212,7 +214,9 @@ class SchemeRegularityRepositoryEdgeCasesIntegrationTest {
         List<SchemeRegularityRepository.SchemeWaterSupplyMetrics> rows =
                 repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3);
 
-        assertThat(rows).isEmpty();
+        assertThat(rows).hasSize(2);
+        assertThat(rows).allSatisfy(r ->
+                assertThat(r.averageLitersPerHousehold()).isEqualByComparingTo("0.0000"));
     }
 
     private void seedDuplicateMeterReadingOnSameDay() {
