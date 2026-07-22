@@ -2,6 +2,9 @@ package org.arghyam.jalsoochak.message.service;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
@@ -204,6 +207,42 @@ class DailyReportPdfServiceTest {
         // The breakdown table is drawn before the KPI summary table: the first officer name
         // precedes the "Yesterday" summary-table header in the extracted text.
         assertThat(text.indexOf("Alice")).isLessThan(text.indexOf("Yesterday"));
+    }
+
+    @Test
+    void generate_sdoReport_mobileNumberFitsOnOneLineInSummaryTable() throws Exception {
+        // Regression: the dense SDO per-Section-Officer summary table used the default 6pt cell
+        // padding, which clipped the 12th digit of a mobile number to a second line
+        // ("91986859500"+"1"). With the tighter padding the full 12-digit number stays intact, so
+        // PDFTextStripper extracts it as one contiguous token.
+        String filename = service.generate(
+                sampleKpis(), 700L, "SDO Kumar", "SUB_DIVISIONAL_OFFICER", samplePriority(), sampleSectionOfficers());
+        try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            String text = new PDFTextStripper().getText(doc);
+            assertThat(text).contains("919868595001");   // Alice — 12 digits, unbroken
+            assertThat(text).contains("919868595002");   // Bob   — 12 digits, unbroken
+        }
+    }
+
+    @Test
+    void generate_dashboardUrlIsEmbeddedAsClickableLinkAnnotation() throws Exception {
+        // The dashboard URL must be a real PDF link annotation (not just plain text) so it is
+        // clickable in every viewer — including WhatsApp/mobile viewers that don't auto-detect
+        // bare URLs (browsers and the MinIO preview do, which is why it "worked" only there before).
+        String filename = service.generate(
+                sampleKpis(), 500L, "Binod Nimoli", "SECTION_OFFICER", samplePriority(), List.of());
+        try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            List<PDAnnotation> annotations = doc.getPage(0).getAnnotations();
+            boolean hasDashboardLink = annotations.stream()
+                    .filter(PDAnnotationLink.class::isInstance)
+                    .map(a -> ((PDAnnotationLink) a).getAction())
+                    .filter(PDActionURI.class::isInstance)
+                    .map(a -> ((PDActionURI) a).getURI())
+                    .anyMatch("https://jalsoochak.jjmbrain.in/"::equals);
+            assertThat(hasDashboardLink)
+                    .as("first page must contain a clickable URI link annotation for the dashboard URL")
+                    .isTrue();
+        }
     }
 
     @Test
