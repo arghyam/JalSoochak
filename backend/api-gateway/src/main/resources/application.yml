@@ -69,6 +69,15 @@ spring:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+    # Disable client-side syntax highlighting. highlight.js' recursive
+    # processLines overflows the JS call stack ("Maximum call stack size
+    # exceeded") on large/deeply nested responses (e.g. the analytics
+    # water-quantity/region-wise endpoint), producing "Could not render
+    # responses". This aggregated UI is what staging serves, so the setting
+    # must live here. Plain-text rendering skips the highlighter; the
+    # response body still renders in full.
+    syntax-highlight:
+      activated: false
     urls:
       - name: user-service
         url: /user/v3/api-docs

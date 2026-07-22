@@ -73,6 +73,13 @@ springdoc:
     path: /swagger-ui.html
     tags-sorter: alpha
     operations-sorter: method
+    # Disable client-side syntax highlighting. highlight.js' recursive
+    # processLines overflows the JS call stack ("Maximum call stack size
+    # exceeded") on large/deeply nested responses (e.g. water-quantity/
+    # region-wise), causing "Could not render responses". Plain-text
+    # rendering avoids the highlighter entirely; the response still renders.
+    syntax-highlight:
+      activated: false
   api-docs:
     path: /v3/api-docs
 
