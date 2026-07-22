@@ -5230,14 +5230,12 @@ public class SchemeRegularityRepository {
                     SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
-                        s.house_hold_count::bigint AS house_hold_count,
+                        COALESCE(s.house_hold_count, 0)::bigint AS house_hold_count,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count,
                         COALESCE(s.planned_fhtc, 0)::bigint AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.tenant_id = ?
-                      AND s.house_hold_count IS NOT NULL
-                      AND s.house_hold_count > 0{{WS}}
-                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, s.house_hold_count DESC, COALESCE(s.planned_fhtc, 0) DESC
+                    WHERE s.tenant_id = ?{{WS}}
+                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 water_by_scheme AS (
                     -- supply_days: days the scheme actually supplied water ({{SWD}}), measured off
@@ -5269,19 +5267,28 @@ public class SchemeRegularityRepository {
 
         return jdbcTemplate.query(
                 sql,
-                (rs, rowNum) -> new SchemeWaterSupplyMetrics(
-                        rs.getInt("scheme_id"),
-                        rs.getString("scheme_name"),
-                        rs.getLong("house_hold_count"),
-                        rs.getLong("fhtc_count"),
-                        rs.getLong("planned_fhtc"),
-                        rs.getLong("total_water_supplied_liters"),
-                        rs.getInt("supply_days"),
-                        BigDecimal.valueOf(rs.getLong("total_water_supplied_liters"))
-                                .divide(
-                                        BigDecimal.valueOf(rs.getLong("house_hold_count") * daysInRange),
-                                        4,
-                                        java.math.RoundingMode.HALF_UP)),
+                (rs, rowNum) -> {
+                    long householdCount = rs.getLong("house_hold_count");
+                    long totalWaterSuppliedLiters = rs.getLong("total_water_supplied_liters");
+                    long denominator = householdCount * daysInRange;
+                    // Schemes with non-positive households (zero/NULL, or a spurious negative) are now in
+                    // scope (parity with the region-own rollup); guard the per-household division so they
+                    // surface a 0 average instead of throwing ArithmeticException on divide-by-zero or
+                    // producing a negative average from a negative denominator.
+                    BigDecimal averageLitersPerHousehold = householdCount <= 0
+                            ? BigDecimal.ZERO.setScale(4, java.math.RoundingMode.HALF_UP)
+                            : BigDecimal.valueOf(totalWaterSuppliedLiters)
+                                    .divide(BigDecimal.valueOf(denominator), 4, java.math.RoundingMode.HALF_UP);
+                    return new SchemeWaterSupplyMetrics(
+                            rs.getInt("scheme_id"),
+                            rs.getString("scheme_name"),
+                            householdCount,
+                            rs.getLong("fhtc_count"),
+                            rs.getLong("planned_fhtc"),
+                            totalWaterSuppliedLiters,
+                            rs.getInt("supply_days"),
+                            averageLitersPerHousehold);
+                },
                 tenantId,
                 tenantId,
                 startDate,

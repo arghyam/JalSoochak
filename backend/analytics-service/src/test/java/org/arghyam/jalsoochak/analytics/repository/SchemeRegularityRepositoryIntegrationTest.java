@@ -1094,6 +1094,66 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
+    void averageWaterSupplyPerCurrentRegion_includesZeroAndNullHouseholdSchemes_andReconcilesWithRegionOwn() {
+        // Schemes with zero or NULL house_hold_count used to be filtered out of the current-scope list,
+        // so its totals could not reconcile with the region-own rollup (which always counts them). Seed a
+        // zero-household and a NULL-household scheme under the same parent LGD/department and assert
+        // (a) both now surface, (b) their per-household average is 0 rather than throwing divide-by-zero,
+        // and (c) the current-scope totals now match getRegionOwnWaterSupply for the parent region.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 3, 1, "Scheme C (zero households)", 1003, 2003, 0.0, 0.0,
+                100, 100, 101, null, null, null, null,
+                200, 200, 201, null, null, null, null,
+                1, 0, 0, 0);
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 4, 1, "Scheme D (null households)", 1004, 2004, 0.0, 0.0,
+                100, 100, 102, null, null, null, null,
+                200, 200, 202, null, null, null, null,
+                1, null, null, null);
+
+        List<SchemeRegularityRepository.SchemeWaterSupplyMetrics> current =
+                repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3);
+
+        // Both zero/NULL-household schemes now appear (previously filtered out); ordered by scheme_id.
+        assertThat(current)
+                .extracting(SchemeRegularityRepository.SchemeWaterSupplyMetrics::schemeId)
+                .containsExactly(1, 2, 3, 4);
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics schemeC =
+                current.stream().filter(r -> r.schemeId() == 3).findFirst().orElseThrow();
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics schemeD =
+                current.stream().filter(r -> r.schemeId() == 4).findFirst().orElseThrow();
+        assertThat(schemeC.householdCount()).isZero();
+        assertThat(schemeD.householdCount()).isZero();
+        // No divide-by-zero: zero-denominator schemes report a 0 average.
+        assertThat(schemeC.averageLitersPerHousehold()).isEqualByComparingTo("0.0000");
+        assertThat(schemeD.averageLitersPerHousehold()).isEqualByComparingTo("0.0000");
+
+        // Current-scope totals reconcile with the region-own rollup for the parent LGD (level 1 = 100),
+        // which spans exactly the same tenant schemes.
+        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics regionOwn =
+                repository.getRegionOwnWaterSupplyByLgd(1, 100, D1, D3);
+        long currentHouseholds = current.stream()
+                .mapToLong(SchemeRegularityRepository.SchemeWaterSupplyMetrics::householdCount).sum();
+        long currentWater = current.stream()
+                .mapToLong(SchemeRegularityRepository.SchemeWaterSupplyMetrics::totalWaterSuppliedLiters).sum();
+        assertThat(current).hasSize(regionOwn.schemeCount());
+        assertThat(currentHouseholds).isEqualTo(regionOwn.totalHouseholdCount());
+        assertThat(currentWater).isEqualTo(regionOwn.totalWaterSuppliedLiters());
+    }
+
+    @Test
     void suppliedWater_countsNullSubmissionStatusRows() {
         // Legacy/direct-event water can persist submission_status = NULL; with a positive volume it must
         // count as supplied (exercises the "submission_status = SUBMITTED OR submission_status IS NULL" branch).
