@@ -5271,10 +5271,11 @@ public class SchemeRegularityRepository {
                     long householdCount = rs.getLong("house_hold_count");
                     long totalWaterSuppliedLiters = rs.getLong("total_water_supplied_liters");
                     long denominator = householdCount * daysInRange;
-                    // Schemes with zero/NULL households are now in scope (parity with the region-own
-                    // rollup); guard the per-household division so they surface a 0 average instead of
-                    // throwing ArithmeticException on divide-by-zero.
-                    BigDecimal averageLitersPerHousehold = denominator == 0
+                    // Schemes with non-positive households (zero/NULL, or a spurious negative) are now in
+                    // scope (parity with the region-own rollup); guard the per-household division so they
+                    // surface a 0 average instead of throwing ArithmeticException on divide-by-zero or
+                    // producing a negative average from a negative denominator.
+                    BigDecimal averageLitersPerHousehold = householdCount <= 0
                             ? BigDecimal.ZERO.setScale(4, java.math.RoundingMode.HALF_UP)
                             : BigDecimal.valueOf(totalWaterSuppliedLiters)
                                     .divide(BigDecimal.valueOf(denominator), 4, java.math.RoundingMode.HALF_UP);
