@@ -60,7 +60,7 @@ class DailyReportMinioUploadIT {
         // 2) Render the report PDF (no Kafka / no DB).
         DailyReportPdfService pdfService = new DailyReportPdfService();
         ReflectionTestUtils.setField(pdfService, "reportDir", tempDir.toString() + "/");
-        ReflectionTestUtils.setField(pdfService, "dashboardUrl", "https://jalsoochak.jjmbrain.in/");
+        ReflectionTestUtils.setField(pdfService, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
         ReflectionTestUtils.setField(pdfService, "supportPhone", "919999999999");
 
         List<DailyReportPriorityRow> priority = List.of(
