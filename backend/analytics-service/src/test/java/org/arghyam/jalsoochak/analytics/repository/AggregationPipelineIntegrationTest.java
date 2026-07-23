@@ -213,6 +213,30 @@ class AggregationPipelineIntegrationTest {
     }
 
     @Test
+    void regionMetrics_partialDayCoverage_fallsBackToLegacy() {
+        aggregationRepository.upsertSchemeDaily(D1, D2);
+        // Only D1's DAY bucket is aggregated (D2 missing) -> the [D1, D2] window is partly covered.
+        aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, D1, D1, true);
+
+        // Partial coverage -> empty, so the caller uses the legacy raw-fact query instead of an
+        // under-summed total.
+        assertThat(aggregateReadRepository.getRegionMetrics(1, "LGD", 1, D1, D2)).isEmpty();
+        // A fully covered sub-range ([D1, D1]) still returns metrics from the aggregate.
+        assertThat(aggregateReadRepository.getRegionMetrics(1, "LGD", 1, D1, D1)).isPresent();
+    }
+
+    @Test
+    void criticalCount_noAggregatedRowsOnOrAfterCutoff_fallsBackToLegacy() {
+        aggregationRepository.upsertSchemeDaily(D1, D2);
+
+        // Cutoff after all aggregated data -> no rows on/after cutoff -> empty (legacy fallback),
+        // so a store not backfilled up to the cutoff is not reported as all-critical.
+        assertThat(aggregateReadRepository.getCriticalSchemeCount(1, "LGD", 1, D2.plusDays(1))).isEmpty();
+        // Cutoff within the aggregated range -> present.
+        assertThat(aggregateReadRepository.getCriticalSchemeCount(1, "LGD", 1, D2)).isPresent();
+    }
+
+    @Test
     void regionRollup_buildsScopedRows_withPeriodEffectiveFilters() {
         // Tenant tier: {4} in force through D1, then {1,4} from D2 on.
         insertFilterHistory(1, LocalDate.of(2020, 1, 1), D2, List.of(4));

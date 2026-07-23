@@ -68,11 +68,14 @@ public class AggregateReadRepository {
     /**
      * Sum the DAY fact_region_metrics_table rows for a region over [start, end]. scheme_count
      * and household_count are region attributes (constant per day) so they are taken
-     * as the max across the days, not summed. Returns empty when no DAY rows are
-     * stored for the region/range (caller falls back to the legacy path).
+     * as the max across the days, not summed. Returns empty unless a DAY row is stored for
+     * <em>every</em> day in the range (caller falls back to the legacy path): a partially
+     * aggregated window — e.g. a range predating the backfill horizon — would otherwise sum
+     * only the covered days and understate the range totals against the full-range divisor.
      */
     public Optional<RegionPeriodMetrics> getRegionMetrics(int tenantId, String hierarchy, int regionId,
                                                           LocalDate start, LocalDate end) {
+        long expectedDays = java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1;
         String sql = """
                 SELECT COUNT(*)                                          AS day_rows,
                        COALESCE(MAX(scheme_count), 0)                    AS scheme_count,
@@ -92,7 +95,10 @@ public class AggregateReadRepository {
                   AND period_start BETWEEN ? AND ?
                 """;
         return jdbcTemplate.query(sql, rs -> {
-            if (rs.next() && rs.getLong("day_rows") > 0) {
+            // Require full coverage: one DAY row per day in the range. Partial coverage
+            // (day_rows < expectedDays) means the window is only partly aggregated, so fall
+            // back to legacy rather than report an under-summed total.
+            if (rs.next() && rs.getLong("day_rows") >= expectedDays) {
                 return Optional.of(new RegionPeriodMetrics(
                         rs.getInt("scheme_count"),
                         rs.getLong("supply_days"),
@@ -533,26 +539,29 @@ public class AggregateReadRepository {
     /**
      * Critical-scheme count: schemes in the region whose last supplied date (MAX
      * reading_date where supplied) is NULL or before {@code cutoffDate}. Empty
-     * Optional when the region has no aggregated rows at all (fall back to legacy,
-     * so a not-yet-backfilled tenant isn't reported as all-critical).
+     * Optional when the region has no aggregated rows on/after {@code cutoffDate}
+     * (fall back to legacy): a store not yet backfilled up to the cutoff would
+     * otherwise show every scheme's last supply as "before cutoff" and report the
+     * whole region as critical.
      */
     public OptionalLong getCriticalSchemeCount(int tenantId, String hierarchy, int regionId, LocalDate cutoffDate) {
         String orClause = regionMembershipOrClause(hierarchy, "ds");
         // Critical is a current-state KPI, so the filter in force today applies.
         String schemeFilter = workStatusFilter.andHistoryPredicate("ds", "CURRENT_DATE");
 
-        Object[] existsParams = new Object[1 + 6];
+        Object[] existsParams = new Object[1 + 6 + 1];
         existsParams[0] = tenantId;
         for (int i = 0; i < 6; i++) {
             existsParams[1 + i] = regionId;
         }
+        existsParams[1 + 6] = cutoffDate;
         Boolean hasRows = jdbcTemplate.queryForObject(("""
                 SELECT EXISTS (
                     SELECT 1
                     FROM analytics_schema.dim_scheme_table ds
                     JOIN analytics_schema.fact_scheme_daily_table sd
                       ON sd.tenant_id = ds.tenant_id AND sd.scheme_id = ds.scheme_id
-                    WHERE ds.tenant_id = ? AND (%s)
+                    WHERE ds.tenant_id = ? AND (%s) AND sd.reading_date >= ?
                 )
                 """).formatted(orClause), Boolean.class, existsParams);
         if (hasRows == null || !hasRows) {
