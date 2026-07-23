@@ -43,7 +43,7 @@ public class DailyReportPdfService {
     @Value("${daily-report.report.dir:${escalation.report.dir:/tmp/escalation-reports/}}")
     private String reportDir;
 
-    @Value("${daily-report.dashboard-url:https://jalsoochak.jjmbrain.in/}")
+    @Value("${daily-report.dashboard-url:https://jalsoochak.jjmbrain.in/staff/}")
     private String dashboardUrl;
 
     @Value("${daily-report.support-phone:}")
@@ -65,6 +65,15 @@ public class DailyReportPdfService {
     private static final float LINK_R = 0.10f;
     private static final float LINK_G = 0.35f;
     private static final float LINK_B = 0.85f;
+
+    // Trend colouring: an upward (increase) trend is drawn green, a downward (decrease) trend red.
+    // The em-dash "no change" indicator keeps the default black.
+    private static final float TREND_UP_R = 0.13f;
+    private static final float TREND_UP_G = 0.55f;
+    private static final float TREND_UP_B = 0.13f;   // forest green
+    private static final float TREND_DOWN_R = 0.80f;
+    private static final float TREND_DOWN_G = 0.11f;
+    private static final float TREND_DOWN_B = 0.11f; // red
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final DateTimeFormatter DISPLAY = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
@@ -133,6 +142,7 @@ public class DailyReportPdfService {
                 // ---- Header ----
                 headerLine(ctx, bold, 16, "Daily Water Service Situation Report");
                 headerLine(ctx, font, 11, "Officer: " + (officerName != null ? officerName : "Officer"));
+                headerLine(ctx, font, 11, "Role: " + roleLabel(officerUserType));
                 headerLine(ctx, font, 11, "Date: " + reportDate.plusDays(1).format(HEADER));
                 headerLine(ctx, font, 11, "Reporting Period: 00:00 hrs - 23:59 hrs");
                 headerLinkLine(ctx, font, 9,
@@ -153,8 +163,10 @@ public class DailyReportPdfService {
                             "Schemes Supplying Water", "Schemes Not Supplying Water",
                             "Average LPCD", "Average MLD", "Regular Supply (%) for past 1 week",
                             "Reading Submission (%)", "Anomalous Submissions"};
+                    // Centre the numeric KPI columns; keep the name and mobile identifier columns left.
+                    boolean[] soCenter = {false, false, true, true, true, true, true, true, true, true};
                     drawTable(ctx, soCols, soHeader, sectionOfficerSummaryRows(sectionOfficerRows),
-                            7f, 7f, SO_TABLE_CELL_PAD);
+                            7f, 7f, SO_TABLE_CELL_PAD, soCenter);
                     ctx.y -= 12;
                 }
 
@@ -164,7 +176,9 @@ public class DailyReportPdfService {
                         "Yesterday\n(" + reportDate.format(DISPLAY) + ")",
                         "Previous Day\n(" + previousDate.format(DISPLAY) + ")",
                         "Trend"};
-                drawTable(ctx, sumCols, sumHeader, summaryRows(kpis), 10f, 10f);
+                // Centre the two value columns and the Trend column; keep the KPI label column left.
+                boolean[] sumCenter = {false, true, true, true};
+                drawTable(ctx, sumCols, sumHeader, summaryRows(kpis), 10f, 10f, sumCenter);
                 ctx.y -= 12;
 
                 // ---- 2. Priority Actions ----
@@ -177,12 +191,14 @@ public class DailyReportPdfService {
                 // ---- 3. Reasons for No Water Supply ----
                 sectionTitle(ctx, "3. Reasons for No Water Supply");
                 float[] rCols = {CONTENT_WIDTH - 100, 100};
-                drawTable(ctx, rCols, new String[]{"Reason", "Count"}, reasonRows(kpis), 10f, 10f);
+                // Centre the numeric Count column; keep the Reason/Type label column left.
+                boolean[] countCenter = {false, true};
+                drawTable(ctx, rCols, new String[]{"Reason", "Count"}, reasonRows(kpis), 10f, 10f, countCenter);
                 ctx.y -= 12;
 
                 // ---- 4. Anomalous Submissions ----
                 sectionTitle(ctx, "4. Anomalous Submissions");
-                drawTable(ctx, rCols, new String[]{"Type", "Count"}, anomalyRows(kpis), 10f, 10f);
+                drawTable(ctx, rCols, new String[]{"Type", "Count"}, anomalyRows(kpis), 10f, 10f, countCenter);
                 ctx.y -= 12;
 
                 // ---- Footer ----
@@ -227,6 +243,18 @@ public class DailyReportPdfService {
 
     private static boolean isSdo(String officerUserType) {
         return "SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType != null ? officerUserType.trim() : null);
+    }
+
+    /**
+     * Human-readable role label shown under the officer name, e.g. {@code SECTION_OFFICER} →
+     * "Section Officer", {@code SUB_DIVISIONAL_OFFICER} → "Sub Divisional Officer". Falls back to a
+     * title-cased form of any other raw type, or "Officer" when the type is missing.
+     */
+    private String roleLabel(String officerUserType) {
+        if (officerUserType == null || officerUserType.isBlank()) {
+            return "Officer";
+        }
+        return prettifyReason(officerUserType);
     }
 
     private List<String[]> sectionOfficerSummaryRows(List<DailyReportSectionOfficerRow> rows) {
@@ -307,6 +335,24 @@ public class DailyReportPdfService {
         return (v == Math.rint(v)) ? String.valueOf((long) v) : String.valueOf(v);
     }
 
+    /**
+     * Returns the RGB fill colour for a trend cell: green for an up arrow ({@code ▲}), red for a down
+     * arrow ({@code ▼}), or {@code null} for any other text (drawn in the default black). Only the
+     * Summary table's Trend column produces the arrow prefixes, so this never mis-colours other cells.
+     */
+    private static float[] trendColor(String line) {
+        if (line == null || line.isEmpty()) {
+            return null;
+        }
+        if (line.startsWith(UP.trim())) {
+            return new float[]{TREND_UP_R, TREND_UP_G, TREND_UP_B};
+        }
+        if (line.startsWith(DOWN.trim())) {
+            return new float[]{TREND_DOWN_R, TREND_DOWN_G, TREND_DOWN_B};
+        }
+        return null;
+    }
+
     private String anomalyLabel(String type) {
         if (type == null) return "Unknown";
         if (ANOMALY_LABELS.containsKey(type)) return ANOMALY_LABELS.get(type);
@@ -372,22 +418,31 @@ public class DailyReportPdfService {
     /** Draws a bordered table with a bold header row; wraps cells and paginates, re-drawing the header. */
     private void drawTable(Ctx ctx, float[] colW, String[] header, List<String[]> rows,
                            float fontSize, float headerFontSize) throws IOException {
-        drawTable(ctx, colW, header, rows, fontSize, headerFontSize, CELL_PAD);
+        drawTable(ctx, colW, header, rows, fontSize, headerFontSize, CELL_PAD, null);
     }
 
-    /** As {@link #drawTable} but with an explicit horizontal cell padding (used by the dense SDO table). */
+    /** As {@link #drawTable} but with per-column centre alignment ({@code center[c]} centres column c). */
     private void drawTable(Ctx ctx, float[] colW, String[] header, List<String[]> rows,
-                           float fontSize, float headerFontSize, float cellPad) throws IOException {
+                           float fontSize, float headerFontSize, boolean[] center) throws IOException {
+        drawTable(ctx, colW, header, rows, fontSize, headerFontSize, CELL_PAD, center);
+    }
+
+    /**
+     * As {@link #drawTable} but with an explicit horizontal cell padding (used by the dense SDO table)
+     * and optional per-column centre alignment ({@code center} may be {@code null} for all-left).
+     */
+    private void drawTable(Ctx ctx, float[] colW, String[] header, List<String[]> rows,
+                           float fontSize, float headerFontSize, float cellPad, boolean[] center) throws IOException {
         float headerH = rowHeight(ctx.bold, headerFontSize, colW, header, cellPad);
         ctx.ensureSpace(headerH + rowHeight(ctx.font, fontSize, colW, rows.isEmpty() ? header : rows.get(0), cellPad));
-        drawRow(ctx, colW, header, ctx.bold, headerFontSize, cellPad);
+        drawRow(ctx, colW, header, ctx.bold, headerFontSize, cellPad, center);
         for (String[] r : rows) {
             float h = rowHeight(ctx.font, fontSize, colW, r, cellPad);
             if (ctx.y - h < MARGIN) {
                 ctx.newPage();
-                drawRow(ctx, colW, header, ctx.bold, headerFontSize, cellPad);
+                drawRow(ctx, colW, header, ctx.bold, headerFontSize, cellPad, center);
             }
-            drawRow(ctx, colW, r, ctx.font, fontSize, cellPad);
+            drawRow(ctx, colW, r, ctx.font, fontSize, cellPad, center);
         }
     }
 
@@ -402,8 +457,8 @@ public class DailyReportPdfService {
         return maxLines * lh + 2 * cellPad;
     }
 
-    private void drawRow(Ctx ctx, float[] colW, String[] cells, PDFont font, float fontSize, float cellPad)
-            throws IOException {
+    private void drawRow(Ctx ctx, float[] colW, String[] cells, PDFont font, float fontSize, float cellPad,
+                         boolean[] center) throws IOException {
         float lh = fontSize * LINE_SPACING;
         List<List<String>> wrapped = new ArrayList<>();
         int maxLines = 1;
@@ -416,9 +471,20 @@ public class DailyReportPdfService {
         float top = ctx.y;
         float cx = MARGIN;
         for (int c = 0; c < colW.length; c++) {
+            boolean centered = center != null && c < center.length && center[c];
             float baseline = top - cellPad - fontSize;
             for (String line : wrapped.get(c)) {
-                ctx.text(font, fontSize, cx + cellPad, baseline, line);
+                // Centre numeric columns within the full cell width; left-align everything else.
+                float tx = centered
+                        ? cx + (colW[c] - textWidth(font, fontSize, line)) / 2f
+                        : cx + cellPad;
+                float[] trendColor = trendColor(line);
+                if (trendColor != null) {
+                    ctx.colorText(font, fontSize, tx, baseline, line,
+                            trendColor[0], trendColor[1], trendColor[2]);
+                } else {
+                    ctx.text(font, fontSize, tx, baseline, line);
+                }
                 baseline -= lh;
             }
             ctx.rect(cx, top - rowH, colW[c], rowH);
@@ -563,6 +629,23 @@ public class DailyReportPdfService {
             cs.newLineAtOffset(x, baselineY);
             cs.showText(sanitize(f, s));
             cs.endText();
+        }
+
+        /**
+         * As {@link #text} but draws the glyphs in the given RGB fill colour, restoring black after.
+         * The colour is set <em>before</em> {@code beginText()} — setting a fill colour inside the
+         * text object is not reliably honoured by all renderers (PDFBox's own stripper reports the
+         * glyph as the default black), so the {@code rg} operator must precede the text object.
+         */
+        void colorText(PDFont f, float size, float x, float baselineY, String s, float r, float g, float b)
+                throws IOException {
+            cs.setNonStrokingColor(r, g, b);
+            cs.beginText();
+            cs.setFont(f, size);
+            cs.newLineAtOffset(x, baselineY);
+            cs.showText(sanitize(f, s));
+            cs.endText();
+            cs.setNonStrokingColor(0f, 0f, 0f);
         }
 
         /**
