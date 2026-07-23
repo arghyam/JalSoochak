@@ -61,10 +61,10 @@ CREATE TABLE analytics_schema.fact_region_metrics_table (
     critical_scheme_count           INT        NOT NULL DEFAULT 0,
     distinct_submitting_schemes     INT        NOT NULL DEFAULT 0,
 
-    -- derived ratios for this exact bucket
-    average_regularity              NUMERIC(6,2),
-    reading_submission_rate         NUMERIC(6,2),
-    avg_water_supply_per_scheme     NUMERIC(18,2),
+    -- NO derived-ratio columns are stored. Ratios (regularity %, submission rate, water
+    -- per scheme) are always recomputed on read from the additive numerators/denominators
+    -- above, for the exact grouping requested — averaging pre-averaged rows is unsafe
+    -- (Simpson's paradox) when buckets/regions differ in size.
 
     -- norm snapshot used for this region/period
     norm_required_lpcd              INT,

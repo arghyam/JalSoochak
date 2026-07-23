@@ -12,7 +12,7 @@ import java.util.Set;
 
 /**
  * Set-based population of the pre-aggregation tables (fact_scheme_daily_table ->
- * fact_region_metrics_table / fact_region_distribution_table, and fact_submission_activity_hourly_table).
+ * fact_region_metrics_table, and fact_submission_activity_hourly_table).
  *
  * <p>All writes are idempotent UPSERTs keyed on the natural key, so a re-run for an
  * overlapping window simply refreshes the affected rows (used by the N-day
@@ -24,7 +24,7 @@ import java.util.Set;
  * <p><b>Work-status filter:</b> the base grain ({@code fact_scheme_daily_table}) is built
  * <em>unfiltered</em> — one row per scheme-day regardless of {@code work_status} — so a
  * filter change never requires rebuilding it. The filter is applied when rolling up into
- * {@code fact_region_metrics_table} / {@code fact_region_distribution_table}, using the
+ * {@code fact_region_metrics_table}, using the
  * SCD-2 history row ({@code dim_tenant_work_status_filter_table}) in force on the bucket's
  * {@code period_end}. Region-metric rows are built per {@code work_status_scope}:
  * {@code TENANT} (own tenant → national → env chain; all hierarchies/levels — what tenant
@@ -271,7 +271,6 @@ public class AggregationRepository {
                     total_household_count, total_achieved_fhtc, total_planned_fhtc,
                     supply_days_in_efficient_range, compliant_submission_count, anomalous_submission_count,
                     continuous_scheme_count, critical_scheme_count, distinct_submitting_schemes,
-                    average_regularity, reading_submission_rate, avg_water_supply_per_scheme,
                     norm_required_lpcd, norm_persons_per_household, norm_over_supply_pct, norm_under_supply_pct,
                     computed_at, is_final
                 )
@@ -287,15 +286,6 @@ public class AggregationRepository {
                        COALESCE(c.continuous_scheme_count, 0),
                        COALESCE(c.never_submitted_scheme_count, 0),
                        COALESCE(c.distinct_submitting_schemes, 0),
-                       CASE WHEN s.scheme_count > 0 AND ? > 0
-                            THEN ROUND(COALESCE(a.total_supply_days, 0)::numeric / (s.scheme_count * ?) * 100, 2)
-                            ELSE 0 END,
-                       CASE WHEN s.scheme_count > 0 AND ? > 0
-                            THEN ROUND(COALESCE(a.total_submission_days, 0)::numeric / (s.scheme_count * ?) * 100, 2)
-                            ELSE 0 END,
-                       CASE WHEN s.scheme_count > 0
-                            THEN ROUND(COALESCE(a.total_water_supplied_liters, 0)::numeric / s.scheme_count, 2)
-                            ELSE 0 END,
                        a.norm_required_lpcd, a.norm_persons_per_household, a.norm_over_supply_pct, a.norm_under_supply_pct,
                        CURRENT_TIMESTAMP, ?
                 FROM (
@@ -374,9 +364,6 @@ public class AggregationRepository {
                     continuous_scheme_count = EXCLUDED.continuous_scheme_count,
                     critical_scheme_count = EXCLUDED.critical_scheme_count,
                     distinct_submitting_schemes = EXCLUDED.distinct_submitting_schemes,
-                    average_regularity = EXCLUDED.average_regularity,
-                    reading_submission_rate = EXCLUDED.reading_submission_rate,
-                    avg_water_supply_per_scheme = EXCLUDED.avg_water_supply_per_scheme,
                     norm_required_lpcd = EXCLUDED.norm_required_lpcd, norm_persons_per_household = EXCLUDED.norm_persons_per_household,
                     norm_over_supply_pct = EXCLUDED.norm_over_supply_pct, norm_under_supply_pct = EXCLUDED.norm_under_supply_pct,
                     computed_at = EXCLUDED.computed_at, is_final = EXCLUDED.is_final
@@ -386,82 +373,10 @@ public class AggregationRepository {
                 scale.name(), periodStart, periodEnd, hierarchy, level,
                 workStatusScope,
                 daysInRange,
-                daysInRange, daysInRange,   // average_regularity denominators
-                daysInRange, daysInRange,   // reading_submission_rate denominators
                 isFinal,
                 periodStart, periodEnd,     // activity sums window
                 daysInRange,                // continuous threshold
                 periodStart, periodEnd);    // per-scheme window
-    }
-
-    /**
-     * Roll fact_scheme_daily_table reason/status columns into the long-format distribution
-     * table for one bucket. Distributions serve tenant screens, so the TENANT-chain filter
-     * (as of the bucket's period_end) restricts the scheme set; the bucket is cleared first
-     * so reason keys that disappear on re-aggregation don't leave stale slices behind.
-     */
-    public int upsertRegionDistribution(PeriodScale scale, LocalDate periodStart, LocalDate periodEnd, boolean isFinal) {
-        jdbcTemplate.update("""
-                DELETE FROM analytics_schema.fact_region_distribution_table
-                WHERE period_scale = ? AND period_start = ?
-                """, scale.name(), periodStart);
-        int total = 0;
-        for (int level = 1; level <= 6; level++) {
-            total += upsertDistributionForLevel(scale, periodStart, periodEnd, "LGD",
-                    "level_" + level + "_lgd_id", level, isFinal);
-            total += upsertDistributionForLevel(scale, periodStart, periodEnd, "DEPT",
-                    "level_" + level + "_dept_id", level, isFinal);
-        }
-        return total;
-    }
-
-    private int upsertDistributionForLevel(PeriodScale scale, LocalDate periodStart, LocalDate periodEnd,
-                                           String hierarchy, String levelColumn, int level, boolean isFinal) {
-        requireAllowedColumn(levelColumn);
-        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(periodEnd));
-        // OUTAGE_REASON and NON_SUBMISSION_REASON: distinct schemes per reason in the bucket.
-        // Region membership comes from the dim_scheme mapping rows (a multi-mapped scheme
-        // belongs to every region it maps to), not from the daily row's single stored chain.
-        String sql = ("""
-                INSERT INTO analytics_schema.fact_region_distribution_table (
-                    period_scale, period_start, period_end, tenant_id, hierarchy, region_level, region_id,
-                    dist_type, dist_key, scheme_count, computed_at, is_final
-                )
-                SELECT ?, ?, ?, x.tenant_id, ?, ?, x.region_id, x.dist_type, x.dist_key,
-                       COUNT(DISTINCT x.scheme_id), CURRENT_TIMESTAMP, ?
-                FROM (
-                    SELECT m.region_id, sd.tenant_id, sd.scheme_id,
-                           'OUTAGE_REASON' AS dist_type, sd.outage_reason_code AS dist_key
-                    FROM (
-                        SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
-                        FROM analytics_schema.dim_scheme_table ds
-                        WHERE %1$s IS NOT NULL%2$s
-                    ) m
-                    JOIN analytics_schema.fact_scheme_daily_table sd
-                      ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
-                    WHERE sd.reading_date BETWEEN ? AND ? AND sd.outage_reason_code IS NOT NULL
-                    UNION ALL
-                    SELECT m.region_id, sd.tenant_id, sd.scheme_id,
-                           'NON_SUBMISSION_REASON' AS dist_type, sd.non_submission_reason_code AS dist_key
-                    FROM (
-                        SELECT DISTINCT %1$s AS region_id, ds.tenant_id, ds.scheme_id
-                        FROM analytics_schema.dim_scheme_table ds
-                        WHERE %1$s IS NOT NULL%2$s
-                    ) m
-                    JOIN analytics_schema.fact_scheme_daily_table sd
-                      ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
-                    WHERE sd.reading_date BETWEEN ? AND ? AND sd.non_submission_reason_code IS NOT NULL
-                ) x
-                GROUP BY x.tenant_id, x.region_id, x.dist_type, x.dist_key
-                ON CONFLICT (period_scale, period_start, tenant_id, hierarchy, region_level, region_id, dist_type, dist_key)
-                DO UPDATE SET period_end = EXCLUDED.period_end,
-                              scheme_count = EXCLUDED.scheme_count,
-                              computed_at = EXCLUDED.computed_at,
-                              is_final = EXCLUDED.is_final
-                """).formatted(levelColumn, schemeFilter);
-        return jdbcTemplate.update(sql,
-                scale.name(), periodStart, periodEnd, hierarchy, level, isFinal,
-                periodStart, periodEnd, periodStart, periodEnd);
     }
 
     // ============================================================

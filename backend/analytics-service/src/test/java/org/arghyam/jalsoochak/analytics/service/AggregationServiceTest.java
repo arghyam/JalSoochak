@@ -64,11 +64,24 @@ class AggregationServiceTest {
         verify(aggregationRepository, times(1))
                 .upsertRegionMetrics(eq(PeriodScale.MONTH), eq(LocalDate.of(2026, 1, 1)),
                         eq(LocalDate.of(2026, 1, 31)), eq(true));
+    }
 
-        // Distribution rollups run for the same set of buckets.
-        verify(aggregationRepository, times(8)).upsertRegionDistribution(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+    @Test
+    void aggregateDayGrain_buildsOnlyDayBuckets_notWeekOrMonth() {
+        LocalDate from = LocalDate.of(2026, 1, 1);
+        LocalDate to = LocalDate.of(2026, 1, 3);
+
+        service.aggregateDayGrain(from, to);
+
+        // Base scheme/day refresh still runs once for the whole window.
+        verify(aggregationRepository, times(1)).upsertSchemeDaily(from, to);
+
+        // Only DAY buckets are rolled hourly; WEEK/MONTH are left to the midnight run.
+        ArgumentCaptor<PeriodScale> scaleCaptor = ArgumentCaptor.forClass(PeriodScale.class);
+        verify(aggregationRepository, times(3)).upsertRegionMetrics(
+                scaleCaptor.capture(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyBoolean());
+        assertThat(scaleCaptor.getAllValues()).containsOnly(PeriodScale.DAY);
     }
 
     private static List<LocalDate> weekStarts(List<PeriodScale> scales, List<LocalDate> starts) {

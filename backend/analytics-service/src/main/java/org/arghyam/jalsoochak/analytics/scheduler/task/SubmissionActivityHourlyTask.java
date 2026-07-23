@@ -12,9 +12,10 @@ import java.time.ZoneId;
 
 /**
  * Top-of-hour aggregation: (1) populates fact_submission_activity_hourly_table for the hour
- * that just completed, and (2) re-rolls the CURRENT day's aggregates so dashboard
- * counts change every hour as new submissions arrive (today's DAY/WEEK/MONTH region
- * rows stay provisional; the midnight task finalizes the completed day).
+ * that just completed, and (2) re-rolls the CURRENT day's DAY-grain aggregates so dashboard
+ * counts change every hour as new submissions arrive. Only the DAY grain is refreshed
+ * hourly (today's rows stay provisional); the in-progress WEEK/MONTH buckets are rolled by
+ * the midnight task, keeping the hourly job's write churn off those larger grains.
  */
 @Component
 @RequiredArgsConstructor
@@ -42,8 +43,9 @@ public class SubmissionActivityHourlyTask implements AnalyticsScheduledTask {
         log.info("Running scheduled task '{}' for hour={} and current-day refresh={}",
                 taskName(), previousHour, today);
         aggregationService.aggregateHour(previousHour);
-        // Refresh today's provisional rollups so dashboard counts update hourly.
-        aggregationService.aggregateWindow(today, today);
+        // Refresh today's provisional DAY rollups so dashboard counts update hourly.
+        // WEEK/MONTH are left to the midnight run to limit intraday dead-tuple churn.
+        aggregationService.aggregateDayGrain(today, today);
         log.info("Completed scheduled task '{}' for hour={}", taskName(), previousHour);
         log.info("Scheduler END '{}'", taskName());
     }

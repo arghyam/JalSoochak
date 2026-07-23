@@ -27,12 +27,29 @@ public class AggregationService {
     private final AggregationRepository aggregationRepository;
 
     /**
-     * Recompute all grains for every bucket touched by [{@code from}, {@code to}].
-     * Safe to call repeatedly (idempotent UPSERTs) — used by the nightly lookback
-     * and by the backfill runner.
+     * Recompute all grains (base scheme/day + DAY/WEEK/MONTH region rollups) for every
+     * bucket touched by [{@code from}, {@code to}]. Safe to call repeatedly (idempotent
+     * UPSERTs) — used by the nightly lookback and by the backfill runner.
      */
     @Transactional
     public void aggregateWindow(LocalDate from, LocalDate to) {
+        aggregate(from, to, true);
+    }
+
+    /**
+     * Intraday refresh of the base scheme/day grain and the DAY region rollups only.
+     * The in-progress WEEK/MONTH buckets are deliberately NOT re-rolled here — the
+     * midnight {@link #aggregateWindow} run finalizes them once the day closes. This
+     * confines the hourly job's row churn (and the Postgres dead tuples it produces) to
+     * the DAY grain, the only grain whose intraday value the dashboards read live; the
+     * WEEK/MONTH trend series lag by at most the current day between midnight runs.
+     */
+    @Transactional
+    public void aggregateDayGrain(LocalDate from, LocalDate to) {
+        aggregate(from, to, false);
+    }
+
+    private void aggregate(LocalDate from, LocalDate to, boolean includeWeekAndMonth) {
         if (from == null || to == null || from.isAfter(to)) {
             throw new IllegalArgumentException("Invalid aggregation window: " + from + " .. " + to);
         }
@@ -45,25 +62,25 @@ public class AggregationService {
         for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
             boolean isFinal = d.isBefore(today);
             aggregationRepository.upsertRegionMetrics(PeriodScale.DAY, d, d, isFinal);
-            aggregationRepository.upsertRegionDistribution(PeriodScale.DAY, d, d, isFinal);
         }
 
-        // WEEK buckets (Sunday -> Saturday) touched by the window
-        for (LocalDate ws = sundayOf(from); !ws.isAfter(to); ws = ws.plusWeeks(1)) {
-            LocalDate we = ws.plusDays(6);
-            boolean isFinal = we.isBefore(today);
-            aggregationRepository.upsertRegionMetrics(PeriodScale.WEEK, ws, we, isFinal);
-            aggregationRepository.upsertRegionDistribution(PeriodScale.WEEK, ws, we, isFinal);
-        }
+        if (includeWeekAndMonth) {
+            // WEEK buckets (Sunday -> Saturday) touched by the window
+            for (LocalDate ws = sundayOf(from); !ws.isAfter(to); ws = ws.plusWeeks(1)) {
+                LocalDate we = ws.plusDays(6);
+                boolean isFinal = we.isBefore(today);
+                aggregationRepository.upsertRegionMetrics(PeriodScale.WEEK, ws, we, isFinal);
+            }
 
-        // MONTH buckets touched by the window
-        for (LocalDate ms = from.withDayOfMonth(1); !ms.isAfter(to); ms = ms.plusMonths(1)) {
-            LocalDate me = ms.withDayOfMonth(ms.lengthOfMonth());
-            boolean isFinal = me.isBefore(today);
-            aggregationRepository.upsertRegionMetrics(PeriodScale.MONTH, ms, me, isFinal);
-            aggregationRepository.upsertRegionDistribution(PeriodScale.MONTH, ms, me, isFinal);
+            // MONTH buckets touched by the window
+            for (LocalDate ms = from.withDayOfMonth(1); !ms.isAfter(to); ms = ms.plusMonths(1)) {
+                LocalDate me = ms.withDayOfMonth(ms.lengthOfMonth());
+                boolean isFinal = me.isBefore(today);
+                aggregationRepository.upsertRegionMetrics(PeriodScale.MONTH, ms, me, isFinal);
+            }
         }
-        log.info("[aggregation] region rollups refreshed for window={}..{}", from, to);
+        log.info("[aggregation] region rollups refreshed (weekMonth={}) for window={}..{}",
+                includeWeekAndMonth, from, to);
     }
 
     /** Aggregate reading-submission activity for a single hour. */

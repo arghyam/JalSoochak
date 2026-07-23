@@ -1,11 +1,13 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.HourlySubmissionActivityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.arghyam.jalsoochak.analytics.service.SubmissionActivityService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -47,6 +49,9 @@ class AnalyticsRegularityAndReadingControllerTest {
 
     @MockBean
     private SchemeRegularityService schemeRegularityService;
+
+    @MockBean
+    private SubmissionActivityService submissionActivityService;
 
     @ParameterizedTest
     @MethodSource("averageRegularityValidRoutes")
@@ -345,6 +350,94 @@ class AnalyticsRegularityAndReadingControllerTest {
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getHourlySubmissionActivity_tenantWide_wrapsResponse() throws Exception {
+        when(submissionActivityService.getHourlySubmissionActivity(TENANT_ID, null, null, START, END))
+                .thenReturn(hourlyResponse());
+
+        mockMvc.perform(get(BASE + "/submission-activity/hourly")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.tenantId").value(TENANT_ID))
+                .andExpect(jsonPath("$.data.hourlyActivity[0].submissionCount").value(3))
+                .andExpect(jsonPath("$.data.hourlyActivity[0].distinctSchemeCount").value(2));
+
+        verify(submissionActivityService, times(1))
+                .getHourlySubmissionActivity(TENANT_ID, null, null, START, END);
+    }
+
+    @Test
+    void getHourlySubmissionActivity_withLgdId_routesToRegionScope() throws Exception {
+        when(submissionActivityService.getHourlySubmissionActivity(TENANT_ID, 101, null, START, END))
+                .thenReturn(hourlyResponse());
+
+        mockMvc.perform(get(BASE + "/submission-activity/hourly")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("lgd_id", "101"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(submissionActivityService, times(1))
+                .getHourlySubmissionActivity(TENANT_ID, 101, null, START, END);
+    }
+
+    @Test
+    void getHourlySubmissionActivity_serviceValidationFailure_returnsBadRequest() throws Exception {
+        when(submissionActivityService.getHourlySubmissionActivity(any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("Provide either lgd_id or department_id, not both"));
+
+        mockMvc.perform(get(BASE + "/submission-activity/hourly")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString())
+                        .param("lgd_id", "101")
+                        .param("department_id", "201"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void getHourlySubmissionActivity_withoutTenantId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get(BASE + "/submission-activity/hourly")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getHourlySubmissionActivity_serviceThrows_returnsServerError() throws Exception {
+        when(submissionActivityService.getHourlySubmissionActivity(any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("unexpected"));
+
+        mockMvc.perform(get(BASE + "/submission-activity/hourly")
+                        .param("tenant_id", String.valueOf(TENANT_ID))
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    private static HourlySubmissionActivityResponse hourlyResponse() {
+        return HourlySubmissionActivityResponse.builder()
+                .tenantId(TENANT_ID)
+                .startDate(START)
+                .endDate(END)
+                .hourlyActivity(List.of(
+                        HourlySubmissionActivityResponse.HourlyBucket.builder()
+                                .hourStart(java.time.LocalDateTime.of(2026, 1, 1, 9, 0))
+                                .submissionCount(3L)
+                                .distinctSchemeCount(2)
+                                .build()))
+                .build();
     }
 
     private static Stream<Arguments> averageRegularityValidRoutes() {

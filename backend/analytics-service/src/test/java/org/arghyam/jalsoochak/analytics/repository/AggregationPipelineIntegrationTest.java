@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * End-to-end test of the pre-aggregation population (fact_scheme_daily_table -> region
  * rollups, norm snapshot + efficient-range) and the aggregate read path. Requires
- * Docker (Testcontainers + real Flyway, so V44-V49 are exercised).
+ * Docker (Testcontainers + real Flyway, so the analytics migrations are exercised).
  *
  * <p>Water semantics under test are the unified supplied-water rule: only the latest
  * water row per scheme/day with submission_status SUBMITTED(1)-or-NULL and quantity &gt; 0
@@ -321,7 +321,6 @@ class AggregationPipelineIntegrationTest {
     private void truncateAll() {
         jdbcTemplate.execute("""
                 TRUNCATE
-                    analytics_schema.fact_region_distribution_table,
                     analytics_schema.fact_region_metrics_table,
                     analytics_schema.fact_scheme_daily_table,
                     analytics_schema.dim_tenant_water_norm_table,
