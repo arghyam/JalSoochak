@@ -5,7 +5,10 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.TextPosition;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
 import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
@@ -14,8 +17,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.TreeMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,7 +42,7 @@ class DailyReportPdfServiceTest {
     void setUp() {
         service = new DailyReportPdfService();
         ReflectionTestUtils.setField(service, "reportDir", tempDir.toString() + "/");
-        ReflectionTestUtils.setField(service, "dashboardUrl", "https://jalsoochak.jjmbrain.in/");
+        ReflectionTestUtils.setField(service, "dashboardUrl", "https://jalsoochak.jjmbrain.in/staff/");
         ReflectionTestUtils.setField(service, "supportPhone", "919999999999");
     }
 
@@ -90,6 +97,62 @@ class DailyReportPdfServiceTest {
     }
 
     @Test
+    void generate_numericCellsAreCentreAligned() throws Exception {
+        // Column geometry mirrors DailyReportPdfService (MARGIN + sumCols {215,110,110,rest}).
+        final float margin = 40f;
+        final float cellPad = 6f;                         // CELL_PAD
+        final float contentWidth = PDRectangle.A4.getWidth() - 2 * margin;
+        final float yesterdayLeft = margin + 215f;        // start of the "Yesterday" value column
+        final float yesterdayRight = yesterdayLeft + 110f;
+        final float trendLeft = margin + 215f + 110f + 110f;
+        final float trendWidth = contentWidth - 435f;
+
+        String filename = service.generate(
+                sampleKpis(), 500L, "Binod Nimoli", "SECTION_OFFICER", samplePriority(), List.of());
+        List<Glyph> glyphs = new ArrayList<>();
+        try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            PDFTextStripper stripper = new PDFTextStripper() {
+                @Override
+                protected void writeString(String text, List<TextPosition> positions) throws IOException {
+                    for (TextPosition p : positions) {
+                        glyphs.add(new Glyph(p.getUnicode(), p.getXDirAdj(), p.getYDirAdj()));
+                    }
+                    super.writeString(text, positions);
+                }
+            };
+            stripper.getText(doc);
+        }
+
+        // (1) The "no change" em dash is unique to the Trend column — assert it is centred there,
+        // i.e. well to the right of where a left-aligned glyph (columnLeft + padding) would sit.
+        Glyph dash = glyphs.stream().filter(g -> "—".equals(g.ch())).findFirst().orElse(null);
+        assertThat(dash).as("em-dash rendered in the Trend column").isNotNull();
+        assertThat(dash.x())
+                .as("em dash is centred, not left-aligned")
+                .isGreaterThan(trendLeft + cellPad + 15f)
+                .isLessThan(trendLeft + trendWidth);
+
+        // (2) The "Yesterday" value column is centred → each row's value starts at a different x
+        // (a left-aligned column would start every value at the same columnLeft + padding).
+        TreeMap<Integer, Float> rowStartX = new TreeMap<>();
+        for (Glyph g : glyphs) {
+            if (g.ch() != null && g.ch().length() == 1 && Character.isDigit(g.ch().charAt(0))
+                    && g.x() >= yesterdayLeft && g.x() < yesterdayRight) {
+                rowStartX.merge(Math.round(g.y()), g.x(), Math::min);
+            }
+        }
+        // Topmost rows (sorted by y) are the summary table's — before the Priority Actions table.
+        long distinctStarts = rowStartX.values().stream().limit(8).distinct().count();
+        assertThat(distinctStarts)
+                .as("centred value column → per-row start-x varies (would be constant if left-aligned)")
+                .isGreaterThan(1L);
+    }
+
+    /** A single rendered glyph and its top-left-origin position, captured for alignment assertions. */
+    private record Glyph(String ch, float x, float y) {
+    }
+
+    @Test
     void generate_createsValidPdfWithExpectedFilename() throws Exception {
         String filename = service.generate(sampleKpis(), 500L, "Binod Nimoli", "SECTION_OFFICER", samplePriority(), List.of());
 
@@ -124,6 +187,8 @@ class DailyReportPdfServiceTest {
 
         assertThat(text).contains("Daily Water Service Situation Report");
         assertThat(text).contains("Officer: Binod Nimoli");
+        // Role line rendered under the officer name (SECTION_OFFICER → "Section Officer").
+        assertThat(text).contains("Role: Section Officer");
         assertThat(text).contains("1. Summary");
         assertThat(text).contains("2. Priority Actions");
         assertThat(text).contains("3. Reasons for No Water Supply");
@@ -198,6 +263,8 @@ class DailyReportPdfServiceTest {
         try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
             text = new PDFTextStripper().getText(doc);
         }
+        // Role line for the SDO (SUB_DIVISIONAL_OFFICER → "Sub Divisional Officer").
+        assertThat(text).contains("Role: Sub Divisional Officer");
         // Extra breakdown table + its officers appear, alongside the normal SO sections.
         assertThat(text).contains("Section Officer");   // breakdown header token
         assertThat(text).contains("Alice");
@@ -238,7 +305,7 @@ class DailyReportPdfServiceTest {
                     .map(a -> ((PDAnnotationLink) a).getAction())
                     .filter(PDActionURI.class::isInstance)
                     .map(a -> ((PDActionURI) a).getURI())
-                    .anyMatch("https://jalsoochak.jjmbrain.in/"::equals);
+                    .anyMatch("https://jalsoochak.jjmbrain.in/staff/"::equals);
             assertThat(hasDashboardLink)
                     .as("first page must contain a clickable URI link annotation for the dashboard URL")
                     .isTrue();
@@ -253,6 +320,37 @@ class DailyReportPdfServiceTest {
         try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
             String text = new PDFTextStripper().getText(doc);
             assertThat(text).doesNotContain("Alice");
+        }
+    }
+
+    @Test
+    void generate_trendArrowsAreColoured_greenForUp_redForDown() throws Exception {
+        // Supplying 142 vs 140 → up arrow (green); Not-supplying 6 vs 8 → down arrow (red).
+        // Rendered to a raster and pixel-sampled: everything else in the report is black text,
+        // white background, or a blue link, so any strongly green / strongly red pixels can only be
+        // the coloured trend arrows.
+        String filename = service.generate(
+                sampleKpis(), 500L, "Binod Nimoli", "SECTION_OFFICER", samplePriority(), List.of());
+        try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            BufferedImage img = new PDFRenderer(doc).renderImageWithDPI(0, 150);
+            int greenPixels = 0;
+            int redPixels = 0;
+            for (int py = 0; py < img.getHeight(); py++) {
+                for (int px = 0; px < img.getWidth(); px++) {
+                    int rgb = img.getRGB(px, py);
+                    int r = (rgb >> 16) & 0xFF;
+                    int g = (rgb >> 8) & 0xFF;
+                    int b = rgb & 0xFF;
+                    if (g > r + 40 && g > b + 40) {
+                        greenPixels++;   // up-arrow green
+                    }
+                    if (r > g + 40 && r > b + 40) {
+                        redPixels++;     // down-arrow red
+                    }
+                }
+            }
+            assertThat(greenPixels).as("green (up-arrow) pixels present").isPositive();
+            assertThat(redPixels).as("red (down-arrow) pixels present").isPositive();
         }
     }
 
