@@ -56,8 +56,8 @@ class SystemConfigKeyEnumTest {
     }
 
     @Test
-    @DisplayName("enum has exactly 5 values")
-    void enumHasFiveValues() {
-        assertThat(SystemConfigKeyEnum.values()).hasSize(5);
+    @DisplayName("enum has exactly 6 values")
+    void enumHasSixValues() {
+        assertThat(SystemConfigKeyEnum.values()).hasSize(6);
     }
 }

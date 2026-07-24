@@ -223,21 +223,27 @@ class SchemeRegularityRepositoryIntegrationTest {
         List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> byDept =
                 repository.getChildSchemeRegularityMetricsByDepartment(200, D1, D3);
 
-        // Water-based supply days: scheme 1 (child 101/dept 201) supplied only on D2 => 1 day;
-        // averageRegularity = 1 / (1 scheme * 3 days) = 0.3333. Scheme 2 (child 102/dept 202) supplied 0.
+        // Water-based supply days: scheme 1 (child 101/dept 201) supplied only on D2 => 1 day.
+        // KPI is now regularSchemeCount / schemeCount. At the default 90% threshold a 3-day window
+        // requires 3 supply days (round-half-up of 2.7), so a scheme with 1 supply day is NOT regular:
+        // regularSchemeCount = 0 => averageRegularity = 0/1 = 0.0000. Scheme 2 supplied 0 (also not regular).
         assertThat(byLgd).hasSize(2);
         assertThat(byLgd.get(0).lgdId()).isEqualTo(101);
         assertThat(byLgd.get(0).totalSupplyDays()).isEqualTo(1);
-        assertThat(byLgd.get(0).averageRegularity()).isEqualByComparingTo("0.3333");
+        assertThat(byLgd.get(0).regularSchemeCount()).isZero();
+        assertThat(byLgd.get(0).averageRegularity()).isEqualByComparingTo("0.0000");
         assertThat(byLgd.get(1).lgdId()).isEqualTo(102);
         assertThat(byLgd.get(1).totalSupplyDays()).isEqualTo(0);
+        assertThat(byLgd.get(1).regularSchemeCount()).isZero();
         assertThat(byLgd.get(1).averageRegularity()).isEqualByComparingTo("0.0000");
 
         assertThat(byDept).hasSize(2);
         assertThat(byDept.get(0).departmentId()).isEqualTo(201);
         assertThat(byDept.get(0).totalSupplyDays()).isEqualTo(1);
+        assertThat(byDept.get(0).regularSchemeCount()).isZero();
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
         assertThat(byDept.get(1).totalSupplyDays()).isEqualTo(0);
+        assertThat(byDept.get(1).regularSchemeCount()).isZero();
     }
 
     @Test
@@ -279,9 +285,12 @@ class SchemeRegularityRepositoryIntegrationTest {
                 repository.getChildSchemeRegularityMetricsByLgd(100, D1, D3);
         assertThat(childRegularity.get(0).lgdId()).isEqualTo(101);
         assertThat(childRegularity.get(0).schemeCount()).isEqualTo(1);
-        // Water-based: scheme 1 supplied only on D2 => 1 supply day; 1 / (1 * 3) = 0.3333.
+        // Water-based: scheme 1 supplied only on D2 => 1 supply day, counted once despite the duplicate
+        // mapping row. At the default 90% threshold (3 of 3 days required) the scheme is NOT regular:
+        // regularSchemeCount = 0 => averageRegularity = 0.0000.
         assertThat(childRegularity.get(0).totalSupplyDays()).isEqualTo(1);
-        assertThat(childRegularity.get(0).averageRegularity()).isEqualByComparingTo("0.3333");
+        assertThat(childRegularity.get(0).regularSchemeCount()).isZero();
+        assertThat(childRegularity.get(0).averageRegularity()).isEqualByComparingTo("0.0000");
 
         // Scheme-count helper stays distinct.
         assertThat(repository.getSchemeCountByLgdInScope(1, 100)).isEqualTo(2);
@@ -1091,6 +1100,66 @@ class SchemeRegularityRepositoryIntegrationTest {
         assertThat(byDept.get(0).totalWaterSuppliedLiters()).isEqualTo(200L);
         assertThat(byDept.get(1).departmentId()).isEqualTo(202);
         assertThat(byDept.get(1).totalWaterSuppliedLiters()).isEqualTo(0L);
+    }
+
+    @Test
+    void averageWaterSupplyPerCurrentRegion_includesZeroAndNullHouseholdSchemes_andReconcilesWithRegionOwn() {
+        // Schemes with zero or NULL house_hold_count used to be filtered out of the current-scope list,
+        // so its totals could not reconcile with the region-own rollup (which always counts them). Seed a
+        // zero-household and a NULL-household scheme under the same parent LGD/department and assert
+        // (a) both now surface, (b) their per-household average is 0 rather than throwing divide-by-zero,
+        // and (c) the current-scope totals now match getRegionOwnWaterSupply for the parent region.
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 3, 1, "Scheme C (zero households)", 1003, 2003, 0.0, 0.0,
+                100, 100, 101, null, null, null, null,
+                200, 200, 201, null, null, null, null,
+                1, 0, 0, 0);
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_scheme_table
+                (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
+                 parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
+                 parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                """, 4, 1, "Scheme D (null households)", 1004, 2004, 0.0, 0.0,
+                100, 100, 102, null, null, null, null,
+                200, 200, 202, null, null, null, null,
+                1, null, null, null);
+
+        List<SchemeRegularityRepository.SchemeWaterSupplyMetrics> current =
+                repository.getAverageWaterSupplyPerCurrentRegion(1, D1, D3);
+
+        // Both zero/NULL-household schemes now appear (previously filtered out); ordered by scheme_id.
+        assertThat(current)
+                .extracting(SchemeRegularityRepository.SchemeWaterSupplyMetrics::schemeId)
+                .containsExactly(1, 2, 3, 4);
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics schemeC =
+                current.stream().filter(r -> r.schemeId() == 3).findFirst().orElseThrow();
+        SchemeRegularityRepository.SchemeWaterSupplyMetrics schemeD =
+                current.stream().filter(r -> r.schemeId() == 4).findFirst().orElseThrow();
+        assertThat(schemeC.householdCount()).isZero();
+        assertThat(schemeD.householdCount()).isZero();
+        // No divide-by-zero: zero-denominator schemes report a 0 average.
+        assertThat(schemeC.averageLitersPerHousehold()).isEqualByComparingTo("0.0000");
+        assertThat(schemeD.averageLitersPerHousehold()).isEqualByComparingTo("0.0000");
+
+        // Current-scope totals reconcile with the region-own rollup for the parent LGD (level 1 = 100),
+        // which spans exactly the same tenant schemes.
+        SchemeRegularityRepository.ChildRegionWaterSupplyMetrics regionOwn =
+                repository.getRegionOwnWaterSupplyByLgd(1, 100, D1, D3);
+        long currentHouseholds = current.stream()
+                .mapToLong(SchemeRegularityRepository.SchemeWaterSupplyMetrics::householdCount).sum();
+        long currentWater = current.stream()
+                .mapToLong(SchemeRegularityRepository.SchemeWaterSupplyMetrics::totalWaterSuppliedLiters).sum();
+        assertThat(current).hasSize(regionOwn.schemeCount());
+        assertThat(currentHouseholds).isEqualTo(regionOwn.totalHouseholdCount());
+        assertThat(currentWater).isEqualTo(regionOwn.totalWaterSuppliedLiters());
     }
 
     @Test

@@ -25,4 +25,10 @@ public class StaffOtpRequestDTO {
     /** State code selected by the user (e.g. {@code MP}, {@code TR}). Case-insensitive. */
     @NotBlank(message = "tenantCode is required")
     private String tenantCode;
+
+    /**
+     * Optional reCAPTCHA token. Intentionally not {@code @NotBlank}: emptiness is enforced inside
+     * {@code CaptchaVerificationService.verify(...)} only when {@code captcha.enabled=true}.
+     */
+    private String captchaToken;
 }

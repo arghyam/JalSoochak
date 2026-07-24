@@ -71,15 +71,14 @@ spring:
 
 notification:
   channel:
-
     # ── Webhook / Push Notification ─────────────────────────
     webhook:
-      url: ""                          # Default webhook endpoint URL
-      secret: ""                       # Shared secret for request signing
+      url: "" # Default webhook endpoint URL
+      secret: "" # Shared secret for request signing
 
     # ── Email via SendGrid ──────────────────────────────────
     email:
-      sendgrid-api-key: ""             # SendGrid API key
+      sendgrid-api-key: "" # SendGrid API key
       from-address: "noreply@example.com"
       from-name: "Water Management Platform"
 
@@ -225,7 +224,14 @@ pii:
 
 escalation:
   report:
-    dir: /tmp/escalation-reports/     # Directory where escalation PDFs are saved
+    dir: /tmp/escalation-reports/ # Directory where escalation PDFs are saved
+
+# Daily Water Service Situation Report (officer daily PDF)
+daily-report:
+  report:
+    dir: ${DAILY_REPORT_DIR:/tmp/escalation-reports/} # reuses the escalation report dir by default
+  dashboard-url: ${DAILY_REPORT_DASHBOARD_URL:https://jalsoochak.jjmbrain.in/}
+  support-phone: ${DAILY_REPORT_SUPPORT_PHONE:} # shown in the PDF footer; blank hides the line
 
 # Base URL used to construct the public PDF download link sent via WhatsApp.
 # For local dev: http://localhost:8085
@@ -259,6 +265,8 @@ notifications:
     dry-run: ${NOTIFICATIONS_NUDGE_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
   escalation:
     dry-run: ${NOTIFICATIONS_ESCALATION_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
+  daily-report:
+    dry-run: ${NOTIFICATIONS_DAILY_REPORT_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
   sms:
     dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
 
@@ -276,12 +284,15 @@ glific:
     nudge-id: ${GLIFIC_NUDGE_TEMPLATE_ID:}
     escalation-id: ${GLIFIC_ESCALATION_TEMPLATE_ID:}
     login-otp-id: ${GLIFIC_LOGIN_OTP_TEMPLATE_ID:}
+    daily-report-so-id: ${GLIFIC_DAILY_REPORT_SO_TEMPLATE_ID:}
+    daily-report-sdo-id: ${GLIFIC_DAILY_REPORT_SDO_TEMPLATE_ID:}
   flow:
     nudge-id: ${GLIFIC_NUDGE_FLOW_ID:}
     welcome-id: ${GLIFIC_WELCOME_FLOW_ID:38949}
   media:
     escalation-caption: ${GLIFIC_ESCALATION_CAPTION:Escalations}
     escalation-thumbnail: ${GLIFIC_ESCALATION_THUMBNAIL:}
+    daily-report-caption: ${GLIFIC_DAILY_REPORT_CAPTION:Daily Water Service Situation Report}
 
 # ──────────────────────────────────────────────────────────────
 # SMSCountry REST API (SMS OTP delivery)
@@ -293,19 +304,19 @@ smscountry:
   auth-token: ${SMSCOUNTRY_AUTH_TOKEN:}
   sender-id: ${SMSCOUNTRY_SENDER_ID:ARGHYM}
   dlt-principal-entity-id: ${SMSCOUNTRY_DLT_PE_ID:1701177400802435652}
-  dlt-template-id:         ${SMSCOUNTRY_DLT_TEMPLATE_ID:1707177451874727981}
-  dlt-header-id:           ${SMSCOUNTRY_DLT_HEADER_ID:1705177444898758356}
+  dlt-template-id: ${SMSCOUNTRY_DLT_TEMPLATE_ID:1707177451874727981}
+  dlt-header-id: ${SMSCOUNTRY_DLT_HEADER_ID:1705177444898758356}
 
 # ──────────────────────────────────────────────────────────────
 # MinIO Object Storage (escalation PDF hosting)
 # ──────────────────────────────────────────────────────────────
 
 minio:
-  endpoint:   ${MINIO_ENDPOINT:https://localhost:9000}
+  endpoint: ${MINIO_ENDPOINT:https://localhost:9000}
   access-key: ${MINIO_ACCESS_KEY}
   secret-key: ${MINIO_SECRET_KEY}
-  bucket:     ${MINIO_BUCKET:escalation-reports}
-  base-url:   ${MINIO_BASE_URL:https://localhost:9000}
+  bucket: ${MINIO_BUCKET:escalation-reports}
+  base-url: ${MINIO_BASE_URL:https://localhost:9000}
 
 logging:
   file:

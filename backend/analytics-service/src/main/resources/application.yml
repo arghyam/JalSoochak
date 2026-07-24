@@ -73,6 +73,13 @@ springdoc:
     path: /swagger-ui.html
     tags-sorter: alpha
     operations-sorter: method
+    # Disable client-side syntax highlighting. highlight.js' recursive
+    # processLines overflows the JS call stack ("Maximum call stack size
+    # exceeded") on large/deeply nested responses (e.g. water-quantity/
+    # region-wise), causing "Could not render responses". Plain-text
+    # rendering avoids the highlighter entirely; the response still renders.
+    syntax-highlight:
+      activated: false
   api-docs:
     path: /v3/api-docs
 
@@ -114,6 +121,16 @@ analytics:
       # false = count/list all schemes regardless of work_status. Flip without a code change (default).
       work-status-filter-enabled: ${ANALYTICS_DASHBOARD_CONTINUOUS_SCHEMES_WORK_STATUS_FILTER_ENABLED:false}
 
+    regularity:
+      # Percentage of days in a window on which a scheme must supply water to count as "regular".
+      # Last tier of the fallback chain: a tenant's own REGULARITY_THRESHOLD_PERCENT config wins, then
+      # the national default (tenant 0), then this value. Must be > 0 and <= 100.
+      threshold-percent: ${ANALYTICS_DASHBOARD_REGULARITY_THRESHOLD_PERCENT:90}
+      # Window applied to /scheme-regularity/average when start and end date are the same day: a
+      # single day is too small a sample for a share-of-days KPI, so it expands to this many trailing
+      # days (inclusive of the requested day). Not per-tenant configurable.
+      single-day-lookback-days: ${ANALYTICS_DASHBOARD_REGULARITY_SINGLE_DAY_LOOKBACK_DAYS:30}
+
   scheduler:
     common:
       # Midnight IST: a day is 12am->12am; this run finalizes the just-completed day.
@@ -123,7 +140,7 @@ analytics:
       lookback-days: ${ANALYTICS_NATIONAL_DASHBOARD_LOOKBACK_DAYS:30}
     scheme-status:
       inactive-after-days: ${ANALYTICS_SCHEME_STATUS_INACTIVE_AFTER_DAYS:30}
-      critical-after-days: ${ANALYTICS_SCHEME_STATUS_CRITICAL_AFTER_DAYS:5}
+      critical-after-days: ${ANALYTICS_SCHEME_STATUS_CRITICAL_AFTER_DAYS:30}
 
     dim-date-backfill:
       cron: ${ANALYTICS_DIM_DATE_BACKFILL_CRON:0 10 0 * * *}

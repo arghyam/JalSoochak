@@ -142,6 +142,60 @@ class TenantEventListenerTest {
     }
 
     @Test
+    void handleRegularityThresholdUpdated_publishesCorrectPayload() {
+        RegularityThresholdUpdatedEvent event =
+                new RegularityThresholdUpdatedEvent(2, "TR", 87.5);
+
+        listener.handleRegularityThresholdUpdated(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(kafkaProducer).publishJson(eq("tenant-service-topic"), captor.capture());
+        Map<String, Object> payload = captor.getValue();
+        assertThat(payload.get("eventType")).isEqualTo("REGULARITY_THRESHOLD_UPDATED");
+        assertThat(payload.get("tenantId")).isEqualTo(2);
+        assertThat(payload.get("stateCode")).isEqualTo("TR");
+        assertThat(payload.get("thresholdPercent")).isEqualTo(87.5);
+    }
+
+    @Test
+    void handleRegularityThresholdUpdated_nationalTenantZero_publishes() {
+        // tenant-0 (national default) uses the "NATIONAL" sentinel state code and must still publish.
+        RegularityThresholdUpdatedEvent event =
+                new RegularityThresholdUpdatedEvent(0, "NATIONAL", 90.0);
+
+        listener.handleRegularityThresholdUpdated(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(kafkaProducer).publishJson(eq("tenant-service-topic"), captor.capture());
+        Map<String, Object> payload = captor.getValue();
+        assertThat(payload.get("tenantId")).isEqualTo(0);
+        assertThat(payload.get("stateCode")).isEqualTo("NATIONAL");
+        assertThat(payload.get("thresholdPercent")).isEqualTo(90.0);
+    }
+
+    @Test
+    void handleRegularityThresholdUpdated_skipsKafka_whenTenantIdOrThresholdIsNull() {
+        listener.handleRegularityThresholdUpdated(
+                new RegularityThresholdUpdatedEvent(null, "TR", 90.0));
+        listener.handleRegularityThresholdUpdated(
+                new RegularityThresholdUpdatedEvent(1, "TR", null));
+
+        verify(kafkaProducer, never()).publishJson(anyString(), any());
+    }
+
+    @Test
+    void handleRegularityThresholdUpdated_kafkaFailureIsSwallowed() {
+        doThrow(new RuntimeException("broker down"))
+                .when(kafkaProducer).publishJson(anyString(), any());
+
+        // A publish failure must not propagate out of an AFTER_COMMIT listener.
+        listener.handleRegularityThresholdUpdated(
+                new RegularityThresholdUpdatedEvent(2, "TR", 90.0));
+    }
+
+    @Test
     void handleLocationHierarchyUpdated_publishesCorrectPayload() {
         LocationLevelNameDTO name = LocationLevelNameDTO.builder().languageId(1).title("District").build();
         LocationLevelConfigDTO level = LocationLevelConfigDTO.builder()

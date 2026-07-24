@@ -4,7 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -12,6 +12,10 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 import org.arghyam.jalsoochak.user.exceptions.KeycloakLogoutException;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.net.http.HttpClient;
+import java.time.Duration;
+import java.util.Locale;
 
 
 @Slf4j
@@ -36,9 +40,14 @@ public class KeycloakClient {
         this.clientId = clientId;
         this.clientSecret = clientSecret;
 
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(connectTimeoutMs);
-        factory.setReadTimeout(readTimeoutMs);
+        // Use JdkClientHttpRequestFactory (java.net.http.HttpClient) rather than
+        // SimpleClientHttpRequestFactory: the latter's HttpURLConnection swallows the response
+        // body on 4xx statuses (notably 401), which hid Keycloak's brute-force lockout message.
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(connectTimeoutMs))
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
         this.restClient = RestClient.builder().requestFactory(factory).build();
     }
 
@@ -93,7 +102,18 @@ public class KeycloakClient {
                     .retrieve()
                     .body(KeycloakTokenResponse.class);
         } catch (RestClientResponseException e) {
-            log.error("Keycloak token error: status={}, body={}", e.getStatusCode().value(), e.getResponseBodyAsString());
+            String responseBody = e.getResponseBodyAsString();
+            log.error("Keycloak token error: status={}, body={}", e.getStatusCode().value(), responseBody);
+            // Realm-level brute-force temporary lockout comes back as an invalid_grant "Account
+            // temporarily disabled" error (observed as HTTP 401 on this Keycloak version), so
+            // detect it from the body before the status branches below map it to the generic
+            // wrong-credentials message. Reading the body on 401 requires JdkClientHttpRequestFactory
+            // (see constructor) — SimpleClientHttpRequestFactory's HttpURLConnection drops it.
+            if (isAccountTemporarilyLocked(responseBody)) {
+                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, 
+                        "Account temporarily locked due to too many failed login attempts. "
+                                + "Please try again in a few minutes.", e);
+            }
             if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
                 throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username, password, or refresh token", e);
             }
@@ -107,5 +127,15 @@ public class KeycloakClient {
             log.error("Keycloak token error", e);
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Keycloak token request failed", e);
         }
+    }
+
+    /**
+     * Detects Keycloak's brute-force temporary-lockout response. When realm-level brute-force
+     * detection locks an account, the token endpoint returns an {@code invalid_grant} error whose
+     * description contains "temporarily disabled". Matched against the raw response body.
+     */
+    private boolean isAccountTemporarilyLocked(String responseBody) {
+        return responseBody != null
+                && responseBody.toLowerCase(Locale.ROOT).contains("temporarily disabled");
     }
 }

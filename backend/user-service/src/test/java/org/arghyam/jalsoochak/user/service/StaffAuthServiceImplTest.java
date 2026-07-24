@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -15,6 +16,7 @@ import org.arghyam.jalsoochak.user.service.StaffKeycloakService.ProvisionResult;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import org.arghyam.jalsoochak.user.clients.KeycloakClient;
@@ -30,7 +32,9 @@ import org.arghyam.jalsoochak.user.event.UserAnalyticsEventPublisher;
 import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
+import org.arghyam.jalsoochak.user.exceptions.CaptchaVerificationException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
+import org.arghyam.jalsoochak.user.service.CaptchaVerificationService;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
@@ -55,6 +59,7 @@ class StaffAuthServiceImplTest {
     @Mock UserNotificationEventPublisher eventPublisher;
     @Mock UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock TransactionTemplate transactionTemplate;
+    @Mock CaptchaVerificationService captchaVerificationService;
 
     StaffAuthServiceImpl service;
 
@@ -86,7 +91,7 @@ class StaffAuthServiceImplTest {
         OtpProperties otpProps = new OtpProperties(10, 5, 60, 6, "WHATSAPP", null);
         service = new StaffAuthServiceImpl(userCommonRepository, userTenantRepository,
                 otpProps, otpService, staffKeycloakService, keycloakClient, eventPublisher,
-                userAnalyticsEventPublisher, transactionTemplate);
+                userAnalyticsEventPublisher, transactionTemplate, captchaVerificationService);
     }
 
     @Nested
@@ -100,6 +105,10 @@ class StaffAuthServiceImplTest {
             request = new StaffOtpRequestDTO();
             request.setPhoneNumber("919876543210");
             request.setTenantCode("mp");
+            // requestOtp now runs its DB work inside transactionTemplate.execute(...); make the mock
+            // invoke the callback. lenient() because the captcha-failure test short-circuits first.
+            lenient().when(transactionTemplate.execute(any())).thenAnswer(inv ->
+                    ((TransactionCallback<?>) inv.getArgument(0)).doInTransaction(null));
         }
 
         @Test
@@ -115,6 +124,18 @@ class StaffAuthServiceImplTest {
 
             verify(otpService).requestOtp(10L, 1, OtpType.LOGIN);
             verify(eventPublisher).publishLoginOtpAfterCommit(any(SendLoginOtpEvent.class), eq(10L), eq("MP"));
+        }
+
+        @Test
+        @DisplayName("CAPTCHA failure short-circuits before any DB work or OTP send")
+        void captchaFailure_shortCircuits() {
+            doThrow(new CaptchaVerificationException("CAPTCHA verification failed"))
+                    .when(captchaVerificationService).verify(any(), eq("staff_otp"));
+
+            assertThatThrownBy(() -> service.requestOtp(request))
+                    .isInstanceOf(CaptchaVerificationException.class);
+
+            verifyNoInteractions(userCommonRepository, userTenantRepository, otpService, eventPublisher);
         }
 
         @Test

@@ -221,6 +221,25 @@ class GlobalExceptionHandlerTest {
         }
     }
 
+    // ── AccountTemporarilyLockedException ─────────────────────────────────────
+
+    @Nested
+    @DisplayName("handleAccountLocked")
+    class HandleAccountLocked {
+
+        @Test
+        @DisplayName("returns 429 with a Retry-After header")
+        void returns429WithRetryAfter() {
+            AccountTemporarilyLockedException ex = new AccountTemporarilyLockedException(90);
+            ResponseEntity<ApiErrorResponseDTO> response = handler.handleAccountLocked(ex);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+            assertThat(response.getHeaders().getFirst("Retry-After")).isEqualTo("90");
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().getMessage()).contains("temporarily locked");
+        }
+    }
+
     // ── AccountDeactivatedException ───────────────────────────────────────────
 
     @Nested

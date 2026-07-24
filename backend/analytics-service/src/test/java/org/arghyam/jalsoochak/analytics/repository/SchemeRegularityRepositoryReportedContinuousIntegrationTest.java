@@ -22,10 +22,13 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * REPORTED-METRIC: validates the reported-days continuity SQL of getContinuousSchemeCountByLgd against
- * a real Postgres. Exercises the three UNION branches (readings / image-reject anomalies /
- * submission_attempt), the IST day-boundary shift, lever A (any reading vs supplied), and that the
- * count (list=false) agrees with the list (list=true).
+ * REPORTED-METRIC: validates the reported-days continuous SQL against a real Postgres for ALL THREE
+ * scopes — LGD, department and user — which now share one "reported day" definition. A scheme is
+ * continuous when it reported on AT LEAST ONE day in the range (reported_days &gt;= 1). Exercises the
+ * three UNION branches (readings / image-reject anomalies / submission_attempt) each in isolation, the
+ * IST day-boundary shift, lever A (any reading — even a 0-supply reading — counts as reported), a
+ * scheme with no events (not continuous), that the count (list=false) agrees with the list (list=true),
+ * and that LGD / department / user scopes return the same schemes.
  */
 @JdbcTest
 @Testcontainers
@@ -62,9 +65,10 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
 
     private static final int TENANT = 1;
     private static final int LGD = 100;                 // level 1
+    private static final int DEPARTMENT = 1;            // level 1 (schemes carry level_1_dept_id = 1)
+    private static final int USER = 11;
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D3 = LocalDate.of(2026, 1, 3);
-    private static final int DAYS_IN_RANGE = 3;          // (D3 - D1) + 1
 
     @BeforeEach
     void setUp() {
@@ -73,42 +77,79 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
                     analytics_schema.submission_attempt_table,
                     analytics_schema.anomaly_table,
                     analytics_schema.fact_meter_reading_table,
+                    analytics_schema.dim_user_scheme_mapping_table,
+                    analytics_schema.dim_user_table,
                     analytics_schema.dim_scheme_table,
+                    analytics_schema.dim_department_location_table,
                     analytics_schema.dim_lgd_location_table,
                     analytics_schema.dim_tenant_table
                 RESTART IDENTITY CASCADE
                 """);
         seedTenantAndLgd();
+        seedDepartment();
         seedSchemes(10, 20, 30, 40, 50);
+        seedUserAndMappings(10, 20, 30, 40, 50);
 
-        // Scheme 10: supplied all 3 days -> reported 3 (branch A)
-        reading(10, D1, 5); reading(10, LocalDate.of(2026, 1, 2), 5); reading(10, D3, 5);
-        // Scheme 20: supplied days 1,2 + duplicate reject at 2026-01-02 20:00 UTC -> + 5:30 = 2026-01-03 01:30 -> day 3
-        // (branch B + IST boundary; created_at is plain TIMESTAMP holding UTC after V41, so +5:30 is session-independent)
-        reading(20, D1, 5); reading(20, LocalDate.of(2026, 1, 2), 5);
+        // New definition: continuous = reported on AT LEAST ONE day in the range. Each scheme qualifies
+        // (or not) via exactly one lever so the branches stay independently covered.
+        // Scheme 10: one supplied reading (branch A) -> continuous
+        reading(10, D1, 5);
+        // Scheme 20: ONLY a duplicate-image reject at 2026-01-02 20:00 UTC -> + 5:30 = 2026-01-03 01:30 -> day 3
+        // (branch B + IST boundary; created_at is plain TIMESTAMP holding UTC after V41, so +5:30 is
+        // session-independent). No reading row, so it can only be continuous via lever B.
         anomaly(20, "DUPLICATE_IMAGE_SUBMISSION", "2026-01-02 20:00:00");
-        // Scheme 30: supplied days 1,2 + submission_attempt on day 3 (branch C)
-        reading(30, D1, 5); reading(30, LocalDate.of(2026, 1, 2), 5);
+        // Scheme 30: ONLY a submission_attempt on day 3 (branch C), no reading row -> continuous via lever C
         submissionAttempt(30, "2026-01-03 06:00:00");
-        // Scheme 40: supplied days 1,2 only -> reported 2 -> NOT continuous
-        reading(40, D1, 5); reading(40, LocalDate.of(2026, 1, 2), 5);
-        // Scheme 50: day1 is 0-supply (outage) + supplied days 2,3 -> reported 3 (lever A: any reading counts)
-        reading(50, D1, 0); reading(50, LocalDate.of(2026, 1, 2), 5); reading(50, D3, 5);
+        // Scheme 40: no events at all -> reported 0 -> NOT continuous
+        // Scheme 50: ONLY a 0-supply reading (branch A "any reading") -> continuous: reported even without supply
+        reading(50, D1, 0);
     }
 
     @Test
-    void reportedContinuousCount_countsReadingsAndRejectsAndAttempts_withIstBoundary() {
-        long count = repository.getContinuousSchemeCountByLgd(TENANT, LGD, D1, D3, DAYS_IN_RANGE);
-        // 10 (readings), 20 (reject on IST day 3), 30 (attempt day 3), 50 (0-supply still reports) => 4.
-        // 40 is excluded (only 2 reported days).
+    void reportedContinuousCount_countsReadingsAndRejectsAndAttempts_atLeastOneDay() {
+        long count = repository.getContinuousSchemeCountByLgd(TENANT, LGD, D1, D3);
+        // 10 (reading), 20 (reject on IST day 3), 30 (attempt day 3), 50 (0-supply reading still reports) => 4.
+        // 40 is excluded (no reported days).
         assertThat(count).isEqualTo(4L);
     }
 
     @Test
     void listMatchesCount_sameReportedContinuitySchemes() {
         List<SchemeRegularityRepository.ContinuousSchemeRow> rows =
-                repository.getContinuousSchemesByLgd(TENANT, LGD, D1, D3, DAYS_IN_RANGE, 100, 0);
+                repository.getContinuousSchemesByLgd(TENANT, LGD, D1, D3, 100, 0);
         List<Integer> ids = rows.stream()
+                .map(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
+                .collect(Collectors.toList());
+        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
+    }
+
+    @Test
+    void reportedContinuousCount_byDepartment_matchesLgdDefinition() {
+        // Department scope now uses the same reported_events levers A/B/C as LGD -> same 4 schemes.
+        long count = repository.getContinuousSchemeCountByDepartment(TENANT, DEPARTMENT, D1, D3);
+        assertThat(count).isEqualTo(4L);
+    }
+
+    @Test
+    void listMatchesCount_byDepartment_sameReportedContinuitySchemes() {
+        List<Integer> ids = repository.getContinuousSchemesByDepartment(TENANT, DEPARTMENT, D1, D3, 100, 0)
+                .stream()
+                .map(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
+                .collect(Collectors.toList());
+        assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
+    }
+
+    @Test
+    void reportedContinuousCount_byUser_matchesLgdDefinition() {
+        // User scope now uses the same reported_events levers A/B/C as LGD -> same 4 schemes.
+        long count = repository.getContinuousSchemeCountByUserSchemes(TENANT, USER, D1, D3);
+        assertThat(count).isEqualTo(4L);
+    }
+
+    @Test
+    void listMatchesCount_byUser_sameReportedContinuitySchemes() {
+        List<Integer> ids = repository.getContinuousSchemesByUserSchemes(TENANT, USER, D1, D3, 100, 0)
+                .stream()
                 .map(SchemeRegularityRepository.ContinuousSchemeRow::schemeId)
                 .collect(Collectors.toList());
         assertThat(ids).containsExactlyInAnyOrder(10, 20, 30, 50);
@@ -130,6 +171,31 @@ class SchemeRegularityRepositoryReportedContinuousIntegrationTest {
                  created_at, updated_at)
                 VALUES (?, ?, 'L100', 'District', 'District', 1, ?, ?, NULL, NULL, NULL, NULL, NOW(), NOW())
                 """, LGD, TENANT, LGD, LGD);
+    }
+
+    private void seedDepartment() {
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_department_location_table
+                (department_id, tenant_id, department_c_name, title, department_level,
+                 level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
+                 created_at, updated_at)
+                VALUES (?, ?, 'Dept', 'Dept', 1, ?, NULL, NULL, NULL, NULL, NULL, NOW(), NOW())
+                """, DEPARTMENT, TENANT, DEPARTMENT);
+    }
+
+    private void seedUserAndMappings(int... schemeIds) {
+        jdbcTemplate.update("""
+                INSERT INTO analytics_schema.dim_user_table
+                (user_id, tenant_id, email, user_type, created_at, updated_at)
+                VALUES (?, ?, ?, 1, NOW(), NOW())
+                """, USER, TENANT, "user" + USER + "@example.com");
+        for (int s : schemeIds) {
+            jdbcTemplate.update("""
+                    INSERT INTO analytics_schema.dim_user_scheme_mapping_table
+                    (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
+                    VALUES (gen_random_uuid(), ?, ?, ?, NULL, NOW(), NOW(), 1)
+                    """, TENANT, USER, s);
+        }
     }
 
     private void seedSchemes(int... schemeIds) {

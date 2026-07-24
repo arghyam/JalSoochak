@@ -122,6 +122,27 @@ class KeycloakClientTest {
     }
 
     @Test
+    void testObtainToken_accountTemporarilyLocked_mapsToTooManyRequests() {
+        // Given – Keycloak brute-force temporary lockout: invalid_grant / "Account temporarily
+        // disabled" on the token endpoint, observed as HTTP 401 on the deployed Keycloak version.
+        // Detection is body-based (requires JdkClientHttpRequestFactory to expose the 401 body),
+        // so it maps to 429 rather than the generic wrong-credentials 401 message.
+        stubFor(post(urlEqualTo("/realms/test-realm/protocol/openid-connect/token"))
+                .willReturn(aResponse()
+                        .withStatus(HttpStatus.UNAUTHORIZED.value())
+                        .withHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                        .withBody("{\"error\":\"invalid_grant\",\"error_description\":\"Account temporarily disabled\"}")));
+
+        // When & Then
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class,
+                () -> keycloakClient.obtainToken("lockeduser", "wrongpass"));
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exception.getStatusCode());
+        assertEquals("Account temporarily locked due to too many failed login attempts. "
+                + "Please try again in a few minutes.", exception.getReason());
+    }
+
+    @Test
     void testObtainToken_gatewayError() {
         // Given
         stubFor(post(urlEqualTo("/realms/test-realm/protocol/openid-connect/token"))

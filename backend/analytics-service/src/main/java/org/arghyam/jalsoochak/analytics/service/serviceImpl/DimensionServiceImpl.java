@@ -8,6 +8,7 @@ import org.arghyam.jalsoochak.analytics.dto.event.TenantLocationHierarchyUpdated
 import org.arghyam.jalsoochak.analytics.dto.event.UserEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.UserSchemeMappingsReplacedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.IncludedWorkStatusesUpdatedEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.RegularityThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterNormUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEvent;
 import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
@@ -311,23 +312,7 @@ public class DimensionServiceImpl implements DimensionService {
     @Override
     @Transactional
     public void updateIncludedWorkStatuses(IncludedWorkStatusesUpdatedEvent event) {
-        // The national default (tenantId=0) is a config-only singleton: no TENANT_CREATED event ever
-        // creates it, so it must be materialised on first write instead of throwing. Real tenants still
-        // require an existing row (TENANT_CREATED precedes any config change on the same ordered topic).
-        DimTenant tenant = dimTenantRepository.findById(event.getTenantId())
-                .orElseGet(() -> {
-                    if (!NATIONAL_TENANT_ID.equals(event.getTenantId())) {
-                        throw new IllegalStateException(
-                                "No dim_tenant_table row for tenantId=" + event.getTenantId());
-                    }
-                    return DimTenant.builder()
-                            .tenantId(event.getTenantId())
-                            .stateCode(event.getStateCode())
-                            .title(event.getStateCode())
-                            .status(NATIONAL_TENANT_STATUS)
-                            .createdAt(LocalDateTime.now())
-                            .build();
-                });
+        DimTenant tenant = findOrMaterialiseConfigTenant(event.getTenantId(), event.getStateCode());
         tenant.setIncludedWorkStatuses(event.getWorkStatuses());
         tenant.setUpdatedAt(LocalDateTime.now());
         dimTenantRepository.save(tenant);
@@ -375,6 +360,40 @@ public class DimensionServiceImpl implements DimensionService {
             return List.of();
         }
         return statuses.stream().filter(Objects::nonNull).distinct().sorted().toList();
+    }
+
+    @Override
+    @Transactional
+    public void updateRegularityThreshold(RegularityThresholdUpdatedEvent event) {
+        DimTenant tenant = findOrMaterialiseConfigTenant(event.getTenantId(), event.getStateCode());
+        tenant.setRegularityThresholdPercent(event.getThresholdPercent());
+        tenant.setUpdatedAt(LocalDateTime.now());
+        dimTenantRepository.save(tenant);
+        log.info("Updated dim_tenant_table.regularity_threshold_percent={} [tenantId={}]",
+                event.getThresholdPercent(), event.getTenantId());
+    }
+
+    /**
+     * Resolves the {@code dim_tenant_table} row a config event writes to.
+     *
+     * <p>The national default (tenantId=0) is a config-only singleton: no TENANT_CREATED event ever
+     * creates it, so it must be materialised on first write instead of throwing. Real tenants still
+     * require an existing row (TENANT_CREATED precedes any config change on the same ordered topic).</p>
+     */
+    private DimTenant findOrMaterialiseConfigTenant(Integer tenantId, String stateCode) {
+        return dimTenantRepository.findById(tenantId)
+                .orElseGet(() -> {
+                    if (!NATIONAL_TENANT_ID.equals(tenantId)) {
+                        throw new IllegalStateException("No dim_tenant_table row for tenantId=" + tenantId);
+                    }
+                    return DimTenant.builder()
+                            .tenantId(tenantId)
+                            .stateCode(stateCode)
+                            .title(stateCode)
+                            .status(NATIONAL_TENANT_STATUS)
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                });
     }
 
     @Override

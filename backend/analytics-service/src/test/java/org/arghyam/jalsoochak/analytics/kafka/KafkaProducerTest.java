@@ -8,8 +8,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
 
+import java.util.concurrent.CompletableFuture;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class KafkaProducerTest {
@@ -22,6 +26,9 @@ class KafkaProducerTest {
 
     @Test
     void sendMessage_sendsToAnalyticsServiceTopic() {
+        when(kafkaTemplate.send(anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture(null));
+
         producer.sendMessage("hello");
 
         ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);

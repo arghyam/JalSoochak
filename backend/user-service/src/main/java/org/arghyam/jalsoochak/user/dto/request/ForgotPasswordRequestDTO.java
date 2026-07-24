@@ -11,4 +11,10 @@ public class ForgotPasswordRequestDTO {
     @NotBlank(message = "Email is required")
     @Email(message = "Please provide a valid email address")
     private String email;
+
+    /**
+     * Optional reCAPTCHA token. Intentionally not {@code @NotBlank}: emptiness is enforced inside
+     * {@code CaptchaVerificationService.verify(...)} only when {@code captcha.enabled=true}.
+     */
+    private String captchaToken;
 }

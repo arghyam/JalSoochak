@@ -165,6 +165,49 @@ public class AggregateReadRepository {
         }, params);
     }
 
+    /**
+     * Count schemes under a region classified "regular" over [start, end] — i.e. that supplied
+     * water on at least {@code thresholdDays} of the window's days — from fact_scheme_daily_table.
+     * Mirrors {@code RegularityThresholdFilter}: a scheme is regular when supply_days &gt;=
+     * thresholdDays. Schemes with no activity have zero supply days and are (correctly) not
+     * counted; the divisor (total scheme count) comes from {@link #getRegionMetrics}. The caller
+     * only invokes this once {@code getRegionMetrics} confirms full coverage, so a plain count
+     * (not an Optional) is returned.
+     */
+    public long getRegularSchemeCount(int tenantId, String hierarchy, int regionId,
+                                      LocalDate start, LocalDate end, int thresholdDays) {
+        String orClause = regionMembershipOrClause(hierarchy, "ds");
+        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(end));
+        String sql = ("""
+                SELECT COUNT(*) FILTER (WHERE supply_days >= ?) AS regular_schemes
+                FROM (
+                    SELECT sd.scheme_id, SUM(sd.supplied) AS supply_days
+                    FROM (
+                        SELECT DISTINCT ds.tenant_id, ds.scheme_id
+                        FROM analytics_schema.dim_scheme_table ds
+                        WHERE ds.tenant_id = ?
+                          AND (%s)%s
+                    ) m
+                    JOIN analytics_schema.fact_scheme_daily_table sd
+                      ON sd.tenant_id = m.tenant_id AND sd.scheme_id = m.scheme_id
+                    WHERE sd.reading_date BETWEEN ? AND ?
+                    GROUP BY sd.scheme_id
+                ) t
+                """).formatted(orClause, schemeFilter);
+
+        Object[] params = new Object[4 + 6];
+        params[0] = thresholdDays;
+        params[1] = tenantId;
+        for (int i = 0; i < 6; i++) {
+            params[2 + i] = regionId;
+        }
+        params[8] = start;
+        params[9] = end;
+
+        Long count = jdbcTemplate.queryForObject(sql, Long.class, params);
+        return count == null ? 0L : count;
+    }
+
     /** OR over the six level columns of {@code alias}: a region id matches exactly one level. */
     private static String regionMembershipOrClause(String hierarchy, String alias) {
         String suffix = "DEPT".equalsIgnoreCase(hierarchy) ? "dept" : "lgd";

@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -50,6 +51,14 @@ public class DimTenant {
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "included_work_statuses", columnDefinition = "integer[]")
     private List<Integer> includedWorkStatuses;
+
+    /**
+     * Percentage of days on which a scheme must supply water to count as regular. NULL means "not
+     * configured" — {@code RegularityThresholdFilter} then falls back to the national default
+     * (tenant-0) and finally the analytics env default.
+     */
+    @Column(name = "regularity_threshold_percent")
+    private BigDecimal regularityThresholdPercent;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;

@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -37,7 +38,13 @@ import org.arghyam.jalsoochak.user.event.UserNotificationEventPublisher;
 import org.arghyam.jalsoochak.user.exceptions.AccountDeactivatedException;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.exceptions.ForbiddenAccessException;
+import org.arghyam.jalsoochak.user.exceptions.AccountTemporarilyLockedException;
+import org.arghyam.jalsoochak.user.exceptions.CaptchaVerificationException;
 import org.arghyam.jalsoochak.user.exceptions.InvalidCredentialsException;
+import org.springframework.http.HttpStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
 import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.exceptions.UserAlreadyExistsException;
 import org.arghyam.jalsoochak.user.enums.ResourceType;
@@ -120,6 +127,12 @@ class AuthServiceImplTest {
     @Mock
     private DataVersionRepository dataVersionRepository;
 
+    @Mock
+    private CaptchaVerificationService captchaVerificationService;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
     private AuthServiceImpl authService;
 
     @BeforeEach
@@ -127,7 +140,8 @@ class AuthServiceImplTest {
         authService = new AuthServiceImpl(
                 keycloakProvider, keycloakClient, userCommonRepository, userTenantRepository,
                 userNotificationEventPublisher, userAnalyticsEventPublisher, keycloakAdminHelper, passwordResetProperties,
-                frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper, dataVersionRepository
+                frontendProperties, tokenService, new ObjectMapper(), metadataDecryptionHelper, dataVersionRepository,
+                captchaVerificationService, transactionTemplate
         );
     }
 
@@ -238,12 +252,52 @@ class AuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("CAPTCHA failure short-circuits before any DB/Keycloak work")
+        void login_captchaFailure_shortCircuits() {
+            doThrow(new CaptchaVerificationException("CAPTCHA verification failed"))
+                    .when(captchaVerificationService).verify(any(), eq("login"));
+
+            assertThrows(CaptchaVerificationException.class,
+                    () -> authService.login(loginRequest("user@example.com", "pass")));
+
+            verify(userCommonRepository, never()).findAdminUserByEmail(anyString());
+            verify(keycloakClient, never()).obtainToken(anyString(), anyString());
+        }
+
+        @Test
         @DisplayName("Should throw InvalidCredentialsException when user not found")
         void login_userNotFound_throwsInvalidCredentials() {
             when(userCommonRepository.findAdminUserByEmail(anyString())).thenReturn(Optional.empty());
 
             assertThrows(InvalidCredentialsException.class,
                     () -> authService.login(loginRequest("nobody@example.com", "pass")));
+        }
+
+        @Test
+        @DisplayName("Should raise AccountTemporarilyLockedException when a 401 hides a brute-force lockout")
+        void login_lockedAccount_throwsTooManyRequests() {
+            when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakClient.obtainToken("user@example.com", "wrong"))
+                    .thenThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username, password, or refresh token"));
+            when(keycloakAdminHelper.isTemporarilyLockedByBruteForce("kc-uuid")).thenReturn(true);
+
+            assertThrows(AccountTemporarilyLockedException.class,
+                    () -> authService.login(loginRequest("user@example.com", "wrong")));
+        }
+
+        @Test
+        @DisplayName("Wrong password on an unlocked account is normalised to the generic invalid-credentials error")
+        void login_wrongPassword_notLocked_normalisesToInvalidCredentials() {
+            when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakClient.obtainToken("user@example.com", "wrong"))
+                    .thenThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username, password, or refresh token"));
+            when(keycloakAdminHelper.isTemporarilyLockedByBruteForce("kc-uuid")).thenReturn(false);
+
+            InvalidCredentialsException ex = assertThrows(InvalidCredentialsException.class,
+                    () -> authService.login(loginRequest("user@example.com", "wrong")));
+
+            // Must match the unknown-account message verbatim so responses are indistinguishable.
+            assertEquals("Invalid credentials", ex.getMessage());
         }
 
         @Test
@@ -487,6 +541,14 @@ class AuthServiceImplTest {
     @Nested
     @DisplayName("forgotPassword()")
     class ForgotPasswordTests {
+
+        @BeforeEach
+        void stubTransactionTemplate() {
+            // forgotPassword now runs its DB work inside transactionTemplate.execute(...);
+            // make the mock invoke the callback so the body executes.
+            when(transactionTemplate.execute(any())).thenAnswer(inv ->
+                    ((TransactionCallback<?>) inv.getArgument(0)).doInTransaction(null));
+        }
 
         @Test
         @DisplayName("Should return silently (OWASP) when email is not registered")

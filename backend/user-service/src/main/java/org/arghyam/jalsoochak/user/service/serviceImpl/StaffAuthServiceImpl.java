@@ -21,12 +21,12 @@ import org.arghyam.jalsoochak.user.exceptions.ResourceNotFoundException;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
+import org.arghyam.jalsoochak.user.service.CaptchaVerificationService;
 import org.arghyam.jalsoochak.user.service.OtpService;
 import org.arghyam.jalsoochak.user.service.StaffAuthService;
 import org.arghyam.jalsoochak.user.service.StaffKeycloakService;
 import org.arghyam.jalsoochak.user.util.TenantAccessValidator;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Objects;
@@ -58,10 +58,18 @@ public class StaffAuthServiceImpl implements StaffAuthService {
     private final UserNotificationEventPublisher eventPublisher;
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final TransactionTemplate transactionTemplate;
+    private final CaptchaVerificationService captchaVerificationService;
 
     @Override
-    @Transactional
     public OtpRequestResponseDTO requestOtp(StaffOtpRequestDTO request) {
+        // Verify CAPTCHA before opening a transaction: the external verification call must not run
+        // inside a DB transaction (which would otherwise hold a pooled connection for its duration),
+        // and a failure short-circuits without any DB work. No-op when captcha.enabled=false.
+        captchaVerificationService.verify(request.getCaptchaToken(), "staff_otp");
+        return Objects.requireNonNull(transactionTemplate.execute(status -> requestOtpTransactional(request)));
+    }
+
+    private OtpRequestResponseDTO requestOtpTransactional(StaffOtpRequestDTO request) {
         String tenantCode = request.getTenantCode().trim().toUpperCase();
         String phone = request.getPhoneNumber().trim();
 
@@ -207,7 +215,13 @@ public class StaffAuthServiceImpl implements StaffAuthService {
             provisionResult = staffKeycloakService.ensureKeycloakAccount(freshUser, tenantCode, schema);
             token = keycloakClient.obtainToken(freshUser.phoneNumber(), provisionResult.managedPassword());
         } catch (RuntimeException e) {
-            otpService.revertOtpConsumption(consumedOtpId);
+            try {
+                otpService.revertOtpConsumption(consumedOtpId);
+            } catch (RuntimeException revertEx) {
+                // Never let a reversion failure mask the original cause.
+                e.addSuppressed(revertEx);
+                log.error("OTP consumption reversion failed for consumedOtpId={}", consumedOtpId, revertEx);
+            }
             throw e;
         } finally {
             // Sync the newly-provisioned Keycloak UUID to analytics_schema.dim_user_table.

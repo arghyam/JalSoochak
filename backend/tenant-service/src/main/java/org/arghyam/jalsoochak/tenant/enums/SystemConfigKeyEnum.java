@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.enums;
 import org.arghyam.jalsoochak.tenant.dto.internal.ChannelListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.ConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.IncludedWorkStatusesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.RegularityThresholdConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
 
@@ -55,7 +56,16 @@ public enum SystemConfigKeyEnum implements ConfigKey {
      * Published to analytics via INCLUDED_WORK_STATUSES_UPDATED with tenantId=0.
      * Managed by Super User.
      */
-    INCLUDED_WORK_STATUSES(IncludedWorkStatusesConfigDTO.class);
+    INCLUDED_WORK_STATUSES(IncludedWorkStatusesConfigDTO.class),
+
+    /**
+     * National default for the percentage of days on which a scheme must supply water to count as
+     * regular in analytics dashboards (analytics tenant-0). E.g. 90 means a scheme must supply on at
+     * least 90% of the window's days. Applies to national screens uniformly and to any tenant that has
+     * not set its own value. Published to analytics via REGULARITY_THRESHOLD_UPDATED with tenantId=0.
+     * Managed by Super User.
+     */
+    REGULARITY_THRESHOLD_PERCENT(RegularityThresholdConfigDTO.class);
 
     private final Class<? extends ConfigValueDTO> dtoClass;
 

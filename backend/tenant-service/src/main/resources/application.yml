@@ -116,10 +116,19 @@ escalation:
       days: 7 # Days before level-2 officer is notified
     officer:
       user_type: DISTRICT_OFFICER
+# Daily Water Service Situation Report — per-tenant daily cron (IST). Runs after the
+# midnight analytics refresh so the previous day's KPIs are settled. Overridable per tenant
+# via common_schema.tenant_config_master_table key DAILY_SITUATION_REPORT_TIME.
+daily-report:
+  schedule:
+    hour: ${DAILY_REPORT_SCHEDULE_HOUR:21}
+    minute: ${DAILY_REPORT_SCHEDULE_MINUTE:00}
+  officer:
+    user-types: ${DAILY_REPORT_OFFICER_USER_TYPES:SECTION_OFFICER,SUB_DIVISIONAL_OFFICER}
 storage:
-  enabled: ${STORAGE_ENABLED:false}            # set to true to activate S3-compatible storage
+  enabled: ${STORAGE_ENABLED:false} # set to true to activate S3-compatible storage
   provider: ${STORAGE_PROVIDER:s3}
-  endpoint: ${STORAGE_ENDPOINT:}               # blank = real AWS S3; set to MinIO/R2/etc. URL for custom providers
+  endpoint: ${STORAGE_ENDPOINT:} # blank = real AWS S3; set to MinIO/R2/etc. URL for custom providers
   region: ${STORAGE_REGION:ap-south-1}
   access-key: ${STORAGE_ACCESS_KEY:}
   secret-key: ${STORAGE_SECRET_KEY:}

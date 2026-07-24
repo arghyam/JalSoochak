@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.repository;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.arghyam.jalsoochak.analytics.helper.DashboardWorkStatusFilter;
+import org.arghyam.jalsoochak.analytics.helper.RegularityThresholdFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -44,14 +45,45 @@ public class SchemeRegularityRepository {
      */
     private final boolean continuousSchemesWorkStatusFilterEnabled;
 
+    /**
+     * Resolves the effective scheme-regularity threshold (own tenant → tenant-0 → env default) and renders
+     * the canonical "is this scheme regular" classification. Every regularity query routes its
+     * classification through this filter so the definition cannot drift between screens.
+     */
+    private final RegularityThresholdFilter regularityThresholdFilter;
+
     public SchemeRegularityRepository(
             JdbcTemplate jdbcTemplate,
             @Value("${analytics.dashboard.included-work-statuses:4}") String includedWorkStatusesCsv,
             @Value("${analytics.dashboard.continuous-schemes.work-status-filter-enabled:false}")
-            boolean continuousSchemesWorkStatusFilterEnabled) {
+            boolean continuousSchemesWorkStatusFilterEnabled,
+            @Value("${analytics.dashboard.regularity.threshold-percent:90}") String regularityThresholdPercent) {
         this.jdbcTemplate = jdbcTemplate;
         this.workStatusFilter = new DashboardWorkStatusFilter(includedWorkStatusesCsv);
         this.continuousSchemesWorkStatusFilterEnabled = continuousSchemesWorkStatusFilterEnabled;
+        this.regularityThresholdFilter = new RegularityThresholdFilter(regularityThresholdPercent);
+    }
+
+    /** Exposes the effective-threshold resolver to the service layer (for Java-side threshold maths). */
+    public RegularityThresholdFilter regularityThresholdFilter() {
+        return regularityThresholdFilter;
+    }
+
+    /**
+     * The regularity threshold percentage effectively applied to {@code tenantId}'s screens (own tenant →
+     * tenant-0 → env default). Evaluates the <em>same</em> COALESCE expression the classification SQL uses,
+     * so the surfaced threshold always matches what was applied. Used only to make the KPI explainable in
+     * the response; never NULL (the env tier is always a concrete value).
+     */
+    public BigDecimal getEffectiveTenantRegularityThresholdPercent(Integer tenantId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT " + regularityThresholdFilter.tenantThresholdPercentExpr(tenantId), BigDecimal.class);
+    }
+
+    /** National counterpart of {@link #getEffectiveTenantRegularityThresholdPercent(Integer)} (tenant-0 → env). */
+    public BigDecimal getEffectiveNationalRegularityThresholdPercent() {
+        return jdbcTemplate.queryForObject(
+                "SELECT " + regularityThresholdFilter.nationalThresholdPercentExpr(), BigDecimal.class);
     }
 
     private static final int NOT_SUBMITTED_STATUS = SubmissionStatus.NOT_SUBMITTED.getCode();
@@ -134,6 +166,102 @@ public class SchemeRegularityRepository {
         return withWaterFragments(sql
                 .replace("{{WS}}", workStatusFilter.andPredicate("s"))
                 .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
+    }
+
+    /**
+     * Tenant-scoped regularity variant of {@link #withDashboardFragments(String)}: resolves the
+     * {@code {{RTP}}} token to the effective threshold percentage for {@code tenantId} (own tenant →
+     * tenant-0 → env default) before the dashboard/water tokens are applied, so the generated expression
+     * is itself scrubbed by the M1 guard in {@link #withWaterFragments(String)}.
+     *
+     * <p>Queries place {@code {{RTP}}} wherever they need the effective percentage — as the {@code pctExpr}
+     * of {@link RegularityThresholdFilter#isRegularExpr(String, String, String)}, and/or in the SELECT list
+     * to surface the threshold actually applied. A {@code null} {@code tenantId} degrades to the national
+     * chain.</p>
+     */
+    private String withRegularityFragments(String sql, Integer tenantId) {
+        return withDashboardFragments(
+                sql.replace("{{RTP}}", regularityThresholdFilter.tenantThresholdPercentExpr(tenantId)));
+    }
+
+    /**
+     * National-scoped regularity variant of {@link #withRegularityFragments(String, Integer)}: resolves
+     * {@code {{RTP}}} to the national chain (tenant-0 → env default) with no own-tenant tier, so every
+     * state on a national screen is judged against one uniform bar.
+     */
+    private String withNationalRegularityFragments(String sql) {
+        return withDashboardFragments(
+                sql.replace("{{RTP}}", regularityThresholdFilter.nationalThresholdPercentExpr()));
+    }
+
+    /**
+     * Inclusive day count of a request window — the denominator every regularity classification is judged
+     * against. Inlined into SQL as a literal (it is derived from the request, not user text), mirroring the
+     * {@code daysInRange} inlining already used by {@link #resolveDashboardOrderBy}.
+     */
+    private static long daysInRange(LocalDate startDate, LocalDate endDate) {
+        return ChronoUnit.DAYS.between(startDate, endDate) + 1;
+    }
+
+    /**
+     * SELECT fragment counting the regular schemes in a per-scheme supply-days CTE, using the canonical
+     * classification and the {@code {{RTP}}} effective-threshold token.
+     *
+     * <p>Counting <em>inside</em> the CTE is correct even though schemes with zero supply days are absent
+     * from it: the threshold is always at least 1, so an absent scheme can never be regular. No outer join
+     * is needed.</p>
+     *
+     * @param cte               the CTE holding one row per scheme with a supply-day count
+     * @param supplyDaysColumn  that CTE's supply-day count column
+     * @param daysInRange       the window length the classification is judged against
+     */
+    private static String regularSchemeCountSelect(String cte, String supplyDaysColumn, long daysInRange) {
+        return "COALESCE((SELECT COUNT(*)::int FROM " + cte + " WHERE "
+                + RegularityThresholdFilter.isRegularExpr(
+                        supplyDaysColumn, Long.toString(daysInRange), "{{RTP}}")
+                + "), 0)";
+    }
+
+    /**
+     * Aggregate counterpart of {@link #regularSchemeCountSelect(String, String, long)} for grouped
+     * per-region queries: counts the distinct regular schemes within each {@code GROUP BY} bucket.
+     *
+     * <p>These queries reach their supply-day count through a {@code LEFT JOIN}, so a scheme that never
+     * supplied water has a NULL count. The classification then evaluates to NULL and {@code FILTER} drops
+     * the row — which is the correct answer (no supply days ⇒ not regular), matching the subquery form.</p>
+     *
+     * @param schemeIdExpr    the scheme-id expression counted (kept DISTINCT to match {@code scheme_count})
+     * @param supplyDaysExpr  the joined supply-day count, possibly NULL
+     * @param daysInRange     the window length the classification is judged against
+     */
+    private static String regularSchemeCountFilter(String schemeIdExpr, String supplyDaysExpr, long daysInRange) {
+        return "COALESCE(COUNT(DISTINCT " + schemeIdExpr + ") FILTER (WHERE "
+                + RegularityThresholdFilter.isRegularExpr(
+                        supplyDaysExpr, Long.toString(daysInRange), "{{RTP}}")
+                + "), 0)::int";
+    }
+
+    /**
+     * A period bucket's day count capped to the request window: {@code LEAST(period_end, anchor_end) -
+     * GREATEST(period_start, anchor_start) + 1}. A partial month bucket (e.g. a July bucket queried through
+     * 15-Jul) is judged on its 15 days, not 31, matching the {@code periodStartDate}/{@code periodEndDate}
+     * the caller receives. {@code p} is the {@code periods} CTE alias, {@code pm} the {@code params} alias
+     * carrying {@code anchor_start}/{@code anchor_end}.
+     */
+    private static final String CAPPED_PERIOD_DAYS_EXPR =
+            "(LEAST(p.period_end_date, pm.anchor_end) - GREATEST(p.period_start_date, pm.anchor_start) + 1)";
+
+    /**
+     * Periodic counterpart of {@link #regularSchemeCountFilter(String, String, long)}: a
+     * {@code COUNT(*) FILTER (...)} over one row per scheme per bucket, classifying each against the bucket's
+     * {@link #CAPPED_PERIOD_DAYS_EXPR capped days} rather than a fixed window length. Requires the
+     * {@code scheme_supply_days} rows aliased {@code ssd}, joined to {@code periods p} and
+     * {@code params pm}.
+     */
+    private static String regularSchemeCountPeriodicFilter() {
+        return "COUNT(*) FILTER (WHERE "
+                + RegularityThresholdFilter.isRegularExpr("ssd.supply_days", CAPPED_PERIOD_DAYS_EXPR, "{{RTP}}")
+                + ")::int";
     }
 
     /**
@@ -247,6 +375,14 @@ public class SchemeRegularityRepository {
         return List.of();
     }
 
+    /** Maps the {@code scheme_count} / {@code total_supply_days} / {@code regular_scheme_count} triple. */
+    private static SchemeRegularityMetrics mapSchemeRegularityMetrics(Map<String, Object> result) {
+        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
+        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
+        int regularSchemeCount = result.get("regular_scheme_count") instanceof Number value ? value.intValue() : 0;
+        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays, regularSchemeCount);
+    }
+
     public SchemeRegularityMetrics getSchemeRegularityMetrics(Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
         Integer lgdLevel = getLgdLevel(parentLgdId);
         if (lgdLevel == null) {
@@ -254,7 +390,8 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        // No tenantId in scope on this overload, so the threshold degrades to the national chain.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
@@ -273,14 +410,14 @@ public class SchemeRegularityRepository {
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
-                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
-                """, schemeLgdColumn));
+                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days,
+                    %2$s AS regular_scheme_count
+                """, schemeLgdColumn,
+                regularSchemeCountSelect("scheme_supply_days", "supply_days", daysInRange(startDate, endDate))));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, startDate, endDate);
-        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
-        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
 
-        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
+        return mapSchemeRegularityMetrics(result);
     }
 
     public SchemeRegularityMetrics getSchemeRegularityMetrics(
@@ -291,7 +428,7 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        String sql = withRegularityFragments(String.format("""
                 WITH schemes_in_lgd AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
@@ -312,14 +449,15 @@ public class SchemeRegularityRepository {
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_lgd) AS scheme_count,
-                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
-                """, schemeLgdColumn));
+                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days,
+                    %2$s AS regular_scheme_count
+                """, schemeLgdColumn,
+                regularSchemeCountSelect("scheme_supply_days", "supply_days", daysInRange(startDate, endDate))),
+                tenantId);
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentLgdId, tenantId, startDate, endDate, tenantId);
-        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
-        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
 
-        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
+        return mapSchemeRegularityMetrics(result);
     }
 
     public SchemeRegularityMetrics getReadingSubmissionRateMetricsByLgd(Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
@@ -420,7 +558,8 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        // No tenantId in scope on this overload, so the threshold degrades to the national chain.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
@@ -439,14 +578,14 @@ public class SchemeRegularityRepository {
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
-                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
-                """, schemeDepartmentColumn));
+                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days,
+                    %2$s AS regular_scheme_count
+                """, schemeDepartmentColumn,
+                regularSchemeCountSelect("scheme_supply_days", "supply_days", daysInRange(startDate, endDate))));
 
         Map<String, Object> result = jdbcTemplate.queryForMap(sql, parentDepartmentId, startDate, endDate);
-        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
-        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
 
-        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
+        return mapSchemeRegularityMetrics(result);
     }
 
     public SchemeRegularityMetrics getSchemeRegularityMetricsByDepartment(
@@ -458,7 +597,7 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        String sql = withRegularityFragments(String.format("""
                 WITH schemes_in_department AS (
                     SELECT DISTINCT s.scheme_id
                     FROM analytics_schema.dim_scheme_table s
@@ -479,15 +618,16 @@ public class SchemeRegularityRepository {
                 )
                 SELECT
                     (SELECT COUNT(*)::int FROM schemes_in_department) AS scheme_count,
-                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days
-                """, schemeDepartmentColumn));
+                    COALESCE((SELECT SUM(supply_days)::int FROM scheme_supply_days), 0) AS total_supply_days,
+                    %2$s AS regular_scheme_count
+                """, schemeDepartmentColumn,
+                regularSchemeCountSelect("scheme_supply_days", "supply_days", daysInRange(startDate, endDate))),
+                tenantId);
 
         Map<String, Object> result =
                 jdbcTemplate.queryForMap(sql, parentDepartmentId, tenantId, startDate, endDate, tenantId);
-        int schemeCount = result.get("scheme_count") instanceof Number value ? value.intValue() : 0;
-        int totalSupplyDays = result.get("total_supply_days") instanceof Number value ? value.intValue() : 0;
 
-        return new SchemeRegularityMetrics(schemeCount, totalSupplyDays);
+        return mapSchemeRegularityMetrics(result);
     }
 
     public SchemeRegularityMetrics getReadingSubmissionRateMetricsByDepartment(
@@ -1106,7 +1246,8 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        // No tenantId in scope on this overload, so the threshold degrades to the national chain.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id,
@@ -1135,7 +1276,8 @@ public class SchemeRegularityRepository {
                     c.child_lgd_id AS lgd_id,
                     c.title,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
-                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days,
+                    %4$s AS regular_scheme_count
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
                     ON s.child_lgd_id = c.child_lgd_id
@@ -1143,25 +1285,22 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_lgd_id, c.title
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn,
+                regularSchemeCountFilter("s.scheme_id", "sd.supply_days", daysInRange)));
 
         return jdbcTemplate.query(
                 sql,
                 (rs, rowNum) -> {
                     int schemeCount = rs.getInt("scheme_count");
-                    int totalSupplyDays = rs.getInt("total_supply_days");
-                    BigDecimal averageRegularity = BigDecimal.ZERO;
-                    if (schemeCount > 0) {
-                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
-                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
-                    }
+                    int regularSchemeCount = rs.getInt("regular_scheme_count");
                     return new ChildRegionSchemeRegularityMetrics(
                             rs.getInt("lgd_id"),
                             null,
                             rs.getString("title"),
                             schemeCount,
-                            totalSupplyDays,
-                            averageRegularity);
+                            rs.getInt("total_supply_days"),
+                            regularSchemeCount,
+                            RegularityThresholdFilter.regularityRate(regularSchemeCount, schemeCount));
                 },
                 childLevel,
                 parentLgdId,
@@ -1189,7 +1328,7 @@ public class SchemeRegularityRepository {
         String childSchemeLgdColumn = resolveSchemeLgdColumn(childLevel);
         String childRegionParentLgdColumn = resolveChildRegionLgdParentColumn(lgdLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        String sql = withRegularityFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         l.lgd_id AS child_lgd_id,
@@ -1221,7 +1360,8 @@ public class SchemeRegularityRepository {
                     c.child_lgd_id AS lgd_id,
                     c.title,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
-                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days,
+                    %4$s AS regular_scheme_count
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
                     ON s.child_lgd_id = c.child_lgd_id
@@ -1229,25 +1369,23 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_lgd_id, c.title
                 ORDER BY c.child_lgd_id
-                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn));
+                """, childRegionParentLgdColumn, childSchemeLgdColumn, parentSchemeLgdColumn,
+                regularSchemeCountFilter("s.scheme_id", "sd.supply_days", daysInRange)),
+                tenantId);
 
         return jdbcTemplate.query(
                 sql,
                 (rs, rowNum) -> {
                     int schemeCount = rs.getInt("scheme_count");
-                    int totalSupplyDays = rs.getInt("total_supply_days");
-                    BigDecimal averageRegularity = BigDecimal.ZERO;
-                    if (schemeCount > 0) {
-                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
-                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
-                    }
+                    int regularSchemeCount = rs.getInt("regular_scheme_count");
                     return new ChildRegionSchemeRegularityMetrics(
                             rs.getInt("lgd_id"),
                             null,
                             rs.getString("title"),
                             schemeCount,
-                            totalSupplyDays,
-                            averageRegularity);
+                            rs.getInt("total_supply_days"),
+                            regularSchemeCount,
+                            RegularityThresholdFilter.regularityRate(regularSchemeCount, schemeCount));
                 },
                 childLevel,
                 parentLgdId,
@@ -1279,7 +1417,8 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        // No tenantId in scope on this overload, so the threshold degrades to the national chain.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         d.department_id AS child_department_id,
@@ -1308,7 +1447,8 @@ public class SchemeRegularityRepository {
                     c.child_department_id AS department_id,
                     c.title,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
-                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days,
+                    %4$s AS regular_scheme_count
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
                     ON s.child_department_id = c.child_department_id
@@ -1316,25 +1456,22 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_department_id, c.title
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn,
+                regularSchemeCountFilter("s.scheme_id", "sd.supply_days", daysInRange)));
 
         return jdbcTemplate.query(
                 sql,
                 (rs, rowNum) -> {
                     int schemeCount = rs.getInt("scheme_count");
-                    int totalSupplyDays = rs.getInt("total_supply_days");
-                    BigDecimal averageRegularity = BigDecimal.ZERO;
-                    if (schemeCount > 0) {
-                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
-                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
-                    }
+                    int regularSchemeCount = rs.getInt("regular_scheme_count");
                     return new ChildRegionSchemeRegularityMetrics(
                             null,
                             rs.getInt("department_id"),
                             rs.getString("title"),
                             schemeCount,
-                            totalSupplyDays,
-                            averageRegularity);
+                            rs.getInt("total_supply_days"),
+                            regularSchemeCount,
+                            RegularityThresholdFilter.regularityRate(regularSchemeCount, schemeCount));
                 },
                 childLevel,
                 parentDepartmentId,
@@ -1363,7 +1500,7 @@ public class SchemeRegularityRepository {
         String childSchemeDepartmentColumn = resolveSchemeDepartmentColumn(childLevel);
         String childRegionParentDepartmentColumn = resolveChildRegionDepartmentParentColumn(departmentLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        String sql = withRegularityFragments(String.format("""
                 WITH child_regions AS (
                     SELECT
                         d.department_id AS child_department_id,
@@ -1395,7 +1532,8 @@ public class SchemeRegularityRepository {
                     c.child_department_id AS department_id,
                     c.title,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
-                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days,
+                    %4$s AS regular_scheme_count
                 FROM child_regions c
                 LEFT JOIN schemes_in_scope s
                     ON s.child_department_id = c.child_department_id
@@ -1403,25 +1541,23 @@ public class SchemeRegularityRepository {
                     ON sd.scheme_id = s.scheme_id
                 GROUP BY c.child_department_id, c.title
                 ORDER BY c.child_department_id
-                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn));
+                """, childRegionParentDepartmentColumn, childSchemeDepartmentColumn, parentSchemeDepartmentColumn,
+                regularSchemeCountFilter("s.scheme_id", "sd.supply_days", daysInRange)),
+                tenantId);
 
         return jdbcTemplate.query(
                 sql,
                 (rs, rowNum) -> {
                     int schemeCount = rs.getInt("scheme_count");
-                    int totalSupplyDays = rs.getInt("total_supply_days");
-                    BigDecimal averageRegularity = BigDecimal.ZERO;
-                    if (schemeCount > 0) {
-                        averageRegularity = BigDecimal.valueOf(totalSupplyDays)
-                                .divide(BigDecimal.valueOf((long) schemeCount * daysInRange), 4, RoundingMode.HALF_UP);
-                    }
+                    int regularSchemeCount = rs.getInt("regular_scheme_count");
                     return new ChildRegionSchemeRegularityMetrics(
                             null,
                             rs.getInt("department_id"),
                             rs.getString("title"),
                             schemeCount,
-                            totalSupplyDays,
-                            averageRegularity);
+                            rs.getInt("total_supply_days"),
+                            regularSchemeCount,
+                            RegularityThresholdFilter.regularityRate(regularSchemeCount, schemeCount));
                 },
                 childLevel,
                 parentDepartmentId,
@@ -3191,8 +3327,7 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             Integer lgdId,
             LocalDate startDate,
-            LocalDate endDate,
-            int daysInRange
+            LocalDate endDate
     ) {
         Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
         if (lgdLevel == null) {
@@ -3201,6 +3336,7 @@ public class SchemeRegularityRepository {
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
         // REPORTED-METRIC: a "reported day" = any day the scheme SUPPLIED or ATTEMPTED a submission.
+        // Continuous = the scheme reported on AT LEAST ONE day in the range (reported_days >= 1).
         // Four levers, each independently revertible (grep REPORTED-METRIC):
         //   (A) supplied -> reported: drop the confirmed_reading>0 filter (re-add to revert)
         //   (B) include image-quality rejects (duplicate/unreadable/less-than-previous) as reported days
@@ -3254,7 +3390,7 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN reported_days rd
                   ON rd.scheme_id = ss.scheme_id
-                WHERE COALESCE(rd.reported_days, 0) = ?
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 """, schemeLgdColumn));
 
         Long count = jdbcTemplate.queryForObject(
@@ -3270,8 +3406,7 @@ public class SchemeRegularityRepository {
                 endDate,        // (B) range end
                 tenantId,       // (C) submission_attempt tenant
                 startDate,      // (C) range start
-                endDate,        // (C) range end
-                daysInRange     // continuous == reported every day
+                endDate         // (C) range end
         );
         return count == null ? 0L : count;
     }
@@ -3280,8 +3415,7 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             Integer departmentId,
             LocalDate startDate,
-            LocalDate endDate,
-            int daysInRange
+            LocalDate endDate
     ) {
         Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
         if (departmentLevel == null) {
@@ -3289,6 +3423,9 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
+        // REPORTED-METRIC: same "reported day" definition as getContinuousSchemeCountByLgd (levers A/B/C:
+        // any reading incl. 0-supply / image rejects / submission attempts). Continuous = reported on at
+        // least one day (reported_days >= 1). See getContinuousSchemeCountByLgd for the full lever notes.
         String sql = withContinuousSchemesDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
@@ -3296,33 +3433,60 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings in fact.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN schemes_in_scope ss
-                      ON ss.scheme_id = m.scheme_id
+                    JOIN schemes_in_scope ss ON ss.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects (validation/auth) captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT COUNT(*)::bigint AS continuous_count
                 FROM schemes_in_scope ss
-                LEFT JOIN supply_days sd
-                  ON sd.scheme_id = ss.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) = ?
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = ss.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 """, schemeDepartmentColumn));
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
                 Long.class,
-                departmentId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate,
-                daysInRange
+                departmentId,   // schemes_in_scope: region
+                tenantId,       // schemes_in_scope: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate         // (C) range end
         );
         return count == null ? 0L : count;
     }
@@ -3331,9 +3495,11 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             Integer userId,
             LocalDate startDate,
-            LocalDate endDate,
-            int daysInRange
+            LocalDate endDate
     ) {
+        // REPORTED-METRIC: same "reported day" definition as getContinuousSchemeCountByLgd (levers A/B/C:
+        // any reading incl. 0-supply / image rejects / submission attempts). Continuous = reported on at
+        // least one day (reported_days >= 1). See getContinuousSchemeCountByLgd for the full lever notes.
         String sql = withContinuousSchemesDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
@@ -3343,33 +3509,60 @@ public class SchemeRegularityRepository {
                     WHERE usm.user_id = ?
                       AND s.tenant_id = ?{{WS}}
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings in fact.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN user_schemes us
-                      ON us.scheme_id = m.scheme_id
+                    JOIN user_schemes us ON us.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN user_schemes us ON us.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects (validation/auth) captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN user_schemes us ON us.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT COUNT(*)::bigint AS continuous_count
                 FROM user_schemes us
-                LEFT JOIN supply_days sd
-                  ON sd.scheme_id = us.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) = ?
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = us.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 """);
 
         Long count = jdbcTemplate.queryForObject(
                 sql,
                 Long.class,
-                userId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate,
-                daysInRange
+                userId,         // user_schemes: user
+                tenantId,       // user_schemes: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate         // (C) range end
         );
         return count == null ? 0L : count;
     }
@@ -3379,7 +3572,6 @@ public class SchemeRegularityRepository {
             Integer lgdId,
             LocalDate startDate,
             LocalDate endDate,
-            int daysInRange,
             Integer limit,
             Integer offset
     ) {
@@ -3437,7 +3629,7 @@ public class SchemeRegularityRepository {
                 FROM schemes_in_scope ss
                 LEFT JOIN reported_days rd
                   ON rd.scheme_id = ss.scheme_id
-                WHERE COALESCE(rd.reported_days, 0) = ?
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 ORDER BY ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3460,7 +3652,6 @@ public class SchemeRegularityRepository {
                 tenantId,       // (C) submission_attempt tenant
                 startDate,      // (C) range start
                 endDate,        // (C) range end
-                daysInRange,    // continuous == reported every day
                 limit,
                 offset
         );
@@ -3471,10 +3662,11 @@ public class SchemeRegularityRepository {
             Integer userId,
             LocalDate startDate,
             LocalDate endDate,
-            int daysInRange,
             Integer limit,
             Integer offset
     ) {
+        // REPORTED-METRIC: must use the SAME "reported day" definition as getContinuousSchemeCountByUserSchemes
+        // so the count (list=false) and the list (list=true) agree. Levers A/B/C mirror the count method.
         String sql = withContinuousSchemesDashboardFragments("""
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
@@ -3493,24 +3685,46 @@ public class SchemeRegularityRepository {
                       ON us.scheme_id = s.scheme_id
                     WHERE s.tenant_id = ?
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN user_schemes us
-                      ON us.scheme_id = m.scheme_id
+                    JOIN user_schemes us ON us.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN user_schemes us ON us.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN user_schemes us ON us.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT
                     sd.scheme_id,
                     sd.scheme_name
                 FROM scheme_details sd
-                LEFT JOIN supply_days sdy
-                  ON sdy.scheme_id = sd.scheme_id
-                WHERE COALESCE(sdy.supply_days, 0) = ?
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = sd.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 ORDER BY sd.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3522,13 +3736,18 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name")
                 ),
-                userId,
-                tenantId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate,
-                daysInRange,
+                userId,         // user_schemes: user
+                tenantId,       // user_schemes: tenant
+                tenantId,       // scheme_details: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate,        // (C) range end
                 limit,
                 offset
         );
@@ -3539,7 +3758,6 @@ public class SchemeRegularityRepository {
             Integer departmentId,
             LocalDate startDate,
             LocalDate endDate,
-            int daysInRange,
             Integer limit,
             Integer offset
     ) {
@@ -3549,6 +3767,8 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
+        // REPORTED-METRIC: must use the SAME "reported day" definition as getContinuousSchemeCountByDepartment
+        // so the count (list=false) and the list (list=true) agree. Levers A/B/C mirror the count method.
         String sql = withContinuousSchemesDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT s.scheme_id, s.scheme_name
@@ -3556,24 +3776,46 @@ public class SchemeRegularityRepository {
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
                 ),
-                supply_days AS (
-                    SELECT
-                        m.scheme_id,
-                        COUNT(DISTINCT CASE WHEN m.confirmed_reading > 0 THEN m.reading_date END)::int AS supply_days
+                reported_events AS (
+                    -- (A) readings.  REPORTED: any reading.  SUPPLIED (revert): AND m.confirmed_reading > 0
+                    SELECT m.scheme_id, m.reading_date AS event_date
                     FROM analytics_schema.fact_meter_reading_table m
-                    JOIN schemes_in_scope ss
-                      ON ss.scheme_id = m.scheme_id
+                    JOIN schemes_in_scope ss ON ss.scheme_id = m.scheme_id
                     WHERE m.tenant_id = ?
                       AND m.reading_date BETWEEN ? AND ?
-                    GROUP BY m.scheme_id
+                      -- AND m.confirmed_reading > 0            -- REVERT lever (A)
+
+                    UNION ALL   -- (B) arrived-but-rejected image submissions (no reading row)
+                    SELECT a.scheme_id, (a.created_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.anomaly_table a
+                    JOIN schemes_in_scope ss ON ss.scheme_id = a.scheme_id
+                    WHERE a.tenant_id = ?
+                      AND a.type IN ('DUPLICATE_IMAGE_SUBMISSION','UNREADABLE_IMAGE','READING_LESS_THAN_PREVIOUS')
+                      AND (a.created_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (B): delete this UNION ALL block
+
+                    UNION ALL   -- (C) pre-anomaly rejects captured in submission_attempt_table
+                    SELECT sa.scheme_id, (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date AS event_date
+                    FROM analytics_schema.submission_attempt_table sa
+                    JOIN schemes_in_scope ss ON ss.scheme_id = sa.scheme_id
+                    WHERE sa.tenant_id = ?
+                      AND sa.scheme_id IS NOT NULL
+                      AND (sa.attempted_at + INTERVAL '5 hours 30 minutes')::date BETWEEN ? AND ?
+                      -- REVERT lever (C): delete this UNION ALL block
+                ),
+                reported_days AS (
+                    SELECT re.scheme_id,
+                           COUNT(DISTINCT re.event_date)::int AS reported_days
+                    FROM reported_events re
+                    GROUP BY re.scheme_id
                 )
                 SELECT
                     ss.scheme_id,
                     ss.scheme_name
                 FROM schemes_in_scope ss
-                LEFT JOIN supply_days sd
-                  ON sd.scheme_id = ss.scheme_id
-                WHERE COALESCE(sd.supply_days, 0) = ?
+                LEFT JOIN reported_days rd
+                  ON rd.scheme_id = ss.scheme_id
+                WHERE COALESCE(rd.reported_days, 0) >= 1
                 ORDER BY ss.scheme_id ASC
                 LIMIT ?
                 OFFSET ?
@@ -3585,12 +3827,17 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name")
                 ),
-                departmentId,
-                tenantId,
-                tenantId,
-                startDate,
-                endDate,
-                daysInRange,
+                departmentId,   // schemes_in_scope: region
+                tenantId,       // schemes_in_scope: tenant
+                tenantId,       // (A) fact tenant
+                startDate,      // (A) range start
+                endDate,        // (A) range end
+                tenantId,       // (B) anomaly tenant
+                startDate,      // (B) range start
+                endDate,        // (B) range end
+                tenantId,       // (C) submission_attempt tenant
+                startDate,      // (C) range start
+                endDate,        // (C) range end
                 limit,
                 offset
         );
@@ -4494,7 +4741,8 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        // No tenantId on this overload, so is_regular uses the national threshold chain.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4535,14 +4783,17 @@ public class SchemeRegularityRepository {
                     ss.centre_scheme_id,
                     ss.operating_status,
                     COALESCE(sup.supply_days, 0)::int AS supply_days,
-                    COALESCE(sub.submission_days, 0)::int AS submission_days
+                    COALESCE(sub.submission_days, 0)::int AS submission_days,
+                    %2$s AS is_regular
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_supply_days sup
                     ON sup.scheme_id = ss.scheme_id
                 LEFT JOIN scheme_submission_days sub
                     ON sub.scheme_id = ss.scheme_id
                 ORDER BY ss.scheme_id
-                """,schemeLgdColumn));
+                """, schemeLgdColumn,
+                RegularityThresholdFilter.isRegularExpr(
+                        "COALESCE(sup.supply_days, 0)", Long.toString(daysInRange(startDate, endDate)), "{{RTP}}")));
 
         return jdbcTemplate.query(
                 sql,
@@ -4553,7 +4804,8 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
-                        rs.getInt("submission_days")),
+                        rs.getInt("submission_days"),
+                        rs.getBoolean("is_regular")),
                 parentLgdId,
                 startDate,
                 endDate,
@@ -4569,7 +4821,7 @@ public class SchemeRegularityRepository {
         }
         String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        String sql = withRegularityFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4613,14 +4865,18 @@ public class SchemeRegularityRepository {
                     ss.centre_scheme_id,
                     ss.operating_status,
                     COALESCE(sup.supply_days, 0)::int AS supply_days,
-                    COALESCE(sub.submission_days, 0)::int AS submission_days
+                    COALESCE(sub.submission_days, 0)::int AS submission_days,
+                    %2$s AS is_regular
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_supply_days sup
                     ON sup.scheme_id = ss.scheme_id
                 LEFT JOIN scheme_submission_days sub
                     ON sub.scheme_id = ss.scheme_id
                 ORDER BY ss.scheme_id
-                """,schemeLgdColumn));
+                """, schemeLgdColumn,
+                RegularityThresholdFilter.isRegularExpr(
+                        "COALESCE(sup.supply_days, 0)", Long.toString(daysInRange(startDate, endDate)), "{{RTP}}")),
+                tenantId);
 
         return jdbcTemplate.query(
                 sql,
@@ -4631,7 +4887,8 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
-                        rs.getInt("submission_days")),
+                        rs.getInt("submission_days"),
+                        rs.getBoolean("is_regular")),
                 parentLgdId,
                 tenantId,
                 startDate,
@@ -4651,7 +4908,8 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        // No tenantId on this overload, so is_regular uses the national threshold chain.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4692,14 +4950,17 @@ public class SchemeRegularityRepository {
                     ss.centre_scheme_id,
                     ss.operating_status,
                     COALESCE(sup.supply_days, 0)::int AS supply_days,
-                    COALESCE(sub.submission_days, 0)::int AS submission_days
+                    COALESCE(sub.submission_days, 0)::int AS submission_days,
+                    %2$s AS is_regular
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_supply_days sup
                     ON sup.scheme_id = ss.scheme_id
                 LEFT JOIN scheme_submission_days sub
                     ON sub.scheme_id = ss.scheme_id
                 ORDER BY ss.scheme_id
-                """,schemeDepartmentColumn));
+                """, schemeDepartmentColumn,
+                RegularityThresholdFilter.isRegularExpr(
+                        "COALESCE(sup.supply_days, 0)", Long.toString(daysInRange(startDate, endDate)), "{{RTP}}")));
 
         return jdbcTemplate.query(
                 sql,
@@ -4710,7 +4971,8 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
-                        rs.getInt("submission_days")),
+                        rs.getInt("submission_days"),
+                        rs.getBoolean("is_regular")),
                 parentDepartmentId,
                 startDate,
                 endDate,
@@ -4727,7 +4989,7 @@ public class SchemeRegularityRepository {
         }
         String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
 
-        String sql = withDashboardFragments(String.format("""
+        String sql = withRegularityFragments(String.format("""
                 WITH schemes_in_scope AS (
                     SELECT DISTINCT
                         s.scheme_id,
@@ -4771,14 +5033,18 @@ public class SchemeRegularityRepository {
                     ss.centre_scheme_id,
                     ss.operating_status,
                     COALESCE(sup.supply_days, 0)::int AS supply_days,
-                    COALESCE(sub.submission_days, 0)::int AS submission_days
+                    COALESCE(sub.submission_days, 0)::int AS submission_days,
+                    %2$s AS is_regular
                 FROM schemes_in_scope ss
                 LEFT JOIN scheme_supply_days sup
                     ON sup.scheme_id = ss.scheme_id
                 LEFT JOIN scheme_submission_days sub
                     ON sub.scheme_id = ss.scheme_id
                 ORDER BY ss.scheme_id
-                """,schemeDepartmentColumn));
+                """, schemeDepartmentColumn,
+                RegularityThresholdFilter.isRegularExpr(
+                        "COALESCE(sup.supply_days, 0)", Long.toString(daysInRange(startDate, endDate)), "{{RTP}}")),
+                tenantId);
 
         return jdbcTemplate.query(
                 sql,
@@ -4789,7 +5055,8 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
                         rs.getInt("supply_days"),
-                        rs.getInt("submission_days")),
+                        rs.getInt("submission_days"),
+                        rs.getBoolean("is_regular")),
                 parentDepartmentId,
                 tenantId,
                 startDate,
@@ -4963,14 +5230,12 @@ public class SchemeRegularityRepository {
                     SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
-                        s.house_hold_count::bigint AS house_hold_count,
+                        COALESCE(s.house_hold_count, 0)::bigint AS house_hold_count,
                         COALESCE(s.fhtc_count, 0)::bigint AS fhtc_count,
                         COALESCE(s.planned_fhtc, 0)::bigint AS planned_fhtc
                     FROM analytics_schema.dim_scheme_table s
-                    WHERE s.tenant_id = ?
-                      AND s.house_hold_count IS NOT NULL
-                      AND s.house_hold_count > 0{{WS}}
-                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, s.house_hold_count DESC, COALESCE(s.planned_fhtc, 0) DESC
+                    WHERE s.tenant_id = ?{{WS}}
+                    ORDER BY s.scheme_id, COALESCE(s.fhtc_count, 0) DESC, COALESCE(s.house_hold_count, 0) DESC, COALESCE(s.planned_fhtc, 0) DESC
                 ),
                 water_by_scheme AS (
                     -- supply_days: days the scheme actually supplied water ({{SWD}}), measured off
@@ -5002,19 +5267,28 @@ public class SchemeRegularityRepository {
 
         return jdbcTemplate.query(
                 sql,
-                (rs, rowNum) -> new SchemeWaterSupplyMetrics(
-                        rs.getInt("scheme_id"),
-                        rs.getString("scheme_name"),
-                        rs.getLong("house_hold_count"),
-                        rs.getLong("fhtc_count"),
-                        rs.getLong("planned_fhtc"),
-                        rs.getLong("total_water_supplied_liters"),
-                        rs.getInt("supply_days"),
-                        BigDecimal.valueOf(rs.getLong("total_water_supplied_liters"))
-                                .divide(
-                                        BigDecimal.valueOf(rs.getLong("house_hold_count") * daysInRange),
-                                        4,
-                                        java.math.RoundingMode.HALF_UP)),
+                (rs, rowNum) -> {
+                    long householdCount = rs.getLong("house_hold_count");
+                    long totalWaterSuppliedLiters = rs.getLong("total_water_supplied_liters");
+                    long denominator = householdCount * daysInRange;
+                    // Schemes with non-positive households (zero/NULL, or a spurious negative) are now in
+                    // scope (parity with the region-own rollup); guard the per-household division so they
+                    // surface a 0 average instead of throwing ArithmeticException on divide-by-zero or
+                    // producing a negative average from a negative denominator.
+                    BigDecimal averageLitersPerHousehold = householdCount <= 0
+                            ? BigDecimal.ZERO.setScale(4, java.math.RoundingMode.HALF_UP)
+                            : BigDecimal.valueOf(totalWaterSuppliedLiters)
+                                    .divide(BigDecimal.valueOf(denominator), 4, java.math.RoundingMode.HALF_UP);
+                    return new SchemeWaterSupplyMetrics(
+                            rs.getInt("scheme_id"),
+                            rs.getString("scheme_name"),
+                            householdCount,
+                            rs.getLong("fhtc_count"),
+                            rs.getLong("planned_fhtc"),
+                            totalWaterSuppliedLiters,
+                            rs.getInt("supply_days"),
+                            averageLitersPerHousehold);
+                },
                 tenantId,
                 tenantId,
                 startDate,
@@ -5277,7 +5551,9 @@ public class SchemeRegularityRepository {
 
     public List<StateSchemeRegularityMetrics> getStateWiseRegularityMetrics(
             LocalDate startDate, LocalDate endDate) {
-        String sql = withDashboardFragments("""
+        // National screen: every state is judged against one uniform bar (tenant-0 -> env), never each
+        // state's own configured threshold, so the states stay comparable.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH supply_days_by_scheme AS (
                     SELECT
                         f.tenant_id,
@@ -5293,7 +5569,8 @@ public class SchemeRegularityRepository {
                     t.state_code,
                     t.title,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
-                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days,
+                    %1$s AS regular_scheme_count
                 FROM analytics_schema.dim_tenant_table t
                 LEFT JOIN (
                     SELECT DISTINCT s.tenant_id, s.scheme_id
@@ -5307,7 +5584,7 @@ public class SchemeRegularityRepository {
                 WHERE t.tenant_id > 0
                 GROUP BY t.tenant_id, t.state_code, t.title
                 ORDER BY t.tenant_id
-                """);
+                """, regularSchemeCountFilter("s.scheme_id", "sd.supply_days", daysInRange(startDate, endDate))));
 
         return jdbcTemplate.query(
                 sql,
@@ -5316,7 +5593,8 @@ public class SchemeRegularityRepository {
                         rs.getString("state_code"),
                         rs.getString("title"),
                         rs.getInt("scheme_count"),
-                        rs.getInt("total_supply_days")),
+                        rs.getInt("total_supply_days"),
+                        rs.getInt("regular_scheme_count")),
                 startDate,
                 endDate);
     }
@@ -5535,7 +5813,8 @@ public class SchemeRegularityRepository {
 
     public List<Level2RegularityMetrics> getLgdLevel2WiseRegularityMetricsForNation(
             LocalDate startDate, LocalDate endDate) {
-        String sql = withDashboardFragments("""
+        // National screen: uniform bar (tenant-0 -> env) for every district, never each state's own value.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH supply_days_by_scheme AS (
                     SELECT
                         f.tenant_id,
@@ -5550,7 +5829,8 @@ public class SchemeRegularityRepository {
                     s.tenant_id,
                     s.level_2_lgd_id AS lgd_id,
                     COALESCE(COUNT(DISTINCT s.scheme_id), 0)::int AS scheme_count,
-                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days
+                    COALESCE(SUM(sd.supply_days), 0)::int AS total_supply_days,
+                    %1$s AS regular_scheme_count
                 FROM (
                     SELECT DISTINCT s.tenant_id, s.scheme_id, s.level_2_lgd_id
                     FROM analytics_schema.dim_scheme_table s
@@ -5563,7 +5843,7 @@ public class SchemeRegularityRepository {
                   AND s.level_2_lgd_id IS NOT NULL
                 GROUP BY s.tenant_id, s.level_2_lgd_id
                 ORDER BY s.tenant_id, s.level_2_lgd_id
-                """);
+                """, regularSchemeCountFilter("s.scheme_id", "sd.supply_days", daysInRange(startDate, endDate))));
 
         return jdbcTemplate.query(
                 sql,
@@ -5571,7 +5851,8 @@ public class SchemeRegularityRepository {
                         rs.getInt("tenant_id"),
                         (Integer) rs.getObject("lgd_id"),
                         rs.getInt("scheme_count"),
-                        rs.getInt("total_supply_days")),
+                        rs.getInt("total_supply_days"),
+                        rs.getInt("regular_scheme_count")),
                 startDate,
                 endDate);
     }
@@ -6452,9 +6733,12 @@ public class SchemeRegularityRepository {
         // fact_water_quantity.date (scheme regularity is now measured off fact_water_quantity, not readings).
         String periodStartFromWater = sqlParts.periodStartFromFact().replace("m.reading_date", "f.date");
 
-        String sql = withDashboardFragments(String.format("""
+        // National screen: uniform bar (tenant-0 -> env) via {{NWS}}/{{RTP}}. Each bucket is classified on
+        // its days capped to the request window (capped_days) so a partial month is judged on its partial
+        // length, matching the capped periodStartDate/periodEndDate returned to the caller.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH params AS (
-                    SELECT ?::date AS anchor_start
+                    SELECT ?::date AS anchor_start, ?::date AS anchor_end
                 ),
                 schemes_in_scope AS (
                     SELECT DISTINCT
@@ -6510,10 +6794,14 @@ public class SchemeRegularityRepository {
                 ),
                 period_supply AS (
                     SELECT
-                        period_start_date,
-                        COALESCE(SUM(supply_days)::int, 0) AS total_supply_days
-                    FROM scheme_supply_days
-                    GROUP BY period_start_date
+                        ssd.period_start_date,
+                        COALESCE(SUM(ssd.supply_days)::int, 0) AS total_supply_days,
+                        %6$s AS regular_scheme_count
+                    FROM scheme_supply_days ssd
+                    JOIN periods p
+                        ON p.period_start_date = ssd.period_start_date
+                    CROSS JOIN params pm
+                    GROUP BY ssd.period_start_date
                 )
                 SELECT
                     p.period_start_date,
@@ -6521,6 +6809,7 @@ public class SchemeRegularityRepository {
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
                     COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
+                    COALESCE(ps.regular_scheme_count, 0) AS regular_scheme_count,
                     COALESCE(pw.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
                 LEFT JOIN period_supply ps
@@ -6533,7 +6822,8 @@ public class SchemeRegularityRepository {
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
                 periodStartFromWater,
-                periodStartFromWater));
+                periodStartFromWater,
+                regularSchemeCountPeriodicFilter()));
 
         return jdbcTemplate.query(
                 sql,
@@ -6543,8 +6833,10 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_count"),
                         rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
+                        rs.getInt("regular_scheme_count"),
                         rs.getLong("total_water_quantity")),
                 startDate,
+                endDate,
                 startDate,
                 endDate,
                 startDate,
@@ -6560,9 +6852,12 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
-        String sql = withDashboardFragments(String.format("""
+        // No tenantId param on this overload, so the threshold degrades to the national chain (the
+        // per-scheme {{WS}} work-status filter still keys on each scheme's own tenant_id column). Each
+        // bucket is classified against its days capped to the request window.
+        String sql = withNationalRegularityFragments(String.format("""
                 WITH params AS (
-                    SELECT ?::date AS anchor_start
+                    SELECT ?::date AS anchor_start, ?::date AS anchor_end
                 ),
                 schemes_in_scope AS (
                     SELECT DISTINCT ON (s.scheme_id)
@@ -6610,11 +6905,15 @@ public class SchemeRegularityRepository {
                 ),
                 period_supply AS (
                     SELECT
-                        period_start_date,
-                        COALESCE(SUM(supply_days)::int, 0) AS total_supply_days,
-                        COALESCE(SUM(total_water_quantity)::bigint, 0) AS total_water_quantity
-                    FROM scheme_supply_days
-                    GROUP BY period_start_date
+                        ssd.period_start_date,
+                        COALESCE(SUM(ssd.supply_days)::int, 0) AS total_supply_days,
+                        COALESCE(SUM(ssd.total_water_quantity)::bigint, 0) AS total_water_quantity,
+                        %6$s AS regular_scheme_count
+                    FROM scheme_supply_days ssd
+                    JOIN periods p
+                        ON p.period_start_date = ssd.period_start_date
+                    CROSS JOIN params pm
+                    GROUP BY ssd.period_start_date
                 )
                 SELECT
                     p.period_start_date,
@@ -6622,6 +6921,7 @@ public class SchemeRegularityRepository {
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
                     COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
+                    COALESCE(ps.regular_scheme_count, 0) AS regular_scheme_count,
                     COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
                 LEFT JOIN period_supply ps
@@ -6632,7 +6932,8 @@ public class SchemeRegularityRepository {
                 sqlParts.periodStartFromSeries(),
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
-                sqlParts.periodStartFromFact()));
+                sqlParts.periodStartFromFact(),
+                regularSchemeCountPeriodicFilter()));
 
         return jdbcTemplate.query(
                 sql,
@@ -6642,8 +6943,10 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_count"),
                         rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
+                        rs.getInt("regular_scheme_count"),
                         rs.getLong("total_water_quantity")),
                 startDate,
+                endDate,
                 locationId,
                 startDate,
                 endDate,
@@ -6659,9 +6962,11 @@ public class SchemeRegularityRepository {
             LocalDate endDate,
             PeriodScale scale) {
         PeriodSqlParts sqlParts = buildPeriodSqlPartsForSchemeDay(scale);
-        String sql = withDashboardFragments(String.format("""
+        // Tenant-scoped screen: threshold resolves own tenant -> tenant-0 -> env via {{RTP}}. Each bucket is
+        // classified against its days capped to the request window.
+        String sql = withRegularityFragments(String.format("""
                 WITH params AS (
-                    SELECT ?::date AS anchor_start
+                    SELECT ?::date AS anchor_start, ?::date AS anchor_end
                 ),
                 schemes_in_scope AS (
                     SELECT DISTINCT ON (s.scheme_id)
@@ -6711,11 +7016,15 @@ public class SchemeRegularityRepository {
                 ),
                 period_supply AS (
                     SELECT
-                        period_start_date,
-                        COALESCE(SUM(supply_days)::int, 0) AS total_supply_days,
-                        COALESCE(SUM(total_water_quantity)::bigint, 0) AS total_water_quantity
-                    FROM scheme_supply_days
-                    GROUP BY period_start_date
+                        ssd.period_start_date,
+                        COALESCE(SUM(ssd.supply_days)::int, 0) AS total_supply_days,
+                        COALESCE(SUM(ssd.total_water_quantity)::bigint, 0) AS total_water_quantity,
+                        %6$s AS regular_scheme_count
+                    FROM scheme_supply_days ssd
+                    JOIN periods p
+                        ON p.period_start_date = ssd.period_start_date
+                    CROSS JOIN params pm
+                    GROUP BY ssd.period_start_date
                 )
                 SELECT
                     p.period_start_date,
@@ -6723,6 +7032,7 @@ public class SchemeRegularityRepository {
                     COALESCE((SELECT COUNT(*)::int FROM schemes_in_scope), 0) AS scheme_count,
                     COALESCE((SELECT total_achieved_fhtc_count FROM scheme_fhtc_totals), 0)::bigint AS total_achieved_fhtc_count,
                     COALESCE(ps.total_supply_days, 0) AS total_supply_days,
+                    COALESCE(ps.regular_scheme_count, 0) AS regular_scheme_count,
                     COALESCE(ps.total_water_quantity, 0)::bigint AS total_water_quantity
                 FROM periods p
                 LEFT JOIN period_supply ps
@@ -6733,7 +7043,9 @@ public class SchemeRegularityRepository {
                 sqlParts.periodStartFromSeries(),
                 sqlParts.periodEndFromSeries(),
                 sqlParts.periodLabelFromSeries(),
-                sqlParts.periodStartFromFact()));
+                sqlParts.periodStartFromFact(),
+                regularSchemeCountPeriodicFilter()),
+                tenantId);
 
         return jdbcTemplate.query(
                 sql,
@@ -6743,8 +7055,10 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_count"),
                         rs.getLong("total_achieved_fhtc_count"),
                         rs.getInt("total_supply_days"),
+                        rs.getInt("regular_scheme_count"),
                         rs.getLong("total_water_quantity")),
                 startDate,
+                endDate,
                 locationId,
                 tenantId,
                 startDate,
@@ -7422,7 +7736,26 @@ public class SchemeRegularityRepository {
         };
     }
 
-    public record SchemeRegularityMetrics(int schemeCount, int totalSupplyDays) {
+    /**
+     * Carrier for the scheme-regularity KPI and — sharing the same shape minus the classification — the
+     * reading-submission-rate KPI.
+     *
+     * @param schemeCount       schemes in scope
+     * @param totalSupplyDays   summed supply days (for reading-submission-rate: summed submission days)
+     * @param regularSchemeCount schemes classified regular by {@link RegularityThresholdFilter}. Only
+     *                          meaningful for the regularity KPI; reading-submission-rate has no
+     *                          regular/irregular classification and uses the two-argument constructor,
+     *                          which fixes this at 0.
+     */
+    public record SchemeRegularityMetrics(int schemeCount, int totalSupplyDays, int regularSchemeCount) {
+
+        /**
+         * For the reading-submission-rate KPI, which shares this carrier but never classifies schemes as
+         * regular. Keeps that KPI's call sites free of a meaningless argument.
+         */
+        public SchemeRegularityMetrics(int schemeCount, int totalSupplyDays) {
+            this(schemeCount, totalSupplyDays, 0);
+        }
     }
 
     public record SchemeWaterSupplyMetrics(
@@ -7461,20 +7794,31 @@ public class SchemeRegularityRepository {
             Long supplyDaysInEfficientRange) {
     }
 
+    /**
+     * @param regularSchemeCount schemes regular <em>within this bucket</em>, classified against the bucket's
+     *                           days capped to the request window (a partial month bucket is judged on its
+     *                           partial length, matching the response's {@code periodStartDate}/{@code periodEndDate})
+     */
     public record PeriodicSchemeRegularityMetrics(
             LocalDate periodStartDate,
             LocalDate periodEndDate,
             Integer schemeCount,
             Long totalAchievedFhtcCount,
             Integer totalSupplyDays,
+            Integer regularSchemeCount,
             Long totalWaterQuantity) {}
 
+    /**
+     * @param regularSchemeCount schemes in this child region classified regular
+     * @param averageRegularity  {@code regularSchemeCount / schemeCount} — the share of regular schemes
+     */
     public record ChildRegionSchemeRegularityMetrics(
             Integer lgdId,
             Integer departmentId,
             String title,
             Integer schemeCount,
             Integer totalSupplyDays,
+            Integer regularSchemeCount,
             BigDecimal averageRegularity) {
     }
 
@@ -7528,7 +7872,8 @@ public class SchemeRegularityRepository {
             String stateCode,
             String title,
             Integer schemeCount,
-            Integer totalSupplyDays) {
+            Integer totalSupplyDays,
+            Integer regularSchemeCount) {
     }
 
     public record StateReadingSubmissionMetrics(
@@ -7564,7 +7909,8 @@ public class SchemeRegularityRepository {
             Integer tenantId,
             Integer lgdId,
             Integer schemeCount,
-            Integer totalSupplyDays) {
+            Integer totalSupplyDays,
+            Integer regularSchemeCount) {
     }
 
     public record Level2ReadingSubmissionMetrics(
@@ -7658,6 +8004,11 @@ public class SchemeRegularityRepository {
             List<Integer> suppliedLgdLocationLevels) {
     }
 
+    /**
+     * @param isRegular whether this scheme met the regularity threshold over the window, classified by the
+     *                  same {@link RegularityThresholdFilter} rule as the aggregate KPI (additive to the
+     *                  existing per-scheme {@code supplyDays}/rate, which are unchanged)
+     */
     public record SchemeRegularityListMetrics(
             Integer schemeId,
             String schemeName,
@@ -7665,7 +8016,8 @@ public class SchemeRegularityRepository {
             Integer centreSchemeId,
             Integer operatingStatus,
             Integer supplyDays,
-            Integer submissionDays) {
+            Integer submissionDays,
+            Boolean isRegular) {
     }
 
     public record SubmissionStatusCount(Integer compliantSubmissionCount, Integer anomalousSubmissionCount) {

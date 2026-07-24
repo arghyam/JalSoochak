@@ -130,6 +130,21 @@ public class GlificWhatsAppService {
     @Value("${glific.flow.welcome-id:}")
     private String welcomeFlowId;
 
+    /**
+     * Suppresses only the Daily Water Service Situation Report document HSM (and its media upload).
+     * Defaults to {@link #whatsappDryRun}.
+     */
+    @Value("${notifications.daily-report.dry-run:${notifications.whatsapp.dry-run:false}}")
+    private boolean dailyReportDryRun;
+
+    /** Document HSM template id for the SECTION_OFFICER daily report. */
+    @Value("${glific.template.daily-report-so-id:}")
+    private String dailyReportSoTemplateId;
+
+    /** Document HSM template id for the SUB_DIVISIONAL_OFFICER daily report. */
+    @Value("${glific.template.daily-report-sdo-id:}")
+    private String dailyReportSdoTemplateId;
+
     @PostConstruct
     void validateTemplates() {
         if (whatsappDryRun && nudgeDryRun && escalationDryRun) {
@@ -156,10 +171,42 @@ public class GlificWhatsAppService {
             throw new IllegalStateException(
                     "glific.flow.welcome-id must be configured");
         }
-        if (!whatsappDryRun && (loginOtpTemplateId == null || loginOtpTemplateId.isBlank())) {
+        validateAccountAndReportTemplates();
+    }
+
+    private void validateAccountAndReportTemplates() {
+        if (!whatsappDryRun && isBlank(loginOtpTemplateId)) {
             throw new IllegalStateException(
                     "glific.template.login-otp-id must be configured — SEND_LOGIN_OTP events cannot be delivered without it");
         }
+        if (!dailyReportDryRun) {
+            if (isBlank(dailyReportSoTemplateId)) {
+                throw new IllegalStateException(
+                        "glific.template.daily-report-so-id must be configured when daily-report delivery is enabled"
+                        + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports)");
+            }
+            // sendDailyReportHsm does Integer.parseInt on the resolved template id, so fail fast at
+            // startup on a non-numeric id rather than per-message (retry → DLT) at delivery time.
+            requireNumericTemplateId(dailyReportSoTemplateId, "glific.template.daily-report-so-id");
+            // The SDO id is optional (resolveDailyReportTemplateId falls back to the SO template),
+            // so validate it only when it has been configured.
+            if (!isBlank(dailyReportSdoTemplateId)) {
+                requireNumericTemplateId(dailyReportSdoTemplateId, "glific.template.daily-report-sdo-id");
+            }
+        }
+    }
+
+    private static void requireNumericTemplateId(String value, String propertyName) {
+        try {
+            Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException(
+                    propertyName + " must be a numeric Glific template id but was '" + value + "'", e);
+        }
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     private boolean isDryRun(boolean flag, String operation) {
@@ -175,6 +222,9 @@ public class GlificWhatsAppService {
 
     @Value("${glific.media.escalation-thumbnail:}")
     private String escalationThumbnail;
+
+    @Value("${glific.media.daily-report-caption:Daily Water Service Situation Report}")
+    private String dailyReportCaption;
 
     /**
      * Sends the login OTP HSM template to an officer.
@@ -229,19 +279,62 @@ public class GlificWhatsAppService {
      * @return Glific {@code messageMedia.id} to pass to {@link #sendEscalationHsm}
      */
     public String uploadMedia(String publicUrl) {
-        if (isDryRun(escalationDryRun, "uploadMedia")) return "dry-run-media-id";
+        return uploadMediaInternal(publicUrl, escalationCaption, escalationDryRun);
+    }
+
+    private String uploadMediaInternal(String publicUrl, String caption, boolean dryRun) {
+        if (isDryRun(dryRun, "uploadMedia")) return "dry-run-media-id";
         log.debug("[Glific] Uploading media");
         JsonNode response = client.execute(CREATE_MESSAGE_MEDIA_MUTATION, Map.of(
                         "input", Map.of(
                                 "url", publicUrl,
                                 "source_url", publicUrl,
-                                "caption", escalationCaption,
+                                "caption", caption,
                                 "thumbnail", escalationThumbnail,
                                 "isTemplateMedia", true)));
         checkErrors(response, "createMessageMedia");
         String mediaId = response.path("createMessageMedia").path("messageMedia").path("id").asText();
         log.info("[Glific] Media uploaded, mediaId={}", mediaId);
         return mediaId;
+    }
+
+    /**
+     * Sends the Daily Water Service Situation Report document HSM to an officer. Two-step, like
+     * {@link #sendEscalationHsm}: upload the PDF via {@code createMessageMedia}, then
+     * {@code createAndSendMessage} with the {@code mediaId} as the document header. The Glific
+     * template is chosen by officer role (SO vs SDO).
+     *
+     * @param contactId       Glific contact id of the officer
+     * @param minioUrl        publicly reachable URL of the report PDF
+     * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
+     */
+    public void sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType) {
+        if (isDryRun(dailyReportDryRun, "sendDailyReportHsm")) return;
+
+        String templateId = resolveDailyReportTemplateId(officerUserType);
+        String mediaId = uploadMediaInternal(minioUrl, dailyReportCaption, dailyReportDryRun);
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("templateId", Integer.parseInt(templateId));
+        input.put("receiverId", contactId.intValue());
+        input.put("isHsm", true);
+        input.put("params", List.of());
+        if (mediaId != null && !mediaId.isBlank()) {
+            input.put("mediaId", Integer.parseInt(mediaId));
+        }
+
+        JsonNode response = client.execute(CREATE_AND_SEND_MESSAGE_MUTATION, Map.of("input", input));
+        checkErrors(response, "createAndSendMessage");
+        log.debug("[Glific] Daily report HSM sent to contactId={}", contactId);
+    }
+
+    /** SUB_DIVISIONAL_OFFICER uses its own template when configured; otherwise falls back to the SO template. */
+    private String resolveDailyReportTemplateId(String officerUserType) {
+        if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
+                && !isBlank(dailyReportSdoTemplateId)) {
+            return dailyReportSdoTemplateId;
+        }
+        return dailyReportSoTemplateId;
     }
 
     /**
