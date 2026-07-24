@@ -380,6 +380,28 @@ class DimensionServiceImplTest {
     }
 
     @Test
+    void updateWaterNorm_whenNoOpenRow_snapshotsTenantPersonCountPerHousehold() {
+        // First-ever norm change (no open SCD-2 row): the new history row must snapshot the tenant's
+        // configured person_count_per_household, not a hardcoded default.
+        WaterNormUpdatedEvent event = new WaterNormUpdatedEvent("WATER_NORM_UPDATED", 1, "MP", 70);
+        DimTenant existing = DimTenant.builder()
+                .tenantId(1).stateCode("MP").title("MP").status(1)
+                .personCountPerHousehold(6)
+                .build();
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(existing));
+        when(dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.empty());
+
+        service.updateWaterNorm(event);
+
+        ArgumentCaptor<DimTenantWaterNorm> openedCaptor = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
+        verify(dimTenantWaterNormRepository, times(1)).save(openedCaptor.capture());
+        DimTenantWaterNorm opened = openedCaptor.getValue();
+        assertThat(opened.getRequiredLpcd()).isEqualTo(70);
+        assertThat(opened.getPersonCountPerHousehold()).isEqualTo(6);
+    }
+
+    @Test
     void updateWaterNorm_whenValueChanges_closesOpenRowAndOpensNewHistoryRow() {
         WaterNormUpdatedEvent event = new WaterNormUpdatedEvent("WATER_NORM_UPDATED", 1, "MP", 70);
         DimTenant existing = DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build();

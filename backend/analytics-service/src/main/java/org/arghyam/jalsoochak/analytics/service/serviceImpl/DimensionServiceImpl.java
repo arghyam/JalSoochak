@@ -280,7 +280,7 @@ public class DimensionServiceImpl implements DimensionService {
 
         Integer lpcd = newLpcd != null ? newLpcd
                 : (open != null ? open.getRequiredLpcd() : tenant.getRequiredLpcd());
-        Integer persons = open != null ? open.getPersonCountPerHousehold() : 5;
+        Integer persons = open != null ? open.getPersonCountPerHousehold() : tenant.getPersonCountPerHousehold();
         Integer overPct = newOverPct != null ? newOverPct
                 : (open != null ? open.getOverSupplyRangePercentage() : tenant.getOverSupplyRangePercentage());
         Integer underPct = newUnderPct != null ? newUnderPct

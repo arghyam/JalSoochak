@@ -32,6 +32,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_dim_tenant_water_norm_table_open
 CREATE INDEX IF NOT EXISTS idx_dim_tenant_water_norm_table_lookup
     ON analytics_schema.dim_tenant_water_norm_table(tenant_id, effective_from, effective_to);
 
+-- No two intervals for the same tenant may overlap. Ranges are half-open
+-- [effective_from, effective_to) (NULL effective_to = open/current, treated as
+-- +infinity), so adjacent rows sharing a boundary date do NOT overlap and are
+-- allowed; only genuinely overlapping timelines are rejected. Complements the
+-- partial unique index above (which caps the open rows at one per tenant).
+-- btree_gist provides the gist operator class for the scalar tenant_id equality.
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+ALTER TABLE analytics_schema.dim_tenant_water_norm_table
+    ADD CONSTRAINT excl_dim_tenant_water_norm_table_no_overlap
+    EXCLUDE USING gist (
+        tenant_id WITH =,
+        daterange(effective_from, effective_to, '[)') WITH &&
+    );
+
 -- ------------------------------------------------------------
 -- Seed one open row per existing tenant from the current norms.
 -- effective_from = tenant creation date (norms have applied since the tenant

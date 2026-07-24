@@ -1195,8 +1195,17 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private NationalDashboardLevel2MetricsResponse buildNationalLevel2FromAggregate(
             List<AggregateReadRepository.NationalRegionRow> rows,
             LocalDate startDate, LocalDate endDate, int daysInRange) {
+        // Regularity matches the legacy fallback: a scheme is "regular" when it supplied water on at
+        // least the national threshold's share of the window's days (threshold uniform across the
+        // national dashboard), classified with the national work-status filter. Summing the per-day
+        // regular_scheme_count would over-count, so it is derived per region from the base grain.
+        int regularityThresholdDays = RegularityThresholdFilter.thresholdDays(
+                daysInRange, schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent());
         List<NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow> districts = rows.stream()
-                .map(r -> NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow.builder()
+                .map(r -> {
+                    int regularSchemeCount = (int) aggregateReadRepository.getNationalRegularSchemeCount(
+                            r.tenantId(), "LGD", r.regionId(), startDate, endDate, regularityThresholdDays);
+                    return NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow.builder()
                         .tenantId(r.tenantId())
                         .lgdId(r.regionId())
                         .tenantStatus(r.tenantStatus())
@@ -1212,10 +1221,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                                 ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount()) : BigDecimal.ZERO)
                         .supplyDaysInEfficientRange(r.supplyDaysInEfficientRange())
                         .totalSupplyDays((int) r.totalSupplyDays())
-                        .averageRegularity(aggregateRatio(r.totalSupplyDays(), (long) r.schemeCount() * daysInRange))
+                        .regularSchemeCount(regularSchemeCount)
+                        .averageRegularity(RegularityThresholdFilter.regularityRate(
+                                regularSchemeCount, r.schemeCount()))
                         .totalSubmissionDays((int) r.totalSubmissionDays())
                         .readingSubmissionRate(aggregateRatio(r.totalSubmissionDays(), (long) r.schemeCount() * daysInRange))
-                        .build())
+                        .build();
+                })
                 .toList();
 
         Map<String, Integer> overallOutageReasonDistribution =
@@ -1252,8 +1264,17 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .build())
                 .toList();
 
+        // Regularity matches the legacy fallback (regular schemes ÷ scheme count, threshold-based)
+        // rather than a supply-day fraction. Threshold is uniform (national percent); the regular
+        // count is derived per region from the base grain with the national work-status filter,
+        // since the per-day regular_scheme_count is not additive across the window.
+        int regularityThresholdDays = RegularityThresholdFilter.thresholdDays(
+                daysInRange, schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent());
         List<NationalDashboardResponse.StateRegularity> regularity = rows.stream()
-                .map(r -> NationalDashboardResponse.StateRegularity.builder()
+                .map(r -> {
+                    int regularSchemeCount = (int) aggregateReadRepository.getNationalRegularSchemeCount(
+                            r.tenantId(), "LGD", r.regionId(), startDate, endDate, regularityThresholdDays);
+                    return NationalDashboardResponse.StateRegularity.builder()
                         .tenantId(r.tenantId())
                         .lgdId(r.regionId())
                         .tenantStatus(r.tenantStatus())
@@ -1261,8 +1282,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                         .stateTitle(r.stateTitle())
                         .schemeCount(r.schemeCount())
                         .totalSupplyDays((int) r.totalSupplyDays())
-                        .averageRegularity(aggregateRatio(r.totalSupplyDays(), (long) r.schemeCount() * daysInRange))
-                        .build())
+                        .regularSchemeCount(regularSchemeCount)
+                        .averageRegularity(RegularityThresholdFilter.regularityRate(
+                                regularSchemeCount, r.schemeCount()))
+                        .build();
+                })
                 .toList();
 
         List<NationalDashboardResponse.StateReadingSubmissionRate> submission = rows.stream()

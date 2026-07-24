@@ -1608,6 +1608,67 @@ class SchemeRegularityServiceImplTest {
     }
 
     @Test
+    void refreshNationalDashboard_readFromAggregates_usesThresholdBasedRegularity() throws Exception {
+        // From-aggregate path must match the fallback KPI: regularSchemeCount / schemeCount (threshold-based,
+        // national work-status filter), NOT a supply-day fraction. Values are chosen so the two disagree:
+        // threshold-based = 3/5 = 0.6000, whereas totalSupplyDays/(schemeCount*days) = 12/(5*3) = 0.8000.
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+
+        when(aggregateReadRepository.getNationalRegionMetrics(1, START, END))
+                .thenReturn(Optional.of(List.of(
+                        new AggregateReadRepository.NationalRegionRow(
+                                1, 100, "mp", "Madhya Pradesh", 1, "Madhya Pradesh",
+                                5, 12L, 10L, 64000L, 7L, 120L, 110L, 140L)
+                )));
+        when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
+                .thenReturn(new BigDecimal("90"));
+        // daysInRange = 3, threshold 90% -> thresholdDays = max(1, round(2.7)) = 3.
+        when(aggregateReadRepository.getNationalRegularSchemeCount(1, "LGD", 100, START, END, 3))
+                .thenReturn(3L);
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(START, END))
+                .thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardResponse response = service.refreshNationalDashboard(START, END);
+
+        assertThat(response.getStateWiseRegularity()).hasSize(1);
+        NationalDashboardResponse.StateRegularity reg = response.getStateWiseRegularity().getFirst();
+        assertThat(reg.getRegularSchemeCount()).isEqualTo(3);
+        assertThat(reg.getAverageRegularity()).isEqualByComparingTo("0.6000");
+    }
+
+    @Test
+    void getNationalDashboardLevel2MetricsForApi_readFromAggregates_usesThresholdBasedRegularity() throws Exception {
+        // Same threshold-based regularity guarantee for the level-2 (district) from-aggregate path:
+        // 3/5 = 0.6000, not the supply-day fraction 12/(5*3) = 0.8000.
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+
+        when(aggregateReadRepository.getNationalRegionMetrics(2, START, END))
+                .thenReturn(Optional.of(List.of(
+                        new AggregateReadRepository.NationalRegionRow(
+                                1, 101, "mp", "Madhya Pradesh", 1, "District-1",
+                                5, 12L, 10L, 64000L, 7L, 120L, 110L, 140L)
+                )));
+        when(schemeRegularityRepository.getEffectiveNationalRegularityThresholdPercent())
+                .thenReturn(new BigDecimal("90"));
+        when(aggregateReadRepository.getNationalRegularSchemeCount(1, "LGD", 101, START, END, 3))
+                .thenReturn(3L);
+        when(schemeRegularityRepository.getOverallOutageReasonSchemeCount(START, END))
+                .thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        NationalDashboardLevel2MetricsResponse response =
+                service.getNationalDashboardLevel2MetricsForApi(START, END);
+
+        assertThat(response.getDistricts()).hasSize(1);
+        NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow district = response.getDistricts().getFirst();
+        assertThat(district.getRegularSchemeCount()).isEqualTo(3);
+        assertThat(district.getAverageRegularity()).isEqualByComparingTo("0.6000");
+    }
+
+    @Test
     void getNationalDashboardLevel2MetricsForApi_joinsRegularityRowsByTenantAndLgd() throws Exception {
         mockRedisValueOps();
         String key = ":national:dashboard:metrics:level2:start:2026-01-01:end:2026-01-03:v1";

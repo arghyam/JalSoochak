@@ -176,8 +176,25 @@ public class AggregateReadRepository {
      */
     public long getRegularSchemeCount(int tenantId, String hierarchy, int regionId,
                                       LocalDate start, LocalDate end, int thresholdDays) {
+        return regularSchemeCount(tenantId, hierarchy, regionId, start, end, thresholdDays,
+                workStatusFilter.andHistoryPredicate("ds", dateLiteral(end)));
+    }
+
+    /**
+     * National-scoped counterpart of {@link #getRegularSchemeCount}: applies the national
+     * work-status history predicate (tenant-0 → env default, no own-tenant tier) so the regular
+     * count is filter-consistent with the {@code NATIONAL}-scope region rows the national dashboard
+     * reads and with the legacy {@code {{NWS}}} fallback.
+     */
+    public long getNationalRegularSchemeCount(int tenantId, String hierarchy, int regionId,
+                                              LocalDate start, LocalDate end, int thresholdDays) {
+        return regularSchemeCount(tenantId, hierarchy, regionId, start, end, thresholdDays,
+                workStatusFilter.andNationalHistoryPredicate("ds", dateLiteral(end)));
+    }
+
+    private long regularSchemeCount(int tenantId, String hierarchy, int regionId,
+                                    LocalDate start, LocalDate end, int thresholdDays, String schemeFilter) {
         String orClause = regionMembershipOrClause(hierarchy, "ds");
-        String schemeFilter = workStatusFilter.andHistoryPredicate("ds", dateLiteral(end));
         String sql = ("""
                 SELECT COUNT(*) FILTER (WHERE supply_days >= ?) AS regular_schemes
                 FROM (
