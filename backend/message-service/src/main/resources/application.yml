@@ -230,7 +230,7 @@ escalation:
 daily-report:
   report:
     dir: ${DAILY_REPORT_DIR:/tmp/escalation-reports/} # reuses the escalation report dir by default
-  dashboard-url: ${DAILY_REPORT_DASHBOARD_URL:https://jalsoochak.jjmbrain.in/}
+  dashboard-url: ${DAILY_REPORT_DASHBOARD_URL:https://jalsoochak.jjmbrain.in/staff/}
   support-phone: ${DAILY_REPORT_SUPPORT_PHONE:} # shown in the PDF footer; blank hides the line
 
 # Base URL used to construct the public PDF download link sent via WhatsApp.
@@ -238,6 +238,10 @@ daily-report:
 # For demo with ngrok: https://<your-ngrok-id>.ngrok.io
 app:
   base-url: ${APP_BASE_URL:http://localhost:8085}
+  daily-report:
+    # Delivers SUB_DIVISIONAL_OFFICER reports (SO layout + per-Section-Officer Summary breakdown).
+    # Operational kill-switch — set APP_DAILY_REPORT_SDO_ENABLED=false to suppress SDO reports.
+    sdo-enabled: ${APP_DAILY_REPORT_SDO_ENABLED:true}
 
 # ──────────────────────────────────────────────────────────────
 # Notification Guards (per channel / per purpose)
