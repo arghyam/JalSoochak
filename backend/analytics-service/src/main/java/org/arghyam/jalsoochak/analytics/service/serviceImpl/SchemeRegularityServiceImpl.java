@@ -27,6 +27,7 @@ import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.enums.RegularityScope;
 import org.arghyam.jalsoochak.analytics.enums.SchemeStatus;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
+import org.arghyam.jalsoochak.analytics.repository.AggregateReadRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
@@ -63,6 +64,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -72,7 +74,6 @@ import java.util.stream.Collectors;
 @Slf4j
 public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
-    private static final Duration SCHEME_REGULARITY_CACHE_TTL = Duration.ofHours(24);
     private static final String SCHEME_REGULARITY_CACHE_PREFIX = ":scheme_regularity";
     private static final String READING_SUBMISSION_RATE_CACHE_PREFIX = ":reading_submission_rate";
     private static final String NATIONAL_DASHBOARD_CACHE_PREFIX = ":national:dashboard";
@@ -97,6 +98,17 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     @Value("${analytics.scheduler.scheme-status.critical-after-days:30}")
     private int criticalAfterDays;
 
+    /** When true, serve metrics from the pre-aggregation tables (legacy SQL is the fallback). */
+    @Value("${analytics.read-from-aggregates:true}")
+    private boolean readFromAggregates;
+
+    /**
+     * Dashboard response cache TTL in hours. Defaults to 1 so today's counts refresh
+     * hourly (the hourly aggregation task re-rolls the current day each hour).
+     */
+    @Value("${analytics.cache.ttl-hours:1}")
+    private long cacheTtlHours;
+
     /**
      * Trailing window (in days, inclusive) that a single-day regularity request expands to: a share-of-days
      * KPI is meaningless over one day, so {@code start == end} widens to this many trailing days. Applied to
@@ -108,6 +120,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private int regularitySingleDayLookbackDays;
 
     private final SchemeRegularityRepository schemeRegularityRepository;
+    private final AggregateReadRepository aggregateReadRepository;
     private final DimTenantRepository dimTenantRepository;
     private final DimUserRepository dimUserRepository;
     private final StringRedisTemplate redisTemplate;
@@ -143,7 +156,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         SchemeRegularityRepository.SchemeRegularityMetrics metrics;
         try {
-            metrics = schemeRegularityRepository.getSchemeRegularityMetrics(tenantId, parentLgdId, startDate, endDate);
+            metrics = aggregateRegionMetricsOrNull(tenantId, "LGD", parentLgdId, startDate, endDate, false);
+            if (metrics == null) {
+                metrics = schemeRegularityRepository.getSchemeRegularityMetrics(tenantId, parentLgdId, startDate, endDate);
+            }
         } catch (Exception ex) {
             // #region agent log
             appendDebugLog(
@@ -190,6 +206,94 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         return response;
     }
 
+    /**
+     * Region scheme metrics from the pre-aggregation tables, or {@code null} when the
+     * aggregate read path is disabled or has no DAY rows for the region/range (the
+     * caller then falls back to the legacy raw-fact query). {@code useSubmissionDays}
+     * selects total_submission_days (reading submitted) vs total_supply_days
+     * (water supplied) for the {@code totalSupplyDays} slot of the returned record.
+     *
+     * <p>For the regularity KPI ({@code useSubmissionDays == false}) the "regular scheme"
+     * count is computed from the base grain against the effective threshold (schemes supplying
+     * on at least {@code thresholdDays} of the window), matching the legacy
+     * {@code RegularityThresholdFilter} classification. The reading-submission-rate KPI
+     * ({@code useSubmissionDays == true}) never classifies schemes as regular, so its regular
+     * count is left 0.</p>
+     */
+    private SchemeRegularityRepository.SchemeRegularityMetrics aggregateRegionMetricsOrNull(
+            Integer tenantId, String hierarchy, Integer regionId,
+            LocalDate startDate, LocalDate endDate, boolean useSubmissionDays) {
+        if (!readFromAggregates || regionId == null) {
+            return null;
+        }
+        return aggregateReadRepository.getRegionMetrics(tenantId, hierarchy, regionId, startDate, endDate)
+                .map(m -> {
+                    int regularSchemeCount = 0;
+                    if (!useSubmissionDays) {
+                        int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+                        BigDecimal thresholdPercent =
+                                schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(tenantId);
+                        int thresholdDays = RegularityThresholdFilter.thresholdDays(daysInRange, thresholdPercent);
+                        regularSchemeCount = (int) aggregateReadRepository.getRegularSchemeCount(
+                                tenantId, hierarchy, regionId, startDate, endDate, thresholdDays);
+                    }
+                    return new SchemeRegularityRepository.SchemeRegularityMetrics(
+                            m.schemeCount(),
+                            (int) (useSubmissionDays ? m.totalSubmissionDays() : m.totalSupplyDays()),
+                            regularSchemeCount);
+                })
+                .orElse(null);
+    }
+
+    /**
+     * Periodic scheme-regularity is served from the legacy path. The per-bucket "regular scheme"
+     * classification uses a per-bucket day count and threshold that are not pre-aggregated, so this
+     * always returns {@code null} and the caller uses the legacy per-bucket SQL. (Periodic
+     * water-quantity still uses the aggregate path; only the regularity series falls back here.)
+     */
+    private List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> aggregatePeriodicRegularityOrNull(
+            Integer tenantId, String hierarchy, Integer regionId,
+            LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        return null;
+    }
+
+    /**
+     * Parent-region reason distribution map (outage or non-submission) from the base
+     * grain, falling back lazily to {@code legacy} when the aggregate path is off or
+     * the region has no aggregated rows in range. {@code outage}=true reads
+     * outage reasons, else non-submission reasons.
+     */
+    private Map<String, Integer> resolveReasonParentMap(
+            Integer tenantId, String hierarchy, Integer regionId, boolean outage,
+            LocalDate startDate, LocalDate endDate, java.util.function.Supplier<Map<String, Integer>> legacy) {
+        if (readFromAggregates && regionId != null) {
+            Optional<Map<String, Integer>> agg = aggregateReadRepository.getReasonDistribution(
+                    tenantId, hierarchy, regionId, outage, startDate, endDate);
+            if (agg.isPresent()) {
+                return agg.get();
+            }
+        }
+        return legacy.get();
+    }
+
+    /**
+     * Submission-status summary (compliant/anomalous reading counts + scheme count)
+     * from the pre-aggregation tables, or {@code null} to fall back to legacy SQL.
+     */
+    private SubmissionStatusSummaryResponse aggregateSubmissionStatusOrNull(
+            Integer tenantId, String hierarchy, Integer regionId, LocalDate startDate, LocalDate endDate) {
+        if (!readFromAggregates || regionId == null) {
+            return null;
+        }
+        return aggregateReadRepository.getRegionMetrics(tenantId, hierarchy, regionId, startDate, endDate)
+                .map(m -> SubmissionStatusSummaryResponse.builder()
+                        .schemeCount(m.schemeCount())
+                        .compliantSubmissionCount((int) m.compliantSubmissionCount())
+                        .anomalousSubmissionCount((int) m.anomalousSubmissionCount())
+                        .build())
+                .orElse(null);
+    }
+
     @Override
     public ReadingSubmissionRateResponse getReadingSubmissionRateByLgd(
             Integer tenantId, Integer parentLgdId, LocalDate startDate, LocalDate endDate) {
@@ -223,7 +327,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         Integer parentLgdLevel = schemeRegularityRepository.getLgdLevelForTenant(tenantId, parentLgdId);
         SchemeRegularityRepository.SchemeRegularityMetrics metrics;
         try {
-            metrics = schemeRegularityRepository.getReadingSubmissionRateMetricsByLgd(tenantId, parentLgdId, startDate, endDate);
+            metrics = aggregateRegionMetricsOrNull(tenantId, "LGD", parentLgdId, startDate, endDate, true);
+            if (metrics == null) {
+                metrics = schemeRegularityRepository.getReadingSubmissionRateMetricsByLgd(tenantId, parentLgdId, startDate, endDate);
+            }
         } catch (Exception ex) {
             // #region agent log
             appendDebugLog(
@@ -290,8 +397,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
-                schemeRegularityRepository.getSchemeRegularityMetricsByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+                aggregateRegionMetricsOrNull(tenantId, "DEPT", parentDepartmentId, startDate, endDate, false);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getSchemeRegularityMetricsByDepartment(
+                    tenantId, parentDepartmentId, startDate, endDate);
+        }
 
         BigDecimal thresholdPercent =
                 schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(tenantId);
@@ -352,8 +462,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> metrics =
-                schemeRegularityRepository.getChildSchemeRegularityMetricsByLgd(
-                        tenantId, parentLgdId, startDate, endDate);
+                aggregateChildRegularityOrNull(tenantId, "LGD", parentLgdId, parentLgdLevel, startDate, endDate, daysInRange);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getChildSchemeRegularityMetricsByLgd(
+                    tenantId, parentLgdId, startDate, endDate);
+        }
 
         List<AverageSchemeRegularityResponse.ChildRegionRegularity> childRegions = metrics.stream()
                 .map(m -> AverageSchemeRegularityResponse.ChildRegionRegularity.builder()
@@ -437,8 +550,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> metrics =
-                schemeRegularityRepository.getChildSchemeRegularityMetricsByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+                aggregateChildRegularityOrNull(tenantId, "DEPT", parentDepartmentId, parentDepartmentLevel, startDate, endDate, daysInRange);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getChildSchemeRegularityMetricsByDepartment(
+                    tenantId, parentDepartmentId, startDate, endDate);
+        }
 
         List<AverageSchemeRegularityResponse.ChildRegionRegularity> childRegions = metrics.stream()
                 .map(m -> AverageSchemeRegularityResponse.ChildRegionRegularity.builder()
@@ -510,8 +626,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         Integer parentDepartmentLevel = schemeRegularityRepository.getDepartmentLevelForTenant(tenantId, parentDepartmentId);
         SchemeRegularityRepository.SchemeRegularityMetrics metrics =
-                schemeRegularityRepository.getReadingSubmissionRateMetricsByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+                aggregateRegionMetricsOrNull(tenantId, "DEPT", parentDepartmentId, startDate, endDate, true);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getReadingSubmissionRateMetricsByDepartment(
+                    tenantId, parentDepartmentId, startDate, endDate);
+        }
 
         BigDecimal readingSubmissionRate = BigDecimal.ZERO;
         if (metrics.schemeCount() > 0 && daysInRange > 0) {
@@ -568,8 +687,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionReadingSubmissionMetrics> metrics =
-                schemeRegularityRepository.getChildReadingSubmissionRateMetricsByLgd(
-                        tenantId, parentLgdId, startDate, endDate);
+                aggregateChildSubmissionOrNull(tenantId, "LGD", parentLgdId, parentLgdLevel, startDate, endDate, daysInRange);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getChildReadingSubmissionRateMetricsByLgd(
+                    tenantId, parentLgdId, startDate, endDate);
+        }
 
         List<ReadingSubmissionRateResponse.ChildRegionReadingSubmissionRate> childRegions = metrics.stream()
                 .map(m -> ReadingSubmissionRateResponse.ChildRegionReadingSubmissionRate.builder()
@@ -645,8 +767,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionReadingSubmissionMetrics> metrics =
-                schemeRegularityRepository.getChildReadingSubmissionRateMetricsByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+                aggregateChildSubmissionOrNull(tenantId, "DEPT", parentDepartmentId, parentDepartmentLevel, startDate, endDate, daysInRange);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getChildReadingSubmissionRateMetricsByDepartment(
+                    tenantId, parentDepartmentId, startDate, endDate);
+        }
 
         List<ReadingSubmissionRateResponse.ChildRegionReadingSubmissionRate> childRegions = metrics.stream()
                 .map(m -> ReadingSubmissionRateResponse.ChildRegionReadingSubmissionRate.builder()
@@ -777,7 +902,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.SchemeWaterSupplyMetrics> metrics =
-                schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegion(tenantId, startDate, endDate);
+                aggregateSchemeWaterSupplyOrNull(tenantId, startDate, endDate, daysInRange);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegion(tenantId, startDate, endDate);
+        }
 
         List<AverageWaterSupplyResponse.SchemeWaterSupply> schemes = metrics.stream()
                 .map(m -> AverageWaterSupplyResponse.SchemeWaterSupply.builder()
@@ -941,6 +1069,17 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
 
+        if (readFromAggregates) {
+            Optional<List<AggregateReadRepository.NationalRegionRow>> agg =
+                    aggregateReadRepository.getNationalRegionMetrics(2, startDate, endDate);
+            if (agg.isPresent()) {
+                NationalDashboardLevel2MetricsResponse aggResponse =
+                        buildNationalLevel2FromAggregate(agg.get(), startDate, endDate, daysInRange);
+                writeToCache(cacheKey, aggResponse);
+                return aggResponse;
+            }
+        }
+
         List<SchemeRegularityRepository.Level2WaterSupplyMetrics> quantityRows =
                 schemeRegularityRepository.getLgdLevel2WiseWaterSupplyMetricsForNation(startDate, endDate);
         List<SchemeRegularityRepository.Level2SupplyDaysInEfficientRange> efficientRangeRows =
@@ -1052,9 +1191,122 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":v5";
     }
 
+    /** Build the national district (level-2) metrics from pre-aggregated region rows. */
+    private NationalDashboardLevel2MetricsResponse buildNationalLevel2FromAggregate(
+            List<AggregateReadRepository.NationalRegionRow> rows,
+            LocalDate startDate, LocalDate endDate, int daysInRange) {
+        List<NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow> districts = rows.stream()
+                .map(r -> NationalDashboardLevel2MetricsResponse.LgdLevel2MetricsRow.builder()
+                        .tenantId(r.tenantId())
+                        .lgdId(r.regionId())
+                        .tenantStatus(r.tenantStatus())
+                        .stateCode(r.stateCode())
+                        .stateTitle(r.stateTitle())
+                        .districtTitle(r.regionTitle())
+                        .schemeCount(r.schemeCount())
+                        .totalHouseholdCount(r.totalHouseholdCount())
+                        .totalAchievedFhtcCount(r.totalAchievedFhtc())
+                        .totalPlannedFhtcCount(r.totalPlannedFhtc())
+                        .totalWaterSuppliedLiters(r.totalWaterSuppliedLiters())
+                        .avgWaterSupplyPerScheme(r.schemeCount() > 0
+                                ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount()) : BigDecimal.ZERO)
+                        .supplyDaysInEfficientRange(r.supplyDaysInEfficientRange())
+                        .totalSupplyDays((int) r.totalSupplyDays())
+                        .averageRegularity(aggregateRatio(r.totalSupplyDays(), (long) r.schemeCount() * daysInRange))
+                        .totalSubmissionDays((int) r.totalSubmissionDays())
+                        .readingSubmissionRate(aggregateRatio(r.totalSubmissionDays(), (long) r.schemeCount() * daysInRange))
+                        .build())
+                .toList();
+
+        Map<String, Integer> overallOutageReasonDistribution =
+                buildReasonCountMap(schemeRegularityRepository.getOverallOutageReasonSchemeCount(startDate, endDate));
+
+        return NationalDashboardLevel2MetricsResponse.builder()
+                .startDate(startDate)
+                .endDate(endDate)
+                .daysInRange(daysInRange)
+                .overallOutageReasonDistribution(overallOutageReasonDistribution)
+                .districts(districts)
+                .build();
+    }
+
+    /** Build the national (state level-1) dashboard from pre-aggregated region rows. */
+    private NationalDashboardResponse buildNationalDashboardFromAggregate(
+            List<AggregateReadRepository.NationalRegionRow> rows,
+            LocalDate startDate, LocalDate endDate, int daysInRange) {
+        List<NationalDashboardResponse.StateQuantityPerformance> quantity = rows.stream()
+                .map(r -> NationalDashboardResponse.StateQuantityPerformance.builder()
+                        .tenantId(r.tenantId())
+                        .lgdId(r.regionId())
+                        .tenantStatus(r.tenantStatus())
+                        .stateCode(r.stateCode())
+                        .stateTitle(r.stateTitle())
+                        .schemeCount(r.schemeCount())
+                        .totalHouseholdCount(r.totalHouseholdCount())
+                        .totalAchievedFhtcCount(r.totalAchievedFhtc())
+                        .totalPlannedFhtcCount(r.totalPlannedFhtc())
+                        .totalWaterSuppliedLiters(r.totalWaterSuppliedLiters())
+                        .avgWaterSupplyPerScheme(r.schemeCount() > 0
+                                ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount()) : BigDecimal.ZERO)
+                        .supplyDaysInEfficientRange(r.supplyDaysInEfficientRange())
+                        .build())
+                .toList();
+
+        List<NationalDashboardResponse.StateRegularity> regularity = rows.stream()
+                .map(r -> NationalDashboardResponse.StateRegularity.builder()
+                        .tenantId(r.tenantId())
+                        .lgdId(r.regionId())
+                        .tenantStatus(r.tenantStatus())
+                        .stateCode(r.stateCode())
+                        .stateTitle(r.stateTitle())
+                        .schemeCount(r.schemeCount())
+                        .totalSupplyDays((int) r.totalSupplyDays())
+                        .averageRegularity(aggregateRatio(r.totalSupplyDays(), (long) r.schemeCount() * daysInRange))
+                        .build())
+                .toList();
+
+        List<NationalDashboardResponse.StateReadingSubmissionRate> submission = rows.stream()
+                .map(r -> NationalDashboardResponse.StateReadingSubmissionRate.builder()
+                        .tenantId(r.tenantId())
+                        .lgdId(r.regionId())
+                        .tenantStatus(r.tenantStatus())
+                        .stateCode(r.stateCode())
+                        .stateTitle(r.stateTitle())
+                        .schemeCount(r.schemeCount())
+                        .totalSubmissionDays((int) r.totalSubmissionDays())
+                        .readingSubmissionRate(aggregateRatio(r.totalSubmissionDays(), (long) r.schemeCount() * daysInRange))
+                        .build())
+                .toList();
+
+        Map<String, Integer> overallOutageReasonDistribution =
+                buildReasonCountMap(schemeRegularityRepository.getOverallOutageReasonSchemeCount(startDate, endDate));
+
+        return NationalDashboardResponse.builder()
+                .startDate(startDate)
+                .endDate(endDate)
+                .daysInRange(daysInRange)
+                .stateWiseQuantityPerformance(quantity)
+                .stateWiseRegularity(regularity)
+                .stateWiseReadingSubmissionRate(submission)
+                .overallOutageReasonDistribution(overallOutageReasonDistribution)
+                .build();
+    }
+
     private NationalDashboardResponse buildAndCacheNationalDashboard(
             LocalDate startDate, LocalDate endDate, String cacheKey) {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+
+        if (readFromAggregates) {
+            Optional<List<AggregateReadRepository.NationalRegionRow>> agg =
+                    aggregateReadRepository.getNationalRegionMetrics(1, startDate, endDate);
+            if (agg.isPresent()) {
+                NationalDashboardResponse aggResponse =
+                        buildNationalDashboardFromAggregate(agg.get(), startDate, endDate, daysInRange);
+                writeToCache(cacheKey, aggResponse);
+                return aggResponse;
+            }
+        }
+
         List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> quantityMetrics =
                 schemeRegularityRepository.getAverageWaterSupplyPerNation(startDate, endDate);
         Map<Integer, Long> supplyDaysInEfficientRangeByTenantId =
@@ -1244,7 +1496,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> metrics;
         try {
-            metrics = schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegionByLgd(tenantId, lgdId, startDate, endDate);
+            metrics = aggregateChildWaterSupplyOrNull(tenantId, "LGD", lgdId, parentLgdLevel, startDate, endDate);
+            if (metrics == null) {
+                metrics = schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegionByLgd(tenantId, lgdId, startDate, endDate);
+            }
         } catch (Exception ex) {
             // #region agent log
             appendDebugLog(
@@ -1359,7 +1614,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int daysInRange = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
         List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> metrics;
         try {
-            metrics = schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegionByDepartment(tenantId, parentDepartmentId, startDate, endDate);
+            metrics = aggregateChildWaterSupplyOrNull(tenantId, "DEPT", parentDepartmentId, parentDepartmentLevel, startDate, endDate);
+            if (metrics == null) {
+                metrics = schemeRegularityRepository.getAverageWaterSupplyPerCurrentRegionByDepartment(tenantId, parentDepartmentId, startDate, endDate);
+            }
         } catch (Exception ex) {
             // #region agent log
             appendDebugLog(
@@ -1450,7 +1708,10 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> metrics =
-                schemeRegularityRepository.getRegionWiseWaterQuantityByLgd(tenantId, parentLgdId, startDate, endDate);
+                aggregateChildWaterQuantityOrNull(tenantId, "LGD", parentLgdId, parentLgdLevel, startDate, endDate);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getRegionWiseWaterQuantityByLgd(tenantId, parentLgdId, startDate, endDate);
+        }
 
         List<RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity> childRegions = metrics.stream()
                 .map(metric -> RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity.builder()
@@ -1504,8 +1765,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> metrics =
-                schemeRegularityRepository.getRegionWiseWaterQuantityByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+                aggregateChildWaterQuantityOrNull(tenantId, "DEPT", parentDepartmentId, parentDepartmentLevel, startDate, endDate);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getRegionWiseWaterQuantityByDepartment(
+                    tenantId, parentDepartmentId, startDate, endDate);
+        }
 
         List<RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity> childRegions = metrics.stream()
                 .map(metric -> RegionWiseWaterQuantityResponse.ChildRegionWaterQuantity.builder()
@@ -1536,24 +1800,29 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public PeriodicWaterQuantityResponse getPeriodicWaterQuantityByLgdId(
-            Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+            Integer tenantId, Integer lgdId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        validateTenantInput(tenantId);
         validateLgdInput(lgdId);
         validateDateRange(startDate, endDate);
         validateScaleInput(scale);
 
         String cacheKey = PERIODIC_WATER_QUANTITY_CACHE_PREFIX
+                + ":tenant:" + tenantId
                 + ":lgd:" + lgdId
                 + ":scale:" + scale.name().toLowerCase()
                 + ":start:" + startDate
                 + ":end:" + endDate
-                + ":v1";
+                + ":v2";
         PeriodicWaterQuantityResponse cached = readFromCache(cacheKey, PeriodicWaterQuantityResponse.class);
         if (cached != null) {
             return cached;
         }
 
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> metrics =
-                schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(lgdId, startDate, endDate, scale);
+                aggregatePeriodicWaterQuantityOrNull(tenantId, "LGD", lgdId, startDate, endDate, scale);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getPeriodicWaterQuantityByLgdId(lgdId, startDate, endDate, scale);
+        }
 
         PeriodicWaterQuantityResponse response =
                 buildPeriodicWaterQuantityResponse(lgdId, null, startDate, endDate, scale, metrics);
@@ -1563,15 +1832,199 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
 
     @Override
     public PeriodicWaterQuantityResponse getPeriodicWaterQuantityByDepartment(
-            Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+            Integer tenantId, Integer departmentId, LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        validateTenantInput(tenantId);
         validateDepartmentInput(departmentId);
         validateDateRange(startDate, endDate);
         validateScaleInput(scale);
 
         List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> metrics =
-                schemeRegularityRepository.getPeriodicWaterQuantityByDepartment(departmentId, startDate, endDate, scale);
+                aggregatePeriodicWaterQuantityOrNull(tenantId, "DEPT", departmentId, startDate, endDate, scale);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getPeriodicWaterQuantityByDepartment(departmentId, startDate, endDate, scale);
+        }
 
         return buildPeriodicWaterQuantityResponse(null, departmentId, startDate, endDate, scale, metrics);
+    }
+
+    /**
+     * Periodic water-quantity buckets from pre-rolled aggregates (DAY/WEEK/MONTH), or
+     * {@code null} to fall back to legacy. averageWaterQuantity = total water supplied /
+     * water-quantity row count for the bucket (matches the legacy per-row average).
+     */
+    private List<SchemeRegularityRepository.PeriodicWaterQuantityMetrics> aggregatePeriodicWaterQuantityOrNull(
+            Integer tenantId, String hierarchy, Integer regionId,
+            LocalDate startDate, LocalDate endDate, PeriodScale scale) {
+        if (!readFromAggregates || regionId == null) {
+            return null;
+        }
+        // DAY/WEEK/MONTH are read directly; QUARTER/YEAR are re-bucketed from stored MONTH rows.
+        List<AggregateReadRepository.PeriodicRegionRow> rows =
+                aggregateReadRepository.getPeriodicRegionMetrics(tenantId, hierarchy, regionId, scale.name(), startDate, endDate);
+        if (rows.isEmpty()) {
+            return null;
+        }
+        return rows.stream()
+                .map(r -> {
+                    // After the de-dup a scheme-day has at most one qualifying water row, so
+                    // the supply-day count IS the qualifying-row count (the average's divisor).
+                    BigDecimal avg = r.totalSupplyDays() > 0
+                            ? BigDecimal.valueOf(r.totalWaterSuppliedLiters())
+                                    .divide(BigDecimal.valueOf(r.totalSupplyDays()), 4, RoundingMode.HALF_UP)
+                            : BigDecimal.ZERO;
+                    return new SchemeRegularityRepository.PeriodicWaterQuantityMetrics(
+                            r.periodStart(), r.periodEnd(), null, avg,
+                            r.totalHouseholdCount(), r.totalAchievedFhtc(), r.totalPlannedFhtc());
+                })
+                .toList();
+    }
+
+    private static BigDecimal aggregateRatio(long numerator, long denominator) {
+        if (denominator <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return BigDecimal.valueOf(numerator).divide(BigDecimal.valueOf(denominator), 4, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Per-child scheme-regularity is served from the legacy path: the threshold-based
+     * "regular scheme" classification is per child region and is not pre-aggregated, so this
+     * always returns {@code null} and the caller uses the legacy per-child SQL. (The region-wide
+     * and national regularity cards do use the aggregate path via {@code getRegularSchemeCount}.)
+     */
+    private List<SchemeRegularityRepository.ChildRegionSchemeRegularityMetrics> aggregateChildRegularityOrNull(
+            Integer tenantId, String hierarchy, Integer parentRegionId, Integer parentLevel,
+            LocalDate startDate, LocalDate endDate, int daysInRange) {
+        return null;
+    }
+
+    /** Per-child reading-submission rows from aggregates, or {@code null} to fall back to legacy. */
+    private List<SchemeRegularityRepository.ChildRegionReadingSubmissionMetrics> aggregateChildSubmissionOrNull(
+            Integer tenantId, String hierarchy, Integer parentRegionId, Integer parentLevel,
+            LocalDate startDate, LocalDate endDate, int daysInRange) {
+        if (!readFromAggregates || parentRegionId == null || parentLevel == null) {
+            return null;
+        }
+        boolean dept = "DEPT".equals(hierarchy);
+        return aggregateReadRepository.getChildRegionMetrics(tenantId, hierarchy, parentRegionId, parentLevel, startDate, endDate)
+                .map(rows -> rows.stream()
+                        .map(r -> new SchemeRegularityRepository.ChildRegionReadingSubmissionMetrics(
+                                dept ? null : r.regionId(),
+                                dept ? r.regionId() : null,
+                                r.title(),
+                                r.schemeCount(),
+                                (int) r.totalSubmissionDays(),
+                                aggregateRatio(r.totalSubmissionDays(), (long) r.schemeCount() * daysInRange)))
+                        .toList())
+                .orElse(null);
+    }
+
+    /** Per-child water-quantity rows from aggregates, or {@code null} to fall back to legacy. */
+    private List<SchemeRegularityRepository.ChildRegionWaterQuantityMetrics> aggregateChildWaterQuantityOrNull(
+            Integer tenantId, String hierarchy, Integer parentRegionId, Integer parentLevel,
+            LocalDate startDate, LocalDate endDate) {
+        if (!readFromAggregates || parentRegionId == null || parentLevel == null) {
+            return null;
+        }
+        boolean dept = "DEPT".equals(hierarchy);
+        return aggregateReadRepository.getChildRegionMetrics(tenantId, hierarchy, parentRegionId, parentLevel, startDate, endDate)
+                .map(rows -> rows.stream()
+                        .map(r -> new SchemeRegularityRepository.ChildRegionWaterQuantityMetrics(
+                                dept ? null : r.regionId(),
+                                dept ? r.regionId() : null,
+                                r.title(),
+                                r.totalWaterSuppliedLiters(),
+                                r.totalHouseholdCount(),
+                                r.totalAchievedFhtc(),
+                                r.totalPlannedFhtc(),
+                                r.supplyDaysInEfficientRange()))
+                        .toList())
+                .orElse(null);
+    }
+
+    /** Per-child outage-reason rows from aggregates, or {@code null} to fall back to legacy. */
+    private List<SchemeRegularityRepository.ChildRegionOutageReasonSchemeCount> aggregateChildOutageRowsOrNull(
+            Integer tenantId, String hierarchy, Integer parentRegionId, Integer parentLevel,
+            LocalDate startDate, LocalDate endDate) {
+        if (!readFromAggregates || parentRegionId == null || parentLevel == null) {
+            return null;
+        }
+        boolean dept = "DEPT".equals(hierarchy);
+        return aggregateReadRepository.getChildReasonDistribution(tenantId, hierarchy, parentRegionId, parentLevel, true, startDate, endDate)
+                .map(rows -> rows.stream()
+                        .map(r -> new SchemeRegularityRepository.ChildRegionOutageReasonSchemeCount(
+                                dept ? null : r.regionId(), dept ? r.regionId() : null, r.reasonKey(), r.schemeCount()))
+                        .toList())
+                .orElse(null);
+    }
+
+    /** Per-child non-submission-reason rows from aggregates, or {@code null} to fall back to legacy. */
+    private List<SchemeRegularityRepository.ChildRegionNonSubmissionReasonSchemeCount> aggregateChildNonSubmissionRowsOrNull(
+            Integer tenantId, String hierarchy, Integer parentRegionId, Integer parentLevel,
+            LocalDate startDate, LocalDate endDate) {
+        if (!readFromAggregates || parentRegionId == null || parentLevel == null) {
+            return null;
+        }
+        boolean dept = "DEPT".equals(hierarchy);
+        return aggregateReadRepository.getChildReasonDistribution(tenantId, hierarchy, parentRegionId, parentLevel, false, startDate, endDate)
+                .map(rows -> rows.stream()
+                        .map(r -> new SchemeRegularityRepository.ChildRegionNonSubmissionReasonSchemeCount(
+                                dept ? null : r.regionId(), dept ? r.regionId() : null, r.reasonKey(), r.schemeCount()))
+                        .toList())
+                .orElse(null);
+    }
+
+    /** Per-scheme water supply (current region) from aggregates, or {@code null} to fall back to legacy. */
+    private List<SchemeRegularityRepository.SchemeWaterSupplyMetrics> aggregateSchemeWaterSupplyOrNull(
+            Integer tenantId, LocalDate startDate, LocalDate endDate, int daysInRange) {
+        if (!readFromAggregates) {
+            return null;
+        }
+        return aggregateReadRepository.getSchemeWaterSupply(tenantId, startDate, endDate)
+                .map(rows -> rows.stream()
+                        .map(r -> new SchemeRegularityRepository.SchemeWaterSupplyMetrics(
+                                r.schemeId(), r.schemeName(), r.householdCount(),
+                                r.achievedFhtc(), r.plannedFhtc(), r.totalWaterSuppliedLiters(), r.supplyDays(),
+                                aggregateRatio(r.totalWaterSuppliedLiters(), r.householdCount() * (long) daysInRange)))
+                        .toList())
+                .orElse(null);
+    }
+
+    /** Per-child water-supply rows (unified supplied-water figure) from aggregates, or {@code null} to fall back. */
+    private List<SchemeRegularityRepository.ChildRegionWaterSupplyMetrics> aggregateChildWaterSupplyOrNull(
+            Integer tenantId, String hierarchy, Integer parentRegionId, Integer parentLevel,
+            LocalDate startDate, LocalDate endDate) {
+        if (!readFromAggregates || parentRegionId == null || parentLevel == null) {
+            return null;
+        }
+        boolean dept = "DEPT".equals(hierarchy);
+        return aggregateReadRepository.getChildRegionMetrics(tenantId, hierarchy, parentRegionId, parentLevel, startDate, endDate)
+                .map(rows -> rows.stream()
+                        .map(r -> new SchemeRegularityRepository.ChildRegionWaterSupplyMetrics(
+                                null, null,
+                                dept ? null : r.regionId(),
+                                dept ? r.regionId() : null,
+                                r.title(),
+                                r.totalHouseholdCount(), r.totalAchievedFhtc(), r.totalPlannedFhtc(),
+                                r.totalWaterSuppliedLiters(), r.schemeCount(),
+                                r.schemeCount() > 0
+                                        ? aggregateRatio(r.totalWaterSuppliedLiters(), r.schemeCount())
+                                        : BigDecimal.ZERO))
+                        .toList())
+                .orElse(null);
+    }
+
+    /** Critical-scheme count from aggregates, falling back to {@code legacy} when off or not aggregated. */
+    private long resolveCriticalCount(Integer tenantId, String hierarchy, Integer regionId,
+                                      LocalDate cutoffDate, java.util.function.LongSupplier legacy) {
+        if (readFromAggregates && regionId != null) {
+            java.util.OptionalLong agg =
+                    aggregateReadRepository.getCriticalSchemeCount(tenantId, hierarchy, regionId, cutoffDate);
+            if (agg.isPresent()) {
+                return agg.getAsLong();
+            }
+        }
+        return legacy.getAsLong();
     }
 
     @Override
@@ -1595,8 +2048,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         }
 
         List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> metrics =
-                schemeRegularityRepository.getPeriodicSchemeRegularityByLgdId(
-                        tenantId, lgdId, startDate, endDate, scale);
+                aggregatePeriodicRegularityOrNull(tenantId, "LGD", lgdId, startDate, endDate, scale);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getPeriodicSchemeRegularityByLgdId(
+                    tenantId, lgdId, startDate, endDate, scale);
+        }
 
         PeriodicSchemeRegularityResponse response =
                 buildPeriodicSchemeRegularityResponse(lgdId, null, startDate, endDate, scale, metrics);
@@ -1613,8 +2069,11 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateScaleInput(scale);
 
         List<SchemeRegularityRepository.PeriodicSchemeRegularityMetrics> metrics =
-                schemeRegularityRepository.getPeriodicSchemeRegularityByDepartment(
-                        tenantId, departmentId, startDate, endDate, scale);
+                aggregatePeriodicRegularityOrNull(tenantId, "DEPT", departmentId, startDate, endDate, scale);
+        if (metrics == null) {
+            metrics = schemeRegularityRepository.getPeriodicSchemeRegularityByDepartment(
+                    tenantId, departmentId, startDate, endDate, scale);
+        }
 
         return buildPeriodicSchemeRegularityResponse(null, departmentId, startDate, endDate, scale, metrics);
     }
@@ -1769,12 +2228,17 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
 
-        List<SchemeRegularityRepository.OutageReasonSchemeCount> rows =
-                schemeRegularityRepository.getOutageReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate);
+        Map<String, Integer> parentOutageMap = resolveReasonParentMap(tenantId, "LGD", parentLgdId, true,
+                startDate, endDate,
+                () -> buildReasonCountMap(schemeRegularityRepository.getOutageReasonSchemeCountByLgd(
+                        tenantId, parentLgdId, startDate, endDate)));
         List<SchemeRegularityRepository.ChildRegionRef> childRegions =
                 schemeRegularityRepository.getChildRegionsByLgd(tenantId, parentLgdId);
         List<SchemeRegularityRepository.ChildRegionOutageReasonSchemeCount> childRows =
-                schemeRegularityRepository.getChildOutageReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate);
+                aggregateChildOutageRowsOrNull(tenantId, "LGD", parentLgdId, parentLgdLevel, startDate, endDate);
+        if (childRows == null) {
+            childRows = schemeRegularityRepository.getChildOutageReasonSchemeCountByLgd(tenantId, parentLgdId, startDate, endDate);
+        }
 
         OutageReasonSchemeCountResponse response = OutageReasonSchemeCountResponse.builder()
                 .lgdId(parentLgdId)
@@ -1783,7 +2247,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .endDate(endDate)
                 .parentLgdLevel(parentLgdLevel)
                 .parentDepartmentLevel(null)
-                .outageReasonSchemeCount(buildReasonCountMap(rows))
+                .outageReasonSchemeCount(parentOutageMap)
                 .childRegionCount(childRegions.size())
                 .childRegions(buildChildOutageRegions(
                         childRegions,
@@ -1818,14 +2282,18 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
         }
 
-        List<SchemeRegularityRepository.OutageReasonSchemeCount> rows =
-                schemeRegularityRepository.getOutageReasonSchemeCountByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+        Map<String, Integer> parentOutageMap = resolveReasonParentMap(tenantId, "DEPT", parentDepartmentId, true,
+                startDate, endDate,
+                () -> buildReasonCountMap(schemeRegularityRepository.getOutageReasonSchemeCountByDepartment(
+                        tenantId, parentDepartmentId, startDate, endDate)));
         List<SchemeRegularityRepository.ChildRegionRef> childRegions =
                 schemeRegularityRepository.getChildRegionsByDepartment(tenantId, parentDepartmentId);
         List<SchemeRegularityRepository.ChildRegionOutageReasonSchemeCount> childRows =
-                schemeRegularityRepository.getChildOutageReasonSchemeCountByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+                aggregateChildOutageRowsOrNull(tenantId, "DEPT", parentDepartmentId, parentDepartmentLevel, startDate, endDate);
+        if (childRows == null) {
+            childRows = schemeRegularityRepository.getChildOutageReasonSchemeCountByDepartment(
+                    tenantId, parentDepartmentId, startDate, endDate);
+        }
 
         OutageReasonSchemeCountResponse response = OutageReasonSchemeCountResponse.builder()
                 .lgdId(null)
@@ -1834,7 +2302,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .endDate(endDate)
                 .parentLgdLevel(null)
                 .parentDepartmentLevel(parentDepartmentLevel)
-                .outageReasonSchemeCount(buildReasonCountMap(rows))
+                .outageReasonSchemeCount(parentOutageMap)
                 .childRegionCount(childRegions.size())
                 .childRegions(buildChildOutageRegions(
                         childRegions,
@@ -1918,14 +2386,18 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             throw new IllegalArgumentException("parent_lgd_id not found in dim_lgd_location_table: " + parentLgdId);
         }
 
-        List<SchemeRegularityRepository.NonSubmissionReasonSchemeCount> rows =
-                schemeRegularityRepository.getNonSubmissionReasonSchemeCountByLgd(
-                        tenantId, parentLgdId, startDate, endDate);
+        Map<String, Integer> parentNonSubmissionMap = resolveReasonParentMap(tenantId, "LGD", parentLgdId, false,
+                startDate, endDate,
+                () -> buildNonSubmissionReasonCountMap(schemeRegularityRepository.getNonSubmissionReasonSchemeCountByLgd(
+                        tenantId, parentLgdId, startDate, endDate)));
         List<SchemeRegularityRepository.ChildRegionRef> childRegions =
                 schemeRegularityRepository.getChildRegionsByLgd(tenantId, parentLgdId);
         List<SchemeRegularityRepository.ChildRegionNonSubmissionReasonSchemeCount> childRows =
-                schemeRegularityRepository.getChildNonSubmissionReasonSchemeCountByLgd(
-                        tenantId, parentLgdId, startDate, endDate);
+                aggregateChildNonSubmissionRowsOrNull(tenantId, "LGD", parentLgdId, parentLgdLevel, startDate, endDate);
+        if (childRows == null) {
+            childRows = schemeRegularityRepository.getChildNonSubmissionReasonSchemeCountByLgd(
+                    tenantId, parentLgdId, startDate, endDate);
+        }
 
         NonSubmissionReasonSchemeCountResponse response = NonSubmissionReasonSchemeCountResponse.builder()
                 .lgdId(parentLgdId)
@@ -1934,7 +2406,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .endDate(endDate)
                 .parentLgdLevel(parentLgdLevel)
                 .parentDepartmentLevel(null)
-                .nonSubmissionReasonSchemeCount(buildNonSubmissionReasonCountMap(rows))
+                .nonSubmissionReasonSchemeCount(parentNonSubmissionMap)
                 .childRegionCount(childRegions.size())
                 .childRegions(buildChildNonSubmissionRegions(
                         childRegions,
@@ -1958,14 +2430,18 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                     "parent_department_id not found in dim_department_location_table: " + parentDepartmentId);
         }
 
-        List<SchemeRegularityRepository.NonSubmissionReasonSchemeCount> rows =
-                schemeRegularityRepository.getNonSubmissionReasonSchemeCountByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+        Map<String, Integer> parentNonSubmissionMap = resolveReasonParentMap(tenantId, "DEPT", parentDepartmentId, false,
+                startDate, endDate,
+                () -> buildNonSubmissionReasonCountMap(schemeRegularityRepository.getNonSubmissionReasonSchemeCountByDepartment(
+                        tenantId, parentDepartmentId, startDate, endDate)));
         List<SchemeRegularityRepository.ChildRegionRef> childRegions =
                 schemeRegularityRepository.getChildRegionsByDepartment(tenantId, parentDepartmentId);
         List<SchemeRegularityRepository.ChildRegionNonSubmissionReasonSchemeCount> childRows =
-                schemeRegularityRepository.getChildNonSubmissionReasonSchemeCountByDepartment(
-                        tenantId, parentDepartmentId, startDate, endDate);
+                aggregateChildNonSubmissionRowsOrNull(tenantId, "DEPT", parentDepartmentId, parentDepartmentLevel, startDate, endDate);
+        if (childRows == null) {
+            childRows = schemeRegularityRepository.getChildNonSubmissionReasonSchemeCountByDepartment(
+                    tenantId, parentDepartmentId, startDate, endDate);
+        }
 
         return NonSubmissionReasonSchemeCountResponse.builder()
                 .lgdId(null)
@@ -1974,7 +2450,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 .endDate(endDate)
                 .parentLgdLevel(null)
                 .parentDepartmentLevel(parentDepartmentLevel)
-                .nonSubmissionReasonSchemeCount(buildNonSubmissionReasonCountMap(rows))
+                .nonSubmissionReasonSchemeCount(parentNonSubmissionMap)
                 .childRegionCount(childRegions.size())
                 .childRegions(buildChildNonSubmissionRegions(
                         childRegions,
@@ -2105,6 +2581,13 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
             return cached;
         }
 
+        SubmissionStatusSummaryResponse aggResponse =
+                aggregateSubmissionStatusOrNull(tenantId, "LGD", lgdId, startDate, endDate);
+        if (aggResponse != null) {
+            writeToCache(cacheKey, aggResponse);
+            return aggResponse;
+        }
+
         Integer schemeCount = schemeRegularityRepository.getSchemeCountByLgd(tenantId, lgdId);
         SchemeRegularityRepository.SubmissionStatusCount submissionStatusCount =
                 schemeRegularityRepository.getSubmissionStatusCountByLgd(tenantId, lgdId, startDate, endDate);
@@ -2130,6 +2613,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTenantInput(tenantId);
         validateDepartmentInput(departmentId);
         validateDateRange(startDate, endDate);
+
+        SubmissionStatusSummaryResponse aggResponse =
+                aggregateSubmissionStatusOrNull(tenantId, "DEPT", departmentId, startDate, endDate);
+        if (aggResponse != null) {
+            return aggResponse;
+        }
 
         Integer schemeCount = schemeRegularityRepository.getSchemeCountByDepartment(tenantId, departmentId);
         SchemeRegularityRepository.SubmissionStatusCount submissionStatusCount =
@@ -2196,7 +2685,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int sanitizedDays = Math.max(0, criticalAfterDays);
         LocalDate cutoffDate = LocalDate.now(IST_ZONE).minusDays(sanitizedDays);
 
-        long criticalCount = schemeRegularityRepository.getCriticalSchemeCountByLgd(tenantId, lgdId, cutoffDate);
+        long criticalCount = resolveCriticalCount(tenantId, "LGD", lgdId, cutoffDate,
+                () -> schemeRegularityRepository.getCriticalSchemeCountByLgd(tenantId, lgdId, cutoffDate));
         if (!list) {
             return CriticalSchemesResponse.builder()
                     .criticalSchemeCount(criticalCount)
@@ -2245,8 +2735,8 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         int sanitizedDays = Math.max(0, criticalAfterDays);
         LocalDate cutoffDate = LocalDate.now(IST_ZONE).minusDays(sanitizedDays);
 
-        long criticalCount =
-                schemeRegularityRepository.getCriticalSchemeCountByDepartment(tenantId, departmentId, cutoffDate);
+        long criticalCount = resolveCriticalCount(tenantId, "DEPT", departmentId, cutoffDate,
+                () -> schemeRegularityRepository.getCriticalSchemeCountByDepartment(tenantId, departmentId, cutoffDate));
         if (!list) {
             return CriticalSchemesResponse.builder()
                     .criticalSchemeCount(criticalCount)
@@ -3376,7 +3866,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     private void writeToCache(String cacheKey, Object response) {
         try {
             String payload = objectMapper.writeValueAsString(response);
-            redisTemplate.opsForValue().set(cacheKey, payload, SCHEME_REGULARITY_CACHE_TTL);
+            redisTemplate.opsForValue().set(cacheKey, payload, Duration.ofHours(cacheTtlHours));
         } catch (Exception e) {
             log.warn("Failed to write scheme regularity cache [{}]: {}", cacheKey, e.getMessage());
         }

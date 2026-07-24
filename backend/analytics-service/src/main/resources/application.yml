@@ -133,6 +133,7 @@ analytics:
 
   scheduler:
     common:
+      # Midnight IST: a day is 12am->12am; this run finalizes the just-completed day.
       cron: ${ANALYTICS_SCHEDULER_CRON:0 0 0 * * *}
       zone: ${ANALYTICS_SCHEDULER_ZONE:Asia/Kolkata}
     national-dashboard:
@@ -143,6 +144,19 @@ analytics:
 
     dim-date-backfill:
       cron: ${ANALYTICS_DIM_DATE_BACKFILL_CRON:0 10 0 * * *}
+
+  # KPI pre-aggregation pipeline
+  read-from-aggregates: ${ANALYTICS_READ_FROM_AGGREGATES:true}
+  cache:
+    ttl-hours: ${ANALYTICS_CACHE_TTL_HOURS:1}
+  aggregation:
+    daily:
+      lookback-days: ${ANALYTICS_AGG_DAILY_LOOKBACK_DAYS:3}
+    hourly:
+      cron: ${ANALYTICS_AGG_HOURLY_CRON:0 5 * * * *}
+    backfill:
+      enabled: ${ANALYTICS_AGG_BACKFILL_ENABLED:false}
+      start-date: ${ANALYTICS_AGG_BACKFILL_START_DATE:2024-01-01}
 
 ---
 # One JSON object per line (ELK/Loki-friendly). Example: SPRING_PROFILES_ACTIVE=json-logs

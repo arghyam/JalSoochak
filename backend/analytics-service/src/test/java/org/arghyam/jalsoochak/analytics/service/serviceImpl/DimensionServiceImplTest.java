@@ -14,11 +14,15 @@ import org.arghyam.jalsoochak.analytics.entity.DimDepartmentLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimLgdLocation;
 import org.arghyam.jalsoochak.analytics.entity.DimScheme;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
+import org.arghyam.jalsoochak.analytics.entity.DimTenantWaterNorm;
+import org.arghyam.jalsoochak.analytics.entity.DimTenantWorkStatusFilter;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.repository.DimDepartmentLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimLgdLocationRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimSchemeRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimTenantWaterNormRepository;
+import org.arghyam.jalsoochak.analytics.repository.DimTenantWorkStatusFilterRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +32,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -56,6 +61,10 @@ class DimensionServiceImplTest {
     private DimLgdLocationRepository dimLgdLocationRepository;
     @Mock
     private DimDepartmentLocationRepository dimDepartmentLocationRepository;
+    @Mock
+    private DimTenantWaterNormRepository dimTenantWaterNormRepository;
+    @Mock
+    private DimTenantWorkStatusFilterRepository dimTenantWorkStatusFilterRepository;
     @Mock
     private JdbcTemplate jdbcTemplate;
 
@@ -248,6 +257,74 @@ class DimensionServiceImplTest {
     }
 
     @Test
+    void updateIncludedWorkStatuses_opensScd2HistoryRow() {
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 1, "MP", List.of(1, 4));
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(
+                DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
+        when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.empty());
+
+        service.updateIncludedWorkStatuses(event);
+
+        ArgumentCaptor<DimTenantWorkStatusFilter> captor =
+                ArgumentCaptor.forClass(DimTenantWorkStatusFilter.class);
+        verify(dimTenantWorkStatusFilterRepository, times(1)).save(captor.capture());
+        DimTenantWorkStatusFilter opened = captor.getValue();
+        assertThat(opened.getTenantId()).isEqualTo(1);
+        assertThat(opened.getEffectiveFrom()).isEqualTo(LocalDate.now());
+        assertThat(opened.getEffectiveTo()).isNull();
+        assertThat(opened.getIncludedWorkStatuses()).containsExactly(1, 4);
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_changedSet_closesOpenHistoryRowThenOpensNew() {
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 1, "MP", List.of(4));
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(
+                DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
+        DimTenantWorkStatusFilter open = DimTenantWorkStatusFilter.builder()
+                .tenantId(1)
+                .effectiveFrom(LocalDate.now().minusDays(30))
+                .includedWorkStatuses(List.of(1, 4))
+                .build();
+        when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.of(open));
+
+        service.updateIncludedWorkStatuses(event);
+
+        assertThat(open.getEffectiveTo()).isEqualTo(LocalDate.now());
+        verify(dimTenantWorkStatusFilterRepository, times(1)).saveAndFlush(open);
+        ArgumentCaptor<DimTenantWorkStatusFilter> captor =
+                ArgumentCaptor.forClass(DimTenantWorkStatusFilter.class);
+        verify(dimTenantWorkStatusFilterRepository, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getIncludedWorkStatuses()).containsExactly(4);
+        assertThat(captor.getValue().getEffectiveTo()).isNull();
+    }
+
+    @Test
+    void updateIncludedWorkStatuses_unchangedSet_keepsHistoryTimelineStable() {
+        // Same set in a different order: the timeline must not churn.
+        IncludedWorkStatusesUpdatedEvent event = new IncludedWorkStatusesUpdatedEvent(
+                "INCLUDED_WORK_STATUSES_UPDATED", 1, "MP", List.of(4, 1));
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(
+                DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build()));
+        DimTenantWorkStatusFilter open = DimTenantWorkStatusFilter.builder()
+                .tenantId(1)
+                .effectiveFrom(LocalDate.now().minusDays(30))
+                .includedWorkStatuses(List.of(1, 4))
+                .build();
+        when(dimTenantWorkStatusFilterRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.of(open));
+
+        service.updateIncludedWorkStatuses(event);
+
+        assertThat(open.getEffectiveTo()).isNull();
+        verify(dimTenantWorkStatusFilterRepository, times(0)).save(any(DimTenantWorkStatusFilter.class));
+        verify(dimTenantWorkStatusFilterRepository, times(0)).saveAndFlush(any(DimTenantWorkStatusFilter.class));
+    }
+
+    @Test
     void upsertLgdLocation_whenInvalidGeoJson_setsGeomNullAndSaves() {
         LgdLocationEvent event = new LgdLocationEvent();
         event.setLgdId(101);
@@ -303,6 +380,62 @@ class DimensionServiceImplTest {
     }
 
     @Test
+    void updateWaterNorm_whenValueChanges_closesOpenRowAndOpensNewHistoryRow() {
+        WaterNormUpdatedEvent event = new WaterNormUpdatedEvent("WATER_NORM_UPDATED", 1, "MP", 70);
+        DimTenant existing = DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build();
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(existing));
+
+        DimTenantWaterNorm open = DimTenantWaterNorm.builder()
+                .id(5L).tenantId(1).effectiveFrom(LocalDate.of(2026, 1, 1)).effectiveTo(null)
+                .requiredLpcd(50).personCountPerHousehold(6)
+                .overSupplyRangePercentage(15).underSupplyRangePercentage(20)
+                .build();
+        when(dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.of(open));
+
+        service.updateWaterNorm(event);
+
+        // Close is flushed first (saveAndFlush) so the unique open-row index never sees two open rows.
+        ArgumentCaptor<DimTenantWaterNorm> closedCaptor = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
+        verify(dimTenantWaterNormRepository, times(1)).saveAndFlush(closedCaptor.capture());
+        DimTenantWaterNorm closed = closedCaptor.getValue();
+        assertThat(closed.getId()).isEqualTo(5L);
+        assertThat(closed.getEffectiveTo()).isEqualTo(LocalDate.now());
+
+        // New current row opened via save, carrying non-changed norm fields forward.
+        ArgumentCaptor<DimTenantWaterNorm> openedCaptor = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
+        verify(dimTenantWaterNormRepository, times(1)).save(openedCaptor.capture());
+        DimTenantWaterNorm opened = openedCaptor.getValue();
+        assertThat(opened.getId()).isNull();
+        assertThat(opened.getEffectiveFrom()).isEqualTo(LocalDate.now());
+        assertThat(opened.getEffectiveTo()).isNull();
+        assertThat(opened.getRequiredLpcd()).isEqualTo(70);
+        assertThat(opened.getPersonCountPerHousehold()).isEqualTo(6);
+        assertThat(opened.getOverSupplyRangePercentage()).isEqualTo(15);
+        assertThat(opened.getUnderSupplyRangePercentage()).isEqualTo(20);
+    }
+
+    @Test
+    void updateWaterNorm_whenValueUnchanged_leavesHistoryUntouched() {
+        WaterNormUpdatedEvent event = new WaterNormUpdatedEvent("WATER_NORM_UPDATED", 1, "MP", 70);
+        DimTenant existing = DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build();
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(existing));
+
+        DimTenantWaterNorm open = DimTenantWaterNorm.builder()
+                .id(9L).tenantId(1).effectiveFrom(LocalDate.of(2026, 1, 1)).effectiveTo(null)
+                .requiredLpcd(70).personCountPerHousehold(5)
+                .build();
+        when(dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(1))
+                .thenReturn(Optional.of(open));
+
+        service.updateWaterNorm(event);
+
+        verify(dimTenantRepository, times(1)).save(any(DimTenant.class));
+        verify(dimTenantWaterNormRepository, never()).save(any());
+        verify(dimTenantWaterNormRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
     void updateWaterNorm_tenantNotFound_throwsIllegalStateException() {
         WaterNormUpdatedEvent event = new WaterNormUpdatedEvent("WATER_NORM_UPDATED", 99, "XX", 55);
         when(dimTenantRepository.findById(99)).thenReturn(Optional.empty());
@@ -342,6 +475,34 @@ class DimensionServiceImplTest {
         verify(dimTenantRepository, times(1)).save(captor.capture());
         assertThat(captor.getValue().getUnderSupplyRangePercentage()).isEqualTo(20);
         assertThat(captor.getValue().getOverSupplyRangePercentage()).isEqualTo(30);
+    }
+
+    @Test
+    void updateWaterSupplyThreshold_recordsNormHistory() {
+        WaterSupplyThresholdUpdatedEvent event =
+                new WaterSupplyThresholdUpdatedEvent("WATER_SUPPLY_THRESHOLD_UPDATED", 1, "MP", 25, 35);
+        DimTenant existing = DimTenant.builder().tenantId(1).stateCode("MP").title("MP").status(1).build();
+        when(dimTenantRepository.findById(1)).thenReturn(Optional.of(existing));
+        DimTenantWaterNorm open = DimTenantWaterNorm.builder()
+                .id(7L).tenantId(1).effectiveFrom(LocalDate.of(2026, 1, 1)).effectiveTo(null)
+                .requiredLpcd(55).personCountPerHousehold(5)
+                .overSupplyRangePercentage(10).underSupplyRangePercentage(10)
+                .build();
+        when(dimTenantWaterNormRepository.findByTenantIdAndEffectiveToIsNull(1)).thenReturn(Optional.of(open));
+
+        service.updateWaterSupplyThreshold(event);
+
+        // Close the old norm row and open a new one with the updated thresholds,
+        // carrying lpcd/persons forward.
+        verify(dimTenantWaterNormRepository, times(1)).saveAndFlush(any());
+        ArgumentCaptor<DimTenantWaterNorm> cap = ArgumentCaptor.forClass(DimTenantWaterNorm.class);
+        verify(dimTenantWaterNormRepository, times(1)).save(cap.capture());
+        DimTenantWaterNorm opened = cap.getValue();
+        assertThat(opened.getEffectiveTo()).isNull();
+        assertThat(opened.getUnderSupplyRangePercentage()).isEqualTo(25);
+        assertThat(opened.getOverSupplyRangePercentage()).isEqualTo(35);
+        assertThat(opened.getRequiredLpcd()).isEqualTo(55);
+        assertThat(opened.getPersonCountPerHousehold()).isEqualTo(5);
     }
 
     @Test

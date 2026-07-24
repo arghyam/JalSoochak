@@ -2,12 +2,14 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.HourlySubmissionActivityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.PeriodicSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ReadingSubmissionRateResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.enums.RegularityScope;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
+import org.arghyam.jalsoochak.analytics.service.SubmissionActivityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -34,6 +36,7 @@ import java.time.LocalDate;
 public class AnalyticsRegularityAndReadingController {
 
     private final SchemeRegularityService schemeRegularityService;
+    private final SubmissionActivityService submissionActivityService;
 
     @GetMapping("/scheme-regularity/average")
     @Operation(
@@ -161,7 +164,7 @@ public class AnalyticsRegularityAndReadingController {
                     description = """
                             Time aggregation scale.
                             - day: per-day buckets
-                            - week: rolling 7-day buckets anchored to start_date (not ISO-week aligned)
+                            - week: calendar weeks running Sunday -> Saturday
                             - month/quarter/year: calendar-aligned buckets (month=Jan/Feb..., quarter=Jan-Mar/Apr-Jun..., year=Jan 1-Dec 31)
                             """,
                     required = true,
@@ -283,6 +286,45 @@ public class AnalyticsRegularityAndReadingController {
                     tenantId, parentLgdId, parentDepartmentId, scope, startDate, endDate, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.<ReadingSubmissionRateResponse>builder()
+                            .success(false)
+                            .data(null)
+                            .build());
+        }
+    }
+
+    @GetMapping("/submission-activity/hourly")
+    @Operation(
+            summary = "Get hourly reading-submission activity (submissions + distinct schemes per hour) for a tenant, "
+                    + "optionally scoped to one LGD or department region",
+            description = """
+                    Returns one bucket per hour over [start_date, end_date]. `submissionCount` is additive across
+                    hours; `distinctSchemeCount` is a per-hour figure and must NOT be summed across hours in the UI
+                    (a scheme can submit in several hours). Computed from the base meter-reading fact, so any region
+                    level is supported. Omit both `lgd_id` and `department_id` for the whole-tenant (state) view.
+                    """)
+    public ResponseEntity<ApiResponse<HourlySubmissionActivityResponse>> getHourlySubmissionActivity(
+            @RequestParam(name = "tenant_id") Integer tenantId,
+            @RequestParam(name = "start_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(name = "end_date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(name = "lgd_id", required = false) Integer lgdId,
+            @RequestParam(name = "department_id", required = false) Integer departmentId) {
+        try {
+            HourlySubmissionActivityResponse data = submissionActivityService.getHourlySubmissionActivity(
+                    tenantId, lgdId, departmentId, startDate, endDate);
+            return ResponseEntity.ok(ApiResponse.<HourlySubmissionActivityResponse>builder()
+                    .success(true)
+                    .data(data)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.<HourlySubmissionActivityResponse>builder()
+                    .success(false)
+                    .data(null)
+                    .build());
+        } catch (Exception e) {
+            log.error("Failed /submission-activity/hourly (tenantId={}, startDate={}, endDate={}, lgdId={}, departmentId={})",
+                    tenantId, startDate, endDate, lgdId, departmentId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<HourlySubmissionActivityResponse>builder()
                             .success(false)
                             .data(null)
                             .build());

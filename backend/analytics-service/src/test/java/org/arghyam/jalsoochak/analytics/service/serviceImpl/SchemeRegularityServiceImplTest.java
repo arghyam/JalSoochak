@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service.serviceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageSchemeRegularityResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.AverageWaterSupplyResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardBoundaryResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardLevel2MetricsResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.NationalDashboardResponse;
@@ -21,10 +22,12 @@ import org.arghyam.jalsoochak.analytics.dto.response.SubmissionStatusSummaryResp
 import org.arghyam.jalsoochak.analytics.dto.response.UserSubmissionStatusResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
 import org.arghyam.jalsoochak.analytics.entity.DimTenant;
+import org.arghyam.jalsoochak.analytics.repository.AggregateReadRepository;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
 import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -45,6 +48,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -56,6 +60,8 @@ class SchemeRegularityServiceImplTest {
 
     @Mock
     private SchemeRegularityRepository schemeRegularityRepository;
+    @Mock
+    private AggregateReadRepository aggregateReadRepository;
     @Mock
     private DimTenantRepository dimTenantRepository;
     @Mock
@@ -73,6 +79,12 @@ class SchemeRegularityServiceImplTest {
     private static final LocalDate START = LocalDate.of(2026, 1, 1);
     private static final LocalDate END = LocalDate.of(2026, 1, 3);
     private static final UUID USER_UUID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+    @BeforeEach
+    void initCacheTtl() {
+        // @Value isn't applied under @InjectMocks; set the cache TTL the prod default uses.
+        ReflectionTestUtils.setField(service, "cacheTtlHours", 1L);
+    }
 
     @Test
     void getAverageSchemeRegularity_invalidLgd_throwsBadRequest() {
@@ -128,7 +140,7 @@ class SchemeRegularityServiceImplTest {
         // 90% of a 3-day window rounds (half-up) to 3 days required.
         assertThat(response.getThresholdPercent()).isEqualByComparingTo("90");
         assertThat(response.getThresholdDays()).isEqualTo(3);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -146,6 +158,174 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.3333");
         verify(schemeRegularityRepository, times(1)).getSchemeRegularityMetrics(1, 101, START, END);
+    }
+
+    @Test
+    void getAverageSchemeRegularity_readFromAggregates_usesAggregateAndSkipsLegacyRepo() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getRegionMetrics(1, "LGD", 101, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        4, 6L, 6L, 0L, 0L, 0L, 0L, 0L)));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        // daysInRange=3, 90% => thresholdDays=3; the aggregate classifies 2 of 4 schemes regular.
+        when(aggregateReadRepository.getRegularSchemeCount(1, "LGD", 101, START, END, 3)).thenReturn(2L);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageSchemeRegularityResponse response = service.getAverageSchemeRegularity(1, 101, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(4);
+        assertThat(response.getTotalSupplyDays()).isEqualTo(6);
+        assertThat(response.getRegularSchemeCount()).isEqualTo(2);
+        // regularity = regularSchemeCount / schemeCount = 2 / 4 = 0.5
+        assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.5000");
+        verify(schemeRegularityRepository, never()).getSchemeRegularityMetrics(any(), any(), any(), any());
+    }
+
+    @Test
+    void getAverageSchemeRegularity_readFromAggregates_butNoRows_fallsBackToLegacyRepo() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getRegionMetrics(1, "LGD", 101, START, END)).thenReturn(Optional.empty());
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, START, END))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageSchemeRegularityResponse response = service.getAverageSchemeRegularity(1, 101, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(2);
+        // regularity = regularSchemeCount / schemeCount = 1 / 2 = 0.5
+        assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.5000");
+        verify(schemeRegularityRepository, times(1)).getSchemeRegularityMetrics(1, 101, START, END);
+    }
+
+    @Test
+    void getReadingSubmissionRateByLgd_readFromAggregates_usesSubmissionDays() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getLgdLevelForTenant(1, 101)).thenReturn(2);
+        when(aggregateReadRepository.getRegionMetrics(1, "LGD", 101, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        4, 3L, 9L, 0L, 0L, 0L, 0L, 0L))); // supply=3, submission=9
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        ReadingSubmissionRateResponse response = service.getReadingSubmissionRateByLgd(1, 101, START, END);
+
+        // submission days (9), not supply days: 9 / (4*3) = 0.75
+        assertThat(response.getTotalSubmissionDays()).isEqualTo(9);
+        assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.7500");
+        verify(schemeRegularityRepository, never()).getReadingSubmissionRateMetricsByLgd(any(), any(), any(), any());
+    }
+
+    @Test
+    void getAverageSchemeRegularityByDepartment_readFromAggregates_usesDeptHierarchy() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getRegionMetrics(1, "DEPT", 201, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        2, 3L, 4L, 0L, 0L, 0L, 0L, 0L)));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        // daysInRange=3, 90% => thresholdDays=3; the aggregate classifies 1 of 2 schemes regular.
+        when(aggregateReadRepository.getRegularSchemeCount(1, "DEPT", 201, START, END, 3)).thenReturn(1L);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        AverageSchemeRegularityResponse response = service.getAverageSchemeRegularityByDepartment(1, 201, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(2);
+        assertThat(response.getTotalSupplyDays()).isEqualTo(3);
+        assertThat(response.getRegularSchemeCount()).isEqualTo(1);
+        // regularity = regularSchemeCount / schemeCount = 1 / 2 = 0.5
+        assertThat(response.getAverageRegularity()).isEqualByComparingTo("0.5000");
+        verify(schemeRegularityRepository, never()).getSchemeRegularityMetricsByDepartment(any(), any(), any(), any());
+    }
+
+    @Test
+    void getReadingSubmissionRateByDepartment_readFromAggregates_usesSubmissionDays() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getDepartmentLevelForTenant(1, 201)).thenReturn(2);
+        when(aggregateReadRepository.getRegionMetrics(1, "DEPT", 201, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        2, 1L, 6L, 0L, 0L, 0L, 0L, 0L)));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        ReadingSubmissionRateResponse response = service.getReadingSubmissionRateByDepartment(1, 201, START, END);
+
+        assertThat(response.getTotalSubmissionDays()).isEqualTo(6);
+        assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("1.0000");
+        verify(schemeRegularityRepository, never()).getReadingSubmissionRateMetricsByDepartment(any(), any(), any(), any());
+    }
+
+    @Test
+    void getSubmissionStatusSummaryByLgd_readFromAggregates_usesCompliantAndAnomalousCounts() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(aggregateReadRepository.getRegionMetrics(1, "LGD", 101, START, END))
+                .thenReturn(Optional.of(new AggregateReadRepository.RegionPeriodMetrics(
+                        5, 0L, 0L, 0L, 0L, 0L, 7L, 3L))); // compliant=7, anomalous=3
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        SubmissionStatusSummaryResponse response = service.getSubmissionStatusSummaryByLgd(1, 101, START, END);
+
+        assertThat(response.getSchemeCount()).isEqualTo(5);
+        assertThat(response.getCompliantSubmissionCount()).isEqualTo(7);
+        assertThat(response.getAnomalousSubmissionCount()).isEqualTo(3);
+        verify(schemeRegularityRepository, never()).getSubmissionStatusCountByLgd(any(), any(), any(), any());
+    }
+
+    @Test
+    void getOutageReasonSchemeCountByLgd_readFromAggregates_parentMapFromAggregate() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        when(schemeRegularityRepository.getLgdLevelForTenant(1, 101)).thenReturn(2);
+        when(aggregateReadRepository.getReasonDistribution(1, "LGD", 101, true, START, END))
+                .thenReturn(Optional.of(Map.of("no_electricity", 3, "draught", 1)));
+        when(schemeRegularityRepository.getChildRegionsByLgd(1, 101)).thenReturn(List.of());
+        when(schemeRegularityRepository.getChildOutageReasonSchemeCountByLgd(1, 101, START, END)).thenReturn(List.of());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        OutageReasonSchemeCountResponse response = service.getOutageReasonSchemeCountByLgd(1, 101, START, END);
+
+        assertThat(response.getOutageReasonSchemeCount())
+                .containsEntry("no_electricity", 3)
+                .containsEntry("draught", 1);
+        verify(schemeRegularityRepository, never())
+                .getOutageReasonSchemeCountByLgd(any(), any(), any(), any());
+    }
+
+    @Test
+    void getPeriodicWaterQuantityByLgdId_readFromAggregates_buildsAveragesFromPreRolledRows() throws Exception {
+        ReflectionTestUtils.setField(service, "readFromAggregates", true);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+        // water 300 over 3 supply days => avg 100.0000; households 30, achieved fhtc 20.
+        when(aggregateReadRepository.getPeriodicRegionMetrics(1, "LGD", 101, "WEEK", START, END))
+                .thenReturn(List.of(new AggregateReadRepository.PeriodicRegionRow(
+                        LocalDate.of(2025, 12, 28), LocalDate.of(2026, 1, 3),
+                        2, 3L, 300L, 30L, 20L, 25L)));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        PeriodicWaterQuantityResponse response =
+                service.getPeriodicWaterQuantityByLgdId(1, 101, START, END, PeriodScale.WEEK);
+
+        assertThat(response.getMetrics()).hasSize(1);
+        var m = response.getMetrics().get(0);
+        assertThat(m.getAverageWaterQuantity()).isEqualByComparingTo("100.0000");
+        assertThat(m.getHouseholdCount()).isEqualTo(30L);
+        assertThat(m.getAchievedFhtcCount()).isEqualTo(20L);
+        verify(schemeRegularityRepository, never())
+                .getPeriodicWaterQuantityByLgdId(any(), any(), any(), any());
     }
 
     @Test
@@ -174,7 +354,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getThresholdDays()).isEqualTo(27);
         // The repository is queried over the widened window, never the single requested day.
         verify(schemeRegularityRepository).getSchemeRegularityMetrics(1, 101, expandedStart, singleDay);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -209,7 +389,7 @@ class SchemeRegularityServiceImplTest {
         var response = service.getChildAveragePerformanceScoreByDepartment(201, START, END);
 
         assertThat(response).isEqualTo(repoRows);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -247,7 +427,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.8889");
         assertThat(response.getChildRegionCount()).isEqualTo(2);
         assertThat(response.getChildRegions()).hasSize(2);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -266,7 +446,7 @@ class SchemeRegularityServiceImplTest {
                 ));
 
         PeriodicWaterQuantityResponse response =
-                service.getPeriodicWaterQuantityByLgdId(101, START, requestedEnd, PeriodScale.WEEK);
+                service.getPeriodicWaterQuantityByLgdId(1, 101, START, requestedEnd, PeriodScale.WEEK);
 
         assertThat(response.getScale()).isEqualTo("week");
         assertThat(response.getPeriodCount()).isEqualTo(1);
@@ -348,7 +528,7 @@ class SchemeRegularityServiceImplTest {
         verify(schemeRegularityRepository, times(1))
                 .getPeriodicSchemeRegularityForNation(START, requestedEnd, PeriodScale.WEEK);
 
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -380,7 +560,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getSchemeCount()).isEqualTo(2);
         assertThat(response.getTotalAchievedFhtcCount()).isEqualTo(123L);
         assertThat(response.getMetrics().getFirst().getTotalWaterQuantity()).isEqualTo(115L);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -434,7 +614,7 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getScale()).isEqualTo("week");
         assertThat(response.getDepartmentId()).isEqualTo(201);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -665,7 +845,7 @@ class SchemeRegularityServiceImplTest {
         RegionWiseWaterQuantityResponse response = service.getRegionWiseWaterQuantityByLgd(1, 101, START, END);
 
         assertThat(response.getParentLgdId()).isEqualTo(101);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -684,12 +864,12 @@ class SchemeRegularityServiceImplTest {
         RegionWiseWaterQuantityResponse response = service.getRegionWiseWaterQuantityByDepartment(1, 201, START, END);
 
         assertThat(response.getParentDepartmentId()).isEqualTo(201);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
     void getPeriodicWaterQuantityByDepartment_withNullScale_throws() {
-        assertThatThrownBy(() -> service.getPeriodicWaterQuantityByDepartment(201, START, END, null))
+        assertThatThrownBy(() -> service.getPeriodicWaterQuantityByDepartment(1, 201, START, END, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("scale is required");
     }
@@ -759,7 +939,7 @@ class SchemeRegularityServiceImplTest {
 
         assertThat(response.getParentLgdLevel()).isEqualTo(2);
         assertThat(response.getReadingSubmissionRate()).isEqualByComparingTo("0.5000");
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -937,7 +1117,7 @@ class SchemeRegularityServiceImplTest {
                 ));
 
         PeriodicWaterQuantityResponse response =
-                service.getPeriodicWaterQuantityByDepartment(201, START, END, PeriodScale.DAY);
+                service.getPeriodicWaterQuantityByDepartment(1, 201, START, END, PeriodScale.DAY);
 
         assertThat(response.getDepartmentId()).isEqualTo(201);
         assertThat(response.getPeriodCount()).isEqualTo(1);
@@ -1209,7 +1389,7 @@ class SchemeRegularityServiceImplTest {
         SubmissionStatusSummaryResponse response = service.getSubmissionStatusSummaryByLgd(1, 100, START, END);
 
         assertThat(response.getSchemeCount()).isEqualTo(2);
-        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(cacheKey), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -1369,7 +1549,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getStateWiseRegularity().getFirst().getRegularSchemeCount()).isEqualTo(4);
         assertThat(response.getStateWiseRegularity().getFirst().getAverageRegularity()).isEqualByComparingTo("0.8000");
         assertThat(response.getStateWiseReadingSubmissionRate().getFirst().getTenantStatus()).isEqualTo(1);
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -1472,7 +1652,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(district.getTotalSupplyDays()).isEqualTo(12);
         // KPI = regularSchemeCount / schemeCount = 4 / 5 = 0.8000.
         assertThat(district.getAverageRegularity()).isEqualByComparingTo("0.8000");
-        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+        verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -1545,7 +1725,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getStateWiseBoundaries()).hasSize(1);
         assertThat(response.getStateWiseBoundaries().getFirst().getBoundary().get("type").asText()).isEqualTo("Polygon");
         verify(valueOperations, times(1)).set(
-                eq(":national:dashboard:boundaries:v1"), eq("{boundary-json}"), eq(Duration.ofHours(24)));
+                eq(":national:dashboard:boundaries:v1"), eq("{boundary-json}"), eq(Duration.ofHours(1)));
     }
 
     @Test
@@ -1569,7 +1749,7 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getLgdLevel2Boundaries()).hasSize(1);
         assertThat(response.getLgdLevel2Boundaries().getFirst().getBoundary().get("type").asText()).isEqualTo("Polygon");
         verify(valueOperations, times(1)).set(
-                eq(":national:dashboard:boundaries:level2:v1"), eq("{boundary-json}"), eq(Duration.ofHours(24)));
+                eq(":national:dashboard:boundaries:level2:v1"), eq("{boundary-json}"), eq(Duration.ofHours(1)));
     }
 
     @Test

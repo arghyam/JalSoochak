@@ -36,6 +36,14 @@ public class DimDate {
     private Integer year;
     private Integer week;
 
+    /** Sunday that starts this date's week (weeks run Sunday -> Saturday). */
+    @Column(name = "week_start_date")
+    private LocalDate weekStartDate;
+
+    /** Saturday that ends this date's week. */
+    @Column(name = "week_end_date")
+    private LocalDate weekEndDate;
+
     @Column(name = "is_weekend")
     private Boolean isWeekend;
 
