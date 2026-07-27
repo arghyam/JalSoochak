@@ -114,6 +114,13 @@ analytics:
     # Empty/blank disables the filter (all schemes included).
     included-work-statuses: ${ANALYTICS_DASHBOARD_INCLUDED_WORK_STATUSES:4}
 
+    cache:
+      # TTL (seconds) for cached KPI/dashboard responses whose window still includes "today". Today's
+      # data keeps accumulating through the day, so these are refreshed on this short cadence instead of
+      # being frozen for a full day (immutable windows ending on/before yesterday keep the 24h TTL). Set
+      # to 0 (or negative) to disable caching for current-day windows entirely and serve them fully live.
+      current-day-ttl-seconds: ${ANALYTICS_DASHBOARD_CACHE_CURRENT_DAY_TTL_SECONDS:1800}
+
     continuous-schemes:
       # Toggles the work_status filter for the continuous-schemes count/list API ONLY (tenant
       # dashboards; never the national tenant 0). Every other dashboard API always applies the filter.

@@ -107,6 +107,16 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     @Value("${analytics.dashboard.regularity.single-day-lookback-days:30}")
     private int regularitySingleDayLookbackDays;
 
+    /**
+     * TTL (seconds) applied to a cached KPI whose window still includes "today" — a window whose data is
+     * still accumulating as facts stream in via Kafka. Such windows must not be frozen for a full day
+     * (see {@link #resolveCacheTtl(String)}); a full-day TTL on a partial day is what makes "today" tiles
+     * read 0 all day while the uncached continuous-schemes count climbs. A non-positive value disables
+     * caching for current-day windows entirely, serving them fully live like the continuous-schemes API.
+     */
+    @Value("${analytics.dashboard.cache.current-day-ttl-seconds:1800}")
+    private long currentDayCacheTtlSeconds;
+
     private final SchemeRegularityRepository schemeRegularityRepository;
     private final DimTenantRepository dimTenantRepository;
     private final DimUserRepository dimUserRepository;
@@ -3374,11 +3384,58 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
     }
 
     private void writeToCache(String cacheKey, Object response) {
+        Duration ttl = resolveCacheTtl(cacheKey);
+        // A non-positive current-day TTL means "do not cache today's still-mutating window" — skip the
+        // write so the window is served fully live (like the uncached continuous-schemes endpoint).
+        if (ttl.isZero() || ttl.isNegative()) {
+            return;
+        }
         try {
             String payload = objectMapper.writeValueAsString(response);
-            redisTemplate.opsForValue().set(cacheKey, payload, SCHEME_REGULARITY_CACHE_TTL);
+            redisTemplate.opsForValue().set(cacheKey, payload, ttl);
         } catch (Exception e) {
             log.warn("Failed to write scheme regularity cache [{}]: {}", cacheKey, e.getMessage());
+        }
+    }
+
+    /**
+     * Chooses the cache TTL for a key. A key whose embedded window-end date ({@code :end:<ISO date>}) is
+     * today or later covers a still-accumulating window, so it gets the short current-day TTL (or no
+     * caching when that TTL is non-positive); immutable historical windows (ending on or before
+     * yesterday) and non-date-ranged keys (no {@code :end:} token, e.g. boundaries/status-count) keep
+     * {@link #SCHEME_REGULARITY_CACHE_TTL}. An absent or unparseable end date falls back to the full-day
+     * TTL, so a key-format change can never silently shorten a historical cache.
+     */
+    private Duration resolveCacheTtl(String cacheKey) {
+        LocalDate windowEndDate = extractWindowEndDate(cacheKey);
+        if (windowEndDate != null && !windowEndDate.isBefore(LocalDate.now(IST_ZONE))) {
+            return Duration.ofSeconds(currentDayCacheTtlSeconds);
+        }
+        return SCHEME_REGULARITY_CACHE_TTL;
+    }
+
+    /**
+     * Extracts the window-end date embedded as {@code :end:<ISO date>} in date-ranged cache keys built
+     * throughout this class. Returns {@code null} for keys without the token (non-date-ranged) or whose
+     * token is not an ISO-8601 date.
+     */
+    private static LocalDate extractWindowEndDate(String cacheKey) {
+        if (cacheKey == null) {
+            return null;
+        }
+        int tokenStart = cacheKey.indexOf(":end:");
+        if (tokenStart < 0) {
+            return null;
+        }
+        int valueStart = tokenStart + ":end:".length();
+        int valueEnd = cacheKey.indexOf(':', valueStart);
+        String value = valueEnd < 0
+                ? cacheKey.substring(valueStart)
+                : cacheKey.substring(valueStart, valueEnd);
+        try {
+            return LocalDate.parse(value);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

@@ -15,14 +15,18 @@ import org.arghyam.jalsoochak.analytics.repository.TenantDepartmentBoundaryRepos
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -356,6 +360,106 @@ class TenantDetailsServiceImplTest {
         verify(valueOperations).set(eq(cacheKey), eq("{json}"), eq(java.time.Duration.ofHours(24)));
         verify(schemeRegularityService, never()).getChildAveragePerformanceScoreByLgd(any(), any(), any());
         verify(schemeRegularityService, never()).getAveragePerformanceScoreByLgd(any(), any(), any());
+    }
+
+    @Test
+    void getTenantDetailsWithAggregatedMetrics_currentDayWindow_usesShortTtl() throws Exception {
+        // A window ending today is still accumulating, so the aggregated tile must not be frozen for a
+        // full day — it is cached under the short current-day TTL instead.
+        ReflectionTestUtils.setField(service, "currentDayCacheTtlSeconds", 300L);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+
+        Integer tenantId = 1;
+        Integer parentLgdId = 100;
+        LocalDate end = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        LocalDate start = end.minusDays(2);
+
+        String cacheKey = "analytics-service:api-cache:get_tenant_details"
+                + ":tenant:" + tenantId
+                + ":parent:" + parentLgdId
+                + ":from:" + start
+                + ":to:" + end
+                + ":v4";
+
+        when(dimTenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant(tenantId, "mp")));
+        when(tenantBoundaryRepository.getLocationLevel(parentLgdId)).thenReturn(1);
+        when(tenantBoundaryRepository.getChildLevelByParent(tenantId, parentLgdId, 1))
+                .thenReturn(List.of(Map.of(
+                        "lgd_id", 101,
+                        "parent_lgd_id", 100,
+                        "child_level", 2,
+                        "scheme_count", 2,
+                        "title", "Child A",
+                        "lgd_code", "C101",
+                        "boundary_geojson", "{\"type\":\"Polygon\"}"
+                )));
+        when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
+                .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, start, end))
+                .thenReturn(AverageSchemeRegularityResponse.builder()
+                        .averageRegularity(new BigDecimal("0.75"))
+                        .build());
+        when(schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, start, end))
+                .thenReturn(ReadingSubmissionRateResponse.builder()
+                        .readingSubmissionRate(new BigDecimal("0.84"))
+                        .build());
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        service.getTenantDetailsWithAggregatedMetrics(tenantId, parentLgdId, start, end);
+
+        ArgumentCaptor<Duration> ttl = ArgumentCaptor.forClass(Duration.class);
+        verify(valueOperations).set(eq(cacheKey), eq("{json}"), ttl.capture());
+        assertThat(ttl.getValue()).isEqualTo(Duration.ofSeconds(300));
+    }
+
+    @Test
+    void getTenantDetailsWithAggregatedMetrics_currentDayWindowWithNonPositiveTtl_skipsCacheWrite() throws Exception {
+        // TTL <= 0 disables caching for today's window: the aggregated tile is served fully live.
+        ReflectionTestUtils.setField(service, "currentDayCacheTtlSeconds", 0L);
+        mockRedisValueOps();
+        when(valueOperations.get(any())).thenReturn(null);
+
+        Integer tenantId = 1;
+        Integer parentLgdId = 100;
+        LocalDate end = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        LocalDate start = end.minusDays(2);
+
+        // The today-inclusive aggregated-metrics key must NOT be written; the inner getTenantDetails call
+        // still caches its (non-date-ranged) base boundary under a different key, which is fine.
+        String aggregatedCacheKey = "analytics-service:api-cache:get_tenant_details"
+                + ":tenant:" + tenantId
+                + ":parent:" + parentLgdId
+                + ":from:" + start
+                + ":to:" + end
+                + ":v4";
+
+        when(dimTenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant(tenantId, "mp")));
+        when(tenantBoundaryRepository.getLocationLevel(parentLgdId)).thenReturn(1);
+        when(tenantBoundaryRepository.getChildLevelByParent(tenantId, parentLgdId, 1))
+                .thenReturn(List.of(Map.of(
+                        "lgd_id", 101,
+                        "parent_lgd_id", 100,
+                        "child_level", 2,
+                        "scheme_count", 2,
+                        "title", "Child A",
+                        "lgd_code", "C101",
+                        "boundary_geojson", "{\"type\":\"Polygon\"}"
+                )));
+        when(tenantBoundaryRepository.getMergedBoundaryByParent(tenantId, parentLgdId, 1))
+                .thenReturn(Map.of("child_count", 1, "boundary_geojson", "{\"type\":\"MultiPolygon\"}"));
+        when(schemeRegularityService.getAverageSchemeRegularity(tenantId, parentLgdId, start, end))
+                .thenReturn(AverageSchemeRegularityResponse.builder()
+                        .averageRegularity(new BigDecimal("0.75"))
+                        .build());
+        when(schemeRegularityService.getReadingSubmissionRateByLgd(tenantId, parentLgdId, start, end))
+                .thenReturn(ReadingSubmissionRateResponse.builder()
+                        .readingSubmissionRate(new BigDecimal("0.84"))
+                        .build());
+
+        service.getTenantDetailsWithAggregatedMetrics(tenantId, parentLgdId, start, end);
+
+        verify(valueOperations, never()).set(eq(aggregatedCacheKey), any(), any());
     }
 
     @Test
