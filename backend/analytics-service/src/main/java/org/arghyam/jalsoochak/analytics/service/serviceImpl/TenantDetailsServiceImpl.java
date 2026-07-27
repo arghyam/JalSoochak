@@ -18,6 +18,7 @@ import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
@@ -27,6 +28,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.math.RoundingMode;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,6 +45,16 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
     private static final String TENANT_PERFORMANCE_CACHE_PREFIX = "analytics-service:api-cache:get_tenant_performance_score";
     private static final String TENANT_BOUNDARY_GEOJSON_CACHE_PREFIX = "analytics-service:api-cache:get_tenant_boundary_geojson";
     private static final String DEBUG_LOG_PATH = "/home/beehyv/Desktop/Codes/jalSoochak/JalSoochak_New/.cursor/debug.log";
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+
+    /**
+     * TTL (seconds) for cached responses whose window still includes "today" (data still accumulating
+     * as facts stream in via Kafka). Mirrors SchemeRegularityServiceImpl so the state dashboard's
+     * aggregated tiles refresh through the day instead of freezing at their first (often near-empty)
+     * value. A non-positive value disables caching for current-day windows.
+     */
+    @Value("${analytics.dashboard.cache.current-day-ttl-seconds:1800}")
+    private long currentDayCacheTtlSeconds;
 
     private final DimTenantRepository dimTenantRepository;
     private final TenantBoundaryRepository tenantBoundaryRepository;
@@ -574,29 +586,71 @@ public class TenantDetailsServiceImpl implements TenantDetailsService {
     }
 
     private void writeToCache(String cacheKey, TenantDetailsResponse response) {
-        try {
-            String payload = objectMapper.writeValueAsString(response);
-            redisTemplate.opsForValue().set(cacheKey, payload, TENANT_DETAILS_CACHE_TTL);
-        } catch (Exception e) {
-            log.warn("Failed to write tenant details cache [{}]: {}", cacheKey, e.getMessage());
-        }
+        writeToCacheWithTtl(cacheKey, response, "tenant details");
     }
 
     private void writeToCache(String cacheKey, TenantBoundaryGeoJsonResponse response) {
-        try {
-            String payload = objectMapper.writeValueAsString(response);
-            redisTemplate.opsForValue().set(cacheKey, payload, TENANT_DETAILS_CACHE_TTL);
-        } catch (Exception e) {
-            log.warn("Failed to write tenant boundary cache [{}]: {}", cacheKey, e.getMessage());
-        }
+        writeToCacheWithTtl(cacheKey, response, "tenant boundary");
     }
 
     private void writeToCache(String cacheKey, TenantPerformanceScoreResponse response) {
+        writeToCacheWithTtl(cacheKey, response, "tenant performance");
+    }
+
+    /**
+     * Writes a response under the TTL policy from {@link #resolveCacheTtl(String)}. A non-positive
+     * current-day TTL means "do not cache today's still-mutating window" — the write is skipped so the
+     * window is served fully live.
+     */
+    private void writeToCacheWithTtl(String cacheKey, Object response, String label) {
+        Duration ttl = resolveCacheTtl(cacheKey);
+        if (ttl.isZero() || ttl.isNegative()) {
+            return;
+        }
         try {
             String payload = objectMapper.writeValueAsString(response);
-            redisTemplate.opsForValue().set(cacheKey, payload, TENANT_DETAILS_CACHE_TTL);
+            redisTemplate.opsForValue().set(cacheKey, payload, ttl);
         } catch (Exception e) {
-            log.warn("Failed to write tenant performance cache [{}]: {}", cacheKey, e.getMessage());
+            log.warn("Failed to write {} cache [{}]: {}", label, cacheKey, e.getMessage());
+        }
+    }
+
+    /**
+     * Chooses the cache TTL for a key. A key whose embedded window-end date ({@code :to:<ISO date>}) is
+     * today or later covers a still-accumulating window, so it gets the short current-day TTL (or no
+     * caching when that TTL is non-positive); immutable historical windows and non-date-ranged keys (no
+     * {@code :to:} token) keep {@link #TENANT_DETAILS_CACHE_TTL}. An absent/unparseable end date falls
+     * back to the full-day TTL so a key-format change can never silently shorten a historical cache.
+     */
+    private Duration resolveCacheTtl(String cacheKey) {
+        LocalDate windowEndDate = extractWindowEndDate(cacheKey);
+        if (windowEndDate != null && !windowEndDate.isBefore(LocalDate.now(IST_ZONE))) {
+            return Duration.ofSeconds(currentDayCacheTtlSeconds);
+        }
+        return TENANT_DETAILS_CACHE_TTL;
+    }
+
+    /**
+     * Extracts the window-end date embedded as {@code :to:<ISO date>} in date-ranged cache keys built in
+     * this class. Returns {@code null} for keys without the token or whose token is not an ISO-8601 date.
+     */
+    private static LocalDate extractWindowEndDate(String cacheKey) {
+        if (cacheKey == null) {
+            return null;
+        }
+        int tokenStart = cacheKey.indexOf(":to:");
+        if (tokenStart < 0) {
+            return null;
+        }
+        int valueStart = tokenStart + ":to:".length();
+        int valueEnd = cacheKey.indexOf(':', valueStart);
+        String value = valueEnd < 0
+                ? cacheKey.substring(valueStart)
+                : cacheKey.substring(valueStart, valueEnd);
+        try {
+            return LocalDate.parse(value);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

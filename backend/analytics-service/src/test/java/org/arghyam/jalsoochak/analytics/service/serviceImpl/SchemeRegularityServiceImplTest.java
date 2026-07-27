@@ -27,6 +27,7 @@ import org.arghyam.jalsoochak.analytics.repository.DimTenantRepository;
 import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -37,6 +38,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -129,6 +131,66 @@ class SchemeRegularityServiceImplTest {
         assertThat(response.getThresholdPercent()).isEqualByComparingTo("90");
         assertThat(response.getThresholdDays()).isEqualTo(3);
         verify(valueOperations, times(1)).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
+    }
+
+    @Test
+    void writeToCache_currentDayWindow_usesShortTtl() throws Exception {
+        // A window ending today is still accumulating (facts stream in via Kafka), so it must not be
+        // frozen for a full day — it gets the short current-day TTL instead.
+        ReflectionTestUtils.setField(service, "currentDayCacheTtlSeconds", 300L);
+        mockRedisValueOps();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        LocalDate start = today.minusDays(2);
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:" + start + ":end:" + today + ":v2";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, start, today))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        service.getAverageSchemeRegularity(1, 101, start, today);
+
+        ArgumentCaptor<Duration> ttl = ArgumentCaptor.forClass(Duration.class);
+        verify(valueOperations).set(eq(key), eq("{json}"), ttl.capture());
+        assertThat(ttl.getValue()).isEqualTo(Duration.ofSeconds(300));
+    }
+
+    @Test
+    void writeToCache_currentDayWindowWithNonPositiveTtl_skipsCacheWrite() throws Exception {
+        // TTL <= 0 disables caching for today's window entirely: serve fully live, like continuous-schemes.
+        ReflectionTestUtils.setField(service, "currentDayCacheTtlSeconds", 0L);
+        mockRedisValueOps();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        LocalDate start = today.minusDays(2);
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:" + start + ":end:" + today + ":v2";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, start, today))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+
+        service.getAverageSchemeRegularity(1, 101, start, today);
+
+        verify(valueOperations, never()).set(any(), any(), any(Duration.class));
+    }
+
+    @Test
+    void writeToCache_historicalWindow_keepsFullDayTtlEvenWithShortCurrentDayTtl() throws Exception {
+        // An immutable window ending before today keeps the 24h TTL regardless of the current-day setting.
+        ReflectionTestUtils.setField(service, "currentDayCacheTtlSeconds", 300L);
+        mockRedisValueOps();
+        String key = ":scheme_regularity:tenant:1:lgd:101:start:2026-01-01:end:2026-01-03:v2";
+        when(valueOperations.get(key)).thenReturn(null);
+        when(schemeRegularityRepository.getSchemeRegularityMetrics(1, 101, START, END))
+                .thenReturn(new SchemeRegularityRepository.SchemeRegularityMetrics(2, 3, 1));
+        when(schemeRegularityRepository.getEffectiveTenantRegularityThresholdPercent(1))
+                .thenReturn(new BigDecimal("90"));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
+
+        service.getAverageSchemeRegularity(1, 101, START, END);
+
+        verify(valueOperations).set(eq(key), eq("{json}"), eq(Duration.ofHours(24)));
     }
 
     @Test
