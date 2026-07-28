@@ -62,6 +62,9 @@ class BfmReadingServiceMeterReplacedTest {
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
+    @Mock
+    private RolloverResolutionService rolloverResolutionService;
+
     @InjectMocks
     private BfmReadingService service;
 

@@ -64,6 +64,9 @@ class BfmReadingServicePlaceholderRowTest {
     @Mock
     private ReadingChannelResolver readingChannelResolver;
 
+    @Mock
+    private RolloverResolutionService rolloverResolutionService;
+
     @InjectMocks
     private BfmReadingService service;
 
