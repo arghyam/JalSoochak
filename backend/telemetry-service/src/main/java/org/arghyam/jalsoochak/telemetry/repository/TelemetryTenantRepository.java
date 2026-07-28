@@ -632,6 +632,45 @@ public class TelemetryTenantRepository {
     }
 
     /**
+     * ROLLOVER-RESOLVE: records confirmed-reading provenance on an already-inserted flow_reading row.
+     * A post-insert guarded UPDATE (same style as {@link #applyIngestionTracking}) so the battle-tested
+     * insert path stays untouched and pre-migration tenants (column absent) are a safe no-op. Only
+     * called when the rollover resolver actually overrode the model value; every other row keeps the
+     * column's {@code DEFAULT 0}. The optional audit blob is folded into {@code payload_json} best-effort
+     * so a malformed blob can never fail an otherwise-successful reading submission.
+     */
+    public void applyConfirmedReadingSource(String schemaName,
+                                            Long readingId,
+                                            int confirmedReadingSource,
+                                            String rolloverAuditJson) {
+        validateSchemaName(schemaName);
+        if (readingId == null || !columnExists(schemaName, "flow_reading_table", "confirmed_reading_source")) {
+            return;
+        }
+        jdbcTemplate.update(String.format("""
+                UPDATE %s.flow_reading_table
+                SET confirmed_reading_source = ?, updated_at = NOW()
+                WHERE id = ?
+                """, schemaName), confirmedReadingSource, readingId);
+
+        if (rolloverAuditJson == null || rolloverAuditJson.isBlank()
+                || !columnExists(schemaName, "flow_reading_table", "payload_json")) {
+            return;
+        }
+        try {
+            jdbcTemplate.update(String.format("""
+                    UPDATE %s.flow_reading_table
+                    SET payload_json = COALESCE(payload_json, '{}'::jsonb)
+                                       || jsonb_build_object('rollover_resolution', CAST(? AS jsonb)),
+                        updated_at = NOW()
+                    WHERE id = ?
+                    """, schemaName), rolloverAuditJson, readingId);
+        } catch (RuntimeException ex) {
+            log.warn("Failed to persist rollover audit json for readingId={}: {}", readingId, ex.getMessage());
+        }
+    }
+
+    /**
      * LENIENT-INGEST: scheme-id resolvers must return only real schemes, never auto-provisioned
      * placeholders — otherwise a placeholder would shadow a later-added real scheme and repeat
      * unknown-scheme submissions would be tagged inconsistently. Guarded by columnExists so it is a
@@ -1225,6 +1264,52 @@ public class TelemetryTenantRepository {
                 params.toArray()
         );
         return rows.stream().findFirst();
+    }
+
+    /**
+     * Returns one confirmed reading per calendar day — the last submitted value for that day — over the
+     * trailing {@code days} window, most recent day first. Backs the rollover-resolution consumption
+     * band ({@link org.arghyam.jalsoochak.telemetry.service.RolloverResolutionService}).
+     *
+     * <p>{@code SELECT DISTINCT ON (reading_date)} plus the {@code reading_date DESC, <timeColumn> DESC,
+     * id DESC} tiebreak collapses multiple readings on the same day to the latest one directly in SQL.
+     * Fetch a few extra days (~16) so 14 consecutive-day deltas survive diffing.
+     */
+    public List<DailyConfirmedReading> findRecentDailyConfirmedReadings(String schemaName,
+                                                                        Long schemeId,
+                                                                        Long excludeReadingId,
+                                                                        int days) {
+        validateSchemaName(schemaName);
+        if (schemeId == null || days <= 0) {
+            return List.of();
+        }
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        StringBuilder sql = new StringBuilder(String.format("""
+                SELECT DISTINCT ON (reading_date) reading_date, confirmed_reading
+                FROM %s.flow_reading_table
+                WHERE scheme_id = ?
+                  AND confirmed_reading > 0
+                  AND deleted_at IS NULL
+                  AND reading_date >= (CURRENT_DATE - CAST(? AS INTEGER))
+                """, schemaName));
+        List<Object> params = new ArrayList<>();
+        params.add(schemeId);
+        params.add(days);
+        if (excludeReadingId != null) {
+            sql.append(" AND id <> ?");
+            params.add(excludeReadingId);
+        }
+        sql.append(" ORDER BY reading_date DESC, ").append(timeColumn).append(" DESC, id DESC");
+        sql.append(" LIMIT ?");
+        params.add(days);
+        return jdbcTemplate.query(
+                sql.toString(),
+                (rs, n) -> new DailyConfirmedReading(
+                        rs.getObject("reading_date", LocalDate.class),
+                        rs.getBigDecimal("confirmed_reading")
+                ),
+                params.toArray()
+        );
     }
 
     /**
