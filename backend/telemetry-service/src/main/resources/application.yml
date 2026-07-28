@@ -68,6 +68,12 @@ flowvision:
   http:
     connect-timeout-ms: ${FLOWVISION_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${FLOWVISION_READ_TIMEOUT_MS:10000}
+  rollover:
+    resolution:
+      # Kill-switch for the rollover-digit resolver. Default OFF for a safe cutover — must only be
+      # flipped ON after the confirmed_reading history is cleaned (§6) and FlowVision is emitting the
+      # new rollover payload in prod. When OFF, behaviour is byte-identical to legacy (source 0).
+      enabled: ${FLOWVISION_ROLLOVER_RESOLUTION_ENABLED:false}
 
 resilience4j:
   retry:
