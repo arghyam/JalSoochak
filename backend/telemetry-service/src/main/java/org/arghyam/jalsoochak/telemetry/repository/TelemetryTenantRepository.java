@@ -1290,7 +1290,7 @@ public class TelemetryTenantRepository {
                 WHERE scheme_id = ?
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
-                  AND reading_date >= (CURRENT_DATE - CAST(? AS INTEGER))
+                  AND reading_date >= ((now() AT TIME ZONE 'Asia/Kolkata')::date - CAST(? AS INTEGER))
                 """, schemaName));
         List<Object> params = new ArrayList<>();
         params.add(schemeId);
@@ -1310,6 +1310,17 @@ public class TelemetryTenantRepository {
                 ),
                 params.toArray()
         );
+    }
+
+    /**
+     * Whether this tenant schema has been migrated with {@code confirmed_reading_source} (V35). The
+     * rollover resolver writes this provenance column, so callers must not override {@code confirmed_reading}
+     * on a pre-migration tenant where the source could not be recorded — behaviour would be indistinguishable
+     * from an unmodified row. Cached via the same metadata cache as every other {@code columnExists} guard.
+     */
+    public boolean supportsConfirmedReadingSource(String schemaName) {
+        validateSchemaName(schemaName);
+        return columnExists(schemaName, "flow_reading_table", "confirmed_reading_source");
     }
 
     /**

@@ -14,7 +14,27 @@
 
 BEGIN;
 
--- Phase 0: back up water-quantity rows for D and D+1
+-- Phase B: correct the analytics meter-reading facts, capturing which candidates were actually changed.
+-- The value guard skips rows already corrected / altered, so only genuinely mutated fmr_ids flow into the
+-- backup, the recompute, and the applied flag — Phase C targets and marking derive from applied_now, never
+-- from the raw candidate list. Phase B touches only meter-reading facts, so the Phase 0 backup below still
+-- captures the original (pre-recompute) water-quantity values.
+CREATE TEMP TABLE applied_now (fix_id BIGINT PRIMARY KEY, scheme_id INTEGER, reading_date DATE) ON COMMIT DROP;
+
+WITH upd AS (
+    UPDATE analytics_schema.fact_meter_reading_table fmr
+       SET extracted_reading = f.new_extracted,
+           confirmed_reading = f.new_confirmed
+      FROM public.flow_reading_10x_fix_analytics f
+     WHERE f.applied = FALSE
+       AND fmr.id = f.fmr_id
+       AND fmr.confirmed_reading = f.old_confirmed   -- value guard (idempotent)
+    RETURNING f.fix_id, f.scheme_id, f.reading_date
+)
+INSERT INTO applied_now (fix_id, scheme_id, reading_date)
+SELECT fix_id, scheme_id, reading_date FROM upd;
+
+-- Phase 0: back up water-quantity rows for D and D+1 of the rows we just changed
 CREATE TABLE IF NOT EXISTS public.fact_water_quantity_backup_10x
     (LIKE analytics_schema.fact_water_quantity_table INCLUDING DEFAULTS);
 
@@ -24,30 +44,21 @@ FROM   analytics_schema.fact_water_quantity_table fwq
 JOIN (
         SELECT DISTINCT scheme_id, d::date AS date
         FROM (
-            SELECT scheme_id, reading_date     AS d FROM public.flow_reading_10x_fix_analytics WHERE applied = FALSE
+            SELECT scheme_id, reading_date     AS d FROM applied_now
             UNION
-            SELECT scheme_id, reading_date + 1 AS d FROM public.flow_reading_10x_fix_analytics WHERE applied = FALSE
+            SELECT scheme_id, reading_date + 1 AS d FROM applied_now
         ) u
      ) t
      ON  fwq.tenant_id = 1 AND fwq.scheme_id = t.scheme_id AND fwq.date = t.date
 WHERE NOT EXISTS (SELECT 1 FROM public.fact_water_quantity_backup_10x b WHERE b.id = fwq.id);
 
--- Phase B: correct the analytics meter-reading facts
-UPDATE analytics_schema.fact_meter_reading_table fmr
-   SET extracted_reading = f.new_extracted,
-       confirmed_reading = f.new_confirmed
-  FROM public.flow_reading_10x_fix_analytics f
- WHERE f.applied = FALSE
-   AND fmr.id = f.fmr_id
-   AND fmr.confirmed_reading = f.old_confirmed;   -- value guard (idempotent)
-
 -- Phase C: recompute water quantity for D and D+1
 WITH targets AS (
     SELECT DISTINCT scheme_id, d::date AS date
     FROM (
-        SELECT scheme_id, reading_date     AS d FROM public.flow_reading_10x_fix_analytics WHERE applied = FALSE
+        SELECT scheme_id, reading_date     AS d FROM applied_now
         UNION
-        SELECT scheme_id, reading_date + 1 AS d FROM public.flow_reading_10x_fix_analytics WHERE applied = FALSE
+        SELECT scheme_id, reading_date + 1 AS d FROM applied_now
     ) u
 ),
 recomputed AS (
@@ -74,10 +85,11 @@ UPDATE analytics_schema.fact_water_quantity_table fwq
    AND fwq.id = (SELECT max(id) FROM analytics_schema.fact_water_quantity_table x
                  WHERE x.tenant_id = 1 AND x.scheme_id = fwq.scheme_id AND x.date = fwq.date);
 
--- Mark applied
-UPDATE public.flow_reading_10x_fix_analytics
+-- Mark applied: only the candidates actually changed this run
+UPDATE public.flow_reading_10x_fix_analytics t
    SET applied = TRUE, applied_at = NOW()
- WHERE applied = FALSE;
+  FROM applied_now a
+ WHERE t.fix_id = a.fix_id;
 
 -- Summary  (=== analytics rows fixed this run ===)
 SELECT count(*) AS analytics_rows_fixed

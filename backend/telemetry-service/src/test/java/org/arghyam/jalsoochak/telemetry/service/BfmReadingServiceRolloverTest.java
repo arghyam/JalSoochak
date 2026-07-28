@@ -187,6 +187,9 @@ class BfmReadingServiceRolloverTest {
                         LocalDateTime.now().minusDays(1))));
         when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(10L), eq(1L), any(LocalDate.class)))
                 .thenReturn(Optional.empty());
+        // Tenant schema migrated with confirmed_reading_source (V35) so the resolver is allowed to run.
+        // lenient(): the no-rollover test short-circuits before this gate is reached.
+        lenient().when(repo.supportsConfirmedReadingSource(SCHEMA)).thenReturn(true);
     }
 
     private static CreateReadingRequest request() {

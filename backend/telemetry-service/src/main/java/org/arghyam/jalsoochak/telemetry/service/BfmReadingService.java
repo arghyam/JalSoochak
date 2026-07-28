@@ -353,33 +353,18 @@ public class BfmReadingService {
                     .build();
         }
 
-        // ── ROLLOVER-RESOLVE: resolve FlowVision rollover-digit ambiguity before the reading is
-        // confirmed. Gate the trailing-history fetch tightly (Glific-timeout hygiene): the overwhelming
-        // majority of readings have no rollover, so the common path must add zero extra DB round-trips —
-        // do not fetch eagerly and rely on the in-resolve short-circuit (by then the query already ran).
-        // On the manual/confirmed path (readingValue != null) ocrResult is null, so the gate is false and
-        // behaviour is untouched. The resolved value seeds confirmed_reading and is the number surfaced to
-        // the operator for confirmation; extracted_reading stays the model value (dedup/audit).
+        // ── ROLLOVER-RESOLVE: resolve FlowVision rollover-digit ambiguity before the reading is confirmed.
+        // The resolved value seeds confirmed_reading and is the number surfaced to the operator for
+        // confirmation; extracted_reading stays the model value (dedup/audit). When the resolver is not
+        // applicable (empty result) effectiveConfirmedReading is left untouched — byte-identical to legacy.
         int confirmedReadingSource = RolloverResolutionService.SOURCE_AS_EXTRACTED;
         String rolloverAuditJson = null;
-        if (rolloverResolutionService.isEnabled()
-                && ocrResult != null
-                && ocrResult.isHasRollover()
-                && ocrResult.getRolloverPositions() != null
-                && !ocrResult.getRolloverPositions().isEmpty()
-                && !isMeterReplaced
-                && latestSnapshotOpt.isPresent()) {
-            List<DailyConfirmedReading> dailyHistory = telemetryTenantRepository
-                    .findRecentDailyConfirmedReadings(schemaName, request.getSchemeId(), null, ROLLOVER_HISTORY_DAYS);
-            RolloverResolutionService.ResolvedReading resolved = rolloverResolutionService.resolve(
-                    ocrResult,
-                    dailyHistory,
-                    latestSnapshotOpt.get().confirmedReading(),
-                    isMeterReplaced);
-            confirmedReading = resolved.confirmedReading();
-            effectiveConfirmedReading = resolved.confirmedReading();
-            confirmedReadingSource = resolved.source();
-            rolloverAuditJson = resolved.auditJson();
+        Optional<RolloverResolutionService.ResolvedReading> rollover =
+                resolveRolloverIfApplicable(schemaName, request, ocrResult, isMeterReplaced, latestSnapshotOpt);
+        if (rollover.isPresent()) {
+            effectiveConfirmedReading = rollover.get().confirmedReading();
+            confirmedReadingSource = rollover.get().source();
+            rolloverAuditJson = rollover.get().auditJson();
         }
 
         Long readingId;
@@ -511,6 +496,44 @@ public class BfmReadingService {
                 .qualityStatus(ocrResult != null ? ocrResult.getQualityStatus() : (isValid ? "CONFIRMED" : "REVIEW"))
                 .lastConfirmedReading(lastConfirmedReading)
                 .build();
+    }
+
+    /**
+     * Runs the rollover resolver when — and only when — it can act, returning its result or
+     * {@link Optional#empty()} to signal "leave confirmed_reading exactly as the caller had it".
+     *
+     * <p>The gate is kept tight for Glific-timeout hygiene: the overwhelming majority of readings have no
+     * rollover, so the common path must add <em>zero</em> extra DB round-trips — the trailing-history fetch
+     * happens only after every cheap in-memory check passes (never eagerly, relying on an in-{@code resolve}
+     * short-circuit that runs after the query). The gate also requires the tenant schema to be migrated with
+     * {@code confirmed_reading_source} (V35): on a pre-migration tenant the provenance could not be recorded,
+     * so overriding confirmed_reading would be indistinguishable from an unmodified row — we skip instead,
+     * keeping behaviour byte-identical to legacy. On the manual/confirmed path {@code ocrResult} is null, so
+     * the gate is false and the caller's value is untouched.
+     */
+    private Optional<RolloverResolutionService.ResolvedReading> resolveRolloverIfApplicable(
+            String schemaName,
+            CreateReadingRequest request,
+            FlowVisionResult ocrResult,
+            boolean isMeterReplaced,
+            Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt) {
+        if (!rolloverResolutionService.isEnabled()
+                || ocrResult == null
+                || !ocrResult.isHasRollover()
+                || ocrResult.getRolloverPositions() == null
+                || ocrResult.getRolloverPositions().isEmpty()
+                || isMeterReplaced
+                || latestSnapshotOpt.isEmpty()
+                || !telemetryTenantRepository.supportsConfirmedReadingSource(schemaName)) {
+            return Optional.empty();
+        }
+        List<DailyConfirmedReading> dailyHistory = telemetryTenantRepository
+                .findRecentDailyConfirmedReadings(schemaName, request.getSchemeId(), null, ROLLOVER_HISTORY_DAYS);
+        return Optional.of(rolloverResolutionService.resolve(
+                ocrResult,
+                dailyHistory,
+                latestSnapshotOpt.get().confirmedReading(),
+                isMeterReplaced));
     }
 
     private FlowVisionResult extractReading(String readingUrl, FlowVisionRetryMode flowVisionRetryMode) {

@@ -47,15 +47,23 @@ INSERT INTO public.flow_reading_10x_fix_analytics (
     old_extracted, old_confirmed, new_extracted, new_confirmed,
     prev_confirmed, prev_date, ratio, image_url
 )
-WITH an_readings AS (
-    SELECT id AS fmr_id, scheme_id, reading_date, reading_at,
-           confirmed_reading, extracted_reading, image_url,
-           LAG(confirmed_reading) OVER w AS prev_confirmed,
-           LAG(reading_date)      OVER w AS prev_date
+WITH per_day AS (
+    -- latest reading per scheme per day (mirrors the source-side one-row-per-day view) so the LAG
+    -- below compares against the previous *calendar day's* latest reading, not another same-day row.
+    SELECT DISTINCT ON (scheme_id, reading_date)
+           id AS fmr_id, scheme_id, reading_date, reading_at,
+           confirmed_reading, extracted_reading, image_url
     FROM   analytics_schema.fact_meter_reading_table
     WHERE  tenant_id = 1
       AND  confirmed_reading IS NOT NULL
-    WINDOW w AS (PARTITION BY scheme_id ORDER BY reading_date, reading_at, id)
+    ORDER  BY scheme_id, reading_date, reading_at DESC, id DESC
+),
+an_readings AS (
+    SELECT p.*,
+           LAG(confirmed_reading) OVER w AS prev_confirmed,
+           LAG(reading_date)      OVER w AS prev_date
+    FROM   per_day p
+    WINDOW w AS (PARTITION BY scheme_id ORDER BY reading_date)
 ),
 candidates AS (
     SELECT a.*,

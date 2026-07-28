@@ -196,16 +196,23 @@ public class FlowVisionService {
         }
 
         BigDecimal parsedReading = new BigDecimal(meterReading);
-        Object lastDigitColorObj = dataMap.get("lastDigitColor");
-        String lastDigitColor = lastDigitColorObj == null
-                ? ""
-                : lastDigitColorObj.toString().trim().toLowerCase(Locale.ROOT);
-
-        if (!"red".equals(lastDigitColor)) {
+        if (!isRedColor(dataMap.get("lastDigitColor"))) {
             return parsedReading;
         }
 
         return parsedReading.movePointLeft(1).setScale(1, RoundingMode.UNNECESSARY);
+    }
+
+    /**
+     * Whether {@code lastDigitColor} normalises to {@code "red"} — the single source of truth shared by
+     * {@link #parseMeterReading} (decimal-shift decision) and {@link #isRedLastDigit} (metadata), so the
+     * persisted {@code redLastDigit} flag can never disagree with the shift applied to {@code adjustedReading}.
+     */
+    private static boolean isRedColor(Object lastDigitColorObj) {
+        if (lastDigitColorObj == null) {
+            return false;
+        }
+        return "red".equals(lastDigitColorObj.toString().trim().toLowerCase(Locale.ROOT));
     }
 
     /**
@@ -224,11 +231,7 @@ public class FlowVisionService {
     }
 
     private boolean isRedLastDigit(Map<String, Object> dataMap) {
-        Object lastDigitColorObj = dataMap.get("lastDigitColor");
-        if (lastDigitColorObj == null) {
-            return false;
-        }
-        return "red".equals(lastDigitColorObj.toString().trim().toLowerCase(Locale.ROOT));
+        return isRedColor(dataMap.get("lastDigitColor"));
     }
 
     /**
@@ -260,7 +263,9 @@ public class FlowVisionService {
             Integer position = intOrNull(firstPresent(entry, "position"));
             Integer selectedValue = intOrNull(firstPresent(entry, "selectedValue", "selectedDigit"));
             Integer alternateValue = intOrNull(firstPresent(entry, "alternateValue", "alternateDigit"));
-            if (position == null || selectedValue == null || alternateValue == null) {
+            // A rollover digit must be a single decimal digit; a multi-digit / out-of-range value would
+            // corrupt positional candidate enumeration (it maps one raw-string position to one char).
+            if (position == null || !isDecimalDigit(selectedValue) || !isDecimalDigit(alternateValue)) {
                 log.warn("Skipping malformed FlowVision rolloverPosition entry: {}", sanitizeLogValue(String.valueOf(entry)));
                 continue;
             }
@@ -283,6 +288,10 @@ public class FlowVisionService {
             }
         }
         return null;
+    }
+
+    private static boolean isDecimalDigit(Integer value) {
+        return value != null && value >= 0 && value <= 9;
     }
 
     private Integer intOrNull(Object value) {

@@ -11,22 +11,28 @@
 
 BEGIN;
 
-UPDATE tenant_as.flow_reading_table s
-   SET extracted_reading = f.new_extracted,
-       confirmed_reading = f.new_confirmed,
-       payload_json      = jsonb_build_object(
-                               'confirmed_reading', COALESCE(f.new_confirmed, 0),
-                               'extracted_reading', COALESCE(f.new_extracted, 0)),
-       updated_at        = NOW()
-  FROM public.flow_reading_10x_fix_source f
- WHERE f.applied = FALSE
-   AND s.id = f.src_id
-   AND s.deleted_at IS NULL
-   AND s.confirmed_reading = f.old_confirmed;   -- value guard (idempotent)
-
-UPDATE public.flow_reading_10x_fix_source
+-- Correct the readings and mark applied only for rows the value-guarded UPDATE actually mutated. A
+-- candidate whose row was already fixed / changed / deleted fails the guard, is not returned, and stays
+-- applied = FALSE — so a later rollback only touches rows this run really changed.
+WITH updated AS (
+    UPDATE tenant_as.flow_reading_table s
+       SET extracted_reading = f.new_extracted,
+           confirmed_reading = f.new_confirmed,
+           payload_json      = jsonb_build_object(
+                                   'confirmed_reading', COALESCE(f.new_confirmed, 0),
+                                   'extracted_reading', COALESCE(f.new_extracted, 0)),
+           updated_at        = NOW()
+      FROM public.flow_reading_10x_fix_source f
+     WHERE f.applied = FALSE
+       AND s.id = f.src_id
+       AND s.deleted_at IS NULL
+       AND s.confirmed_reading = f.old_confirmed   -- value guard (idempotent)
+    RETURNING f.fix_id
+)
+UPDATE public.flow_reading_10x_fix_source t
    SET applied = TRUE, applied_at = NOW()
- WHERE applied = FALSE;
+  FROM updated u
+ WHERE t.fix_id = u.fix_id;
 
 -- Summary  (=== source rows fixed this run ===)
 SELECT count(*) AS source_rows_fixed
