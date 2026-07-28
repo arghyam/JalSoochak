@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
+import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -12,7 +13,9 @@ import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -144,8 +147,13 @@ public class FlowVisionService {
                 ).toString();
         String responseRequestId = extractRequestId(responseBody, resultMap, requestId);
 
+        List<RolloverPosition> rolloverPositions = parseRolloverPositions(dataMap);
         FlowVisionResult result = FlowVisionResult.builder()
                 .adjustedReading(adjustedReading)
+                .rawMeterReading(extractRawMeterReading(dataMap))
+                .redLastDigit(isRedLastDigit(dataMap))
+                .hasRollover(isRolloverPresent(dataMap, rolloverPositions))
+                .rolloverPositions(rolloverPositions)
                 .requestId(responseRequestId)
                 .qualityStatus(qualityStatus)
                 .qualityConfidence(qualityConfidence)
@@ -198,6 +206,111 @@ public class FlowVisionService {
         }
 
         return parsedReading.movePointLeft(1).setScale(1, RoundingMode.UNNECESSARY);
+    }
+
+    /**
+     * The raw {@code data.meterReading} string exactly as FlowVision returned it (built from its
+     * {@code selectedDigit}s), before any red-last-digit decimal shift. Preserves digit count and
+     * leading zeros so rollover candidate enumeration can reason positionally. {@code null} when absent
+     * or blank.
+     */
+    private String extractRawMeterReading(Map<String, Object> dataMap) {
+        Object meterReadingObj = dataMap.get("meterReading");
+        if (meterReadingObj == null) {
+            return null;
+        }
+        String meterReading = meterReadingObj.toString().trim();
+        return meterReading.isEmpty() ? null : meterReading;
+    }
+
+    private boolean isRedLastDigit(Map<String, Object> dataMap) {
+        Object lastDigitColorObj = dataMap.get("lastDigitColor");
+        if (lastDigitColorObj == null) {
+            return false;
+        }
+        return "red".equals(lastDigitColorObj.toString().trim().toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * {@code true} when the payload signals a rollover. Tolerates old payloads: absence of both the
+     * {@code hasRollover} flag and any parsed positions yields {@code false}. A truthy {@code hasRollover}
+     * flag OR a non-empty parsed positions list is treated as a rollover.
+     */
+    private boolean isRolloverPresent(Map<String, Object> dataMap, List<RolloverPosition> positions) {
+        Object hasRollover = dataMap.get("hasRollover");
+        boolean flagged = hasRollover != null && Boolean.parseBoolean(hasRollover.toString().trim());
+        return flagged || !positions.isEmpty();
+    }
+
+    /**
+     * Parses {@code data.rolloverPositions[]} into typed records. Tolerates absence (returns empty list)
+     * and skips malformed entries so a partial payload never breaks OCR ingestion. Digit/confidence keys
+     * accept the {@code *Value}/{@code *Digit} aliases FlowVision may use.
+     */
+    private List<RolloverPosition> parseRolloverPositions(Map<String, Object> dataMap) {
+        Object raw = dataMap.get("rolloverPositions");
+        if (!(raw instanceof List<?> rawList) || rawList.isEmpty()) {
+            return List.of();
+        }
+        List<RolloverPosition> positions = new ArrayList<>(rawList.size());
+        for (Object element : rawList) {
+            if (!(element instanceof Map<?, ?> entry)) {
+                continue;
+            }
+            Integer position = intOrNull(firstPresent(entry, "position"));
+            Integer selectedValue = intOrNull(firstPresent(entry, "selectedValue", "selectedDigit"));
+            Integer alternateValue = intOrNull(firstPresent(entry, "alternateValue", "alternateDigit"));
+            if (position == null || selectedValue == null || alternateValue == null) {
+                log.warn("Skipping malformed FlowVision rolloverPosition entry: {}", sanitizeLogValue(String.valueOf(entry)));
+                continue;
+            }
+            positions.add(new RolloverPosition(
+                    position,
+                    selectedValue,
+                    bigDecimalOrNull(firstPresent(entry, "selectedConfidence")),
+                    alternateValue,
+                    bigDecimalOrNull(firstPresent(entry, "alternateConfidence"))
+            ));
+        }
+        return positions.isEmpty() ? List.of() : List.copyOf(positions);
+    }
+
+    private Object firstPresent(Map<?, ?> map, String... keys) {
+        for (String key : keys) {
+            Object value = map.get(key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Integer intOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return new BigDecimal(value.toString().trim()).intValueExact();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private BigDecimal bigDecimalOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof BigDecimal bd) {
+            return bd;
+        }
+        try {
+            return new BigDecimal(value.toString().trim());
+        } catch (RuntimeException ex) {
+            return null;
+        }
     }
 
     private String summarizeFlowVisionResult(FlowVisionResult result) {
