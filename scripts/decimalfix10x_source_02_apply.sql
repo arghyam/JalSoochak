@@ -26,17 +26,22 @@ WITH updated AS (
      WHERE f.applied = FALSE
        AND s.id = f.src_id
        AND s.deleted_at IS NULL
-       AND s.confirmed_reading = f.old_confirmed   -- value guard (idempotent)
+       -- Full pre-fix snapshot guard (idempotent): only mutate a row that still matches every value we
+       -- captured at identify time; an external edit to any column drops the row from this run.
+       AND s.confirmed_reading = f.old_confirmed
+       AND s.extracted_reading IS NOT DISTINCT FROM f.old_extracted
+       AND s.payload_json      IS NOT DISTINCT FROM f.old_payload
     RETURNING f.fix_id
+),
+marked AS (
+    UPDATE public.flow_reading_10x_fix_source t
+       SET applied = TRUE, applied_at = NOW()
+      FROM updated u
+     WHERE t.fix_id = u.fix_id
+    RETURNING t.fix_id
 )
-UPDATE public.flow_reading_10x_fix_source t
-   SET applied = TRUE, applied_at = NOW()
-  FROM updated u
- WHERE t.fix_id = u.fix_id;
-
--- Summary  (=== source rows fixed this run ===)
-SELECT count(*) AS source_rows_fixed
-FROM   public.flow_reading_10x_fix_source
-WHERE  applied = TRUE AND applied_at >= NOW() - INTERVAL '1 minute';
+-- Summary  (=== source rows fixed this run ===): counts exactly the rows this run marked, so a rerun
+-- that changes nothing reports 0.
+SELECT count(*) AS source_rows_fixed FROM marked;
 
 COMMIT;

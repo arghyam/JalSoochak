@@ -168,11 +168,41 @@ class BfmReadingServiceRolloverTest {
 
             // Reject-and-manual-entry: the human value overwrites confirmed_reading, resolver discarded.
             verify(repo).updateConfirmedReading(SCHEMA, 99L, new BigDecimal("999"), 1L);
+            // Provenance is retagged MANUAL, not left as the stale rollover-resolved marker.
+            verify(repo).applyConfirmedReadingSource(SCHEMA, 99L, RolloverResolutionService.SOURCE_MANUAL, null);
             assertEquals(0, resp.getMeterReading().compareTo(new BigDecimal("999")));
             assertTrue(resp.isSuccess());
         } finally {
             TenantContext.clear();
         }
+    }
+
+    @Test
+    void rolloverInputOnPreMigrationSchemaPersistsLegacyConfirmedAndSkipsProvenance() {
+        // Rollover metadata is present, but the tenant schema is NOT migrated with confirmed_reading_source:
+        // the resolver must not run, confirmed_reading stays the model value, and no provenance/history I/O.
+        FlowVisionResult ocr = ocr("0250", "250",
+                new RolloverPosition(2, 2, new BigDecimal("0.55"), 1, new BigDecimal("0.45")));
+
+        stubCommon(ocr);
+        when(repo.supportsConfirmedReadingSource(SCHEMA)).thenReturn(false);
+        when(repo.createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
+                any(BigDecimal.class), any(BigDecimal.class), anyString(), any(), any(), any()))
+                .thenReturn(99L);
+
+        CreateReadingResponse resp = service.createReading(request(), SCHEMA, operator, "919999999999", false);
+
+        assertTrue(resp.isSuccess());
+        assertEquals(0, resp.getMeterReading().compareTo(new BigDecimal("250")), "legacy confirmed value surfaced");
+
+        ArgumentCaptor<BigDecimal> confirmed = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(repo).createFlowReading(anyString(), anyLong(), anyLong(), any(LocalDateTime.class),
+                any(BigDecimal.class), confirmed.capture(), anyString(), any(), any(), any());
+        assertEquals(0, confirmed.getValue().compareTo(new BigDecimal("250")), "confirmed_reading left equal to extracted");
+
+        // Pre-migration: never fetch trailing history and never write provenance.
+        verify(repo, never()).findRecentDailyConfirmedReadings(any(), any(), any(), anyInt());
+        verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────

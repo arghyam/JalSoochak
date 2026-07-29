@@ -38,6 +38,8 @@ public class RolloverResolutionService {
     public static final int SOURCE_AS_EXTRACTED = 0;
     /** {@code confirmed_reading_source} value: reading was resolved to a sibling rollover candidate. */
     public static final int SOURCE_ROLLOVER_RESOLVED = 1;
+    /** {@code confirmed_reading_source} value: confirmed value was set by an explicit manual override. */
+    public static final int SOURCE_MANUAL = 2;
 
     // ── v1 tuning constants (documented; only the kill-switch is externalised) ──────────────────────
     /** Trailing daily-delta window size. */

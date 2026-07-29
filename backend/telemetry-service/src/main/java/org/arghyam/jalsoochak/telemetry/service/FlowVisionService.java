@@ -298,10 +298,12 @@ public class FlowVisionService {
         if (value == null) {
             return null;
         }
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
         try {
+            // Reject fractional metadata (e.g. selectedDigit 1.9, position 2.7) rather than truncating it:
+            // intValueExact() throws on any non-integral value, so only exact integers reach isDecimalDigit.
+            if (value instanceof Number number) {
+                return new BigDecimal(number.toString()).intValueExact();
+            }
             return new BigDecimal(value.toString().trim()).intValueExact();
         } catch (RuntimeException ex) {
             return null;

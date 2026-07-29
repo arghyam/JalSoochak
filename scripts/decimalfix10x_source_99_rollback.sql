@@ -18,8 +18,14 @@ WITH reverted AS (
       FROM public.flow_reading_10x_fix_source f
      WHERE f.applied = TRUE
        AND s.id = f.src_id
+       AND s.deleted_at IS NULL
        AND s.confirmed_reading = f.new_confirmed
        AND s.extracted_reading = f.new_extracted   -- only undo rows we actually set
+       -- and only if the payload still matches exactly what apply wrote, so an external payload edit
+       -- made after apply is never clobbered.
+       AND s.payload_json IS NOT DISTINCT FROM jsonb_build_object(
+               'confirmed_reading', COALESCE(f.new_confirmed, 0),
+               'extracted_reading', COALESCE(f.new_extracted, 0))
     RETURNING f.fix_id
 )
 UPDATE public.flow_reading_10x_fix_source t
