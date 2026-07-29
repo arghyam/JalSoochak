@@ -20,8 +20,16 @@
 -- means every pre-existing row, every other insert path (placeholder
 -- reuse, lenient ingestion, meter-change, reprocessing) and every
 -- pre-migration tenant stay correct with zero code changes. No index
--- is added — the column is not a query dimension. Every related
--- change is marked "ROLLOVER-RESOLVE".
+-- is added on the column itself — it is not a query dimension.
+--
+-- This migration also adds a supporting composite index
+--   flow_reading_table(scheme_id, reading_date DESC)
+-- to back the rollover consumption band query
+-- (findRecentDailyConfirmedReadings: scheme_id = ? AND reading_date >= ?
+-- ORDER BY reading_date DESC) and findLatestConfirmedReadingSnapshot*;
+-- the pre-existing indexes cover only (scheme_id) or
+-- (scheme_id, created_by, reading_date), neither of which serves that
+-- access pattern. Every related change is marked "ROLLOVER-RESOLVE".
 -- ============================================================
 
 -- ── Part A: Backfill existing tenant schemas ────────────────────────────────
@@ -38,6 +46,11 @@ BEGIN
             EXECUTE format(
                 'ALTER TABLE %1$I.flow_reading_table
                      ADD COLUMN IF NOT EXISTS confirmed_reading_source SMALLINT NOT NULL DEFAULT 0',
+                tenant_schema);
+            -- ROLLOVER-RESOLVE: composite index backing the rollover consumption-band query.
+            EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS idx_%1$s_flow_scheme_date
+                     ON %1$I.flow_reading_table(scheme_id, reading_date DESC)',
                 tenant_schema);
         END IF;
     END LOOP;
@@ -77,12 +90,16 @@ BEGIN
     -- Execute the existing provisioning logic first.
     PERFORM common_schema.create_tenant_schema_v35_base(schema_name);
 
-    -- ROLLOVER-RESOLVE: provenance column for new tenant schemas. Guard with to_regclass so a
-    -- partially-provisioned schema is skipped instead of aborting.
+    -- ROLLOVER-RESOLVE: provenance column + supporting consumption-band index for new tenant schemas.
+    -- Guard with to_regclass so a partially-provisioned schema is skipped instead of aborting.
     IF to_regclass(format('%I.flow_reading_table', schema_name)) IS NOT NULL THEN
         EXECUTE format(
             'ALTER TABLE %1$I.flow_reading_table
                  ADD COLUMN IF NOT EXISTS confirmed_reading_source SMALLINT NOT NULL DEFAULT 0',
+            schema_name);
+        EXECUTE format(
+            'CREATE INDEX IF NOT EXISTS idx_%1$s_flow_scheme_date
+                 ON %1$I.flow_reading_table(scheme_id, reading_date DESC)',
             schema_name);
     END IF;
 END;

@@ -585,12 +585,9 @@ public class BfmReadingService {
                 schemaName,
                 latestReading.id(),
                 confirmedReading,
-                operator.id()
+                operator.id(),
+                RolloverResolutionService.manualConfirmSource(confirmedReading, latestReading.confirmedReading())
         );
-        // A manual confirmation supersedes any rollover resolution, so retag provenance as MANUAL instead
-        // of leaving the stale SOURCE_ROLLOVER_RESOLVED marker; no-op on pre-migration tenants.
-        telemetryTenantRepository.applyConfirmedReadingSource(
-                schemaName, latestReading.id(), RolloverResolutionService.SOURCE_MANUAL, null);
 
         publishConfirmedReadingUpdate(operator.tenantId(), latestReading, confirmedReading);
 
@@ -621,12 +618,9 @@ public class BfmReadingService {
                 schemaName,
                 reading.id(),
                 confirmedReading,
-                reading.createdBy() != null ? reading.createdBy() : 1L
+                reading.createdBy() != null ? reading.createdBy() : 1L,
+                RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading())
         );
-        // A manual confirmation supersedes any rollover resolution, so retag provenance as MANUAL instead
-        // of leaving the stale SOURCE_ROLLOVER_RESOLVED marker; no-op on pre-migration tenants.
-        telemetryTenantRepository.applyConfirmedReadingSource(
-                schemaName, reading.id(), RolloverResolutionService.SOURCE_MANUAL, null);
 
         Integer tenantId = null;
         if (reading.createdBy() != null) {

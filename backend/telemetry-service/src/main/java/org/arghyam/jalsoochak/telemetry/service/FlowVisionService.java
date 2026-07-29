@@ -261,8 +261,14 @@ public class FlowVisionService {
                 continue;
             }
             Integer position = intOrNull(firstPresent(entry, "position"));
-            Integer selectedValue = intOrNull(firstPresent(entry, "selectedValue", "selectedDigit"));
-            Integer alternateValue = intOrNull(firstPresent(entry, "alternateValue", "alternateDigit"));
+            // FlowVision may emit each digit either flat (selectedValue: 1, selectedConfidence: 0.55) or
+            // nested (selectedDigit: {value: 5, confidence: 0.94}); tolerate both so the resolver is not a
+            // silent no-op if prod uses the nested shape. The digit alias also carries the nested object,
+            // so unwrap its value/confidence when present, falling back to the flat sibling keys otherwise.
+            Object selectedNode = firstPresent(entry, "selectedValue", "selectedDigit");
+            Object alternateNode = firstPresent(entry, "alternateValue", "alternateDigit");
+            Integer selectedValue = intOrNull(digitValue(selectedNode));
+            Integer alternateValue = intOrNull(digitValue(alternateNode));
             // A rollover digit must be a single decimal digit; a multi-digit / out-of-range value would
             // corrupt positional candidate enumeration (it maps one raw-string position to one char).
             if (position == null || !isDecimalDigit(selectedValue) || !isDecimalDigit(alternateValue)) {
@@ -272,9 +278,9 @@ public class FlowVisionService {
             positions.add(new RolloverPosition(
                     position,
                     selectedValue,
-                    bigDecimalOrNull(firstPresent(entry, "selectedConfidence")),
+                    bigDecimalOrNull(firstNonNull(digitConfidence(selectedNode), firstPresent(entry, "selectedConfidence"))),
                     alternateValue,
-                    bigDecimalOrNull(firstPresent(entry, "alternateConfidence"))
+                    bigDecimalOrNull(firstNonNull(digitConfidence(alternateNode), firstPresent(entry, "alternateConfidence")))
             ));
         }
         return positions.isEmpty() ? List.of() : List.copyOf(positions);
@@ -288,6 +294,26 @@ public class FlowVisionService {
             }
         }
         return null;
+    }
+
+    /** Unwraps a digit node: a nested {@code {value, confidence}} object yields its {@code value}; a scalar yields itself. */
+    private static Object digitValue(Object node) {
+        if (node instanceof Map<?, ?> map) {
+            return map.get("value");
+        }
+        return node;
+    }
+
+    /** Confidence carried inside a nested digit node ({@code {value, confidence}}), or {@code null} for a scalar. */
+    private static Object digitConfidence(Object node) {
+        if (node instanceof Map<?, ?> map) {
+            return map.get("confidence");
+        }
+        return null;
+    }
+
+    private static Object firstNonNull(Object first, Object second) {
+        return first != null ? first : second;
     }
 
     private static boolean isDecimalDigit(Integer value) {

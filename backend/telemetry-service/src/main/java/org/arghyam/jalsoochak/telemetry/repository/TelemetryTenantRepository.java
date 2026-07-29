@@ -2001,27 +2001,49 @@ public class TelemetryTenantRepository {
     }
 
     public void updateConfirmedReading(String schemaName, Long readingId, BigDecimal confirmedReading, Long updatedBy) {
+        updateConfirmedReading(schemaName, readingId, confirmedReading, updatedBy, null);
+    }
+
+    /**
+     * ROLLOVER-RESOLVE: updates confirmed_reading and, when {@code confirmedReadingSource} is non-null,
+     * folds {@code confirmed_reading_source = ?} into the <em>same</em> UPDATE — so a manual confirmation
+     * is a single round-trip instead of an UPDATE followed by a separate {@link #applyConfirmedReadingSource}
+     * write (this path is on the Glific confirm hot path, hit by ~every reading). A {@code null} source
+     * leaves the provenance column untouched (callers that do not record provenance), and a non-null source
+     * is a safe no-op on pre-migration tenants where the column is absent (guarded by columnExists).
+     */
+    public void updateConfirmedReading(String schemaName, Long readingId, BigDecimal confirmedReading,
+                                       Long updatedBy, Integer confirmedReadingSource) {
         validateSchemaName(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");
+        boolean writeSource = confirmedReadingSource != null
+                && columnExists(schemaName, "flow_reading_table", "confirmed_reading_source");
+        String sourceAssignment = writeSource ? ", confirmed_reading_source = ?" : "";
         String sql = hasPayloadJson
                 ? String.format("""
                         UPDATE %s.flow_reading_table
                         SET confirmed_reading = ?,
-                            payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', COALESCE(extracted_reading, 0)),
+                            payload_json = jsonb_build_object('confirmed_reading', ?, 'extracted_reading', COALESCE(extracted_reading, 0))%s,
                             updated_by = ?,
                             updated_at = NOW()
                         WHERE id = ?
-                        """, schemaName)
+                        """, schemaName, sourceAssignment)
                 : String.format("""
                         UPDATE %s.flow_reading_table
-                        SET confirmed_reading = ?, updated_by = ?, updated_at = NOW()
+                        SET confirmed_reading = ?%s, updated_by = ?, updated_at = NOW()
                         WHERE id = ?
-                        """, schemaName);
+                        """, schemaName, sourceAssignment);
+        List<Object> params = new ArrayList<>();
+        params.add(confirmedReading);
         if (hasPayloadJson) {
-            jdbcTemplate.update(sql, confirmedReading, confirmedReading, updatedBy, readingId);
-        } else {
-            jdbcTemplate.update(sql, confirmedReading, updatedBy, readingId);
+            params.add(confirmedReading);
         }
+        if (writeSource) {
+            params.add(confirmedReadingSource);
+        }
+        params.add(updatedBy);
+        params.add(readingId);
+        jdbcTemplate.update(sql, params.toArray());
     }
 
     public void updateReadingLocation(String schemaName,

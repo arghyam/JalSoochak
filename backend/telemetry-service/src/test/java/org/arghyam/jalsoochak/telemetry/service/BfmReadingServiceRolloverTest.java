@@ -166,11 +166,38 @@ class BfmReadingServiceRolloverTest {
 
             CreateReadingResponse resp = service.updateConfirmedReading("corr-1", new BigDecimal("999"));
 
-            // Reject-and-manual-entry: the human value overwrites confirmed_reading, resolver discarded.
-            verify(repo).updateConfirmedReading(SCHEMA, 99L, new BigDecimal("999"), 1L);
-            // Provenance is retagged MANUAL, not left as the stale rollover-resolved marker.
-            verify(repo).applyConfirmedReadingSource(SCHEMA, 99L, RolloverResolutionService.SOURCE_MANUAL, null);
+            // Reject-and-manual-entry: the human value (999 ≠ stored 150) overwrites confirmed_reading and
+            // retags provenance MANUAL — folded into the single confirm UPDATE, not a second write.
+            verify(repo).updateConfirmedReading(SCHEMA, 99L, new BigDecimal("999"), 1L,
+                    RolloverResolutionService.SOURCE_MANUAL);
+            verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
             assertEquals(0, resp.getMeterReading().compareTo(new BigDecimal("999")));
+            assertTrue(resp.isSuccess());
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Test
+    void operatorConfirmingResolvedValueKeepsRolloverProvenance() {
+        TenantContext.setSchema(SCHEMA);
+        try {
+            TelemetryLatestFlowReadingRecord reading = new TelemetryLatestFlowReadingRecord(
+                    99L, 10L, 1L, "corr-1",
+                    new BigDecimal("250"),  // extracted (model)
+                    new BigDecimal("150"),  // confirmed (resolver's value)
+                    IMAGE_URL, LocalDate.now(), LocalDateTime.now(), "BFM");
+            when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
+                    .thenReturn(Optional.of(reading));
+            when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
+
+            // Operator confirms the value we resolved to (150 == stored 150): source is left null so the
+            // UPDATE keeps SOURCE_ROLLOVER_RESOLVED — we can still tell "accepted our correction" apart.
+            CreateReadingResponse resp = service.updateConfirmedReading("corr-1", new BigDecimal("150"));
+
+            verify(repo).updateConfirmedReading(SCHEMA, 99L, new BigDecimal("150"), 1L, null);
+            verify(repo, never()).applyConfirmedReadingSource(any(), any(), anyInt(), any());
+            assertEquals(0, resp.getMeterReading().compareTo(new BigDecimal("150")));
             assertTrue(resp.isSuccess());
         } finally {
             TenantContext.clear();

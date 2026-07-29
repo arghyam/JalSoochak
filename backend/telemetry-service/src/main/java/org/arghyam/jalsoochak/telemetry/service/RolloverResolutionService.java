@@ -88,6 +88,20 @@ public class RolloverResolutionService {
     }
 
     /**
+     * Provenance for a manual confirmation of {@code confirmed_reading}. Returns {@link #SOURCE_MANUAL}
+     * only when the operator's value actually differs from the currently stored value (a {@code null}
+     * stored value counts as a change), else {@code null} to signal "leave the existing provenance marker
+     * untouched". This preserves {@link #SOURCE_ROLLOVER_RESOLVED} when the operator confirms the exact
+     * value we resolved to — i.e. "operator accepted our correction" stays distinguishable from "operator
+     * typed their own". Scale-insensitive ({@link BigDecimal#compareTo}).
+     */
+    public static Integer manualConfirmSource(BigDecimal newConfirmed, BigDecimal storedConfirmed) {
+        boolean changed = storedConfirmed == null || newConfirmed == null
+                || newConfirmed.compareTo(storedConfirmed) != 0;
+        return changed ? SOURCE_MANUAL : null;
+    }
+
+    /**
      * @param ocr               the FlowVision result (model pick + rollover metadata).
      * @param history           one confirmed reading per calendar day over the trailing window,
      *                          most-recent-first (as returned by

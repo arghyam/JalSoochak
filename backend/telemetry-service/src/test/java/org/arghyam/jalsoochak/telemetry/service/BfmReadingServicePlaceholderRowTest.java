@@ -218,7 +218,8 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals(true, resp.isSuccess());
         assertEquals("corr-1", resp.getCorrelationId());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
-        verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
         verify(telemetryEventPublisher).publishMeterReadingRecorded(
                 22,
                 10L,
@@ -265,7 +266,8 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals(true, resp.isSuccess());
         assertEquals("corr-1", resp.getCorrelationId());
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
-        verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading(schemaName, 99L, new BigDecimal("123"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
         verify(telemetryEventPublisher).publishMeterReadingRecorded(
                 22,
                 10L,

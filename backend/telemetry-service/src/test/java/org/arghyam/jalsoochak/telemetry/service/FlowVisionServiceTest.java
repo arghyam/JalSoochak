@@ -227,6 +227,32 @@ class FlowVisionServiceTest {
         assertEquals(8, result.getRolloverPositions().get(0).alternateValue());
     }
 
+    @Test
+    void extractReadingParsesNestedDigitObjectsForRollover() {
+        ScriptedRestTemplate restTemplate = new ScriptedRestTemplate();
+        // Nested FlowVision shape: each digit is an object {value, confidence} rather than flat keys.
+        List<Map<String, Object>> positions = new java.util.ArrayList<>();
+        positions.add(Map.of(
+                "position", 3,
+                "selectedDigit", Map.of("value", 5, "confidence", 0.94),
+                "alternateDigit", Map.of("value", 6, "confidence", 0.91)));
+        restTemplate.enqueue(new ResponseEntity<>(buildRolloverResponse("125", "black", positions), HttpStatus.OK));
+
+        FlowVisionService service = new FlowVisionService(restTemplate, FLOW_VISION_URL);
+
+        FlowVisionResult result = service.extractReading("https://image-url");
+
+        assertNotNull(result);
+        assertTrue(result.isHasRollover());
+        assertEquals(1, result.getRolloverPositions().size());
+        RolloverPosition pos = result.getRolloverPositions().get(0);
+        assertEquals(3, pos.position());
+        assertEquals(5, pos.selectedValue());
+        assertEquals(6, pos.alternateValue());
+        assertEquals(0, new java.math.BigDecimal("0.94").compareTo(pos.selectedConfidence()));
+        assertEquals(0, new java.math.BigDecimal("0.91").compareTo(pos.alternateConfidence()));
+    }
+
     private static Map<String, Object> buildRolloverResponse(String meterReading,
                                                              String lastDigitColor,
                                                              List<Map<String, Object>> rolloverPositions) {
