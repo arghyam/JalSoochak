@@ -19,8 +19,8 @@ WITH reverted AS (
      WHERE f.applied = TRUE
        AND s.id = f.src_id
        AND s.deleted_at IS NULL
-       AND s.confirmed_reading = f.new_confirmed
-       AND s.extracted_reading = f.new_extracted   -- only undo rows we actually set
+       AND s.confirmed_reading IS NOT DISTINCT FROM f.new_confirmed
+       AND s.extracted_reading IS NOT DISTINCT FROM f.new_extracted   -- NULL-safe: only undo rows we actually set
        -- and only if the payload still matches exactly what apply wrote, so an external payload edit
        -- made after apply is never clobbered.
        AND s.payload_json IS NOT DISTINCT FROM jsonb_build_object(

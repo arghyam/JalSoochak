@@ -28,7 +28,7 @@ WITH updated AS (
        AND s.deleted_at IS NULL
        -- Full pre-fix snapshot guard (idempotent): only mutate a row that still matches every value we
        -- captured at identify time; an external edit to any column drops the row from this run.
-       AND s.confirmed_reading = f.old_confirmed
+       AND s.confirmed_reading IS NOT DISTINCT FROM f.old_confirmed
        AND s.extracted_reading IS NOT DISTINCT FROM f.old_extracted
        AND s.payload_json      IS NOT DISTINCT FROM f.old_payload
     RETURNING f.fix_id

@@ -19,8 +19,8 @@ WITH rev AS (
       FROM public.flow_reading_10x_fix_analytics f
      WHERE f.applied = TRUE
        AND fmr.id = f.fmr_id
-       AND fmr.confirmed_reading = f.new_confirmed
-       AND fmr.extracted_reading = f.new_extracted   -- only undo rows we actually set (both columns)
+       AND fmr.confirmed_reading IS NOT DISTINCT FROM f.new_confirmed
+       AND fmr.extracted_reading IS NOT DISTINCT FROM f.new_extracted   -- NULL-safe: only undo rows we actually set (both columns)
     RETURNING f.fix_id, f.scheme_id, f.reading_date
 )
 INSERT INTO reverted_now (fix_id, scheme_id, reading_date)

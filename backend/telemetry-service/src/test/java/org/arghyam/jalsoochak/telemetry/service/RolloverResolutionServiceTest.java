@@ -203,6 +203,36 @@ class RolloverResolutionServiceTest {
         assertEquals(0, resolved.confirmedReading().compareTo(bd("250")));
     }
 
+    @Test
+    void duplicateRolloverPositionKeepsModelValue() {
+        // Two entries target the same raw position — malformed metadata. Rather than let both choice bits
+        // write digit index 2 (which would collapse candidates and double-count confidence), the resolver
+        // falls back to the model value. Without the guard this same input resolves to 150.
+        FlowVisionResult ocr = ocr("0250", "250", false,
+                new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")),
+                new RolloverPosition(2, 2, bd("0.55"), 1, bd("0.45")));
+
+        RolloverResolutionService.ResolvedReading resolved = enabledService()
+                .resolve(ocr, history(100, 110, 120, 130, 140), bd("140"), false);
+
+        assertEquals(RolloverResolutionService.SOURCE_AS_EXTRACTED, resolved.source());
+        assertEquals(0, resolved.confirmedReading().compareTo(bd("250")));
+    }
+
+    @Test
+    void selectedDigitInconsistentWithRawReadingKeepsModelValue() {
+        // The selected digit (7) disagrees with the raw string digit at position 2 ('2') — inconsistent
+        // metadata, so the resolver declines to reason positionally and keeps the model value.
+        FlowVisionResult ocr = ocr("0250", "250", false,
+                new RolloverPosition(2, 7, bd("0.55"), 1, bd("0.45")));
+
+        RolloverResolutionService.ResolvedReading resolved = enabledService()
+                .resolve(ocr, history(100, 110, 120, 130, 140), bd("140"), false);
+
+        assertEquals(RolloverResolutionService.SOURCE_AS_EXTRACTED, resolved.source());
+        assertEquals(0, resolved.confirmedReading().compareTo(bd("250")));
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
 
     private static FlowVisionResult ocr(String rawReading, String adjusted, boolean redLastDigit,

@@ -465,6 +465,11 @@ public class BfmReadingService {
         // the dedup key) stays the model value — only the displayed/confirmed number changes.
         if (confirmedReadingSource == RolloverResolutionService.SOURCE_ROLLOVER_RESOLVED) {
             finalReading = effectiveConfirmedReading;
+            // The resolved value now drives the response, so re-derive validity from it (confidence is
+            // unchanged): a positive resolved reading must yield a successful "captured" response even if
+            // the model's own pick was non-positive.
+            hasPositiveReading = finalReading != null && finalReading.compareTo(BigDecimal.ZERO) > 0;
+            isValid = hasPositiveReading && hasAcceptableConfidence;
         }
 
         String finalMessage;

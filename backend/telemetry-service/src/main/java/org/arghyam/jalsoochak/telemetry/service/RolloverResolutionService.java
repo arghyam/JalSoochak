@@ -122,6 +122,26 @@ public class RolloverResolutionService {
         }
         int length = rawReading.length();
 
+        // ── 0. Reject malformed rollover metadata before any enumeration ────────────────────────────
+        // Each in-range selected digit must match the raw string at its position, and no position may
+        // repeat: a duplicate would let two choice bits write the same index, collapsing distinct
+        // candidates and double-counting confidence. On any violation fall back to the model value
+        // rather than resolve on inconsistent input (out-of-range positions are ignored, as below).
+        boolean[] seenPosition = new boolean[length + 1];
+        for (RolloverPosition pos : ocr.getRolloverPositions()) {
+            int p = pos.position();
+            if (p < 1 || p > length) {
+                continue;
+            }
+            if (seenPosition[p]) {
+                return asExtracted(modelValue); // duplicate position → inconsistent metadata
+            }
+            seenPosition[p] = true;
+            if (rawReading.charAt(p - 1) != (char) ('0' + (pos.selectedValue() % 10))) {
+                return asExtracted(modelValue); // selected digit disagrees with the raw string
+            }
+        }
+
         // ── 1. Consumption band from the daily history ─────────────────────────────────────────────
         double[] deltas = validDailyDeltas(history);
         if (deltas.length < MIN_DELTAS) {
