@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -28,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,6 +46,13 @@ public class BfmReadingService {
     private final GlificOperatorContextService glificOperatorContextService;
     private final FlowVisionReadingsRetryService flowVisionReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
+    private final RolloverResolutionService rolloverResolutionService;
+
+    /**
+     * Trailing-history window (days) fetched for the rollover consumption band. A few extra days over
+     * the resolver's 14-delta window so 14 consecutive-day deltas survive diffing.
+     */
+    private static final int ROLLOVER_HISTORY_DAYS = 18;
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
                                                String schemaName,
@@ -344,6 +353,20 @@ public class BfmReadingService {
                     .build();
         }
 
+        // ── ROLLOVER-RESOLVE: resolve FlowVision rollover-digit ambiguity before the reading is confirmed.
+        // The resolved value seeds confirmed_reading and is the number surfaced to the operator for
+        // confirmation; extracted_reading stays the model value (dedup/audit). When the resolver is not
+        // applicable (empty result) effectiveConfirmedReading is left untouched — byte-identical to legacy.
+        int confirmedReadingSource = RolloverResolutionService.SOURCE_AS_EXTRACTED;
+        String rolloverAuditJson = null;
+        Optional<RolloverResolutionService.ResolvedReading> rollover =
+                resolveRolloverIfApplicable(schemaName, request, ocrResult, isMeterReplaced, latestSnapshotOpt);
+        if (rollover.isPresent()) {
+            effectiveConfirmedReading = rollover.get().confirmedReading();
+            confirmedReadingSource = rollover.get().source();
+            rolloverAuditJson = rollover.get().auditJson();
+        }
+
         Long readingId;
         Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName,
@@ -400,6 +423,15 @@ public class BfmReadingService {
             );
         }
 
+        // ROLLOVER-RESOLVE: tag provenance + best-effort audit only when the resolver actually overrode
+        // the model value. createReading is not @Transactional, so this runs as a separate guarded
+        // statement (audit failure only warns) — acceptable, provenance is audit-only. Every other row
+        // keeps the column's DEFAULT 0.
+        if (confirmedReadingSource == RolloverResolutionService.SOURCE_ROLLOVER_RESOLVED) {
+            telemetryTenantRepository.applyConfirmedReadingSource(
+                    schemaName, readingId, confirmedReadingSource, rolloverAuditJson);
+        }
+
         BigDecimal lastConfirmedReading = latestSnapshotOpt
                 .map(TelemetryConfirmedReadingSnapshot::confirmedReading)
                 .orElse(null);
@@ -427,6 +459,18 @@ public class BfmReadingService {
                 1,
                 0
         );
+
+        // Surface the resolved value to the operator: the "please confirm" message text and the response
+        // meterReading must show the resolved number, not the model pick. extractedReading (persisted, and
+        // the dedup key) stays the model value — only the displayed/confirmed number changes.
+        if (confirmedReadingSource == RolloverResolutionService.SOURCE_ROLLOVER_RESOLVED) {
+            finalReading = effectiveConfirmedReading;
+            // The resolved value now drives the response, so re-derive validity from it (confidence is
+            // unchanged): a positive resolved reading must yield a successful "captured" response even if
+            // the model's own pick was non-positive.
+            hasPositiveReading = finalReading != null && finalReading.compareTo(BigDecimal.ZERO) > 0;
+            isValid = hasPositiveReading && hasAcceptableConfidence;
+        }
 
         String finalMessage;
         String readingText = finalReading != null ? finalReading.stripTrailingZeros().toPlainString() : null;
@@ -457,6 +501,44 @@ public class BfmReadingService {
                 .qualityStatus(ocrResult != null ? ocrResult.getQualityStatus() : (isValid ? "CONFIRMED" : "REVIEW"))
                 .lastConfirmedReading(lastConfirmedReading)
                 .build();
+    }
+
+    /**
+     * Runs the rollover resolver when — and only when — it can act, returning its result or
+     * {@link Optional#empty()} to signal "leave confirmed_reading exactly as the caller had it".
+     *
+     * <p>The gate is kept tight for Glific-timeout hygiene: the overwhelming majority of readings have no
+     * rollover, so the common path must add <em>zero</em> extra DB round-trips — the trailing-history fetch
+     * happens only after every cheap in-memory check passes (never eagerly, relying on an in-{@code resolve}
+     * short-circuit that runs after the query). The gate also requires the tenant schema to be migrated with
+     * {@code confirmed_reading_source} (V35): on a pre-migration tenant the provenance could not be recorded,
+     * so overriding confirmed_reading would be indistinguishable from an unmodified row — we skip instead,
+     * keeping behaviour byte-identical to legacy. On the manual/confirmed path {@code ocrResult} is null, so
+     * the gate is false and the caller's value is untouched.
+     */
+    private Optional<RolloverResolutionService.ResolvedReading> resolveRolloverIfApplicable(
+            String schemaName,
+            CreateReadingRequest request,
+            FlowVisionResult ocrResult,
+            boolean isMeterReplaced,
+            Optional<TelemetryConfirmedReadingSnapshot> latestSnapshotOpt) {
+        if (!rolloverResolutionService.isEnabled()
+                || ocrResult == null
+                || !ocrResult.isHasRollover()
+                || ocrResult.getRolloverPositions() == null
+                || ocrResult.getRolloverPositions().isEmpty()
+                || isMeterReplaced
+                || latestSnapshotOpt.isEmpty()
+                || !telemetryTenantRepository.supportsConfirmedReadingSource(schemaName)) {
+            return Optional.empty();
+        }
+        List<DailyConfirmedReading> dailyHistory = telemetryTenantRepository
+                .findRecentDailyConfirmedReadings(schemaName, request.getSchemeId(), null, ROLLOVER_HISTORY_DAYS);
+        return Optional.of(rolloverResolutionService.resolve(
+                ocrResult,
+                dailyHistory,
+                latestSnapshotOpt.get().confirmedReading(),
+                isMeterReplaced));
     }
 
     private FlowVisionResult extractReading(String readingUrl, FlowVisionRetryMode flowVisionRetryMode) {
@@ -503,7 +585,8 @@ public class BfmReadingService {
                 schemaName,
                 latestReading.id(),
                 confirmedReading,
-                operator.id()
+                operator.id(),
+                RolloverResolutionService.manualConfirmSource(confirmedReading, latestReading.confirmedReading())
         );
 
         publishConfirmedReadingUpdate(operator.tenantId(), latestReading, confirmedReading);
@@ -535,7 +618,8 @@ public class BfmReadingService {
                 schemaName,
                 reading.id(),
                 confirmedReading,
-                reading.createdBy() != null ? reading.createdBy() : 1L
+                reading.createdBy() != null ? reading.createdBy() : 1L,
+                RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading())
         );
 
         Integer tenantId = null;

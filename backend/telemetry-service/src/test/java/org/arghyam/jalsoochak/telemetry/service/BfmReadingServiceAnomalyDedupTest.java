@@ -66,7 +66,8 @@ class BfmReadingServiceAnomalyDedupTest {
                 new ObjectMapper(),
                 glificOperatorContextService,
                 null,
-                readingChannelResolver
+                readingChannelResolver,
+                new RolloverResolutionService(false, new ObjectMapper())
         );
     }
 
