@@ -381,7 +381,7 @@ class TenantStaffServiceImplTest {
             UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             TenantUserRecord noUuidUser = new TenantUserRecord(
-                    10L, 1, "919876543210", "officer@test.com", 3L, "SECTION_OFFICER",
+                    10L, 1, "91XXXXXXXXXX", "officer@test.com", 3L, "SECTION_OFFICER",
                     "Officer", null, TenantUserStatus.ACTIVE.code, null);
             when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(noUuidUser));
             when(userCommonRepository.findUserTypeIdByName("SUB_DIVISIONAL_OFFICER")).thenReturn(Optional.of(4));
