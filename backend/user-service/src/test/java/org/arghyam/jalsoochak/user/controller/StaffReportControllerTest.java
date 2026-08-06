@@ -124,7 +124,7 @@ class StaffReportControllerTest {
                     .thenReturn(sampleResponse("CSV", false));
 
             String body = objectMapper.writeValueAsString(
-                    new StaffReportRequestDTO(List.of("DISTRICT_OFFICER"), "ACTIVE", "anita"));
+                    new StaffReportRequestDTO(List.of("SUB_DIVISIONAL_OFFICER"), "ACTIVE", "anita"));
 
             mockMvc.perform(post(URL)
                             .param("tenantCode", "mp")
@@ -135,7 +135,7 @@ class StaffReportControllerTest {
 
             ArgumentCaptor<StaffReportRequestDTO> cap = ArgumentCaptor.forClass(StaffReportRequestDTO.class);
             verify(staffReportService).generate(eq("mp"), eq(ReportFormat.CSV), cap.capture(), any());
-            assertThat(cap.getValue().roles()).containsExactly("DISTRICT_OFFICER");
+            assertThat(cap.getValue().roles()).containsExactly("SUB_DIVISIONAL_OFFICER");
             assertThat(cap.getValue().status()).isEqualTo("ACTIVE");
             assertThat(cap.getValue().name()).isEqualTo("anita");
         }

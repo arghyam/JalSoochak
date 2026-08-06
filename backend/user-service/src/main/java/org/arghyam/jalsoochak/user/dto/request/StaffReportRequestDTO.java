@@ -13,7 +13,7 @@ import java.util.List;
  */
 @Schema(description = "Filters that scope the staff export (same as listStaff)")
 public record StaffReportRequestDTO(
-        @Schema(description = "Roles to include (case-insensitive)", example = "[\"DISTRICT_OFFICER\"]")
+        @Schema(description = "Roles to include (case-insensitive)", example = "[\"SUB_DIVISIONAL_OFFICER\"]")
         List<String> roles,
 
         @Schema(description = "Status filter — ACTIVE, INACTIVE, or numeric code", example = "ACTIVE")
