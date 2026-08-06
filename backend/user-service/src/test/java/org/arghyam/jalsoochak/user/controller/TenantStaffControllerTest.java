@@ -107,23 +107,23 @@ class TenantStaffControllerTest {
         @DisplayName("returns 200 with updated staff on valid request")
         void returns200() throws Exception {
             TenantStaffResponseDTO updated = TenantStaffResponseDTO.builder()
-                    .id(10L).role("DISTRICT_OFFICER").build();
+                    .id(10L).role("SUB_DIVISIONAL_OFFICER").build();
             when(tenantStaffService.updateStaffRole(eq(10L), any(), any())).thenReturn(updated);
 
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             mockMvc.perform(put("/api/v1/tenant/user/staff/10/role")
                             .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.role").value("DISTRICT_OFFICER"));
+                    .andExpect(jsonPath("$.data.role").value("SUB_DIVISIONAL_OFFICER"));
         }
 
         @Test
         @DisplayName("returns 400 for invalid path variable (non-positive)")
         void returns400ForNonPositiveId() throws Exception {
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             mockMvc.perform(put("/api/v1/tenant/user/staff/0/role")
                             .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
@@ -138,7 +138,7 @@ class TenantStaffControllerTest {
             when(tenantStaffService.updateStaffRole(any(), any(), any()))
                     .thenThrow(new ForbiddenAccessException("forbidden"));
 
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             mockMvc.perform(put("/api/v1/tenant/user/staff/10/role")
                             .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))
@@ -153,7 +153,7 @@ class TenantStaffControllerTest {
             when(tenantStaffService.updateStaffRole(any(), any(), any()))
                     .thenThrow(new ResourceNotFoundException("not found"));
 
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             mockMvc.perform(put("/api/v1/tenant/user/staff/10/role")
                             .with(mockJwt("kc-uuid", "ROLE_STATE_ADMIN"))

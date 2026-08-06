@@ -58,7 +58,6 @@ class TenantStaffServiceImplTest {
     @Mock private TenantStaffRepository tenantStaffRepository;
     @Mock private UserTenantRepository userTenantRepository;
     @Mock private UserCommonRepository userCommonRepository;
-    @Mock private KeycloakAdminHelper keycloakAdminHelper;
     @Mock private KeycloakProvider keycloakProvider;
     @Mock private UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     @Mock private StaffKeycloakService staffKeycloakService;
@@ -74,10 +73,10 @@ class TenantStaffServiceImplTest {
     void setUp() {
         service = new TenantStaffServiceImpl(
                 tenantStaffRepository, userTenantRepository, userCommonRepository,
-                keycloakAdminHelper, keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService,
+                keycloakProvider, userAnalyticsEventPublisher, staffKeycloakService,
                 dataVersionRepository);
         ReflectionTestUtils.setField(service, "allowedUpdateRoles",
-                List.of("SECTION_OFFICER", "DISTRICT_OFFICER"));
+                List.of("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER"));
     }
 
     // --- listStaff ---
@@ -130,16 +129,16 @@ class TenantStaffServiceImplTest {
             TenantStaffRepository.StaffPage staffPage = new TenantStaffRepository.StaffPage(List.of(), 0L);
             when(tenantStaffRepository.listStaffPage(
                     eq("tenant_mp"),
-                    eq(List.of("section_officer", "district_officer")),
+                    eq(List.of("section_officer", "sub_divisional_officer")),
                     any(), any(), any(), any(), anyInt(), anyInt()))
                     .thenReturn(staffPage);
 
             service.listStaff("mp", 0, 20, "id", "desc",
-                    List.of("SECTION_OFFICER,DISTRICT_OFFICER"), null, null);
+                    List.of("SECTION_OFFICER,SUB_DIVISIONAL_OFFICER"), null, null);
 
             verify(tenantStaffRepository).listStaffPage(
                     eq("tenant_mp"),
-                    eq(List.of("section_officer", "district_officer")),
+                    eq(List.of("section_officer", "sub_divisional_officer")),
                     any(), any(), any(), any(), anyInt(), anyInt());
         }
 
@@ -289,7 +288,7 @@ class TenantStaffServiceImplTest {
         @DisplayName("throws ResourceNotFoundException when user not found")
         void throwsWhenUserNotFound() {
             Authentication auth = callerAuth("MP");
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
             when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
@@ -329,13 +328,13 @@ class TenantStaffServiceImplTest {
         @DisplayName("successfully updates role and returns updated staff DTO")
         void updatesRoleSuccessfully() {
             Authentication auth = callerAuth("MP");
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             TenantStaffResponseDTO updated = TenantStaffResponseDTO.builder()
-                    .id(10L).role("DISTRICT_OFFICER").build();
+                    .id(10L).role("SUB_DIVISIONAL_OFFICER").build();
 
             when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
-            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            when(userCommonRepository.findUserTypeIdByName("SUB_DIVISIONAL_OFFICER")).thenReturn(Optional.of(4));
             when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.of(1));
             when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L)).thenReturn(1);
             when(tenantStaffRepository.findStaffById("tenant_mp", 10L)).thenReturn(Optional.of(updated));
@@ -343,9 +342,9 @@ class TenantStaffServiceImplTest {
 
             TenantStaffResponseDTO result = service.updateStaffRole(10L, req, auth);
 
-            assertThat(result.role()).isEqualTo("DISTRICT_OFFICER");
+            assertThat(result.role()).isEqualTo("SUB_DIVISIONAL_OFFICER");
             verify(userTenantRepository).findUserById("tenant_mp", 10L);
-            verify(userCommonRepository).findUserTypeIdByName("DISTRICT_OFFICER");
+            verify(userCommonRepository).findUserTypeIdByName("SUB_DIVISIONAL_OFFICER");
             verify(userCommonRepository).findTenantIdByStateCode("mp");
             verify(userTenantRepository).updateUserRole("tenant_mp", 10L, 4L);
             verify(tenantStaffRepository).findStaffById("tenant_mp", 10L);
@@ -356,13 +355,13 @@ class TenantStaffServiceImplTest {
         @DisplayName("skips analytics event and logs warning when tenantId not found for stateCode")
         void skipsAnalyticsWhenTenantIdNotFound() {
             Authentication auth = callerAuth("MP");
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             TenantStaffResponseDTO updated = TenantStaffResponseDTO.builder()
-                    .id(10L).role("DISTRICT_OFFICER").build();
+                    .id(10L).role("SUB_DIVISIONAL_OFFICER").build();
 
             when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
-            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            when(userCommonRepository.findUserTypeIdByName("SUB_DIVISIONAL_OFFICER")).thenReturn(Optional.of(4));
             when(userCommonRepository.findTenantIdByStateCode("mp")).thenReturn(Optional.empty()); // no tenant found
             when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L)).thenReturn(1);
             when(tenantStaffRepository.findStaffById("tenant_mp", 10L)).thenReturn(Optional.of(updated));
@@ -370,7 +369,7 @@ class TenantStaffServiceImplTest {
 
             TenantStaffResponseDTO result = service.updateStaffRole(10L, req, auth);
 
-            assertThat(result.role()).isEqualTo("DISTRICT_OFFICER");
+            assertThat(result.role()).isEqualTo("SUB_DIVISIONAL_OFFICER");
             verify(userAnalyticsEventPublisher, never()).publishStaffUserUpdatedAfterCommit(
                     anyLong(), anyInt(), anyInt(), anyString(), anyString(), anyInt());
         }
@@ -379,13 +378,13 @@ class TenantStaffServiceImplTest {
         @DisplayName("throws IllegalStateException when user has no Keycloak UUID")
         void throwsWhenKeycloakUuidMissing() {
             Authentication auth = callerAuth("MP");
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             TenantUserRecord noUuidUser = new TenantUserRecord(
                     10L, 1, "919876543210", "officer@test.com", 3L, "SECTION_OFFICER",
                     "Officer", null, TenantUserStatus.ACTIVE.code, null);
             when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(noUuidUser));
-            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            when(userCommonRepository.findUserTypeIdByName("SUB_DIVISIONAL_OFFICER")).thenReturn(Optional.of(4));
 
             assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
                     .isInstanceOf(IllegalStateException.class)
@@ -396,10 +395,10 @@ class TenantStaffServiceImplTest {
         @DisplayName("rolls back the Keycloak user_type attribute when an exception occurs mid-update, then rethrows")
         void rollsBackKeycloakOnException() {
             Authentication auth = callerAuth("MP");
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
-            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            when(userCommonRepository.findUserTypeIdByName("SUB_DIVISIONAL_OFFICER")).thenReturn(Optional.of(4));
             UserResource userResource = mockKeycloakChain("kc-uuid");
             // Simulate failure at DB role update step
             when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L))
@@ -421,10 +420,10 @@ class TenantStaffServiceImplTest {
         @DisplayName("throws ResourceNotFoundException when DB role update affects 0 rows")
         void throwsWhenDbUpdateAffectsZeroRows() {
             Authentication auth = callerAuth("MP");
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             when(userTenantRepository.findUserById("tenant_mp", 10L)).thenReturn(Optional.of(SECTION_OFFICER));
-            when(userCommonRepository.findUserTypeIdByName("DISTRICT_OFFICER")).thenReturn(Optional.of(4));
+            when(userCommonRepository.findUserTypeIdByName("SUB_DIVISIONAL_OFFICER")).thenReturn(Optional.of(4));
             when(userTenantRepository.updateUserRole("tenant_mp", 10L, 4L)).thenReturn(0); // 0 rows affected
             mockKeycloakChain("kc-uuid");
 

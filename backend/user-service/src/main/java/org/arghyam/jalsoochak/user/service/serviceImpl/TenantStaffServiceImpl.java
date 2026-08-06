@@ -18,7 +18,6 @@ import org.arghyam.jalsoochak.user.repository.TenantStaffRepository;
 import org.arghyam.jalsoochak.user.repository.TenantUserRecord;
 import org.arghyam.jalsoochak.user.repository.UserCommonRepository;
 import org.arghyam.jalsoochak.user.repository.UserTenantRepository;
-import org.arghyam.jalsoochak.user.service.KeycloakAdminHelper;
 import org.arghyam.jalsoochak.user.service.StaffKeycloakService;
 import org.arghyam.jalsoochak.user.service.TenantStaffService;
 import org.arghyam.jalsoochak.user.util.SecurityUtils;
@@ -45,13 +44,12 @@ public class TenantStaffServiceImpl implements TenantStaffService {
     private final TenantStaffRepository tenantStaffRepository;
     private final UserTenantRepository userTenantRepository;
     private final UserCommonRepository userCommonRepository;
-    private final KeycloakAdminHelper keycloakAdminHelper;
     private final KeycloakProvider keycloakProvider;
     private final UserAnalyticsEventPublisher userAnalyticsEventPublisher;
     private final StaffKeycloakService staffKeycloakService;
     private final DataVersionRepository dataVersionRepository;
 
-    @Value("${staff.allowed-update-roles:SECTION_OFFICER,DISTRICT_OFFICER}")
+    @Value("${staff.allowed-update-roles:SECTION_OFFICER,SUB_DIVISIONAL_OFFICER}")
     private List<String> allowedUpdateRoles;
 
     @Override
