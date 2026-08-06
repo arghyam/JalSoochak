@@ -393,7 +393,7 @@ class TenantStaffServiceImplTest {
         }
 
         @Test
-        @DisplayName("compensates Keycloak roles and attributes when an exception occurs mid-update, then rethrows")
+        @DisplayName("rolls back the Keycloak user_type attribute when an exception occurs mid-update, then rethrows")
         void rollsBackKeycloakOnException() {
             Authentication auth = callerAuth("MP");
             UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
@@ -408,10 +408,6 @@ class TenantStaffServiceImplTest {
             assertThatThrownBy(() -> service.updateStaffRole(10L, req, auth))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("DB error");
-
-            // Verify compensation: old role re-assigned and new role removed
-            verify(keycloakAdminHelper).assignRoleToUser("kc-uuid", "SECTION_OFFICER");
-            verify(keycloakAdminHelper).removeRoleFromUser("kc-uuid", "DISTRICT_OFFICER");
 
             // Verify Keycloak attribute rollback: user_type restored to original role
             ArgumentCaptor<UserRepresentation> repCaptor =

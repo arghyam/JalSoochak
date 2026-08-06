@@ -122,9 +122,8 @@ public class TenantStaffServiceImpl implements TenantStaffService {
         var usersResource = keycloakProvider.getAdminInstance().realm(keycloakProvider.getRealm()).users();
 
         try {
-            keycloakAdminHelper.removeRoleFromUser(keycloakUuid, currentRole);
-            keycloakAdminHelper.assignRoleToUser(keycloakUuid, request.newRole());
-
+            // Staff roles are attribute-based (user_type), not Keycloak realm roles, so the role
+            // change is applied by overwriting the user_type attribute below — no realm-role assignment.
             var userResource = usersResource.get(keycloakUuid);
             UserRepresentation rep = userResource.toRepresentation();
             Map<String, List<String>> attrs = new HashMap<>(
@@ -153,16 +152,6 @@ public class TenantStaffServiceImpl implements TenantStaffService {
             return tenantStaffRepository.findStaffById(schema, id)
                     .orElseThrow(() -> new ResourceNotFoundException("Staff not found after update: " + id));
         } catch (Exception e) {
-            try {
-                keycloakAdminHelper.assignRoleToUser(keycloakUuid, currentRole);
-            } catch (Exception ce) {
-                log.error("Compensation failed - assignRole {} for user {}: {}", currentRole, keycloakUuid, ce.getMessage(), ce);
-            }
-            try {
-                keycloakAdminHelper.removeRoleFromUser(keycloakUuid, request.newRole());
-            } catch (Exception ce) {
-                log.error("Compensation failed - removeRole {} for user {}: {}", request.newRole(), keycloakUuid, ce.getMessage(), ce);
-            }
             try {
                 var userResource = usersResource.get(keycloakUuid);
                 UserRepresentation rep = userResource.toRepresentation();
