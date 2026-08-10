@@ -143,6 +143,8 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(false, response.getBody().isSuccess());
         assertNotNull(response.getBody().getData());
         assertEquals("RETRY", response.getBody().getData().getQualityStatus());
+        assertEquals("Meter reading service is temporarily unavailable. Please try again shortly.",
+                response.getBody().getData().getMessage());
         assertNull(response.getBody().getData().getErrorCode());
         assertNull(response.getBody().getData().getCorrelationId());
     }

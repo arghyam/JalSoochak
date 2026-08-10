@@ -173,6 +173,7 @@ public class SingleTenantTelemetryController {
             // A transient OCR outage is signalled by qualityStatus=RETRY (success=false). It is a server-side,
             // retryable condition — not a client error — so surface it as 503 Service Unavailable, not 400.
             boolean retry = response != null
+                    && !response.isSuccess()
                     && "RETRY".equalsIgnoreCase(response.getQualityStatus());
             boolean rejected = response == null
                     || !response.isSuccess()
