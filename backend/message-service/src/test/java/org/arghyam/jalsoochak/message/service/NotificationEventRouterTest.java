@@ -979,8 +979,12 @@ class NotificationEventRouterTest {
 
     @Test
     void route_sendsLoginOtp_viaSms_whenDeliveryChannelIsSms() {
+        final boolean[] subscribed = {false};
         when(smsSender.sendOtp("919876500020", "123456", 5))
-                .thenReturn(reactor.core.publisher.Mono.just(true));
+                .thenReturn(Mono.defer(() -> {
+                    subscribed[0] = true;
+                    return Mono.just(true);
+                }));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
@@ -988,13 +992,18 @@ class NotificationEventRouterTest {
                 """);
 
         verify(smsSender).sendOtp("919876500020", "123456", 5);
+        assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
         verifyNoInteractions(whatsAppChannel);
     }
 
     @Test
     void route_sendsLoginOtp_viaSms_defaultsExpiryToFive_whenExpiryMinutesIsZero() {
+        final boolean[] subscribed = {false};
         when(smsSender.sendOtp("919876500021", "654321", 5))
-                .thenReturn(reactor.core.publisher.Mono.just(true));
+                .thenReturn(Mono.defer(() -> {
+                    subscribed[0] = true;
+                    return Mono.just(true);
+                }));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"654321",
@@ -1002,12 +1011,17 @@ class NotificationEventRouterTest {
                 """);
 
         verify(smsSender).sendOtp("919876500021", "654321", 5);
+        assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
     }
 
     @Test
     void route_sendsLoginOtp_viaSms_defaultsExpiryToFive_whenExpiryMinutesIsNegative() {
+        final boolean[] subscribed = {false};
         when(smsSender.sendOtp("919876500022", "111222", 5))
-                .thenReturn(reactor.core.publisher.Mono.just(true));
+                .thenReturn(Mono.defer(() -> {
+                    subscribed[0] = true;
+                    return Mono.just(true);
+                }));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"111222",
@@ -1015,6 +1029,7 @@ class NotificationEventRouterTest {
                 """);
 
         verify(smsSender).sendOtp("919876500022", "111222", 5);
+        assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
     }
 
     @Test

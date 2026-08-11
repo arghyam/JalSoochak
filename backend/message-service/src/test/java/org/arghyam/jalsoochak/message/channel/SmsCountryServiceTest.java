@@ -173,4 +173,17 @@ class SmsCountryServiceTest {
                         "Your OTP for Jalsoochak login is 654321. " +
                         "Do not share this OTP. Valid for 10 minutes.")));
     }
+
+    @Test
+    void sendOtp_emptyResponseBody_returnsFalse() {
+        // SMSCountry returns HTTP 200 with no body — switchIfEmpty should handle this
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")));
+
+        boolean result = service.sendOtp("919876543210", "123456", 5).block();
+
+        assertThat(result).isFalse();
+    }
 }

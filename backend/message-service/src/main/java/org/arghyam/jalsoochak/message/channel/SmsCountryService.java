@@ -134,6 +134,10 @@ public class SmsCountryService implements SmsSender {
                     log.debug("[SMSCountry] SMS OTP queued for phone={}", phoneNumber);
                     return Mono.just(true);
                 })
+                .switchIfEmpty(Mono.defer(() -> {
+                    log.error("[SMSCountry] SMS OTP delivery failed: empty response body");
+                    return Mono.just(false);
+                }))
                 .onErrorResume(WebClientResponseException.class, e -> {
                     if (e.getStatusCode().is5xxServerError()) {
                         // Transient server error — propagate error signal
