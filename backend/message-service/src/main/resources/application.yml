@@ -87,6 +87,14 @@ notification:
       from-address: ${MAIL_FROM_EMAIL:noreply@example.com}
       from-name: ${MAIL_FROM_NAME:Jalsoochak}
 
+  # ── Transactional login OTP SMS ────────────────────────────────────────────
+  # Switch providers by changing 'provider'. No code changes required — add a new
+  # SmsSender implementation annotated with
+  # @ConditionalOnProperty(name = "notification.sms.provider", havingValue = "<name>").
+  # provider: smscountry → requires SMSCOUNTRY_* env vars (default)
+  sms:
+    provider: ${SMS_PROVIDER:smscountry}
+
   # ── Transactional account emails (invite, reinvite, password-reset) ────────
   # Switch providers by changing 'provider'. No code changes required.
   # provider: smtp    → requires spring.mail.* block to be uncommented

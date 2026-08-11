@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
-import org.arghyam.jalsoochak.message.channel.SmsCountryService;
+import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
@@ -103,7 +103,7 @@ public class NotificationEventRouter {
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
     private final GlificWhatsAppService glificWhatsAppService;
-    private final SmsCountryService smsCountryService;
+    private final SmsSender smsSender;
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
@@ -507,7 +507,7 @@ public class NotificationEventRouter {
             }
 
             // Use reactive flow to avoid blocking the Kafka listener thread
-            smsCountryService.sendOtpReactive(phone, otp, expiryMinutes)
+            smsSender.sendOtp(phone, otp, expiryMinutes)
                     .doOnNext(sent -> {
                         if (sent) {
                             log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");

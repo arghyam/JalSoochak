@@ -66,7 +66,7 @@ class SmsCountryServiceTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody(SUCCESS_RESPONSE)));
 
-        boolean result = service.sendOtp("919876543210", "123456", 5);
+        boolean result = service.sendOtp("919876543210", "123456", 5).block();
 
         assertThat(result).isTrue();
 
@@ -94,7 +94,7 @@ class SmsCountryServiceTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"ApiId\":\"abc\",\"Success\":\"True\",\"Message\":\"Messages Queued\",\"MessageUUID\":\"abc\"}")));
 
-        boolean result = service.sendOtp("919876543210", "123456", 5);
+        boolean result = service.sendOtp("919876543210", "123456", 5).block();
 
         assertThat(result).isTrue();
     }
@@ -107,7 +107,7 @@ class SmsCountryServiceTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"ApiId\":\"abc\",\"Success\":false,\"Message\":\"Invalid sender ID\"}")));
 
-        boolean result = service.sendOtp("919876543210", "123456", 5);
+        boolean result = service.sendOtp("919876543210", "123456", 5).block();
 
         assertThat(result).isFalse();
     }
@@ -120,7 +120,7 @@ class SmsCountryServiceTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"Message\":\"Unauthorized\"}")));
 
-        boolean result = service.sendOtp("919876543210", "999999", 5);
+        boolean result = service.sendOtp("919876543210", "999999", 5).block();
 
         assertThat(result).isFalse();
     }
@@ -130,7 +130,7 @@ class SmsCountryServiceTest {
         wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
                 .willReturn(aResponse().withStatus(500)));
 
-        assertThatThrownBy(() -> service.sendOtp("919876543210", "999999", 5))
+        assertThatThrownBy(() -> service.sendOtp("919876543210", "999999", 5).block())
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("SMSCountry OTP send failed");
     }
@@ -139,7 +139,7 @@ class SmsCountryServiceTest {
     void sendOtp_dryRun_noHttpCallMade() {
         ReflectionTestUtils.setField(service, "dryRun", true);
 
-        boolean result = service.sendOtp("919876543210", "123456", 5);
+        boolean result = service.sendOtp("919876543210", "123456", 5).block();
 
         assertThat(result).isTrue();
         wireMockServer.verify(0, postRequestedFor(urlEqualTo(SMS_PATH)));
@@ -153,7 +153,7 @@ class SmsCountryServiceTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"ApiId\":\"abc\",\"Message\":\"Some message\"}")));
 
-        boolean result = service.sendOtp("919876543210", "123456", 5);
+        boolean result = service.sendOtp("919876543210", "123456", 5).block();
 
         assertThat(result).isFalse();
     }
@@ -166,7 +166,7 @@ class SmsCountryServiceTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody(SUCCESS_RESPONSE)));
 
-        service.sendOtp("919876543210", "654321", 10);
+        service.sendOtp("919876543210", "654321", 10).block();
 
         wireMockServer.verify(postRequestedFor(urlEqualTo(SMS_PATH))
                 .withRequestBody(containing(

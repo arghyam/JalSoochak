@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.message.channel;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -22,10 +23,14 @@ import reactor.core.publisher.Mono;
  * <p>Auth: HTTP Basic Auth using authKey:authToken, Base64-encoded.</p>
  * <p>The message text follows the DLT-approved template:
  * "Your OTP for Jalsoochak login is {otp}. Do not share this OTP. Valid for {expiryMinutes} minutes."</p>
+ *
+ * <p>This is the {@link SmsSender} adapter selected when
+ * {@code notification.sms.provider=smscountry} (the default).</p>
  */
 @Service
+@ConditionalOnProperty(name = "notification.sms.provider", havingValue = "smscountry", matchIfMissing = true)
 @Slf4j
-public class SmsCountryService {
+public class SmsCountryService implements SmsSender {
 
     private static final String MESSAGE_TEMPLATE =
             "Your OTP for Jalsoochak login is %s. Do not share this OTP. Valid for %d minutes.";
@@ -61,23 +66,7 @@ public class SmsCountryService {
     }
 
     /**
-     * Sends an OTP SMS to the given phone number (blocking version).
-     *
-     * @param phoneNumber  E.164 format without '+' (e.g., "919876543210")
-     * @param otp          the one-time password string
-     * @param expiryMinutes how long the OTP is valid
-     * @return {@code true} if the SMS was accepted by SMSCountry; {@code false} on a non-retryable failure
-     * @throws RuntimeException on transient errors that should trigger Kafka retry
-     * @deprecated Use {@link #sendOtpReactive(String, String, int)} for non-blocking reactive flow
-     */
-    @Deprecated
-    public boolean sendOtp(String phoneNumber, String otp, int expiryMinutes) {
-        return sendOtpReactive(phoneNumber, otp, expiryMinutes)
-                .block(Duration.ofSeconds(30));
-    }
-
-    /**
-     * Sends an OTP SMS to the given phone number (reactive version).
+     * Sends an OTP SMS to the given phone number via the SMSCountry REST API.
      *
      * <p>This method returns a {@code Mono<Boolean>} that completes with {@code true} if the SMS
      * was accepted by SMSCountry, {@code false} on a non-retryable failure (4xx API rejection),
@@ -89,7 +78,8 @@ public class SmsCountryService {
      * @return a {@code Mono} emitting {@code true} on success, {@code false} on non-retryable failure,
      *         or an error signal for retryable failures
      */
-    public Mono<Boolean> sendOtpReactive(String phoneNumber, String otp, int expiryMinutes) {
+    @Override
+    public Mono<Boolean> sendOtp(String phoneNumber, String otp, int expiryMinutes) {
         if (dryRun) {
             log.info("[SMSCountry] Dry-run mode: skipping SMS OTP send");
             log.debug("[SMSCountry] Dry-run: phone={} otp={}", phoneNumber, otp);
