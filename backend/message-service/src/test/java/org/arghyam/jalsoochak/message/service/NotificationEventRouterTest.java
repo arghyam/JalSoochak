@@ -23,7 +23,7 @@ import java.sql.ResultSet;
 import java.util.List;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
-import org.arghyam.jalsoochak.message.channel.SmsCountryService;
+import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
 import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
@@ -80,7 +80,7 @@ class NotificationEventRouterTest {
     private JdbcTemplate jdbcTemplate;
 
     @Mock
-    private SmsCountryService smsCountryService;
+    private SmsSender smsSender;
 
     @Mock
     private PiiEncryptionService piiEncryptionService;
@@ -979,42 +979,57 @@ class NotificationEventRouterTest {
 
     @Test
     void route_sendsLoginOtp_viaSms_whenDeliveryChannelIsSms() {
-        when(smsCountryService.sendOtpReactive("919876500020", "123456", 5))
-                .thenReturn(reactor.core.publisher.Mono.just(true));
+        final boolean[] subscribed = {false};
+        when(smsSender.sendOtp("919876500020", "123456", 5))
+                .thenReturn(Mono.defer(() -> {
+                    subscribed[0] = true;
+                    return Mono.just(true);
+                }));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
                  "deliveryChannel":"SMS","officerPhoneNumber":"919876500020","expiryMinutes":5}
                 """);
 
-        verify(smsCountryService).sendOtpReactive("919876500020", "123456", 5);
+        verify(smsSender).sendOtp("919876500020", "123456", 5);
+        assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
         verifyNoInteractions(whatsAppChannel);
     }
 
     @Test
     void route_sendsLoginOtp_viaSms_defaultsExpiryToFive_whenExpiryMinutesIsZero() {
-        when(smsCountryService.sendOtpReactive("919876500021", "654321", 5))
-                .thenReturn(reactor.core.publisher.Mono.just(true));
+        final boolean[] subscribed = {false};
+        when(smsSender.sendOtp("919876500021", "654321", 5))
+                .thenReturn(Mono.defer(() -> {
+                    subscribed[0] = true;
+                    return Mono.just(true);
+                }));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"654321",
                  "deliveryChannel":"SMS","officerPhoneNumber":"919876500021","expiryMinutes":0}
                 """);
 
-        verify(smsCountryService).sendOtpReactive("919876500021", "654321", 5);
+        verify(smsSender).sendOtp("919876500021", "654321", 5);
+        assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
     }
 
     @Test
     void route_sendsLoginOtp_viaSms_defaultsExpiryToFive_whenExpiryMinutesIsNegative() {
-        when(smsCountryService.sendOtpReactive("919876500022", "111222", 5))
-                .thenReturn(reactor.core.publisher.Mono.just(true));
+        final boolean[] subscribed = {false};
+        when(smsSender.sendOtp("919876500022", "111222", 5))
+                .thenReturn(Mono.defer(() -> {
+                    subscribed[0] = true;
+                    return Mono.just(true);
+                }));
 
         router.route("""
                 {"eventType":"SEND_LOGIN_OTP","OTP":"111222",
                  "deliveryChannel":"SMS","officerPhoneNumber":"919876500022","expiryMinutes":-1}
                 """);
 
-        verify(smsCountryService).sendOtpReactive("919876500022", "111222", 5);
+        verify(smsSender).sendOtp("919876500022", "111222", 5);
+        assertThat(subscribed[0]).as("sendOtp Mono should be subscribed").isTrue();
     }
 
     @Test
@@ -1024,7 +1039,7 @@ class NotificationEventRouterTest {
                  "deliveryChannel":"SMS","officerPhoneNumber":"","expiryMinutes":5}
                 """);
 
-        verifyNoInteractions(smsCountryService);
+        verifyNoInteractions(smsSender);
     }
 
     @Test
@@ -1034,7 +1049,7 @@ class NotificationEventRouterTest {
                  "deliveryChannel":"","officerPhoneNumber":"919876500023"}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, smsCountryService, glificWhatsAppService);
+        verifyNoInteractions(whatsAppChannel, smsSender, glificWhatsAppService);
     }
 
     @Test
@@ -1044,7 +1059,7 @@ class NotificationEventRouterTest {
                  "deliveryChannel":"TELEGRAM","officerPhoneNumber":"919876500024"}
                 """);
 
-        verifyNoInteractions(whatsAppChannel, smsCountryService, glificWhatsAppService);
+        verifyNoInteractions(whatsAppChannel, smsSender, glificWhatsAppService);
     }
 
     // ────────────── SEND_INVITE_EMAIL — STATE_ADMIN with stateName ──────────────
