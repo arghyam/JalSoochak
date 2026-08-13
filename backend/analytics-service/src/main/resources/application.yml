@@ -104,6 +104,15 @@ logging:
   pattern:
     level: "service=${spring.application.name} %5p"
 
+# Daily Water Service Situation Report (officer daily PDF) — the KPI computation side.
+daily-report:
+  sections:
+    outage-details:
+      # Priority Actions + Reasons for No Water Supply. Hidden by default in the rendered PDF
+      # (message-service reads the same property / env var), so their two queries are skipped here
+      # rather than run for output no one sees. Flip both services together to restore the sections.
+      enabled: ${DAILY_REPORT_OUTAGE_SECTIONS_ENABLED:false}
+
 # single tenant mode is disabled by default
 analytics:
   single-tenant-mode: ${SINGLE_TENANT_MODE:false}

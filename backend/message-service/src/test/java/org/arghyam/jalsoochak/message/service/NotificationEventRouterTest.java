@@ -1291,6 +1291,8 @@ class NotificationEventRouterTest {
     @Test
     @SuppressWarnings("unchecked")
     void handleDailyReport_enrichesPriorityRowsFromOperationalSchema() throws Exception {
+        // Priority Actions is hidden by default; enrichment only runs when the section is restored.
+        ReflectionTestUtils.setField(router, "dailyReportOutageDetailSectionsEnabled", true);
         String json = """
                 {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
                  "officerUserId":500,"officerUserType":"SECTION_OFFICER",
@@ -1369,5 +1371,44 @@ class NotificationEventRouterTest {
         assertThat(row.getJalMitraMobiles()).isEqualTo("919000000001, 919000000002");
         assertThat(row.getIssue()).isEqualTo("Pump Failure");
         assertThat(row.getRemarks()).isEqualTo("No water supply for past 5 days");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void handleDailyReport_withOutageSectionsDisabled_skipsPriorityRowEnrichment() throws Exception {
+        // Default state: the Priority Actions section is hidden, so no rows are built — and crucially
+        // the Jal Mitra name/mobile lookups (PII decryption) are never performed.
+        String json = """
+                {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+                 "officerUserId":500,"officerUserType":"SECTION_OFFICER",
+                 "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
+                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
+                         "priorityActions":[{"schemeId":7,"issue":"Pump Failure","daysNoSupply":5}]}}
+                """;
+
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id = ?")),
+                any(RowMapper.class), eq(500L)))
+                .thenAnswer(inv -> {
+                    RowMapper<Object> rm = inv.getArgument(1);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getObject("whatsapp_connection_id", Long.class)).thenReturn(12345L);
+                    when(rs.getString("title")).thenReturn("enc-officer");
+                    when(rs.getString("phone_number")).thenReturn(null);
+                    return List.of(rm.mapRow(rs, 0));
+                });
+        when(piiEncryptionService.safeDecrypt("enc-officer")).thenReturn("Binod");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("f.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER")).thenReturn(true);
+
+        router.route(json);
+
+        ArgumentCaptor<List<DailyReportPriorityRow>> cap = ArgumentCaptor.forClass(List.class);
+        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), cap.capture(), anyList());
+        assertThat(cap.getValue()).isEmpty();
+        verify(jdbcTemplate, never()).query(argThat(sql -> sql != null && sql.contains("PUMP_OPERATOR")),
+                any(RowMapper.class), eq(7));
     }
 }

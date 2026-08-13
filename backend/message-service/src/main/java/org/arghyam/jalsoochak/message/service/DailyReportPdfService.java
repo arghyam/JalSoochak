@@ -26,15 +26,25 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Renders the Daily Water Service Situation Report PDF (Apache PDFBox) for one officer.
  *
- * <p>Layout mirrors {@code JalSoochak Daily Water Service Situation Report.docx} for the
- * SECTION_OFFICER role: header, a bordered Summary table (Yesterday vs Previous Day + trend),
- * Priority Actions, Reasons for No Water Supply, and Anomalous Submissions. All tables have cell
- * borders; the whole document is drawn with an embedded DejaVu Sans font so the trend arrows
- * ({@code ▲}/{@code ▼}) and dash ({@code —}) render correctly.</p>
+ * <p>Layout mirrors {@code JalSoochak Daily Water Service Situation Report.docx}: a centred title,
+ * bold-labelled header lines, then the numbered sections. All tables have cell borders; the whole
+ * document is drawn with an embedded DejaVu Sans font so the trend arrows ({@code ▲}/{@code ▼}) and
+ * dash ({@code —}) render correctly.</p>
+ *
+ * <p>Sections differ by role and by {@link #outageDetailSectionsEnabled}. With the (default) outage
+ * sections hidden:</p>
+ * <ul>
+ *   <li><b>SECTION_OFFICER</b> — 1. Summary (the KPI table), 2. Anomalous Submissions.</li>
+ *   <li><b>SUB_DIVISIONAL_OFFICER</b> — 1. Summary (the per-Section-Officer breakdown table),
+ *       2. Key Performance Indicators (the KPI table), 3. Anomalous Submissions.</li>
+ * </ul>
+ * <p>With the flag on, Priority Actions and Reasons for No Water Supply slot back in between the KPI
+ * table and Anomalous Submissions, and the numbering shifts accordingly.</p>
  */
 @Service
 @Slf4j
@@ -49,6 +59,15 @@ public class DailyReportPdfService {
     @Value("${daily-report.support-phone:}")
     private String supportPhone;
 
+    /**
+     * Renders the Priority Actions and Reasons for No Water Supply sections. Off by default: both are
+     * retained in code and restored by flipping this property — no code change, and the numbering of
+     * the remaining sections adjusts automatically. analytics-service reads the same property and
+     * skips computing the data for these sections while they are hidden.
+     */
+    @Value("${daily-report.sections.outage-details.enabled:false}")
+    private boolean outageDetailSectionsEnabled;
+
     private static final float MARGIN = 40f;
     private static final float PAGE_WIDTH = PDRectangle.A4.getWidth();
     private static final float PAGE_HEIGHT = PDRectangle.A4.getHeight();
@@ -60,20 +79,24 @@ public class DailyReportPdfService {
     // ("91766101664"+"8"). 3pt gives both a comfortable (>2.5pt) fit on a single line.
     private static final float SO_TABLE_CELL_PAD = 3f;
     private static final float LINE_SPACING = 1.5f;
+    /** Vertical drop of one empty 11pt header line, used for the gaps around the header block. */
+    private static final float BLANK_LINE = 15f;
 
     // Hyperlink styling: link-blue text + underline, matching the standard "highlighted link" look.
     private static final float LINK_R = 0.10f;
     private static final float LINK_G = 0.35f;
     private static final float LINK_B = 0.85f;
 
-    // Trend colouring: an upward (increase) trend is drawn green, a downward (decrease) trend red.
-    // The em-dash "no change" indicator keeps the default black.
-    private static final float TREND_UP_R = 0.13f;
-    private static final float TREND_UP_G = 0.55f;
-    private static final float TREND_UP_B = 0.13f;   // forest green
-    private static final float TREND_DOWN_R = 0.80f;
-    private static final float TREND_DOWN_G = 0.11f;
-    private static final float TREND_DOWN_B = 0.11f; // red
+    // Trend colouring is by *direction of improvement*, not by arrow direction: a move the right way
+    // for that KPI is green, the wrong way red. For most KPIs "up" is the right way, but for the
+    // negative KPIs (see NEGATIVE_KPI_LABELS) it is "down". The em-dash "no change" indicator keeps
+    // the default black.
+    private static final float TREND_GOOD_R = 0.13f;
+    private static final float TREND_GOOD_G = 0.55f;
+    private static final float TREND_GOOD_B = 0.13f; // forest green
+    private static final float TREND_BAD_R = 0.80f;
+    private static final float TREND_BAD_G = 0.11f;
+    private static final float TREND_BAD_B = 0.11f;  // red
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final DateTimeFormatter DISPLAY = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
@@ -82,6 +105,23 @@ public class DailyReportPdfService {
     private static final String NO_CHANGE = "—";      // — em dash
     private static final String UP = "▲ ";            // ▲
     private static final String DOWN = "▼ ";          // ▼
+
+    // KPI row labels. Held as constants because the trend colouring keys off them (see trendColor).
+    private static final String KPI_TOTAL_SCHEMES = "Total Schemes";
+    private static final String KPI_SCHEMES_SUPPLYING = "Schemes Supplying Water";
+    private static final String KPI_SCHEMES_NOT_SUPPLYING = "Schemes Not Supplying Water";
+    private static final String KPI_AVERAGE_LPCD = "Average LPCD";
+    private static final String KPI_AVERAGE_MLD = "Average MLD";
+    private static final String KPI_REGULAR_SUPPLY = "Regular Supply (%) past 1 week";
+    private static final String KPI_READING_SUBMISSION = "Reading Submission (%)";
+    private static final String KPI_ANOMALOUS_SUBMISSIONS = "Anomalous Submissions";
+
+    /**
+     * KPIs where an increase is a deterioration, so the trend colouring is inverted: an up arrow is
+     * drawn red and a down arrow green. Every other KPI improves as it rises.
+     */
+    private static final Set<String> NEGATIVE_KPI_LABELS =
+            Set.of(KPI_SCHEMES_NOT_SUPPLYING, KPI_ANOMALOUS_SUBMISSIONS);
 
     /** anomaly_table.type stores the EscalationType NAME; map names → friendly labels. */
     private static final Map<String, String> ANOMALY_LABELS = Map.ofEntries(
@@ -139,35 +179,57 @@ public class DailyReportPdfService {
             try (Ctx ctx = new Ctx(doc, font, bold)) {
                 ctx.newPage();
 
+                boolean sdo = isSdo(officerUserType);
+                // Section numbers are computed, not literal: the SDO report splits the Summary in two,
+                // and the outage sections may be hidden. Resolved up front because the SDO Summary's
+                // footnote has to name the Anomalous Submissions section drawn further down.
+                int kpiSection = sdo ? 2 : 1;
+                int anomalySection = kpiSection + (outageDetailSectionsEnabled ? 3 : 1);
+
                 // ---- Header ----
-                headerLine(ctx, bold, 16, "Daily Water Service Situation Report");
-                headerLine(ctx, font, 11, "Officer: " + (officerName != null ? officerName : "Officer"));
-                headerLine(ctx, font, 11, "Role: " + roleLabel(officerUserType));
-                headerLine(ctx, font, 11, "Date: " + reportDate.plusDays(1).format(HEADER));
-                headerLine(ctx, font, 11, "Reporting Period: 00:00 hrs - 23:59 hrs");
+                centeredLine(ctx, bold, 16, "Daily Water Service Situation Report");
+                ctx.y -= BLANK_LINE;
+                labelValueLine(ctx, bold, font, 11, "Officer: ",
+                        officerName != null ? officerName : "Officer");
+                labelValueLine(ctx, bold, font, 11, "Role: ", roleLabel(officerUserType));
+                // reportDate is the covered day (D-1), so D is the day the report is generated on.
+                labelValueLine(ctx, bold, font, 11, "Report Generation Date: ",
+                        reportDate.plusDays(1).format(HEADER));
+                labelValueLine(ctx, bold, font, 11, "Reporting Period: ",
+                        reportDate.format(HEADER) + ", 00:00 hrs - 23:59 hrs");
+                ctx.y -= BLANK_LINE;
                 headerLinkLine(ctx, font, 9,
                         "Generated by JalSoochak. Visit the JalSoochak Dashboard at ",
                         dashboardUrl, " for more insights");
                 ctx.y -= 8;
 
-                // ---- 1. Summary ----
+                // ---- Summary ----
+                // For an SDO this section is the per-Section-Officer breakdown table and the KPI table
+                // moves to its own section below; for an SO it is the KPI table itself.
                 sectionTitle(ctx, "1. Summary");
 
-                // SDO only: per-Section-Officer breakdown table, drawn FIRST in the Summary section.
-                // Always rendered for an SDO report; sectionOfficerSummaryRows draws an empty-state row
-                // when there are no section officers.
-                if (isSdo(officerUserType)) {
-                    float[] soCols = {78, 62, 42, 48, 48, 42, 42, 55, 55, CONTENT_WIDTH - 472};
+                if (sdo) {
+                    // The last column carries the longest header word ("Submissions*") and needs the
+                    // widest share, else it hard-splits mid-syllable ("Submissi"/"ons*"). The slack
+                    // comes from the name and the wrapping KPI headers — NOT from Mobile No., which is
+                    // sized so a 12-digit number stays on one line.
+                    float[] soCols = {70, 62, 40, 46, 46, 40, 40, 52, 52, CONTENT_WIDTH - 448};
                     String[] soHeader = {
-                            "Section Officer Name", "Mobile No.", "Total Schemes",
-                            "Schemes Supplying Water", "Schemes Not Supplying Water",
-                            "Average LPCD", "Average MLD", "Regular Supply (%) for past 1 week",
-                            "Reading Submission (%)", "Anomalous Submissions"};
+                            "Section Officer Name", "Mobile No.", KPI_TOTAL_SCHEMES,
+                            KPI_SCHEMES_SUPPLYING, KPI_SCHEMES_NOT_SUPPLYING,
+                            KPI_AVERAGE_LPCD, KPI_AVERAGE_MLD, "Regular Supply (%) for past 1 week",
+                            KPI_READING_SUBMISSION, KPI_ANOMALOUS_SUBMISSIONS + "*"};
                     // Centre the numeric KPI columns; keep the name and mobile identifier columns left.
                     boolean[] soCenter = {false, false, true, true, true, true, true, true, true, true};
+                    // Always rendered for an SDO report; sectionOfficerSummaryRows draws an empty-state
+                    // row when there are no section officers.
                     drawTable(ctx, soCols, soHeader, sectionOfficerSummaryRows(sectionOfficerRows),
                             7f, 7f, SO_TABLE_CELL_PAD, soCenter);
+                    footnote(ctx, "* Please refer to section " + anomalySection
+                            + " Anomalous Submissions for more information.");
                     ctx.y -= 12;
+
+                    sectionTitle(ctx, kpiSection + ". Key Performance Indicators");
                 }
 
                 float[] sumCols = {215, 110, 110, CONTENT_WIDTH - 435};
@@ -181,23 +243,26 @@ public class DailyReportPdfService {
                 drawTable(ctx, sumCols, sumHeader, summaryRows(kpis), 10f, 10f, sumCenter);
                 ctx.y -= 12;
 
-                // ---- 2. Priority Actions ----
-                sectionTitle(ctx, "2. Priority Actions");
-                float[] paCols = {95, 70, 92, 82, 84, CONTENT_WIDTH - 423};
-                String[] paHeader = {"Scheme", "IMIS_ID", "Jal Mitra Name", "Jal Mitra Mobile", "Issue", "Remarks"};
-                drawTable(ctx, paCols, paHeader, priorityActionRows(priorityRows), 8f, 8.5f);
-                ctx.y -= 12;
-
-                // ---- 3. Reasons for No Water Supply ----
-                sectionTitle(ctx, "3. Reasons for No Water Supply");
                 float[] rCols = {CONTENT_WIDTH - 100, 100};
                 // Centre the numeric Count column; keep the Reason/Type label column left.
                 boolean[] countCenter = {false, true};
-                drawTable(ctx, rCols, new String[]{"Reason", "Count"}, reasonRows(kpis), 10f, 10f, countCenter);
-                ctx.y -= 12;
 
-                // ---- 4. Anomalous Submissions ----
-                sectionTitle(ctx, "4. Anomalous Submissions");
+                // ---- Priority Actions + Reasons for No Water Supply (hidden by default) ----
+                if (outageDetailSectionsEnabled) {
+                    sectionTitle(ctx, (kpiSection + 1) + ". Priority Actions");
+                    float[] paCols = {95, 70, 92, 82, 84, CONTENT_WIDTH - 423};
+                    String[] paHeader =
+                            {"Scheme", "IMIS_ID", "Jal Mitra Name", "Jal Mitra Mobile", "Issue", "Remarks"};
+                    drawTable(ctx, paCols, paHeader, priorityActionRows(priorityRows), 8f, 8.5f);
+                    ctx.y -= 12;
+
+                    sectionTitle(ctx, (kpiSection + 2) + ". Reasons for No Water Supply");
+                    drawTable(ctx, rCols, new String[]{"Reason", "Count"}, reasonRows(kpis), 10f, 10f, countCenter);
+                    ctx.y -= 12;
+                }
+
+                // ---- Anomalous Submissions ----
+                sectionTitle(ctx, anomalySection + ". Anomalous Submissions");
                 drawTable(ctx, rCols, new String[]{"Type", "Count"}, anomalyRows(kpis), 10f, 10f, countCenter);
                 ctx.y -= 12;
 
@@ -222,14 +287,14 @@ public class DailyReportPdfService {
         DailyReportKpis.DayKpis y = k.getYesterday();
         DailyReportKpis.DayKpis p = k.getPreviousDay();
         List<String[]> rows = new ArrayList<>();
-        rows.add(intRow("Total Schemes", k.getTotalSchemes(), k.getTotalSchemes()));
-        rows.add(intRow("Schemes Supplying Water", y.getSchemesSupplying(), p.getSchemesSupplying()));
-        rows.add(intRow("Schemes Not Supplying Water", y.getSchemesNotSupplying(), p.getSchemesNotSupplying()));
-        rows.add(dblRow("Average LPCD", y.getAvgLpcd(), p.getAvgLpcd(), ""));
-        rows.add(dblRow("Average MLD", y.getAvgMld(), p.getAvgMld(), ""));
-        rows.add(dblRow("Regular Supply (%) past 1 week", y.getRegularSupplyPctWeek(), p.getRegularSupplyPctWeek(), "%"));
-        rows.add(dblRow("Reading Submission (%)", y.getReadingSubmissionPct(), p.getReadingSubmissionPct(), "%"));
-        rows.add(intRow("Anomalous Submissions", y.getAnomalousCount(), p.getAnomalousCount()));
+        rows.add(intRow(KPI_TOTAL_SCHEMES, k.getTotalSchemes(), k.getTotalSchemes()));
+        rows.add(intRow(KPI_SCHEMES_SUPPLYING, y.getSchemesSupplying(), p.getSchemesSupplying()));
+        rows.add(intRow(KPI_SCHEMES_NOT_SUPPLYING, y.getSchemesNotSupplying(), p.getSchemesNotSupplying()));
+        rows.add(dblRow(KPI_AVERAGE_LPCD, y.getAvgLpcd(), p.getAvgLpcd(), ""));
+        rows.add(dblRow(KPI_AVERAGE_MLD, y.getAvgMld(), p.getAvgMld(), ""));
+        rows.add(dblRow(KPI_REGULAR_SUPPLY, y.getRegularSupplyPctWeek(), p.getRegularSupplyPctWeek(), "%"));
+        rows.add(dblRow(KPI_READING_SUBMISSION, y.getReadingSubmissionPct(), p.getReadingSubmissionPct(), "%"));
+        rows.add(intRow(KPI_ANOMALOUS_SUBMISSIONS, y.getAnomalousCount(), p.getAnomalousCount()));
         return rows;
     }
 
@@ -336,21 +401,30 @@ public class DailyReportPdfService {
     }
 
     /**
-     * Returns the RGB fill colour for a trend cell: green for an up arrow ({@code ▲}), red for a down
-     * arrow ({@code ▼}), or {@code null} for any other text (drawn in the default black). Only the
-     * Summary table's Trend column produces the arrow prefixes, so this never mis-colours other cells.
+     * Returns the RGB fill colour for a trend cell, or {@code null} for any text without a trend arrow
+     * (drawn in the default black). The colour follows whether the movement is an improvement for that
+     * particular KPI, which is why the row's KPI label is needed: rising is good for most KPIs but bad
+     * for {@link #NEGATIVE_KPI_LABELS}, where an up arrow is red and a down arrow green.
+     *
+     * <p>Only the KPI table's Trend column produces the arrow prefixes, so this never mis-colours
+     * cells of the other tables.</p>
+     *
+     * @param line     the cell text, whose leading glyph is the {@code ▲}/{@code ▼}/{@code —} indicator
+     * @param kpiLabel the first cell of the same row — the KPI this trend belongs to
      */
-    private static float[] trendColor(String line) {
+    private static float[] trendColor(String line, String kpiLabel) {
         if (line == null || line.isEmpty()) {
             return null;
         }
-        if (line.startsWith(UP.trim())) {
-            return new float[]{TREND_UP_R, TREND_UP_G, TREND_UP_B};
+        boolean up = line.startsWith(UP.trim());
+        if (!up && !line.startsWith(DOWN.trim())) {
+            return null;
         }
-        if (line.startsWith(DOWN.trim())) {
-            return new float[]{TREND_DOWN_R, TREND_DOWN_G, TREND_DOWN_B};
-        }
-        return null;
+        // For a negative KPI the improvement direction is inverted: down is the good move.
+        boolean improved = up != NEGATIVE_KPI_LABELS.contains(kpiLabel);
+        return improved
+                ? new float[]{TREND_GOOD_R, TREND_GOOD_G, TREND_GOOD_B}
+                : new float[]{TREND_BAD_R, TREND_BAD_G, TREND_BAD_B};
     }
 
     private String anomalyLabel(String type) {
@@ -389,9 +463,30 @@ public class DailyReportPdfService {
         ctx.y -= 14;
     }
 
-    private void headerLine(Ctx ctx, PDFont font, float size, String text) throws IOException {
+    /** Header line centred across the content width — used for the report title. */
+    private void centeredLine(Ctx ctx, PDFont font, float size, String text) throws IOException {
         ctx.y -= (size + 4);
-        ctx.text(font, size, MARGIN, ctx.y, text);
+        float x = MARGIN + (CONTENT_WIDTH - textWidth(font, size, text)) / 2f;
+        ctx.text(font, size, x, ctx.y, text);
+    }
+
+    /**
+     * Header line of the form {@code <bold label><value>}, e.g. a bold "Officer: " followed by the
+     * officer's name in the regular face. Both halves sit on one baseline; the value starts where the
+     * label ends.
+     */
+    private void labelValueLine(Ctx ctx, PDFont labelFont, PDFont valueFont, float size,
+                                String label, String value) throws IOException {
+        ctx.y -= (size + 4);
+        ctx.text(labelFont, size, MARGIN, ctx.y, label);
+        ctx.text(valueFont, size, MARGIN + textWidth(labelFont, size, label), ctx.y, value);
+    }
+
+    /** Small note drawn directly under a table, e.g. the SDO Summary's asterisk reference. */
+    private void footnote(Ctx ctx, String text) throws IOException {
+        ctx.ensureSpace(14);
+        ctx.y -= 10;
+        ctx.text(ctx.font, 8, MARGIN, ctx.y, text);
     }
 
     /**
@@ -478,7 +573,7 @@ public class DailyReportPdfService {
                 float tx = centered
                         ? cx + (colW[c] - textWidth(font, fontSize, line)) / 2f
                         : cx + cellPad;
-                float[] trendColor = trendColor(line);
+                float[] trendColor = trendColor(line, cellAt(cells, 0));
                 if (trendColor != null) {
                     ctx.colorText(font, fontSize, tx, baseline, line,
                             trendColor[0], trendColor[1], trendColor[2]);
