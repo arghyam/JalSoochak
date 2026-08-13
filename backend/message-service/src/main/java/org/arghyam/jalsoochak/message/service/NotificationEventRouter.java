@@ -127,6 +127,15 @@ public class NotificationEventRouter {
     @Value("${app.daily-report.sdo-enabled:true}")
     private boolean dailyReportSdoEnabled;
 
+    /**
+     * Mirrors the same property in {@link DailyReportPdfService}, which hides the Priority Actions and
+     * Reasons for No Water Supply sections by default. While they are hidden there is nothing to enrich,
+     * so the Jal Mitra name/mobile decryption and scheme lookups behind Priority Actions are skipped
+     * rather than performed for output no one sees.
+     */
+    @Value("${daily-report.sections.outage-details.enabled:false}")
+    private boolean dailyReportOutageDetailSectionsEnabled;
+
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
 
     @PostConstruct
@@ -890,7 +899,9 @@ public class NotificationEventRouter {
         log.debug("[Router/DAILY_REPORT] corr={} resolved officer={} name='{}' hasContactId={}",
                 corr, officerUserId, officerName, officer.contactId() != null);
 
-        List<DailyReportPriorityRow> priorityRows = buildPriorityRows(tenantSchema, kpis, corr);
+        List<DailyReportPriorityRow> priorityRows = dailyReportOutageDetailSectionsEnabled
+                ? buildPriorityRows(tenantSchema, kpis, corr)
+                : List.of();
         List<DailyReportSectionOfficerRow> sectionOfficerRows =
                 buildSectionOfficerRows(tenantSchema, kpis, corr);
 

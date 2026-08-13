@@ -240,6 +240,12 @@ daily-report:
     dir: ${DAILY_REPORT_DIR:/tmp/escalation-reports/} # reuses the escalation report dir by default
   dashboard-url: ${DAILY_REPORT_DASHBOARD_URL:https://jalsoochak.jjmbrain.in/staff/}
   support-phone: ${DAILY_REPORT_SUPPORT_PHONE:} # shown in the PDF footer; blank hides the line
+  sections:
+    outage-details:
+      # Priority Actions + Reasons for No Water Supply. Hidden by default; set to true to restore both
+      # sections — the remaining sections renumber automatically. analytics-service reads the same
+      # property (same env var) and skips computing their data while they are hidden, so flip both.
+      enabled: ${DAILY_REPORT_OUTAGE_SECTIONS_ENABLED:false}
 
 # Base URL used to construct the public PDF download link sent via WhatsApp.
 # For local dev: http://localhost:8085

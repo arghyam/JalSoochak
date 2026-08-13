@@ -16,6 +16,18 @@ import java.util.List;
  * schemes via {@code dim_user_scheme_mapping_table}. They follow the same CTE patterns already
  * used in {@link SchemeRegularityRepository} (supply-day / submission-day aggregation over
  * {@code fact_meter_reading_table}). All runtime values are bound as {@code ?} parameters.</p>
+ *
+ * <p>Every method takes an optional {@code supervisorUserId}. When non-null, the officer's schemes
+ * are additionally narrowed to those <em>also</em> mapped to that supervising officer — the SDO
+ * report's per-Section-Officer breakdown, where a Section Officer must only contribute the schemes
+ * they share with the SDO. When null (the officer's own Summary section) the behaviour is unchanged.
+ * The restriction is expressed inside the {@code user_schemes} CTE as</p>
+ *
+ * <pre>{@code AND (CAST(? AS bigint) IS NULL OR EXISTS (... sup.user_id = CAST(? AS bigint) ...))}</pre>
+ *
+ * <p>so the SQL stays a single static text block — the supervisor id is a bind parameter, never
+ * concatenated, and a null bind disables the predicate. The explicit casts are required for
+ * PostgreSQL to infer the parameter type when the bound value is {@code null}.</p>
  */
 @Repository
 @RequiredArgsConstructor
@@ -27,13 +39,19 @@ public class DailySituationReportRepository {
      * Number of the officer's schemes that supplied water on {@code day}
      * (any reading with {@code confirmed_reading > 0}).
      */
-    public int countSchemesSupplyingOnDay(Integer tenantId, Long userId, LocalDate day) {
+    public int countSchemesSupplyingOnDay(Integer tenantId, Long userId, LocalDate day, Long supervisorUserId) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     WHERE usm.user_id = ?
                       AND usm.tenant_id = ?
+                      AND (CAST(? AS bigint) IS NULL
+                           OR EXISTS (SELECT 1
+                                        FROM analytics_schema.dim_user_scheme_mapping_table sup
+                                       WHERE sup.user_id = CAST(? AS bigint)
+                                         AND sup.tenant_id = usm.tenant_id
+                                         AND sup.scheme_id = usm.scheme_id))
                 ),
                 scheme_day AS (
                     SELECT m.scheme_id,
@@ -46,7 +64,8 @@ public class DailySituationReportRepository {
                 )
                 SELECT COALESCE(SUM(has_supply), 0)::int FROM scheme_day
                 """;
-        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, userId, tenantId, tenantId, day);
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class,
+                userId, tenantId, supervisorUserId, supervisorUserId, tenantId, day);
         return value != null ? value : 0;
     }
 
@@ -54,13 +73,19 @@ public class DailySituationReportRepository {
      * Number of the officer's schemes that submitted at least one reading on {@code day}
      * ({@code confirmed_reading >= 0}). Numerator for the reading-submission percentage.
      */
-    public int countSchemesSubmittingOnDay(Integer tenantId, Long userId, LocalDate day) {
+    public int countSchemesSubmittingOnDay(Integer tenantId, Long userId, LocalDate day, Long supervisorUserId) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     WHERE usm.user_id = ?
                       AND usm.tenant_id = ?
+                      AND (CAST(? AS bigint) IS NULL
+                           OR EXISTS (SELECT 1
+                                        FROM analytics_schema.dim_user_scheme_mapping_table sup
+                                       WHERE sup.user_id = CAST(? AS bigint)
+                                         AND sup.tenant_id = usm.tenant_id
+                                         AND sup.scheme_id = usm.scheme_id))
                 ),
                 scheme_day AS (
                     SELECT m.scheme_id,
@@ -73,7 +98,8 @@ public class DailySituationReportRepository {
                 )
                 SELECT COALESCE(SUM(has_submission), 0)::int FROM scheme_day
                 """;
-        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, userId, tenantId, tenantId, day);
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class,
+                userId, tenantId, supervisorUserId, supervisorUserId, tenantId, day);
         return value != null ? value : 0;
     }
 
@@ -82,13 +108,20 @@ public class DailySituationReportRepository {
      * A scheme-day counts once when any reading that day has {@code confirmed_reading > 0}.
      * Divide by {@code schemeCount * daysInRange} for the regular-supply percentage.
      */
-    public int sumSupplyDaysInRange(Integer tenantId, Long userId, LocalDate start, LocalDate end) {
+    public int sumSupplyDaysInRange(Integer tenantId, Long userId, LocalDate start, LocalDate end,
+                                    Long supervisorUserId) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     WHERE usm.user_id = ?
                       AND usm.tenant_id = ?
+                      AND (CAST(? AS bigint) IS NULL
+                           OR EXISTS (SELECT 1
+                                        FROM analytics_schema.dim_user_scheme_mapping_table sup
+                                       WHERE sup.user_id = CAST(? AS bigint)
+                                         AND sup.tenant_id = usm.tenant_id
+                                         AND sup.scheme_id = usm.scheme_id))
                 ),
                 scheme_day AS (
                     SELECT m.scheme_id,
@@ -102,7 +135,8 @@ public class DailySituationReportRepository {
                 )
                 SELECT COALESCE(COUNT(*) FILTER (WHERE has_supply = 1), 0)::int FROM scheme_day
                 """;
-        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, userId, tenantId, tenantId, start, end);
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class,
+                userId, tenantId, supervisorUserId, supervisorUserId, tenantId, start, end);
         return value != null ? value : 0;
     }
 
@@ -110,13 +144,19 @@ public class DailySituationReportRepository {
      * Total litres supplied across the officer's schemes on {@code day}
      * (sum of {@code fact_water_quantity_table.water_quantity}). Basis for MLD and LPCD.
      */
-    public long sumWaterSuppliedOnDay(Integer tenantId, Long userId, LocalDate day) {
+    public long sumWaterSuppliedOnDay(Integer tenantId, Long userId, LocalDate day, Long supervisorUserId) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     WHERE usm.user_id = ?
                       AND usm.tenant_id = ?
+                      AND (CAST(? AS bigint) IS NULL
+                           OR EXISTS (SELECT 1
+                                        FROM analytics_schema.dim_user_scheme_mapping_table sup
+                                       WHERE sup.user_id = CAST(? AS bigint)
+                                         AND sup.tenant_id = usm.tenant_id
+                                         AND sup.scheme_id = usm.scheme_id))
                 )
                 SELECT COALESCE(SUM(f.water_quantity), 0)::bigint
                 FROM analytics_schema.fact_water_quantity_table f
@@ -124,7 +164,8 @@ public class DailySituationReportRepository {
                 WHERE f.tenant_id = ?
                   AND f.date = ?
                 """;
-        Long value = jdbcTemplate.queryForObject(sql, Long.class, userId, tenantId, tenantId, day);
+        Long value = jdbcTemplate.queryForObject(sql, Long.class,
+                userId, tenantId, supervisorUserId, supervisorUserId, tenantId, day);
         return value != null ? value : 0L;
     }
 
@@ -133,13 +174,19 @@ public class DailySituationReportRepository {
      * {@code SUM(fhtc_count) * person_count_per_household} — the same population basis the existing
      * LPCD/efficiency-range logic in {@link SchemeRegularityRepository} uses. Returns 0 when unknown.
      */
-    public long populationServed(Integer tenantId, Long userId) {
+    public long populationServed(Integer tenantId, Long userId, Long supervisorUserId) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     WHERE usm.user_id = ?
                       AND usm.tenant_id = ?
+                      AND (CAST(? AS bigint) IS NULL
+                           OR EXISTS (SELECT 1
+                                        FROM analytics_schema.dim_user_scheme_mapping_table sup
+                                       WHERE sup.user_id = CAST(? AS bigint)
+                                         AND sup.tenant_id = usm.tenant_id
+                                         AND sup.scheme_id = usm.scheme_id))
                 )
                 SELECT COALESCE(SUM(s.fhtc_count), 0)::bigint
                      * COALESCE((SELECT person_count_per_household
@@ -148,25 +195,33 @@ public class DailySituationReportRepository {
                 JOIN user_schemes us ON us.scheme_id = s.scheme_id
                 WHERE s.tenant_id = ?
                 """;
-        Long value = jdbcTemplate.queryForObject(sql, Long.class, userId, tenantId, tenantId, tenantId);
+        Long value = jdbcTemplate.queryForObject(sql, Long.class,
+                userId, tenantId, supervisorUserId, supervisorUserId, tenantId, tenantId);
         return value != null ? value : 0L;
     }
 
     /**
      * Per-scheme "no water supply" rows for the officer on {@code day} — the detail behind the
-     * Section 3 aggregate, used to build the Priority Actions table. For each of the officer's schemes
-     * that recorded an {@code outage_reason} on {@code day}, returns the scheme id, the outage reason,
-     * and the last date the scheme actually supplied water (any {@code confirmed_reading > 0}), from
-     * which the caller derives "no supply for N days". {@code lastSupplyDate} is null if the scheme has
-     * never supplied. Scheme name / IMIS id / operators are resolved downstream (message-service).
+     * outage-reason aggregate, used to build the Priority Actions table. For each of the officer's
+     * schemes that recorded an {@code outage_reason} on {@code day}, returns the scheme id, the outage
+     * reason, and the last date the scheme actually supplied water (any {@code confirmed_reading > 0}),
+     * from which the caller derives "no supply for N days". {@code lastSupplyDate} is null if the scheme
+     * has never supplied. Scheme name / IMIS id / operators are resolved downstream (message-service).
      */
-    public List<NoSupplyScheme> listNoSupplyByScheme(Integer tenantId, Long userId, LocalDate day) {
+    public List<NoSupplyScheme> listNoSupplyByScheme(Integer tenantId, Long userId, LocalDate day,
+                                                     Long supervisorUserId) {
         String sql = """
                 WITH user_schemes AS (
                     SELECT DISTINCT usm.scheme_id
                     FROM analytics_schema.dim_user_scheme_mapping_table usm
                     WHERE usm.user_id = ?
                       AND usm.tenant_id = ?
+                      AND (CAST(? AS bigint) IS NULL
+                           OR EXISTS (SELECT 1
+                                        FROM analytics_schema.dim_user_scheme_mapping_table sup
+                                       WHERE sup.user_id = CAST(? AS bigint)
+                                         AND sup.tenant_id = usm.tenant_id
+                                         AND sup.scheme_id = usm.scheme_id))
                 )
                 SELECT f.scheme_id,
                        MIN(f.outage_reason) AS outage_reason,
@@ -190,7 +245,7 @@ public class DailySituationReportRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("outage_reason"),
                         rs.getObject("last_supply_date", LocalDate.class)),
-                userId, tenantId, tenantId, day, tenantId, day);
+                userId, tenantId, supervisorUserId, supervisorUserId, tenantId, day, tenantId, day);
     }
 
     /** One officer scheme that reported an outage on the report day, plus its last supply date. */
@@ -201,17 +256,31 @@ public class DailySituationReportRepository {
      * Anomaly counts grouped by {@code type} for the officer's schemes over the half-open
      * interval {@code [fromInclusive, toExclusive)} of {@code created_at} (UTC-naive, matching
      * how anomaly timestamps are stored). Excludes soft-deleted rows.
+     *
+     * <p>Selects through the same {@code user_schemes} CTE as the other KPIs rather than joining the
+     * mapping table inline; equivalent for the unsupervised case, because {@code a.tenant_id = ?}
+     * already pins the anomaly rows to the tenant the CTE is scoped to.</p>
      */
     public List<DailyReportKpiDTO.TypeCount> countAnomaliesByType(
-            Integer tenantId, Long userId, LocalDateTime fromInclusive, LocalDateTime toExclusive) {
+            Integer tenantId, Long userId, LocalDateTime fromInclusive, LocalDateTime toExclusive,
+            Long supervisorUserId) {
         String sql = """
+                WITH user_schemes AS (
+                    SELECT DISTINCT usm.scheme_id
+                    FROM analytics_schema.dim_user_scheme_mapping_table usm
+                    WHERE usm.user_id = ?
+                      AND usm.tenant_id = ?
+                      AND (CAST(? AS bigint) IS NULL
+                           OR EXISTS (SELECT 1
+                                        FROM analytics_schema.dim_user_scheme_mapping_table sup
+                                       WHERE sup.user_id = CAST(? AS bigint)
+                                         AND sup.tenant_id = usm.tenant_id
+                                         AND sup.scheme_id = usm.scheme_id))
+                )
                 SELECT a.type AS type,
                        COUNT(DISTINCT a.id)::int AS cnt
                 FROM analytics_schema.anomaly_table a
-                JOIN analytics_schema.dim_user_scheme_mapping_table m
-                    ON m.scheme_id = a.scheme_id
-                   AND m.user_id = ?
-                   AND m.tenant_id = a.tenant_id
+                JOIN user_schemes us ON us.scheme_id = a.scheme_id
                 WHERE a.tenant_id = ?
                   AND a.deleted_at IS NULL
                   AND a.created_at >= ?
@@ -225,6 +294,6 @@ public class DailySituationReportRepository {
                         .type(rs.getString("type"))
                         .count(rs.getInt("cnt"))
                         .build(),
-                userId, tenantId, fromInclusive, toExclusive);
+                userId, tenantId, supervisorUserId, supervisorUserId, tenantId, fromInclusive, toExclusive);
     }
 }
