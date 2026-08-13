@@ -73,19 +73,19 @@ public class MultiFormatReadingController {
             @RequestBody JsonNode rawBody
     ) {
         String safeFormat = sanitize(format);
-        log.info("POST /api/v1/telemetry/readings/formats/{} received", safeFormat);
+        log.info("POST /api/v1/telemetry/readings/formats received");
 
         // Authenticate first so an unauthenticated caller always gets 401 and never learns whether a
         // given format is supported.
         Integer tenantId = telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey).orElse(null);
         if (tenantId == null) {
-            log.info("POST /api/v1/telemetry/readings/formats/{} rejected reason=\"invalid api key\"", safeFormat);
+            log.info("POST /api/v1/telemetry/readings/formats rejected reason=\"invalid api key\"");
             return reject(HttpStatus.UNAUTHORIZED, TelemetryErrorCode.INVALID_API_KEY, "Invalid API key");
         }
 
         if (!mapperRegistry.supports(format)) {
-            log.info("POST /api/v1/telemetry/readings/formats/{} rejected tenantId={} reason=\"unsupported format\"",
-                    safeFormat, tenantId);
+            log.info("POST /api/v1/telemetry/readings/formats rejected tenantId={} reason=\"unsupported format\"",
+                    tenantId);
             return reject(HttpStatus.BAD_REQUEST, TelemetryErrorCode.BAD_REQUEST,
                     "Unsupported reading format: " + safeFormat);
         }
