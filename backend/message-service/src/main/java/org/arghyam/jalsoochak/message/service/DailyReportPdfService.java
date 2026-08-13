@@ -233,10 +233,12 @@ public class DailyReportPdfService {
                 }
 
                 float[] sumCols = {215, 110, 110, CONTENT_WIDTH - 435};
+                // The two value columns are headed by their dates alone — the covered day and the day
+                // before it — since the Reporting Period line already says which day the report covers.
                 String[] sumHeader = {
                         "KPI",
-                        "Yesterday\n(" + reportDate.format(DISPLAY) + ")",
-                        "Previous Day\n(" + previousDate.format(DISPLAY) + ")",
+                        reportDate.format(DISPLAY),
+                        previousDate.format(DISPLAY),
                         "Trend"};
                 // Centre the two value columns and the Trend column; keep the KPI label column left.
                 boolean[] sumCenter = {false, true, true, true};

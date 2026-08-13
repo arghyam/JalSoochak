@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Unit tests for {@link DailyReportPdfService} — verifies both role layouts render a valid, non-empty
- * PDF with the expected header, section numbering, two-line column headers, polarity-aware trend
+ * PDF with the expected header, section numbering, date-headed value columns, polarity-aware trend
  * arrows, correct anomaly labels, and (when enabled) Priority Actions rows.
  */
 class DailyReportPdfServiceTest {
@@ -109,7 +109,7 @@ class DailyReportPdfServiceTest {
         final float margin = 40f;
         final float cellPad = 6f;                         // CELL_PAD
         final float contentWidth = PDRectangle.A4.getWidth() - 2 * margin;
-        final float yesterdayLeft = margin + 215f;        // start of the "Yesterday" value column
+        final float yesterdayLeft = margin + 215f;        // start of the covered-day value column
         final float yesterdayRight = yesterdayLeft + 110f;
         final float trendLeft = margin + 215f + 110f + 110f;
         final float trendWidth = contentWidth - 435f;
@@ -139,7 +139,7 @@ class DailyReportPdfServiceTest {
                 .isGreaterThan(trendLeft + cellPad + 15f)
                 .isLessThan(trendLeft + trendWidth);
 
-        // (2) The "Yesterday" value column is centred → each row's value starts at a different x
+        // (2) The covered-day value column is centred → each row's value starts at a different x
         // (a left-aligned column would start every value at the same columnLeft + padding).
         TreeMap<Integer, Float> rowStartX = new TreeMap<>();
         for (Glyph g : glyphs) {
@@ -189,7 +189,7 @@ class DailyReportPdfServiceTest {
     }
 
     @Test
-    void generate_soReport_hidesOutageSectionsByDefaultAndRendersTwoLineHeaders() throws Exception {
+    void generate_soReport_hidesOutageSectionsByDefaultAndHeadsValueColumnsWithDates() throws Exception {
         String text = renderText(sampleKpis(), samplePriority());
 
         assertThat(text).contains("Daily Water Service Situation Report");
@@ -201,11 +201,11 @@ class DailyReportPdfServiceTest {
         assertThat(text).contains("2. Anomalous Submissions");
         assertThat(text).doesNotContain("Priority Actions");
         assertThat(text).doesNotContain("Reasons for No Water Supply");
-        // Two-line column headers: label and its date appear as separate tokens.
-        assertThat(text).contains("Yesterday");
-        assertThat(text).contains("(07-Jul-2026)");
-        assertThat(text).contains("Previous Day");
-        assertThat(text).contains("(06-Jul-2026)");
+        // The two value columns are headed by their dates alone — no "Yesterday"/"Previous Day" label.
+        assertThat(text).contains("07-Jul-2026");
+        assertThat(text).contains("06-Jul-2026");
+        assertThat(text).doesNotContain("Yesterday");
+        assertThat(text).doesNotContain("Previous Day");
     }
 
     @Test
@@ -378,9 +378,9 @@ class DailyReportPdfServiceTest {
         assertThat(text).contains("2. Key Performance Indicators");
         assertThat(text).contains("3. Anomalous Submissions");
         // The breakdown table is drawn before the KPI table: the first officer name precedes both the
-        // Key Performance Indicators heading and the "Yesterday" KPI-table header.
+        // Key Performance Indicators heading and that table's "KPI" column header.
         assertThat(text.indexOf("Alice")).isLessThan(text.indexOf("2. Key Performance Indicators"));
-        assertThat(text.indexOf("2. Key Performance Indicators")).isLessThan(text.indexOf("Yesterday"));
+        assertThat(text.indexOf("2. Key Performance Indicators")).isLessThan(text.indexOf("KPI"));
     }
 
     @Test
