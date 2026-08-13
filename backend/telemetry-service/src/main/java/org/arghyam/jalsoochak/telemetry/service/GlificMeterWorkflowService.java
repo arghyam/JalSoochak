@@ -1208,11 +1208,14 @@ public class GlificMeterWorkflowService {
 
             if (pendingOpt.isPresent()) {
                 // Manual reading submissions should only update confirmed_reading (never extracted_reading).
+                // A pending meter-change row has confirmed_reading = 0 by query invariant, so it can never
+                // carry rollover-resolved provenance — tag MANUAL unconditionally, folded into the same UPDATE.
                 telemetryTenantRepository.updateConfirmedReading(
                         operatorWithSchema.schemaName(),
                         pendingOpt.get().id(),
                         effectiveConfirmedReading,
-                        operatorWithSchema.operator().id()
+                        operatorWithSchema.operator().id(),
+                        RolloverResolutionService.SOURCE_MANUAL
                 );
                 if (isMeterReplaced) {
                     telemetryTenantRepository.updateMeterChangeReason(
@@ -1234,12 +1237,16 @@ public class GlificMeterWorkflowService {
                 if (todaysFlowOpt.isPresent()) {
                     TelemetryFlowReadingDetails todaysFlow = todaysFlowOpt.get();
                     // Manual reading submissions should only update confirmed_reading (never extracted_reading),
-                    // regardless of whether extracted_reading exists for today's row.
+                    // regardless of whether extracted_reading exists for today's row. Today's row may have been
+                    // rollover-resolved earlier, so retag MANUAL only when the value actually changes — a
+                    // same-value re-entry keeps SOURCE_ROLLOVER_RESOLVED. Folded into the same UPDATE.
                     telemetryTenantRepository.updateConfirmedReading(
                             operatorWithSchema.schemaName(),
                             todaysFlow.id(),
                             effectiveConfirmedReading,
-                            operatorWithSchema.operator().id()
+                            operatorWithSchema.operator().id(),
+                            RolloverResolutionService.manualConfirmSource(
+                                    effectiveConfirmedReading, todaysFlow.confirmedReading())
                     );
                     if (isMeterReplaced) {
                         telemetryTenantRepository.updateMeterChangeReason(

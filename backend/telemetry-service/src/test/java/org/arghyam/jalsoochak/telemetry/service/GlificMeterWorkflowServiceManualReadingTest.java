@@ -116,7 +116,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         assertEquals("bfm-1", resp.getCorrelationId());
 
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("123"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
@@ -171,9 +172,62 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertEquals(new BigDecimal("123"), resp.getMeterReading());
         assertEquals("bfm-2", resp.getCorrelationId());
 
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 77L, new BigDecimal("123"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 77L, new BigDecimal("123"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void manualReadingReenteringTodaysResolvedValueKeepsRolloverProvenance() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+                .thenReturn(Optional.empty());
+
+        // Today's row already holds the resolver's value (150); the operator re-enters the same number.
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
+                        99L,
+                        "bfm-1",
+                        1L,
+                        new BigDecimal("250"),
+                        new BigDecimal("150")
+                )));
+
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
+        doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                anyInt(),
+                anyString(),
+                anyInt()
+        );
+
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("150")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+        // Same value as the stored resolved reading → provenance left untouched (null source), so the row
+        // keeps SOURCE_ROLLOVER_RESOLVED rather than being overwritten to MANUAL.
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("150"), 1L, null);
     }
 
     @Test
@@ -213,7 +267,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertEquals("bfm-1", resp.getCorrelationId());
 
         verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("100"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("100"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
         verify(telemetryTenantRepository, never()).updateMeterChangeReason(anyString(), anyLong(), anyString(), anyLong());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
@@ -306,7 +361,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 ArgumentMatchers.anyString()
         );
 
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("40"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("40"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
 
@@ -352,7 +408,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
         );
 
-        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
+        verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }
 
@@ -412,7 +468,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
 
         verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null);
         verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshot("tenant_test", 10L, null);
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1000"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1000"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
     }
 
     @Test
@@ -466,7 +523,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertEquals(new BigDecimal("100"), resp.getMeterReading());
         assertEquals("bfm-55", resp.getCorrelationId());
 
-        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("100"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 55L, new BigDecimal("100"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
         verify(telemetryTenantRepository).updateMeterChangeReason("tenant_test", 55L, "METER_REPLACED", 1L);
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
     }

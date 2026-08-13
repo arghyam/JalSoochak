@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
-import org.arghyam.jalsoochak.message.channel.SmsCountryService;
+import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
@@ -103,7 +103,7 @@ public class NotificationEventRouter {
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
     private final GlificWhatsAppService glificWhatsAppService;
-    private final SmsCountryService smsCountryService;
+    private final SmsSender smsSender;
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
@@ -126,6 +126,15 @@ public class NotificationEventRouter {
      */
     @Value("${app.daily-report.sdo-enabled:true}")
     private boolean dailyReportSdoEnabled;
+
+    /**
+     * Mirrors the same property in {@link DailyReportPdfService}, which hides the Priority Actions and
+     * Reasons for No Water Supply sections by default. While they are hidden there is nothing to enrich,
+     * so the Jal Mitra name/mobile decryption and scheme lookups behind Priority Actions are skipped
+     * rather than performed for output no one sees.
+     */
+    @Value("${daily-report.sections.outage-details.enabled:false}")
+    private boolean dailyReportOutageDetailSectionsEnabled;
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
 
@@ -507,7 +516,7 @@ public class NotificationEventRouter {
             }
 
             // Use reactive flow to avoid blocking the Kafka listener thread
-            smsCountryService.sendOtpReactive(phone, otp, expiryMinutes)
+            smsSender.sendOtp(phone, otp, expiryMinutes)
                     .doOnNext(sent -> {
                         if (sent) {
                             log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
@@ -890,7 +899,9 @@ public class NotificationEventRouter {
         log.debug("[Router/DAILY_REPORT] corr={} resolved officer={} name='{}' hasContactId={}",
                 corr, officerUserId, officerName, officer.contactId() != null);
 
-        List<DailyReportPriorityRow> priorityRows = buildPriorityRows(tenantSchema, kpis, corr);
+        List<DailyReportPriorityRow> priorityRows = dailyReportOutageDetailSectionsEnabled
+                ? buildPriorityRows(tenantSchema, kpis, corr)
+                : List.of();
         List<DailyReportSectionOfficerRow> sectionOfficerRows =
                 buildSectionOfficerRows(tenantSchema, kpis, corr);
 

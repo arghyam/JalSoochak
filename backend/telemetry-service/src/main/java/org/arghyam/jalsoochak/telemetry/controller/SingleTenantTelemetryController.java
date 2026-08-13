@@ -170,6 +170,11 @@ public class SingleTenantTelemetryController {
                     tenantId,
                     summarizeAssamReadingRequest(request));
             CreateReadingResponse response = glificWebhookService.processAssamReading(request, tenantId);
+            // A transient OCR outage is signalled by qualityStatus=RETRY (success=false). It is a server-side,
+            // retryable condition — not a client error — so surface it as 503 Service Unavailable, not 400.
+            boolean retry = response != null
+                    && !response.isSuccess()
+                    && "RETRY".equalsIgnoreCase(response.getQualityStatus());
             boolean rejected = response == null
                     || !response.isSuccess()
                     || "REJECTED".equalsIgnoreCase(response.getQualityStatus());
@@ -184,6 +189,14 @@ public class SingleTenantTelemetryController {
                     rejected ? "FAILED" : "SUCCESS",
                     response != null ? response.getMessage() : "Reading processed."
             );
+            if (retry) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                        ReadingsApiResponse.builder()
+                                .success(false)
+                                .data(toReadingsDataResponse(response, false))
+                                .build()
+                );
+            }
             if (rejected) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                         ReadingsApiResponse.builder()

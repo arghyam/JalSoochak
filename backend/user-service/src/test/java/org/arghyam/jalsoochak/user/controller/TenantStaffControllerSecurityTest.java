@@ -63,7 +63,7 @@ class TenantStaffControllerSecurityTest {
         @Test
         @DisplayName("returns 401 when unauthenticated")
         void unauthenticated_returns401() throws Exception {
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             mockMvc.perform(put("/api/v1/tenant/user/staff/10/role")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -76,7 +76,7 @@ class TenantStaffControllerSecurityTest {
         @Test
         @DisplayName("returns 403 when authenticated but lacks STATE_ADMIN role")
         void wrongRole_returns403() throws Exception {
-            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "DISTRICT_OFFICER");
+            UpdateStaffRoleRequestDTO req = new UpdateStaffRoleRequestDTO("mp", "SUB_DIVISIONAL_OFFICER");
 
             mockMvc.perform(put("/api/v1/tenant/user/staff/10/role")
                             .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SECTION_OFFICER")))

@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeSummaryDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
 import org.arghyam.jalsoochak.user.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +51,9 @@ class TenantStaffRepositoryTest {
 
     @BeforeEach
     void cleanUsers() {
+        // Mappings first — they FK onto both user_table and scheme_master_table.
+        jdbcTemplate.execute("DELETE FROM tenant_mp.user_scheme_mapping_table");
+        jdbcTemplate.execute("DELETE FROM tenant_mp.scheme_master_table");
         jdbcTemplate.execute("DELETE FROM tenant_mp.user_table");
     }
 
@@ -58,12 +63,18 @@ class TenantStaffRepositoryTest {
      * UserTenantRepository).
      */
     private void insertUser(String name, String phone, String email, int userType, int status) {
-        jdbcTemplate.update("""
+        insertUserReturningId(name, phone, email, userType, status);
+    }
+
+    private long insertUserReturningId(String name, String phone, String email, int userType, int status) {
+        Long id = jdbcTemplate.queryForObject("""
                 INSERT INTO tenant_mp.user_table
                     (tenant_id, title, title_hash, email, user_type, phone_number, phone_number_hash, status,
                      email_verification_status, phone_verification_status, created_at, updated_at)
                 VALUES (1, ?, ?, ?, ?, ?, ?, ?, true, true, NOW(), NOW())
+                RETURNING id
                 """,
+                Long.class,
                 pii.encrypt(name),
                 pii.hmac(name.trim().toLowerCase(Locale.ROOT)),
                 email,
@@ -71,6 +82,25 @@ class TenantStaffRepositoryTest {
                 pii.encrypt(phone),
                 pii.hmac(phone),
                 status);
+        return id;
+    }
+
+    private long insertScheme(String schemeName, int workStatus, int operatingStatus) {
+        Long id = jdbcTemplate.queryForObject("""
+                INSERT INTO tenant_mp.scheme_master_table
+                    (state_scheme_id, centre_scheme_id, scheme_name, work_status, operating_status)
+                VALUES (?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                Long.class, "S-" + schemeName, "C-" + schemeName, schemeName, workStatus, operatingStatus);
+        return id;
+    }
+
+    private void mapUserToScheme(long userId, long schemeId) {
+        jdbcTemplate.update("""
+                INSERT INTO tenant_mp.user_scheme_mapping_table (user_id, scheme_id, status)
+                VALUES (?, ?, 1)
+                """, userId, schemeId);
     }
 
     // ── name filter ──────────────────────────────────────────────────────────
@@ -212,6 +242,86 @@ class TenantStaffRepositoryTest {
 
             assertThat(page1).hasSize(2);
             assertThat(page2).hasSize(1);
+        }
+    }
+
+    // ── scheme attachment ────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Scheme attachment")
+    class SchemeAttachment {
+
+        @Test
+        @DisplayName("findStaffById attaches schemes instead of throwing on an immutable row list")
+        void findStaffById_attachesSchemes() {
+            long userId = insertUserReturningId("Scheme Owner", "91XXXXXXXXX1", "owner@example.com", 3, 1);
+            long schemeId = insertScheme("Alpha Scheme", 2, 1);
+            mapUserToScheme(userId, schemeId);
+
+            Optional<TenantStaffResponseDTO> result = staffRepository.findStaffById(SCHEMA, userId);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().schemes())
+                    .singleElement()
+                    .satisfies(scheme -> {
+                        assertThat(scheme.schemeId()).isEqualTo(schemeId);
+                        assertThat(scheme.schemeName()).isEqualTo("Alpha Scheme");
+                        assertThat(scheme.workStatus()).isEqualTo("Completed");
+                        assertThat(scheme.operatingStatus()).isEqualTo("Operative");
+                    });
+        }
+
+        @Test
+        @DisplayName("findStaffById returns an empty scheme list when the user has no mappings")
+        void findStaffById_noSchemes() {
+            long userId = insertUserReturningId("No Schemes", "91XXXXXXXXX2", "none@example.com", 3, 1);
+
+            Optional<TenantStaffResponseDTO> result = staffRepository.findStaffById(SCHEMA, userId);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().schemes()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("findStaffById returns empty for an unknown id")
+        void findStaffById_unknownId() {
+            assertThat(staffRepository.findStaffById(SCHEMA, 999_999L)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("listStaff still attaches schemes per user")
+        void listStaff_attachesSchemesPerUser() {
+            long withScheme = insertUserReturningId("Has Scheme", "91XXXXXXXXX3", "has@example.com", 3, 1);
+            long withoutScheme = insertUserReturningId("No Scheme", "91XXXXXXXXX4", "no@example.com", 3, 1);
+            mapUserToScheme(withScheme, insertScheme("Beta Scheme", 1, 1));
+
+            List<TenantStaffResponseDTO> result =
+                    staffRepository.listStaff(SCHEMA, null, null, null, "id", "asc", 0, 10);
+
+            assertThat(result).hasSize(2);
+            assertThat(result)
+                    .filteredOn(r -> r.id() == withScheme)
+                    .singleElement()
+                    .satisfies(r -> assertThat(r.schemes()).extracting(SchemeSummaryDTO::schemeName)
+                            .containsExactly("Beta Scheme"));
+            assertThat(result)
+                    .filteredOn(r -> r.id() == withoutScheme)
+                    .singleElement()
+                    .satisfies(r -> assertThat(r.schemes()).isEmpty());
+        }
+
+        @Test
+        @DisplayName("listAllStaffForExport attaches schemes")
+        void listAllStaffForExport_attachesSchemes() {
+            long userId = insertUserReturningId("Export Me", "91XXXXXXXXX5", "export@example.com", 3, 1);
+            mapUserToScheme(userId, insertScheme("Gamma Scheme", 1, 1));
+
+            List<TenantStaffResponseDTO> result =
+                    staffRepository.listAllStaffForExport(SCHEMA, null, null, null);
+
+            assertThat(result).singleElement().satisfies(r ->
+                    assertThat(r.schemes()).extracting(SchemeSummaryDTO::schemeName)
+                            .containsExactly("Gamma Scheme"));
         }
     }
 }

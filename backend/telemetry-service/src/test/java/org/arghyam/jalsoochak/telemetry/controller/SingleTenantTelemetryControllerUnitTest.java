@@ -119,6 +119,37 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     @Test
+    void assamReadingsReturnsServiceUnavailableWhenOcrTransientlyUnavailable() {
+        // A transient FlowVision outage is signalled by qualityStatus=RETRY (success=false). It is not a
+        // client error, so the endpoint must surface it as 503 Service Unavailable, not 400 Bad Request.
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new RetryGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+                "js_valid_key",
+                null,
+                AssamReadingRequest.builder()
+                        .readingUrl("https://example.com/meter.jpg")
+                        .phoneNumber("919999999999")
+                        .stateSchemeId("30178236")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(false, response.getBody().isSuccess());
+        assertNotNull(response.getBody().getData());
+        assertEquals("RETRY", response.getBody().getData().getQualityStatus());
+        assertEquals("Meter reading service is temporarily unavailable. Please try again shortly.",
+                response.getBody().getData().getMessage());
+        assertNull(response.getBody().getData().getErrorCode());
+        assertNull(response.getBody().getData().getCorrelationId());
+    }
+
+    @Test
     void assamReadingsValidationFailureReturnsRejectedResponse() throws Exception {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
@@ -552,7 +583,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
-        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null) {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse updateConfirmedReading(String correlationId, String phoneNumber, BigDecimal confirmedReading) {
                 throw new IllegalStateException("boom");
@@ -597,7 +628,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void resetLatestReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
-        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null) {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
                 throw new IllegalStateException("boom");
@@ -649,6 +680,22 @@ class SingleTenantTelemetryControllerUnitTest {
         }
     }
 
+    private static final class RetryGlificWebhookService extends GlificWebhookService {
+        private RetryGlificWebhookService() {
+            super(null, null, null, null);
+        }
+
+        @Override
+        public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+            return CreateReadingResponse.builder()
+                    .success(false)
+                    .qualityStatus("RETRY")
+                    .message("Meter reading service is temporarily unavailable. Please try again shortly.")
+                    .correlationId("corr-retry")
+                    .build();
+        }
+    }
+
     private static final class StubTelemetryApiKeyService extends TelemetryApiKeyService {
         private final Optional<Integer> tenantId;
 
@@ -667,7 +714,7 @@ class SingleTenantTelemetryControllerUnitTest {
         private final boolean throwError;
 
         private StubBfmReadingService(boolean throwError) {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
             this.throwError = throwError;
         }
 

@@ -2034,6 +2034,18 @@ public class SchemeRegularityRepository {
     }
 
     public Integer getSchemeCountByUser(Integer tenantId, Integer userId) {
+        return getSchemeCountByUser(tenantId, userId, null);
+    }
+
+    /**
+     * As {@link #getSchemeCountByUser(Integer, Integer)}, but when {@code supervisorUserId} is non-null
+     * the count is narrowed to the schemes this user shares with that supervising officer. Used by the
+     * Daily Water Service Situation Report's per-Section-Officer breakdown, where a Section Officer must
+     * only contribute the schemes also mapped to the SDO the report is for. A null bind disables the
+     * predicate, so the SQL stays a single static text block; the explicit casts let PostgreSQL infer
+     * the parameter type when the bound value is {@code null}.
+     */
+    public Integer getSchemeCountByUser(Integer tenantId, Integer userId, Long supervisorUserId) {
         String sql = withDashboardFragments("""
                 SELECT COALESCE(COUNT(DISTINCT usm.scheme_id), 0)::int AS scheme_count
                 FROM analytics_schema.dim_user_scheme_mapping_table usm
@@ -2041,10 +2053,16 @@ public class SchemeRegularityRepository {
                     ON s.scheme_id = usm.scheme_id
                     AND s.tenant_id = usm.tenant_id
                 WHERE usm.user_id = ?
-                  AND usm.tenant_id = ?{{WS}}
+                  AND usm.tenant_id = ?
+                  AND (CAST(? AS bigint) IS NULL
+                       OR EXISTS (SELECT 1
+                                    FROM analytics_schema.dim_user_scheme_mapping_table sup
+                                   WHERE sup.user_id = CAST(? AS bigint)
+                                     AND sup.tenant_id = usm.tenant_id
+                                     AND sup.scheme_id = usm.scheme_id)){{WS}}
                 """);
 
-        return jdbcTemplate.queryForObject(sql, Integer.class, userId, tenantId);
+        return jdbcTemplate.queryForObject(sql, Integer.class, userId, tenantId, supervisorUserId, supervisorUserId);
     }
 
     public long getTotalWaterSuppliedByUserSchemes(Integer tenantId, Integer userId, LocalDate startDate, LocalDate endDate) {

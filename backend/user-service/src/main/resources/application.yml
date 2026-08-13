@@ -68,7 +68,7 @@ keycloak:
   public-key: ${KEYCLOAK_PUBLIC_KEY:}
 
 staff:
-  allowed-update-roles: SECTION_OFFICER,DISTRICT_OFFICER
+  allowed-update-roles: SECTION_OFFICER,SUB_DIVISIONAL_OFFICER
   managed-password-key: ${STAFF_MANAGED_PASSWORD_KEY}
 
 invite:

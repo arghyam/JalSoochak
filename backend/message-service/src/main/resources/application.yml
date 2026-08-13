@@ -87,6 +87,14 @@ notification:
       from-address: ${MAIL_FROM_EMAIL:noreply@example.com}
       from-name: ${MAIL_FROM_NAME:Jalsoochak}
 
+  # ── Transactional login OTP SMS ────────────────────────────────────────────
+  # Switch providers by changing 'provider'. No code changes required — add a new
+  # SmsSender implementation annotated with
+  # @ConditionalOnProperty(name = "notification.sms.provider", havingValue = "<name>").
+  # provider: smscountry → requires SMSCOUNTRY_* env vars (default)
+  sms:
+    provider: ${SMS_PROVIDER:smscountry}
+
   # ── Transactional account emails (invite, reinvite, password-reset) ────────
   # Switch providers by changing 'provider'. No code changes required.
   # provider: smtp    → requires spring.mail.* block to be uncommented
@@ -232,6 +240,12 @@ daily-report:
     dir: ${DAILY_REPORT_DIR:/tmp/escalation-reports/} # reuses the escalation report dir by default
   dashboard-url: ${DAILY_REPORT_DASHBOARD_URL:https://jalsoochak.jjmbrain.in/staff/}
   support-phone: ${DAILY_REPORT_SUPPORT_PHONE:} # shown in the PDF footer; blank hides the line
+  sections:
+    outage-details:
+      # Priority Actions + Reasons for No Water Supply. Hidden by default; set to true to restore both
+      # sections — the remaining sections renumber automatically. analytics-service reads the same
+      # property (same env var) and skips computing their data while they are hidden, so flip both.
+      enabled: ${DAILY_REPORT_OUTAGE_SECTIONS_ENABLED:false}
 
 # Base URL used to construct the public PDF download link sent via WhatsApp.
 # For local dev: http://localhost:8085

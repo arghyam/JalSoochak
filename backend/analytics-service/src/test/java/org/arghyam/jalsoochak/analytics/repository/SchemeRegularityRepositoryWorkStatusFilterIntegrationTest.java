@@ -117,6 +117,24 @@ class SchemeRegularityRepositoryWorkStatusFilterIntegrationTest {
         assertThat(repository.getSchemeCountByUser(1, 11)).isEqualTo(1);
     }
 
+    @Test
+    void schemeCount_byUser_withSupervisor_countsOnlySchemesSharedWithThem() {
+        // Backs the SDO report's per-Section-Officer Total Schemes column: user 11's count must drop
+        // to the schemes they share with the supervising officer, on top of the work-status filter.
+        mapUserScheme("44444444-4444-4444-4444-444444444444", 12, 2);   // supervisor shares only Scheme 2
+        assertThat(repository.getSchemeCountByUser(1, 11, 12L))
+                .as("Scheme 2 is shared but not handed-over, so the work-status filter still excludes it")
+                .isZero();
+
+        mapUserScheme("55555555-5555-5555-5555-555555555555", 12, 1);   // now also shares Scheme 1
+        assertThat(repository.getSchemeCountByUser(1, 11, 12L))
+                .as("Scheme 1 is both shared and handed-over")
+                .isEqualTo(1);
+
+        // A null supervisor leaves the unscoped behaviour untouched.
+        assertThat(repository.getSchemeCountByUser(1, 11, null)).isEqualTo(1);
+    }
+
     // ---- scheme-status count ----
 
     @Test

@@ -59,7 +59,7 @@ class StaffReportDefinitionTest {
         TenantStaffResponseDTO row = TenantStaffResponseDTO.builder()
                 .id(42L).uuid("u-1").title("Anita")
                 .email("a@x").phoneNumber("919999999999")
-                .status(TenantUserStatus.ACTIVE).role("DISTRICT_OFFICER")
+                .status(TenantUserStatus.ACTIVE).role("SUB_DIVISIONAL_OFFICER")
                 .schemes(List.of(
                         new SchemeSummaryDTO(1L, "Scheme A", null, null),
                         new SchemeSummaryDTO(2L, "Scheme B", null, null)))
@@ -124,12 +124,12 @@ class StaffReportDefinitionTest {
     @DisplayName("normalize lower-cases / dedupes / sorts roles and trims status & name")
     void normalizeRoles() {
         StaffReportRequestDTO in = new StaffReportRequestDTO(
-                List.of("DISTRICT_OFFICER", "section_officer", " District_Officer "),
+                List.of("SUB_DIVISIONAL_OFFICER", "section_officer", " Sub_Divisional_Officer "),
                 "  active  ",
                 "  Anita  ");
         StaffReportRequestDTO out = definition.normalize(in);
 
-        assertThat(out.roles()).containsExactly("district_officer", "section_officer");
+        assertThat(out.roles()).containsExactly("section_officer", "sub_divisional_officer");
         assertThat(out.status()).isEqualTo("ACTIVE");
         assertThat(out.name()).isEqualTo("Anita");
     }
@@ -138,8 +138,8 @@ class StaffReportDefinitionTest {
     @DisplayName("normalize splits comma-separated role strings")
     void normalizeSplitsCsvRoles() {
         StaffReportRequestDTO out = definition.normalize(
-                new StaffReportRequestDTO(List.of("DISTRICT_OFFICER,SECTION_OFFICER"), null, null));
-        assertThat(out.roles()).containsExactly("district_officer", "section_officer");
+                new StaffReportRequestDTO(List.of("SUB_DIVISIONAL_OFFICER,SECTION_OFFICER"), null, null));
+        assertThat(out.roles()).containsExactly("section_officer", "sub_divisional_officer");
     }
 
     @Test
@@ -158,11 +158,11 @@ class StaffReportDefinitionTest {
                 eq("tenant_mp"), any(), any(), any()))
                 .thenReturn(List.of());
         definition.fetch("tenant_mp", new StaffReportRequestDTO(
-                List.of("district_officer"), "ACTIVE", null));
+                List.of("sub_divisional_officer"), "ACTIVE", null));
 
         ArgumentCaptor<Integer> statusCap = ArgumentCaptor.forClass(Integer.class);
         org.mockito.Mockito.verify(tenantStaffRepository).listAllStaffForExport(
-                eq("tenant_mp"), eq(List.of("district_officer")), statusCap.capture(), any());
+                eq("tenant_mp"), eq(List.of("sub_divisional_officer")), statusCap.capture(), any());
         assertThat(statusCap.getValue()).isEqualTo(TenantUserStatus.ACTIVE.code);
     }
 

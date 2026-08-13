@@ -58,6 +58,8 @@ class DailySituationReportRepositoryIntegrationTest {
 
     private static final int TENANT = 1;
     private static final long OFFICER = 500L;
+    /** A supervising officer (SDO) used to exercise the shared-scheme narrowing. */
+    private static final long SUPERVISOR = 900L;
     private static final LocalDate DAY = LocalDate.of(2026, 6, 10);
     private static final LocalDate PREV = DAY.minusDays(1);
 
@@ -75,36 +77,36 @@ class DailySituationReportRepositoryIntegrationTest {
     @Test
     void countSchemesSupplyingOnDay_countsOnlySchemesWithPositiveConfirmedReading() {
         // Scheme 1 supplies (confirmed 120); scheme 2 submits 0; scheme 3 no reading.
-        assertThat(repository.countSchemesSupplyingOnDay(TENANT, OFFICER, DAY)).isEqualTo(1);
+        assertThat(repository.countSchemesSupplyingOnDay(TENANT, OFFICER, DAY, null)).isEqualTo(1);
     }
 
     @Test
     void countSchemesSubmittingOnDay_countsSchemesWithAnyReading() {
         // Scheme 1 and scheme 2 both submitted; scheme 3 did not.
-        assertThat(repository.countSchemesSubmittingOnDay(TENANT, OFFICER, DAY)).isEqualTo(2);
+        assertThat(repository.countSchemesSubmittingOnDay(TENANT, OFFICER, DAY, null)).isEqualTo(2);
     }
 
     @Test
     void sumSupplyDaysInRange_countsSupplyDaysAcrossWeekWindow() {
         // Scheme 1 supplies on DAY and PREV → 2 supply-days over the 7-day window.
-        assertThat(repository.sumSupplyDaysInRange(TENANT, OFFICER, DAY.minusDays(6), DAY)).isEqualTo(2);
+        assertThat(repository.sumSupplyDaysInRange(TENANT, OFFICER, DAY.minusDays(6), DAY, null)).isEqualTo(2);
     }
 
     @Test
     void sumWaterSuppliedOnDay_sumsLitresAcrossOfficerSchemes() {
-        assertThat(repository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY)).isEqualTo(500_000L);
+        assertThat(repository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY, null)).isEqualTo(500_000L);
     }
 
     @Test
     void populationServed_usesFhtcTimesPersonsPerHousehold() {
         // fhtc 100 + 100 + 0 = 200; person_count_per_household = 5 → 1000.
-        assertThat(repository.populationServed(TENANT, OFFICER)).isEqualTo(1000L);
+        assertThat(repository.populationServed(TENANT, OFFICER, null)).isEqualTo(1000L);
     }
 
     @Test
     void countAnomaliesByType_groupsByTypeForTheDay() {
         List<DailyReportKpiDTO.TypeCount> counts = repository.countAnomaliesByType(
-                TENANT, OFFICER, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay());
+                TENANT, OFFICER, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay(), null);
 
         assertThat(counts).hasSize(2);
         assertThat(counts).anySatisfy(c -> {
@@ -121,7 +123,7 @@ class DailySituationReportRepositoryIntegrationTest {
         // The PREV window must return only the PREV anomaly (a4, type 5) and none of
         // DAY's anomalies (a1, a2) — confirming the window boundary is applied per day.
         List<DailyReportKpiDTO.TypeCount> prev = repository.countAnomaliesByType(
-                TENANT, OFFICER, PREV.atStartOfDay(), PREV.plusDays(1).atStartOfDay());
+                TENANT, OFFICER, PREV.atStartOfDay(), PREV.plusDays(1).atStartOfDay(), null);
         assertThat(prev).singleElement().satisfies(c -> {
             assertThat(c.getType()).isEqualTo("5");
             assertThat(c.getCount()).isEqualTo(1);
@@ -139,7 +141,7 @@ class DailySituationReportRepositoryIntegrationTest {
         insertOutage(3, "Pipeline Break", DAY);
 
         List<DailySituationReportRepository.NoSupplyScheme> rows =
-                repository.listNoSupplyByScheme(TENANT, OFFICER, DAY);
+                repository.listNoSupplyByScheme(TENANT, OFFICER, DAY, null);
 
         assertThat(rows).hasSize(2);
         assertThat(rows)
@@ -155,6 +157,57 @@ class DailySituationReportRepositoryIntegrationTest {
                 });
         // scheme 1 has readings but no outage reason on DAY → excluded
         assertThat(rows).noneSatisfy(s -> assertThat(s.schemeId()).isEqualTo(1));
+    }
+
+    @Test
+    void supervisorScoping_narrowsEveryKpiToTheSchemesSharedWithTheSupervisor() {
+        // The SDO is mapped to schemes 1 and 3; the officer (a Section Officer under them) is mapped
+        // to 1, 2 and 3. Scheme 2 is the officer's alone, so it must not reach the SDO's breakdown row.
+        mapUser(SUPERVISOR, 1);
+        mapUser(SUPERVISOR, 3);
+        insertWaterQuantity(2, 250_000, DAY);   // scheme-2 litres, visible unscoped only
+        insertOutage(2, "Pump Failure", DAY);
+
+        // Scheme 1 supplies and submits; scheme 2 only submits — dropping scheme 2 costs one submission.
+        assertThat(repository.countSchemesSubmittingOnDay(TENANT, OFFICER, DAY, null)).isEqualTo(2);
+        assertThat(repository.countSchemesSubmittingOnDay(TENANT, OFFICER, DAY, SUPERVISOR)).isEqualTo(1);
+
+        // Scheme 1 is shared, so the supplying count is unchanged by the narrowing.
+        assertThat(repository.countSchemesSupplyingOnDay(TENANT, OFFICER, DAY, SUPERVISOR)).isEqualTo(1);
+        assertThat(repository.sumSupplyDaysInRange(TENANT, OFFICER, DAY.minusDays(6), DAY, SUPERVISOR))
+                .isEqualTo(2);
+
+        // Litres and population lose scheme 2's contribution (250,000 litres; fhtc 100 × 5 people).
+        assertThat(repository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY, null)).isEqualTo(750_000L);
+        assertThat(repository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY, SUPERVISOR)).isEqualTo(500_000L);
+        assertThat(repository.populationServed(TENANT, OFFICER, SUPERVISOR)).isEqualTo(500L);
+
+        // Anomaly a2 sits on scheme 2 and drops out; a1 on the shared scheme 1 stays.
+        assertThat(repository.countAnomaliesByType(
+                TENANT, OFFICER, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay(), SUPERVISOR))
+                .singleElement()
+                .satisfies(c -> {
+                    assertThat(c.getType()).isEqualTo("5");
+                    assertThat(c.getCount()).isEqualTo(1);
+                });
+
+        // Scheme 2's outage is likewise out of scope.
+        assertThat(repository.listNoSupplyByScheme(TENANT, OFFICER, DAY, null)).hasSize(1);
+        assertThat(repository.listNoSupplyByScheme(TENANT, OFFICER, DAY, SUPERVISOR)).isEmpty();
+    }
+
+    @Test
+    void supervisorScoping_withNoSharedSchemes_yieldsZeroes() {
+        // A supervisor mapped to none of the officer's schemes contributes no rows at all.
+        insertScheme(4, 100);
+        mapUser(SUPERVISOR, 4);
+
+        assertThat(repository.countSchemesSupplyingOnDay(TENANT, OFFICER, DAY, SUPERVISOR)).isZero();
+        assertThat(repository.countSchemesSubmittingOnDay(TENANT, OFFICER, DAY, SUPERVISOR)).isZero();
+        assertThat(repository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY, SUPERVISOR)).isZero();
+        assertThat(repository.populationServed(TENANT, OFFICER, SUPERVISOR)).isZero();
+        assertThat(repository.countAnomaliesByType(
+                TENANT, OFFICER, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay(), SUPERVISOR)).isEmpty();
     }
 
     // ---- seed helpers ----------------------------------------------------
@@ -213,11 +266,15 @@ class DailySituationReportRepositoryIntegrationTest {
     }
 
     private void mapOfficer(int schemeId) {
+        mapUser(OFFICER, schemeId);
+    }
+
+    private void mapUser(long userId, int schemeId) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_user_scheme_mapping_table
                 (uuid, tenant_id, user_id, scheme_id, ai_reading, created_at, updated_at, status)
                 VALUES (gen_random_uuid(), ?, ?, ?, NULL, NOW(), NOW(), 1)
-                """, TENANT, OFFICER, schemeId);
+                """, TENANT, userId, schemeId);
     }
 
     private void insertReading(int schemeId, Integer extracted, int confirmed, LocalDate date) {
