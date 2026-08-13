@@ -34,7 +34,9 @@ public class ReadingRequestMapperRegistry {
             }
         }
         this.byFormat = Map.copyOf(map);
-        this.defaultMapper = this.byFormat.get(CanonicalReadingRequestMapper.FORMAT);
+        // Look the default up by the same normalized key used to store entries, so it is still found
+        // if the canonical constant ever carries different casing/padding.
+        this.defaultMapper = this.byFormat.get(normalize(CanonicalReadingRequestMapper.FORMAT));
     }
 
     /**

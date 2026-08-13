@@ -75,7 +75,8 @@ public class LanguageCatalogRepository {
 
     private Map<String, LanguageEntry> catalog() {
         if (!cacheEnabled || cacheTtlMs <= 0L) {
-            return queryCatalog();
+            Map<String, LanguageEntry> loaded = queryCatalog();
+            return loaded != null ? loaded : Map.of();
         }
         long now = System.currentTimeMillis();
         TimedCacheValue cached = cache.get();
@@ -83,10 +84,17 @@ public class LanguageCatalogRepository {
             return cached.value();
         }
         Map<String, LanguageEntry> refreshed = queryCatalog();
+        if (refreshed == null) {
+            // Load failed (not merely empty): fall back for this call but do not cache the failure, so
+            // the next lookup retries rather than pinning the fallback for the whole TTL.
+            return Map.of();
+        }
+        // A genuinely empty (but successful) catalog is cached like any other result.
         cache.set(new TimedCacheValue(refreshed, now + cacheTtlMs));
         return refreshed;
     }
 
+    /** Returns the loaded catalog (possibly empty), or {@code null} if the load failed. */
     private Map<String, LanguageEntry> queryCatalog() {
         String sql = """
                 SELECT a.alias AS alias, a.language_id AS language_id, m.locale_code AS locale_code
@@ -102,9 +110,10 @@ public class LanguageCatalogRepository {
                 }
             });
         } catch (DataAccessException e) {
-            // Table missing (Flyway disabled) or query failed: callers fall back to their hardcoded map.
+            // Table missing (Flyway disabled) or query failed: signal failure (null) so callers fall
+            // back to their hardcoded map and the caller does not cache this as an empty catalog.
             log.debug("Language catalog unavailable, callers will use hardcoded fallback: {}", e.getMessage());
-            return Map.of();
+            return null;
         }
         return out;
     }

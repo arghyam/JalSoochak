@@ -25,7 +25,7 @@ class CanonicalReadingRequestMapperTest {
                   "confirmed_reading": 123.4,
                   "state_scheme_id": "30178236",
                   "center_scheme_id": "30244993",
-                  "phone_number": "919999999999",
+                  "phone_number": "91XXXXXXXXXX",
                   "reading_date_time": "2026-04-23T07:38:22.031Z"
                 }
                 """;
@@ -38,7 +38,7 @@ class CanonicalReadingRequestMapperTest {
         assertEquals("30178236", request.getStateSchemeId());
         // center_scheme_id is a declared @JsonAlias of centreSchemeId
         assertEquals("30244993", request.getCentreSchemeId());
-        assertEquals("919999999999", request.getPhoneNumber());
+        assertEquals("91XXXXXXXXXX", request.getPhoneNumber());
         assertNotNull(request.getReadingDateTime());
     }
 
@@ -46,7 +46,7 @@ class CanonicalReadingRequestMapperTest {
     void unknownFieldsAreIgnored() throws Exception {
         String json = """
                 {
-                  "phone_number": "919999999999",
+                  "phone_number": "91XXXXXXXXXX",
                   "state_scheme_id": "30178236",
                   "confirmed_reading": 10,
                   "some_future_field_from_state": "whatever"
@@ -55,7 +55,7 @@ class CanonicalReadingRequestMapperTest {
 
         AssamReadingRequest request = mapper.map(objectMapper.readTree(json));
 
-        assertEquals("919999999999", request.getPhoneNumber());
+        assertEquals("91XXXXXXXXXX", request.getPhoneNumber());
         assertEquals("30178236", request.getStateSchemeId());
     }
 
