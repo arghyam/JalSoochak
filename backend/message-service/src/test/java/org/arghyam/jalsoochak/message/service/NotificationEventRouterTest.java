@@ -1254,6 +1254,48 @@ class NotificationEventRouterTest {
     }
 
     @Test
+    void handleDailyReport_logsFailedGenerationOutcomeAndRethrows() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenThrow(new java.io.IOException("PDF write failed"));
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(NotificationEventRouter.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            // Rethrown (wrapped by route) so the Kafka container still retries the event.
+            assertThatThrownBy(() -> router.route(DAILY_REPORT_JSON))
+                    .hasRootCauseMessage("PDF write failed");
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        // A generation failure must be counted like every other terminal outcome.
+        assertThat(appender.list).anySatisfy(event -> assertThat(event.getFormattedMessage())
+                .contains("result=FAILED_GENERATION role=SECTION_OFFICER tenant=1 officer=500"));
+        verify(minioStorageService, never()).upload(any(Path.class));
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void handleDailyReport_sdoKillSwitchMatchesRoleWithSurroundingWhitespace() {
+        // The PDF layout and the Glific template both trim the role, so the kill-switch must too —
+        // otherwise a padded role would render/send as an SDO while claiming to be suppressed.
+        ReflectionTestUtils.setField(router, "dailyReportSdoEnabled", false);
+        String sdoJson = DAILY_REPORT_JSON.replace("\"SECTION_OFFICER\"", "\"  SUB_DIVISIONAL_OFFICER  \"");
+
+        router.route(sdoJson);
+
+        verifyNoInteractions(dailyReportPdfService);
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString());
+    }
+
+    @Test
     void handleDailyReport_skipsWhenNoContactResolvable() {
         stubOfficerContact(null, null, null); // no whatsapp id, no phone
         when(piiEncryptionService.safeDecrypt(any())).thenReturn(null);

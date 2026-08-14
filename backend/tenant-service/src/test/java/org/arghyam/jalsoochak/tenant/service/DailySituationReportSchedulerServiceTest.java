@@ -89,6 +89,33 @@ class DailySituationReportSchedulerServiceTest {
     }
 
     @Test
+    void perRoleRequestedCountsSumToTotalWhenARoleIsListedTwice() {
+        // A duplicated CSV entry publishes the role's officers twice, so the per-role tally in the
+        // summary line must add up to requested= rather than being overwritten by the second pass.
+        ReflectionTestUtils.setField(service, "officerUserTypesCsv", "SECTION_OFFICER,SECTION_OFFICER");
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
+                .thenReturn(List.of(11L, 12L));
+
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(DailySituationReportSchedulerService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            service.processDailyReportsForTenant(SCHEMA, TENANT);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        verify(kafkaProducer, org.mockito.Mockito.times(4)).publishJson(eq("common-topic"), org.mockito.ArgumentMatchers.any());
+        assertThat(appender.list).anySatisfy(event -> assertThat(event.getFormattedMessage())
+                .contains("requested=4")
+                .contains("requestedByRole={SECTION_OFFICER=4}"));
+    }
+
+    @Test
     void publishesNothingWhenNoOfficers() {
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
                 .thenReturn(List.of());
