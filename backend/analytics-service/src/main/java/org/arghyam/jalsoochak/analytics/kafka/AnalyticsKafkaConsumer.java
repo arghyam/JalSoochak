@@ -217,12 +217,16 @@ public class AnalyticsKafkaConsumer {
      */
     private void handleDailyReportRequest(String message) throws Exception {
         DailyReportRequestEvent request = objectMapper.readValue(message, DailyReportRequestEvent.class);
+        // Normalised so the role= field is always a countable token, even on a malformed event.
+        String role = (request.getOfficerUserType() == null || request.getOfficerUserType().isBlank())
+                ? "UNKNOWN" : request.getOfficerUserType();
         if (request.getTenantId() == null || request.getOfficerUserId() == null
                 || request.getReportDate() == null || request.getReportDate().isBlank()
                 || request.getTenantSchema() == null || request.getTenantSchema().isBlank()
                 || request.getOfficerUserType() == null || request.getOfficerUserType().isBlank()) {
-            log.warn("[analytics/DAILY_REPORT_REQUEST] Missing required field "
-                    + "(tenantId/officerUserId/reportDate/tenantSchema/officerUserType), skipping");
+            log.warn("[analytics/DAILY_REPORT_REQUEST] corr={} result=SKIPPED_INVALID_EVENT role={} — missing required"
+                            + " field (tenantId/officerUserId/reportDate/tenantSchema/officerUserType)",
+                    request.getCorrelationId(), role);
             return;
         }
 
@@ -230,8 +234,9 @@ public class AnalyticsKafkaConsumer {
         try {
             reportDate = LocalDate.parse(request.getReportDate());
         } catch (DateTimeParseException e) {
-            log.warn("[analytics/DAILY_REPORT_REQUEST] Malformed reportDate '{}', skipping (non-retryable)",
-                    request.getReportDate());
+            log.warn("[analytics/DAILY_REPORT_REQUEST] corr={} result=SKIPPED_INVALID_EVENT role={} — malformed"
+                            + " reportDate '{}' (non-retryable)",
+                    request.getCorrelationId(), role, request.getReportDate());
             return;
         }
 
@@ -257,9 +262,9 @@ public class AnalyticsKafkaConsumer {
         kafkaProducer.publishJson(COMMON_TOPIC, kpisEvent);
 
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
-        log.info("[analytics/DAILY_REPORT_REQUEST] corr={} computed+published: tenant={} officer={} date={} "
+        log.info("[analytics/DAILY_REPORT_REQUEST] corr={} result=COMPUTED role={} tenant={} officer={} date={} "
                         + "totalSchemes={} supplyingY={} reasons={} anomalies={} priorityActions={} tookMs={}",
-                corr, request.getTenantId(), request.getOfficerUserId(), reportDate,
+                corr, role, request.getTenantId(), request.getOfficerUserId(), reportDate,
                 kpis.getTotalSchemes(),
                 kpis.getYesterday() != null ? kpis.getYesterday().getSchemesSupplying() : 0,
                 kpis.getReasonsForNoSupply() != null ? kpis.getReasonsForNoSupply().size() : 0,

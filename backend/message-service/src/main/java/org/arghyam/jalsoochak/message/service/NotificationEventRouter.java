@@ -852,6 +852,11 @@ public class NotificationEventRouter {
      * Handles a {@code DAILY_REPORT_KPIS} event: resolves the officer's contact from the operational
      * {@code user_table} (analytics never sees PII), renders the report PDF, uploads it to MinIO, and
      * sends the document HSM via Glific. Mirrors {@link #handleEscalation}.
+     *
+     * <p>Every terminal outcome — one per officer — is logged with a {@code result=} tag and a
+     * {@code role=} field so daily-report delivery can be counted per role straight from the logs
+     * (see {@code mydocs/DAILY_REPORT_DELIVERY_LOGS.md}). {@code result=GENERATED} marks a rendered
+     * PDF and {@code result=SENT} a confirmed WhatsApp delivery, so the two are counted separately.</p>
      */
     private void handleDailySituationReport(JsonNode root) throws Exception {
         int tenantId = root.path("tenantId").asInt(0);
@@ -859,39 +864,42 @@ public class NotificationEventRouter {
         long officerUserId = root.path("officerUserId").asLong(0);
         String officerUserType = root.path("officerUserType").asText("");
         String corr = root.path("correlationId").asText("");
+        String role = officerUserType.isBlank() ? "UNKNOWN" : officerUserType;
         long startNanos = System.nanoTime();
 
         if (tenantSchema.isBlank() || !tenantSchema.matches(SCHEMA_PATTERN) || officerUserId <= 0) {
-            log.warn("[Router/DAILY_REPORT] corr={} invalid tenantSchema/officerUserId, skipping", corr);
+            log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_INVALID_EVENT role={} tenant={}",
+                    corr, role, tenantId);
             return;
         }
         if (!root.hasNonNull("kpis")) {
-            log.warn("[Router/DAILY_REPORT] corr={} missing kpis payload for officer={}, skipping", corr, officerUserId);
+            log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_KPIS role={} tenant={} officer={}",
+                    corr, role, tenantId, officerUserId);
             return;
         }
 
         log.info("[Router/DAILY_REPORT] corr={} received: tenant={} officer={} role={}",
-                corr, tenantId, officerUserId, officerUserType);
+                corr, tenantId, officerUserId, role);
 
         // SDO delivery is enabled by default now that the SDO layout exists; the dailyReportSdoEnabled
         // flag remains an operational kill-switch to suppress SDO reports without a redeploy.
         if ("SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType) && !dailyReportSdoEnabled) {
-            log.info("[Router/DAILY_REPORT] corr={} SDO delivery disabled via flag; skipping officer={}",
-                    corr, officerUserId);
+            log.info("[Router/DAILY_REPORT] corr={} result=SKIPPED_SDO_DISABLED role={} tenant={} officer={}",
+                    corr, role, tenantId, officerUserId);
             return;
         }
 
         DailyReportKpis kpis = objectMapper.treeToValue(root.path("kpis"), DailyReportKpis.class);
         if (!isRenderableKpis(kpis)) {
-            log.warn("[Router/DAILY_REPORT] corr={} incomplete/malformed kpis for officer={}, skipping (non-retryable)",
-                    corr, officerUserId);
+            log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_MALFORMED_KPIS role={} tenant={} officer={}"
+                    + " (non-retryable)", corr, role, tenantId, officerUserId);
             return;
         }
 
         OfficerContact officer = resolveOfficerContactById(tenantSchema, officerUserId);
         if (officer.contactId() == null && (officer.phone() == null || officer.phone().isBlank())) {
-            log.warn("[Router/DAILY_REPORT] corr={} no phone or whatsapp_connection_id for officer={} in schema={}, skipping",
-                    corr, officerUserId, tenantSchema);
+            log.warn("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT role={} tenant={} officer={} schema={}",
+                    corr, role, tenantId, officerUserId, tenantSchema);
             return;
         }
 
@@ -907,13 +915,20 @@ public class NotificationEventRouter {
 
         String filename = dailyReportPdfService.generate(
                 kpis, officerUserId, officerName, officerUserType, priorityRows, sectionOfficerRows);
+        // The PDF now exists on disk. Logged before upload/delivery so a report that is built but never
+        // delivered is still counted as generated — that gap is the signal worth spotting.
+        log.info("[Router/DAILY_REPORT] corr={} result=GENERATED role={} tenant={} officer={}"
+                        + " priorityRows={} sectionOfficerRows={}",
+                corr, role, tenantId, officerUserId, priorityRows.size(), sectionOfficerRows.size());
+
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
         String minioUrl;
         try {
             minioUrl = minioStorageService.upload(localPath);
         } catch (Exception uploadEx) {
-            log.error("[Router/DAILY_REPORT] corr={} MinIO upload failed, retaining local PDF for recovery: {} — {}",
-                    corr, localPath, uploadEx.getMessage());
+            log.error("[Router/DAILY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
+                            + " retaining local PDF for recovery: {} — {}",
+                    corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
             throw uploadEx;
         }
         try {
@@ -926,12 +941,14 @@ public class NotificationEventRouter {
 
         boolean sent = whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType);
         if (!sent) {
+            log.error("[Router/DAILY_REPORT] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}",
+                    corr, role, tenantId, officerUserId);
             throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + corr + " WhatsApp daily report delivery failed");
         }
         String loggableUrl = minioUrl.replaceFirst("\\?.*$", "");
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
-        log.info("[Router/DAILY_REPORT] corr={} SENT: tenant={} officer={} role={} priorityRows={} tookMs={} ({})",
-                corr, tenantId, officerUserId, officerUserType, priorityRows.size(), tookMs, loggableUrl);
+        log.info("[Router/DAILY_REPORT] corr={} result=SENT role={} tenant={} officer={} priorityRows={} tookMs={} ({})",
+                corr, role, tenantId, officerUserId, priorityRows.size(), tookMs, loggableUrl);
     }
 
     /**

@@ -11,7 +11,9 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -50,11 +52,15 @@ public class DailySituationReportSchedulerService {
         log.info("[DailyReportJob] corr={} start: tenant={} schema={} date={} roles={}",
                 correlationId, tenantId, schema, reportDate, roles);
 
+        // Requested-count per role — the denominator the downstream GENERATED/SENT counts reconcile
+        // against (see mydocs/DAILY_REPORT_DELIVERY_LOGS.md). LinkedHashMap keeps the configured order.
+        Map<String, Integer> requestedByRole = new LinkedHashMap<>();
         int count = 0;
         for (String role : roles) {
             List<Long> officerIds = nudgeRepository.findDistinctOfficerUserIdsByUserType(schema, role);
-            log.info("[DailyReportJob] corr={} tenant={} role={} → {} officer(s)",
-                    correlationId, tenantId, role, officerIds.size());
+            requestedByRole.put(role, officerIds.size());
+            log.info("[DailyReportJob] corr={} result=REQUESTED role={} tenant={} officers={}",
+                    correlationId, role, tenantId, officerIds.size());
             boolean isSdo = SDO_ROLE.equalsIgnoreCase(role);
             for (Long officerUserId : officerIds) {
                 // For an SDO, resolve the Section Officers under them (shared-scheme derivation) so
@@ -81,8 +87,9 @@ public class DailySituationReportSchedulerService {
         }
 
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
-        log.info("[DailyReportJob] corr={} done: tenant={} schema={} date={} requested={} officer(s) tookMs={}",
-                correlationId, tenantId, schema, reportDate, count, tookMs);
+        log.info("[DailyReportJob] corr={} done: tenant={} schema={} date={} requested={} officer(s)"
+                        + " requestedByRole={} tookMs={}",
+                correlationId, tenantId, schema, reportDate, count, requestedByRole, tookMs);
     }
 
     private List<String> officerRoles() {
