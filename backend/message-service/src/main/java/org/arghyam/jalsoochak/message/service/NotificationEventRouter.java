@@ -950,7 +950,10 @@ public class NotificationEventRouter {
 
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
 
-        boolean sent = whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType);
+        // isRenderableKpis has already confirmed reportDate is a parseable ISO date. It is the day the
+        // data covers (D-1) — the date the officer sees in the WhatsApp document name.
+        LocalDate reportDate = LocalDate.parse(kpis.getReportDate());
+        boolean sent = whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType, reportDate);
         if (!sent) {
             log.error("[Router/DAILY_REPORT] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}",
                     corr, role, tenantId, officerUserId);

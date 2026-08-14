@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -226,6 +228,9 @@ public class GlificWhatsAppService {
     @Value("${glific.media.daily-report-caption:Daily Water Service Situation Report}")
     private String dailyReportCaption;
 
+    /** Date suffix of the recipient-visible document name, e.g. "13-08-2026". */
+    private static final DateTimeFormatter DOCUMENT_NAME_DATE = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+
     /**
      * Sends the login OTP HSM template to an officer.
      * Template variable {{1}} = OTP.
@@ -307,12 +312,14 @@ public class GlificWhatsAppService {
      * @param contactId       Glific contact id of the officer
      * @param minioUrl        publicly reachable URL of the report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
+     * @param reportDate      the day the report's data covers (D-1) — appended to the document name
+     *                        the recipient sees in WhatsApp; null falls back to the bare caption
      */
-    public void sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType) {
+    public void sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType, LocalDate reportDate) {
         if (isDryRun(dailyReportDryRun, "sendDailyReportHsm")) return;
 
         String templateId = resolveDailyReportTemplateId(officerUserType);
-        String mediaId = uploadMediaInternal(minioUrl, dailyReportCaption, dailyReportDryRun);
+        String mediaId = uploadMediaInternal(minioUrl, dailyReportDocumentName(reportDate), dailyReportDryRun);
 
         Map<String, Object> input = new HashMap<>();
         input.put("templateId", Integer.parseInt(templateId));
@@ -326,6 +333,22 @@ public class GlificWhatsAppService {
         JsonNode response = client.execute(CREATE_AND_SEND_MESSAGE_MUTATION, Map.of("input", input));
         checkErrors(response, "createAndSendMessage");
         log.debug("[Glific] Daily report HSM sent to contactId={}", contactId);
+    }
+
+    /**
+     * The document name the officer sees for the report in WhatsApp: the configured caption followed by
+     * the date of the data it covers, e.g. {@code "Daily Water Service Situation Report 13-08-2026"}
+     * for a report delivered on 14 August. That is the report day (D-1), <em>not</em> the generation
+     * day — the recipient files these by the day they describe.
+     *
+     * <p>Glific surfaces this {@code createMessageMedia} caption as the document's filename, so it is
+     * the only place the recipient-visible name is set. Falls back to the bare caption when the date is
+     * unknown, so a missing date degrades the name rather than breaking delivery.</p>
+     */
+    String dailyReportDocumentName(LocalDate reportDate) {
+        return reportDate == null
+                ? dailyReportCaption
+                : dailyReportCaption + " " + reportDate.format(DOCUMENT_NAME_DATE);
     }
 
     /** SUB_DIVISIONAL_OFFICER uses its own template when configured; otherwise falls back to the SO template. */
