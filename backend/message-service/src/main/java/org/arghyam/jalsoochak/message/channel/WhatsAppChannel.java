@@ -162,9 +162,10 @@ public class WhatsAppChannel implements NotificationChannel {
      * @return {@code true} if the message was accepted by Glific
      */
     public boolean sendDailyReport(long contactId, String documentUrl, String officerUserType) {
-        String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType;
+        String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
         try {
-            glificWhatsAppService.sendDailyReportHsm(contactId, documentUrl, officerUserType);
+            // Send with the same token that is logged, so the template picked matches the counted role.
+            glificWhatsAppService.sendDailyReportHsm(contactId, documentUrl, role);
             log.info("[WHATSAPP] Daily report HSM sent role={}", role);
             log.debug("[WHATSAPP] Daily report HSM sent role={} contactId={}", role, contactId);
             return true;

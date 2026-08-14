@@ -217,13 +217,16 @@ public class AnalyticsKafkaConsumer {
      */
     private void handleDailyReportRequest(String message) throws Exception {
         DailyReportRequestEvent request = objectMapper.readValue(message, DailyReportRequestEvent.class);
-        // Normalised so the role= field is always a countable token, even on a malformed event.
-        String role = (request.getOfficerUserType() == null || request.getOfficerUserType().isBlank())
-                ? "UNKNOWN" : request.getOfficerUserType();
+        // Canonical role for this event: trimmed once here and then used for the role= log field, the
+        // validation below, and the published KPIs event, so every downstream stage gates on the same
+        // token. Falls back to a countable placeholder so role= is never empty on a malformed event.
+        String officerUserType = request.getOfficerUserType() == null
+                ? null : request.getOfficerUserType().trim();
+        String role = (officerUserType == null || officerUserType.isEmpty()) ? "UNKNOWN" : officerUserType;
         if (request.getTenantId() == null || request.getOfficerUserId() == null
                 || request.getReportDate() == null || request.getReportDate().isBlank()
                 || request.getTenantSchema() == null || request.getTenantSchema().isBlank()
-                || request.getOfficerUserType() == null || request.getOfficerUserType().isBlank()) {
+                || officerUserType == null || officerUserType.isEmpty()) {
             log.warn("[analytics/DAILY_REPORT_REQUEST] corr={} result=SKIPPED_INVALID_EVENT role={} — missing required"
                             + " field (tenantId/officerUserId/reportDate/tenantSchema/officerUserType)",
                     request.getCorrelationId(), role);
@@ -243,7 +246,7 @@ public class AnalyticsKafkaConsumer {
         String corr = request.getCorrelationId();
         long startNanos = System.nanoTime();
         log.info("[analytics/DAILY_REPORT_REQUEST] corr={} received: tenant={} officer={} role={} date={}",
-                corr, request.getTenantId(), request.getOfficerUserId(), request.getOfficerUserType(), reportDate);
+                corr, request.getTenantId(), request.getOfficerUserId(), role, reportDate);
 
         DailyReportKpiDTO kpis = dailySituationReportService.buildReport(
                 request.getTenantId(), request.getOfficerUserId(), reportDate,
@@ -254,7 +257,7 @@ public class AnalyticsKafkaConsumer {
                 .tenantId(request.getTenantId())
                 .tenantSchema(request.getTenantSchema())
                 .officerUserId(request.getOfficerUserId())
-                .officerUserType(request.getOfficerUserType())
+                .officerUserType(officerUserType)
                 .correlationId(corr)
                 .kpis(kpis)
                 .build();

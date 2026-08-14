@@ -58,7 +58,9 @@ public class DailySituationReportSchedulerService {
         int count = 0;
         for (String role : roles) {
             List<Long> officerIds = nudgeRepository.findDistinctOfficerUserIdsByUserType(schema, role);
-            requestedByRole.put(role, officerIds.size());
+            // Merge rather than put: a role listed twice in the CSV is published twice, so the
+            // per-role total must add up to `count` instead of being overwritten by the last pass.
+            requestedByRole.merge(role, officerIds.size(), Integer::sum);
             log.info("[DailyReportJob] corr={} result=REQUESTED role={} tenant={} officers={}",
                     correlationId, role, tenantId, officerIds.size());
             boolean isSdo = SDO_ROLE.equalsIgnoreCase(role);

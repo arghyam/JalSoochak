@@ -862,9 +862,11 @@ public class NotificationEventRouter {
         int tenantId = root.path("tenantId").asInt(0);
         String tenantSchema = root.path("tenantSchema").asText("");
         long officerUserId = root.path("officerUserId").asLong(0);
-        String officerUserType = root.path("officerUserType").asText("");
+        // Canonical role: trimmed once so the SDO gate, the PDF layout and the Glific template are all
+        // chosen from the same token (the latter two trim internally, the gate below did not).
+        String officerUserType = root.path("officerUserType").asText("").trim();
         String corr = root.path("correlationId").asText("");
-        String role = officerUserType.isBlank() ? "UNKNOWN" : officerUserType;
+        String role = officerUserType.isEmpty() ? "UNKNOWN" : officerUserType;
         long startNanos = System.nanoTime();
 
         if (tenantSchema.isBlank() || !tenantSchema.matches(SCHEMA_PATTERN) || officerUserId <= 0) {
@@ -907,14 +909,23 @@ public class NotificationEventRouter {
         log.debug("[Router/DAILY_REPORT] corr={} resolved officer={} name='{}' hasContactId={}",
                 corr, officerUserId, officerName, officer.contactId() != null);
 
-        List<DailyReportPriorityRow> priorityRows = dailyReportOutageDetailSectionsEnabled
-                ? buildPriorityRows(tenantSchema, kpis, corr)
-                : List.of();
-        List<DailyReportSectionOfficerRow> sectionOfficerRows =
-                buildSectionOfficerRows(tenantSchema, kpis, corr);
-
-        String filename = dailyReportPdfService.generate(
-                kpis, officerUserId, officerName, officerUserType, priorityRows, sectionOfficerRows);
+        List<DailyReportPriorityRow> priorityRows;
+        List<DailyReportSectionOfficerRow> sectionOfficerRows;
+        String filename;
+        try {
+            priorityRows = dailyReportOutageDetailSectionsEnabled
+                    ? buildPriorityRows(tenantSchema, kpis, corr)
+                    : List.of();
+            sectionOfficerRows = buildSectionOfficerRows(tenantSchema, kpis, corr);
+            filename = dailyReportPdfService.generate(
+                    kpis, officerUserId, officerName, officerUserType, priorityRows, sectionOfficerRows);
+        } catch (Exception generateEx) {
+            // Row lookup or PDF rendering failed: tag the outcome so it is counted like every other
+            // terminal state, then rethrow so the event is still retried.
+            log.error("[Router/DAILY_REPORT] corr={} result=FAILED_GENERATION role={} tenant={} officer={} — {}",
+                    corr, role, tenantId, officerUserId, generateEx.getMessage(), generateEx);
+            throw generateEx;
+        }
         // The PDF now exists on disk. Logged before upload/delivery so a report that is built but never
         // delivered is still counted as generated — that gap is the signal worth spotting.
         log.info("[Router/DAILY_REPORT] corr={} result=GENERATED role={} tenant={} officer={}"
