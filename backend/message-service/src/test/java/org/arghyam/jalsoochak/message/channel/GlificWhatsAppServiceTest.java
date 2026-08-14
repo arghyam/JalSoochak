@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -525,6 +526,51 @@ class GlificWhatsAppServiceTest {
     @SuppressWarnings("unchecked")
     private ArgumentCaptor<Map<String, Object>> varsCaptor() {
         return ArgumentCaptor.forClass(Map.class);
+    }
+
+    // ─────────────────── daily report document name (WhatsApp) ─────────────────
+
+    @Test
+    void dailyReportDocumentName_appendsTheReportDataDate() {
+        ReflectionTestUtils.setField(service, "dailyReportCaption", "Daily Water Service Situation Report");
+
+        // A report delivered on 14 Aug covers 13 Aug, and is named for the day it describes.
+        assertThat(service.dailyReportDocumentName(LocalDate.of(2026, 8, 13)))
+                .isEqualTo("Daily Water Service Situation Report 13-08-2026");
+        // Single-digit day and month stay zero-padded.
+        assertThat(service.dailyReportDocumentName(LocalDate.of(2026, 1, 5)))
+                .isEqualTo("Daily Water Service Situation Report 05-01-2026");
+    }
+
+    @Test
+    void dailyReportDocumentName_withoutADate_fallsBackToTheBareCaption() {
+        ReflectionTestUtils.setField(service, "dailyReportCaption", "Daily Water Service Situation Report");
+
+        assertThat(service.dailyReportDocumentName(null))
+                .isEqualTo("Daily Water Service Situation Report");
+    }
+
+    @Test
+    void sendDailyReportHsm_uploadsMediaUnderTheDatedDocumentName() throws Exception {
+        // The createMessageMedia caption is what Glific surfaces as the document's filename in
+        // WhatsApp, so this is the assertion that pins the recipient-visible name.
+        ReflectionTestUtils.setField(service, "dailyReportCaption", "Daily Water Service Situation Report");
+        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+        ReflectionTestUtils.setField(service, "escalationThumbnail", "");
+        when(client.execute(contains("createMessageMedia"), anyMap()))
+                .thenReturn(mapper.readTree("{\"createMessageMedia\":{\"messageMedia\":{\"id\":\"77\"}}}"));
+        when(client.execute(contains("createAndSendMessage"), anyMap()))
+                .thenReturn(mapper.readTree("{\"createAndSendMessage\":{\"message\":{\"id\":\"1\"}}}"));
+
+        service.sendDailyReportHsm(555L, "https://minio/report.pdf", "SECTION_OFFICER",
+                LocalDate.of(2026, 8, 13));
+
+        ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
+        verify(client).execute(contains("createMessageMedia"), vars.capture());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> input = (Map<String, Object>) vars.getValue().get("input");
+        assertThat(input).containsEntry("caption", "Daily Water Service Situation Report 13-08-2026");
+        assertThat(input).containsEntry("url", "https://minio/report.pdf");
     }
 
     // ──────────────────────────── dry-run mode ─────────────────────────────────

@@ -310,6 +310,9 @@ glific:
   media:
     escalation-caption: ${GLIFIC_ESCALATION_CAPTION:Escalations}
     escalation-thumbnail: ${GLIFIC_ESCALATION_THUMBNAIL:}
+    # Base name of the report document as the officer sees it in WhatsApp. The date of the data the
+    # report covers (D-1) is appended at send time, e.g. "… Report 13-08-2026" for a 14 Aug delivery,
+    # so configure the name only — do not put a date here.
     daily-report-caption: ${GLIFIC_DAILY_REPORT_CAPTION:Daily Water Service Situation Report}
 
 # ──────────────────────────────────────────────────────────────
