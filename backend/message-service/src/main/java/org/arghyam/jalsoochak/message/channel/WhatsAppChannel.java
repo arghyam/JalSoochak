@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -159,13 +160,15 @@ public class WhatsAppChannel implements NotificationChannel {
      * @param contactId       Glific contact ID of the officer
      * @param documentUrl     publicly reachable MinIO URL of the report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
+     * @param reportDate      the day the report's data covers (D-1); shown in the document name the
+     *                        officer sees in WhatsApp
      * @return {@code true} if the message was accepted by Glific
      */
-    public boolean sendDailyReport(long contactId, String documentUrl, String officerUserType) {
+    public boolean sendDailyReport(long contactId, String documentUrl, String officerUserType, LocalDate reportDate) {
         String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
         try {
             // Send with the same token that is logged, so the template picked matches the counted role.
-            glificWhatsAppService.sendDailyReportHsm(contactId, documentUrl, role);
+            glificWhatsAppService.sendDailyReportHsm(contactId, documentUrl, role, reportDate);
             log.info("[WHATSAPP] Daily report HSM sent role={}", role);
             log.debug("[WHATSAPP] Daily report HSM sent role={} contactId={}", role, contactId);
             return true;
