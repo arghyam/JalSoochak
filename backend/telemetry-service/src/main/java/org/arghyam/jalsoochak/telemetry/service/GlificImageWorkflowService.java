@@ -24,6 +24,7 @@ import java.time.LocalDateTime;
 import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 @Service
 @Slf4j
@@ -382,21 +383,10 @@ public class GlificImageWorkflowService {
     private SchemeResolution resolveAssamSchemeWithoutOperator(String schemaName,
                                                                String stateSchemeId,
                                                                String centreSchemeId) {
-        boolean hasStateSchemeId = stateSchemeId != null && !stateSchemeId.isBlank();
-        boolean hasCentreSchemeId = centreSchemeId != null && !centreSchemeId.isBlank();
-
-        Optional<Long> stateResolvedSchemeId = hasStateSchemeId
-                ? telemetryTenantRepository.findSchemeIdByStateSchemeId(schemaName, stateSchemeId)
-                : Optional.empty();
-        if (stateResolvedSchemeId.isPresent()) {
-            return new SchemeResolution(stateResolvedSchemeId.get(), IngestionSource.NORMAL);
-        }
-
-        Optional<Long> centreResolvedSchemeId = hasCentreSchemeId
-                ? telemetryTenantRepository.findSchemeIdByCentreSchemeId(schemaName, centreSchemeId)
-                : Optional.empty();
-        if (centreResolvedSchemeId.isPresent()) {
-            return new SchemeResolution(centreResolvedSchemeId.get(), IngestionSource.NORMAL);
+        // Any scheme the submitted ids resolve to is usable: there is no operator to prefer one by.
+        SchemeLookup lookup = lookupSubmittedScheme(schemaName, stateSchemeId, centreSchemeId, schemeId -> true);
+        if (lookup.acceptedSchemeId().isPresent()) {
+            return new SchemeResolution(lookup.acceptedSchemeId().get(), IngestionSource.NORMAL);
         }
 
         if (!lenientIngestionEnabled) {
@@ -406,10 +396,71 @@ public class GlificImageWorkflowService {
             throw new IllegalStateException("Scheme not found for the provided state or centre scheme id");
         }
 
+        return provisionPlaceholderScheme(schemaName, stateSchemeId, centreSchemeId, null);
+    }
+
+    // LENIENT-INGEST: outcome of the state-then-centre lookup of the submitted scheme ids.
+    // acceptedSchemeId is the scheme the submission lands on; when nothing was accepted,
+    // rejectedSchemeId carries the scheme that exists but was turned down (the operator is not mapped
+    // to it), and the two flags say which submitted id was found — both only for the rejection logs.
+    private record SchemeLookup(Optional<Long> acceptedSchemeId,
+                                Optional<Long> rejectedSchemeId,
+                                boolean stateSchemeFound,
+                                boolean centreSchemeFound) {
+    }
+
+    /**
+     * LENIENT-INGEST: the single place submitted scheme ids are turned into a scheme — state id first,
+     * centre id second — so a new scheme-id source only has to be added here. {@code acceptable} is how
+     * the caller narrows the candidates ({@code schemeId -> true} when there is no operator to prefer a
+     * mapped scheme by); the centre id is looked up only when the state id yields nothing acceptable,
+     * so the normal path still costs a single query.
+     */
+    private SchemeLookup lookupSubmittedScheme(String schemaName,
+                                               String stateSchemeId,
+                                               String centreSchemeId,
+                                               Predicate<Long> acceptable) {
+        boolean hasStateSchemeId = stateSchemeId != null && !stateSchemeId.isBlank();
+        boolean hasCentreSchemeId = centreSchemeId != null && !centreSchemeId.isBlank();
+
+        Optional<Long> stateResolvedSchemeId = hasStateSchemeId
+                ? telemetryTenantRepository.findSchemeIdByStateSchemeId(schemaName, stateSchemeId)
+                : Optional.empty();
+        if (stateResolvedSchemeId.isPresent() && acceptable.test(stateResolvedSchemeId.get())) {
+            return new SchemeLookup(stateResolvedSchemeId, Optional.empty(), true, false);
+        }
+
+        Optional<Long> centreResolvedSchemeId = hasCentreSchemeId
+                ? telemetryTenantRepository.findSchemeIdByCentreSchemeId(schemaName, centreSchemeId)
+                : Optional.empty();
+        if (centreResolvedSchemeId.isPresent() && acceptable.test(centreResolvedSchemeId.get())) {
+            return new SchemeLookup(centreResolvedSchemeId, Optional.empty(),
+                    stateResolvedSchemeId.isPresent(), true);
+        }
+
+        return new SchemeLookup(
+                Optional.empty(),
+                stateResolvedSchemeId.or(() -> centreResolvedSchemeId),
+                stateResolvedSchemeId.isPresent(),
+                centreResolvedSchemeId.isPresent());
+    }
+
+    /**
+     * LENIENT-INGEST: the single placeholder policy — a scheme id we have never seen becomes an
+     * auto-provisioned scheme so the submission is recorded instead of dropped. Shared by both
+     * resolvers; {@code operatorId} is {@code null} when the submission carried no phone number (the
+     * operator is only credited afterwards, from the scheme).
+     */
+    private SchemeResolution provisionPlaceholderScheme(String schemaName,
+                                                        String stateSchemeId,
+                                                        String centreSchemeId,
+                                                        Long operatorId) {
         Long placeholderSchemeId = telemetryTenantRepository.getOrCreatePlaceholderScheme(
                 schemaName, stateSchemeId, centreSchemeId);
-        log.info("assam_reading_lenient reason=\"scheme_not_found\" phoneAbsent=true auto_provisioned_scheme_id={} stateSchemeId={} centreSchemeId={}",
+        log.info("assam_reading_lenient reason=\"scheme_not_found\" auto_provisioned_scheme_id={} operatorId={} phoneAbsent={} stateSchemeId={} centreSchemeId={}",
                 placeholderSchemeId,
+                operatorId,
+                operatorId == null,
                 sanitizeSchemeId(stateSchemeId),
                 sanitizeSchemeId(centreSchemeId));
         return new SchemeResolution(placeholderSchemeId, IngestionSource.UNKNOWN_SCHEME);
@@ -427,26 +478,14 @@ public class GlificImageWorkflowService {
                                                        boolean operatorIsSentinel,
                                                        String stateSchemeId,
                                                        String centreSchemeId) {
-        boolean hasStateSchemeId = stateSchemeId != null && !stateSchemeId.isBlank();
-        boolean hasCentreSchemeId = centreSchemeId != null && !centreSchemeId.isBlank();
-
-        Optional<Long> stateResolvedSchemeId = hasStateSchemeId
-                ? telemetryTenantRepository.findSchemeIdByStateSchemeId(schemaName, stateSchemeId)
-                : Optional.empty();
-        if (stateResolvedSchemeId.isPresent()
-                && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, stateResolvedSchemeId.get())) {
-            return new SchemeResolution(stateResolvedSchemeId.get(), IngestionSource.NORMAL);
+        // Only a scheme the operator is actually mapped to counts as the normal path.
+        SchemeLookup lookup = lookupSubmittedScheme(schemaName, stateSchemeId, centreSchemeId,
+                schemeId -> telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, schemeId));
+        if (lookup.acceptedSchemeId().isPresent()) {
+            return new SchemeResolution(lookup.acceptedSchemeId().get(), IngestionSource.NORMAL);
         }
 
-        Optional<Long> centreResolvedSchemeId = hasCentreSchemeId
-                ? telemetryTenantRepository.findSchemeIdByCentreSchemeId(schemaName, centreSchemeId)
-                : Optional.empty();
-        if (centreResolvedSchemeId.isPresent()
-                && telemetryTenantRepository.isOperatorMappedToScheme(schemaName, operatorId, centreResolvedSchemeId.get())) {
-            return new SchemeResolution(centreResolvedSchemeId.get(), IngestionSource.NORMAL);
-        }
-
-        boolean schemeExistsButNotMapped = stateResolvedSchemeId.isPresent() || centreResolvedSchemeId.isPresent();
+        boolean schemeExistsButNotMapped = lookup.rejectedSchemeId().isPresent();
 
         if (!lenientIngestionEnabled) {
             // Original behaviour: reject when nothing resolves-and-maps.
@@ -455,15 +494,15 @@ public class GlificImageWorkflowService {
                     rejectionReason,
                     operatorId,
                     sanitizeSchemeId(stateSchemeId),
-                    stateResolvedSchemeId.isPresent(),
+                    lookup.stateSchemeFound(),
                     sanitizeSchemeId(centreSchemeId),
-                    centreResolvedSchemeId.isPresent());
+                    lookup.centreSchemeFound());
             throw new IllegalStateException("Operator is not mapped to the provided state or centre scheme");
         }
 
         // Scheme exists but the operator is not mapped to it -> record against the existing scheme.
         if (schemeExistsButNotMapped) {
-            Long existingSchemeId = stateResolvedSchemeId.orElseGet(centreResolvedSchemeId::get);
+            Long existingSchemeId = lookup.rejectedSchemeId().get();
             // Only flag OPERATOR_NOT_MAPPED for a real operator; a sentinel operator is already flagged
             // via UNKNOWN_OPERATOR and is never expected to be mapped to anything.
             int bits = operatorIsSentinel ? IngestionSource.NORMAL : IngestionSource.OPERATOR_NOT_MAPPED;
@@ -471,20 +510,14 @@ public class GlificImageWorkflowService {
                     operatorId,
                     existingSchemeId,
                     sanitizeSchemeId(stateSchemeId),
-                    stateResolvedSchemeId.isPresent(),
+                    lookup.stateSchemeFound(),
                     sanitizeSchemeId(centreSchemeId),
-                    centreResolvedSchemeId.isPresent());
+                    lookup.centreSchemeFound());
             return new SchemeResolution(existingSchemeId, bits);
         }
 
         // Scheme id not in our records at all -> auto-provision a placeholder scheme.
-        Long placeholderSchemeId = telemetryTenantRepository.getOrCreatePlaceholderScheme(schemaName, stateSchemeId, centreSchemeId);
-        log.info("assam_reading_lenient reason=\"scheme_not_found\" auto_provisioned_scheme_id={} operatorId={} stateSchemeId={} centreSchemeId={}",
-                placeholderSchemeId,
-                operatorId,
-                sanitizeSchemeId(stateSchemeId),
-                sanitizeSchemeId(centreSchemeId));
-        return new SchemeResolution(placeholderSchemeId, IngestionSource.UNKNOWN_SCHEME);
+        return provisionPlaceholderScheme(schemaName, stateSchemeId, centreSchemeId, operatorId);
     }
 
     private String sanitizeSchemeId(String schemeId) {

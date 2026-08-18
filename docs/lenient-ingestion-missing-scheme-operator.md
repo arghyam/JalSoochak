@@ -30,12 +30,12 @@ the tenant master data. Assam submissions were being dropped at two points in
 Instead of rejecting, the Assam path now **records the submission and tags it** so nothing is lost
 and it can be filtered / reconciled later. Four cases, each represented differently:
 
-| Case | Representation | `ingestion_source` bit |
-|---|---|---|
-| Scheme id not in our records | recorded against an **auto-provisioned placeholder scheme** (`scheme_master_table.is_auto_provisioned = TRUE`) | `1` `UNKNOWN_SCHEME` |
-| Phone not in our records | recorded against the single **sentinel "Unknown operator"** (`user_table.is_auto_provisioned = TRUE`, `status = 0`) | `2` `UNKNOWN_OPERATOR` |
-| Scheme + operator exist but are not mapped | recorded against the **existing** scheme (no mapping created) | `4` `OPERATOR_NOT_MAPPED` |
-| No phone in the payload at all | operator **inferred from the scheme** (see §2a) | `8` `PHONE_ABSENT` |
+| Case                                       | Representation                                                                                                      | `ingestion_source` bit    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| Scheme id not in our records               | recorded against an **auto-provisioned placeholder scheme** (`scheme_master_table.is_auto_provisioned = TRUE`)      | `1` `UNKNOWN_SCHEME`      |
+| Phone not in our records                   | recorded against the single **sentinel "Unknown operator"** (`user_table.is_auto_provisioned = TRUE`, `status = 0`) | `2` `UNKNOWN_OPERATOR`    |
+| Scheme + operator exist but are not mapped | recorded against the **existing** scheme (no mapping created)                                                       | `4` `OPERATOR_NOT_MAPPED` |
+| No phone in the payload at all             | operator **inferred from the scheme** (see §2a)                                                                     | `8` `PHONE_ABSENT`        |
 
 Bits are combined (e.g. unknown scheme **and** unknown operator → `1 | 2 = 3`). A normal submission
 has `ingestion_source = 0`.
@@ -45,12 +45,12 @@ has `ingestion_source = 0`.
 `phone_number` is no longer required by bean validation; a blank value is treated exactly like an
 absent one. Resolution order flips when it is missing, because there is no submitter to start from:
 
-| Payload | Order | Operator credited |
-|---|---|---|
-| With phone | operator → scheme | the operator behind the phone (or the sentinel, per §2) |
+| Payload       | Order             | Operator credited                                                                                                                                         |
+| ------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| With phone    | operator → scheme | the operator behind the phone (or the sentinel, per §2)                                                                                                   |
 | Without phone | scheme → operator | the **first pump operator mapped to the resolved scheme** (oldest active `user_scheme_mapping_table` row, `user_type = PUMP_OPERATOR`), else the sentinel |
 
-Because the operator is *inferred*, every such reading is tagged `PHONE_ABSENT` — including the case
+Because the operator is _inferred_, every such reading is tagged `PHONE_ABSENT` — including the case
 where it lands on a perfectly normal, mapped operator, which trips none of the other bits and would
 otherwise be indistinguishable from a genuine submission by that operator. Combinations follow the
 same rules: no phone **and** no mapped pump operator → `8 | 2 = 10`; no phone **and** an unknown
@@ -75,11 +75,11 @@ The update endpoint corrects an existing row, so unlike the POST it cannot infer
 scheme — the body carries no scheme id, and `reading_url` / `image_id` is not a key the reading can
 be looked up by. It therefore needs **one of two identifiers**, and either alone is enough:
 
-| Payload | Row corrected |
-|---|---|
+| Payload                                    | Row corrected                                                         |
+| ------------------------------------------ | --------------------------------------------------------------------- |
 | `correlation_id` (with or without a phone) | the reading with that `correlation_id` or `flowvision_correlation_id` |
-| `phone_number` only | the latest reading created by the operator behind that phone |
-| neither | rejected — `400 Either correlationId or phoneNumber must be provided` |
+| `phone_number` only                        | the latest reading created by the operator behind that phone          |
+| neither                                    | rejected — `400 Either correlationId or phoneNumber must be provided` |
 
 `correlation_id` already won over `phone_number` before this change; the phone was accepted and then
 discarded. Only the controller's "phone is mandatory" gate was dropped.
@@ -100,20 +100,22 @@ attendance and water-quantity facts for any event with a null `tenantId` (see §
 Applied to every existing `tenant_%` schema and baked into `create_tenant_schema()` for new tenants.
 
 ### `flow_reading_table`
-| Column | Type | Meaning |
-|---|---|---|
-| `ingestion_source` | `SMALLINT NOT NULL DEFAULT 0` | Bitmask (0 = normal). `1`=unknown scheme, `2`=unknown operator, `4`=operator-not-mapped, `8`=phone absent from the payload. |
-| `submitted_state_scheme_id` | `VARCHAR(255)` | Raw `state_scheme_id` from the payload (for reconciliation). Null for normal rows. |
-| `submitted_centre_scheme_id` | `VARCHAR(255)` | Raw `centre_scheme_id` from the payload. Null for normal rows. |
-| `submitted_phone_hash` | `VARCHAR(64)` | HMAC of the digit-normalized submitted phone (no raw PII). Set only for the unknown-operator case; always null when no phone was submitted. |
+
+| Column                       | Type                          | Meaning                                                                                                                                     |
+| ---------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ingestion_source`           | `SMALLINT NOT NULL DEFAULT 0` | Bitmask (0 = normal). `1`=unknown scheme, `2`=unknown operator, `4`=operator-not-mapped, `8`=phone absent from the payload.                 |
+| `submitted_state_scheme_id`  | `VARCHAR(255)`                | Raw `state_scheme_id` from the payload (for reconciliation). Null for normal rows.                                                          |
+| `submitted_centre_scheme_id` | `VARCHAR(255)`                | Raw `centre_scheme_id` from the payload. Null for normal rows.                                                                              |
+| `submitted_phone_hash`       | `VARCHAR(64)`                 | HMAC of the digit-normalized submitted phone (no raw PII). Set only for the unknown-operator case; always null when no phone was submitted. |
 
 No migration was needed for `PHONE_ABSENT` — it is another bit in the existing `SMALLINT` column.
 
 Partial index `idx_<schema>_flow_ingestion_source ON flow_reading_table(ingestion_source) WHERE ingestion_source <> 0`.
 
 ### `scheme_master_table`
-| Column | Type | Meaning |
-|---|---|---|
+
+| Column                | Type                             | Meaning                                                     |
+| --------------------- | -------------------------------- | ----------------------------------------------------------- |
 | `is_auto_provisioned` | `BOOLEAN NOT NULL DEFAULT FALSE` | `TRUE` for placeholder schemes created by the lenient path. |
 
 Partial index `idx_<schema>_scheme_auto_prov … WHERE is_auto_provisioned`.
@@ -121,8 +123,9 @@ Placeholder rows have `scheme_name = 'Auto-provisioned scheme (state:<id>|centre
 `work_status = 0`, `operating_status = 0`, and the submitted ids in `state_scheme_id`/`centre_scheme_id`.
 
 ### `user_table`
-| Column | Type | Meaning |
-|---|---|---|
+
+| Column                | Type                             | Meaning                                     |
+| --------------------- | -------------------------------- | ------------------------------------------- |
 | `is_auto_provisioned` | `BOOLEAN NOT NULL DEFAULT FALSE` | `TRUE` for the sentinel "Unknown operator". |
 
 Partial index `idx_<schema>_user_auto_prov … WHERE is_auto_provisioned`.
@@ -178,16 +181,16 @@ ORDER BY reading_date DESC;
 
 Logger: `org.arghyam.jalsoochak.telemetry.service.GlificImageWorkflowService` (INFO).
 
-| What | Grep |
-|---|---|
-| Every leniently-recorded submission (canonical audit line) | `assam_reading_lenient_recorded` |
-| Unknown-scheme events (with the auto-provisioned id) | `assam_reading_lenient reason="scheme_not_found"` |
-| Unknown-operator events (masked phone) | `assam_reading_lenient reason="operator_not_found"` |
-| Operator-not-mapped events | `assam_reading_lenient reason="operator_not_mapped_to_scheme"` |
-| Phone-less submissions (both outcomes) | `assam_reading_phone_absent` |
-| …credited to the scheme's pump operator | `assam_reading_phone_absent reason="operator_inferred_from_scheme"` |
-| …with no pump operator on the scheme (sentinel) | `assam_reading_phone_absent reason="no_operator_mapped_to_scheme"` |
-| The actual phone behind an unknown-operator row (PII) | `rawContactId=` — **DEBUG only** |
+| What                                                       | Grep                                                                |
+| ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| Every leniently-recorded submission (canonical audit line) | `assam_reading_lenient_recorded`                                    |
+| Unknown-scheme events (with the auto-provisioned id)       | `assam_reading_lenient reason="scheme_not_found"`                   |
+| Unknown-operator events (masked phone)                     | `assam_reading_lenient reason="operator_not_found"`                 |
+| Operator-not-mapped events                                 | `assam_reading_lenient reason="operator_not_mapped_to_scheme"`      |
+| Phone-less submissions (both outcomes)                     | `assam_reading_phone_absent`                                        |
+| …credited to the scheme's pump operator                    | `assam_reading_phone_absent reason="operator_inferred_from_scheme"` |
+| …with no pump operator on the scheme (sentinel)            | `assam_reading_phone_absent reason="no_operator_mapped_to_scheme"`  |
+| The actual phone behind an unknown-operator row (PII)      | `rawContactId=` — **DEBUG only**                                    |
 
 The `assam_reading_lenient_recorded` line prints `ingestionSource`, boolean flags
 (`unknownScheme` / `unknownOperator` / `operatorNotMapped` / `phoneAbsent`), `operatorId`,
@@ -208,12 +211,14 @@ submitted). Raw phone numbers only ever appear at DEBUG, per the project privacy
 1. Create the real scheme/operator through the normal admin flow (this also propagates to analytics
    via the usual `SCHEME_CREATED` / `USER_CREATED` events).
 2. Re-point the recorded rows and clear the tag, e.g. for an unknown scheme:
+
    ```sql
    UPDATE <schema>.flow_reading_table
    SET scheme_id = :realSchemeId,
        ingestion_source = ingestion_source & ~1   -- clear UNKNOWN_SCHEME bit
    WHERE scheme_id = :placeholderSchemeId;
    ```
+
    Then soft-delete the placeholder (`UPDATE … scheme_master_table SET deleted_at = NOW() …`).
 3. Analytics fact rows already written against the placeholder `scheme_id` are **not** updated
    automatically — re-point `analytics_schema.fact_meter_reading_table.scheme_id` the same way (or
@@ -226,9 +231,11 @@ submitted). Raw phone numbers only ever appear at DEBUG, per the project privacy
   back to being rejected exactly as before; the tracking columns and any already-recorded rows stay.
 - **Full code removal:** every change is marked `LENIENT-INGEST`, and the optional-phone work on top
   of it is marked `PHONE-OPTIONAL`. To find them:
+
   ```bash
   grep -rn "LENIENT-INGEST\|PHONE-OPTIONAL" backend/ docs/
   ```
+
   Reverting the optional phone means restoring `@NotBlank` on `AssamReadingRequest.phoneNumber` and
   dropping `resolveOperatorFromScheme` / `findFirstPumpOperatorForScheme`; already-recorded rows keep
   their `PHONE_ABSENT` bit.
