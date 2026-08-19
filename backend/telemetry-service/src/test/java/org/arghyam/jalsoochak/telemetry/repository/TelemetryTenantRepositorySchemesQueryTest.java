@@ -80,6 +80,59 @@ class TelemetryTenantRepositorySchemesQueryTest {
         assertTrue(sql.contains("AND u.deleted_at IS NULL"));
     }
 
+    // PHONE-OPTIONAL: a submission without a phone is credited to the scheme's pump operator, so the
+    // lookup must filter on that role, ignore soft-deleted/inactive rows, and be deterministic (oldest
+    // mapping first) so repeated submissions for a scheme always land on the same user.
+    @SuppressWarnings("unchecked")
+    @Test
+    void findFirstPumpOperatorForSchemeSelectsOldestActivePumpOperatorMapping() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), any(), any(), any())).thenReturn(Boolean.TRUE);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(), any())).thenReturn(List.of());
+
+        repository.findFirstPumpOperatorForScheme("tenant_as", 33L);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class), eq(33L), eq("PUMP_OPERATOR"));
+        String sql = sqlCaptor.getValue();
+
+        assertTrue(sql.contains("WHERE usm.scheme_id = ?"));
+        assertTrue(sql.contains("AND usm.status = 1"));
+        assertTrue(sql.contains("AND usm.deleted_at IS NULL"));
+        assertTrue(sql.contains("AND u.status = 1"));
+        assertTrue(sql.contains("AND u.deleted_at IS NULL"));
+        assertTrue(sql.contains("UPPER(COALESCE(ut.c_name, '')) = ?"));
+        assertTrue(sql.contains("ORDER BY usm.id"));
+        assertTrue(sql.contains("LIMIT 1"));
+        assertTrue(sql.contains("u.language_id AS language_id"),
+                "the language column must stay table-qualified so the join does not make it ambiguous");
+    }
+
+    // The language_id column is absent on pre-migration tenant schemas; the lookup must degrade to NULL
+    // rather than failing, exactly as findOperatorById does.
+    @SuppressWarnings("unchecked")
+    @Test
+    void findFirstPumpOperatorForSchemeFallsBackWhenLanguageColumnMissing() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Boolean.class), any(), any(), any())).thenReturn(Boolean.FALSE);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(), any())).thenReturn(List.of());
+
+        repository.findFirstPumpOperatorForScheme("tenant_as", 33L);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class), eq(33L), eq("PUMP_OPERATOR"));
+        assertTrue(sqlCaptor.getValue().contains("NULL::integer AS language_id"));
+    }
+
+    @Test
+    void findFirstPumpOperatorForSchemeSkipsQueryWhenSchemeIdMissing() {
+        TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
+
+        assertTrue(repository.findFirstPumpOperatorForScheme("tenant_as", null).isEmpty());
+
+        verifyNoInteractions(jdbcTemplate);
+    }
+
     // LENIENT-INGEST: placeholder schemes must be created inactive so they never inflate active-scheme
     // dashboards, and flagged is_auto_provisioned so they stay discoverable for reconciliation.
     @SuppressWarnings("unchecked")

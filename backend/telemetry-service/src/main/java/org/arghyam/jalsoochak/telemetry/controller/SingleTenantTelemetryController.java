@@ -300,13 +300,17 @@ public class SingleTenantTelemetryController {
                     hasImageId,
                     hasConfirmedReading);
 
-            if (!hasPhoneNumber) {
-                log.info("PUT /api/v1/telemetry/readings rejected tenantId={} reason=\"phoneNumber must be provided\" request={}",
+            // PHONE-OPTIONAL: either identifier locates the reading to correct — the correlationId of the
+            // original submission, or the submitter's phone (whose latest reading is corrected). Only a
+            // request carrying neither has nothing to update; imageId is not an identifier the reading
+            // can be looked up by.
+            if (!hasPhoneNumber && !hasCorrelationId) {
+                log.info("PUT /api/v1/telemetry/readings rejected tenantId={} reason=\"Either correlationId or phoneNumber must be provided\" request={}",
                         tenantId,
                         summarizeUpdateReadingRequest(request));
                 throw new ResponseStatusException(
                         HttpStatus.BAD_REQUEST,
-                        "phoneNumber must be provided"
+                        "Either correlationId or phoneNumber must be provided"
                 );
             }
 
@@ -330,8 +334,9 @@ public class SingleTenantTelemetryController {
                     summarizeUpdateReadingRequest(request));
             CreateReadingResponse response = bfmReadingService.updateConfirmedReading(
                     hasCorrelationId ? request.getCorrelationId().trim() : null,
-                    request.getPhoneNumber().trim(),
-                    request.getConfirmedReading()
+                    hasPhoneNumber ? request.getPhoneNumber().trim() : null,
+                    request.getConfirmedReading(),
+                    tenantId
             );
             log.info("PUT /api/v1/telemetry/readings updated tenantId={} response={}",
                     tenantId,

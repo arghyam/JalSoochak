@@ -39,6 +39,7 @@ import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.nullable;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -666,8 +667,6 @@ class GlificImageWorkflowServiceAssamTest {
 
         when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
                 .thenReturn(Optional.of(operatorWithSchema));
-        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
-        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "99999999"))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "88888888"))
@@ -684,6 +683,258 @@ class GlificImageWorkflowServiceAssamTest {
         assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getErrorCode());
         verify(telemetryTenantRepository, never()).getOrCreatePlaceholderScheme(anyString(), any(), any());
         verify(bfmReadingService, never()).createReading(any(), anyString(), any(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void processAssamReadingWithoutPhoneCreditsFirstPumpOperatorOfScheme() {
+        // PHONE-OPTIONAL: no phone in the payload -> the scheme is resolved first and the reading is
+        // credited to the pump operator mapped to it, tagged PHONE_ABSENT so the inferred operator is
+        // never mistaken for the actual submitter.
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
+                .phoneNumber(null)
+                .build();
+
+        TelemetryOperator pumpOperator =
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null);
+        TelemetryOperatorWithSchema inferred = new TelemetryOperatorWithSchema("tenant_assam", pumpOperator);
+
+        when(telemetryTenantRepository.findSchemaNameByTenantId(22)).thenReturn(Optional.of("tenant_assam"));
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
+        when(telemetryTenantRepository.findFirstPumpOperatorForScheme("tenant_assam", 30178236L))
+                .thenReturn(Optional.of(pumpOperator));
+        when(operatorContextService.resolveOperatorLanguage(inferred, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        CreateReadingResponse response;
+        try {
+            response = service.processAssamReading(request, 22);
+        } finally {
+            detachAppender(appender);
+        }
+
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        // The credited operator's own phone is passed on so the reading keeps that operator's channel.
+        verify(bfmReadingService).createReading(
+                requestCaptor.capture(),
+                eq("tenant_assam"),
+                eq(pumpOperator),
+                eq("919876543210"),
+                anyBoolean(),
+                eq(FlowVisionRetryMode.RESILIENT));
+        CreateReadingRequest captured = requestCaptor.getValue();
+        assertEquals(30178236L, captured.getSchemeId());
+        assertEquals(11L, captured.getOperatorId());
+        assertEquals(IngestionSource.PHONE_ABSENT, captured.getIngestionSource(),
+                "Only PHONE_ABSENT should be set when the inferred operator is a real, mapped operator");
+        assertNull(captured.getSubmittedPhoneHash());
+        // Nothing was submitted to hash.
+        verify(telemetryTenantRepository, never()).hashSubmittedPhone(anyString());
+        assertTrue(infoLogged(appender, "reason=\"operator_inferred_from_scheme\""));
+    }
+
+    @Test
+    void processAssamReadingTreatsBlankPhoneAsAbsent() {
+        // A blank phone carries no more information than a missing one, so it takes the same path.
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .phoneNumber("   ")
+                .build();
+
+        TelemetryOperator pumpOperator =
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null);
+        TelemetryOperatorWithSchema inferred = new TelemetryOperatorWithSchema("tenant_assam", pumpOperator);
+
+        when(telemetryTenantRepository.findSchemaNameByTenantId(22)).thenReturn(Optional.of("tenant_assam"));
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
+        when(telemetryTenantRepository.findFirstPumpOperatorForScheme("tenant_assam", 30178236L))
+                .thenReturn(Optional.of(pumpOperator));
+        when(operatorContextService.resolveOperatorLanguage(inferred, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+
+        CreateReadingResponse response = service.processAssamReading(request, 22);
+
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class));
+        assertEquals(IngestionSource.PHONE_ABSENT, requestCaptor.getValue().getIngestionSource());
+        // The blank phone must never be resolved as a contact.
+        verify(operatorContextService, never()).tryResolveOperatorWithSchema(anyString(), any());
+    }
+
+    @Test
+    void processAssamReadingWithoutPhoneFallsBackToSentinelWhenSchemeHasNoPumpOperator() {
+        // PHONE-OPTIONAL: a scheme with no mapped pump operator has nobody to credit, so the reading is
+        // recorded against the tenant sentinel and tagged PHONE_ABSENT | UNKNOWN_OPERATOR.
+        ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
+
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .build();
+
+        TelemetryOperator sentinel = new TelemetryOperator(
+                999L, 22, "Unknown Operator", "unknown-operator@auto.jalsoochak.invalid", "UNKNOWN", null);
+        TelemetryOperatorWithSchema sentinelWithSchema = new TelemetryOperatorWithSchema("tenant_assam", sentinel);
+
+        when(telemetryTenantRepository.findSchemaNameByTenantId(22)).thenReturn(Optional.of("tenant_assam"));
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
+        when(telemetryTenantRepository.findFirstPumpOperatorForScheme("tenant_assam", 30178236L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.getOrCreateUnknownOperatorUserId("tenant_assam", 22)).thenReturn(999L);
+        when(telemetryTenantRepository.findOperatorById("tenant_assam", 999L)).thenReturn(Optional.of(sentinel));
+        when(operatorContextService.resolveOperatorLanguage(sentinelWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        CreateReadingResponse response;
+        try {
+            response = service.processAssamReading(request, 22);
+        } finally {
+            detachAppender(appender);
+        }
+
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class));
+        CreateReadingRequest captured = requestCaptor.getValue();
+        assertEquals(999L, captured.getOperatorId());
+        assertEquals(IngestionSource.PHONE_ABSENT | IngestionSource.UNKNOWN_OPERATOR, captured.getIngestionSource());
+        assertNull(captured.getSubmittedPhoneHash());
+        assertTrue(infoLogged(appender, "reason=\"no_operator_mapped_to_scheme\""));
+        assertTrue(infoLogged(appender, "phoneAbsent=true"));
+    }
+
+    @Test
+    void processAssamReadingWithoutPhoneRecordsAgainstPlaceholderWhenSchemeIdsUnknown() {
+        // PHONE-OPTIONAL + LENIENT-INGEST: neither the scheme nor a submitter is known, so the reading
+        // lands on an auto-provisioned placeholder credited to the sentinel, carrying all three bits.
+        ReflectionTestUtils.setField(service, "lenientIngestionEnabled", true);
+
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("99999999")
+                .centreSchemeId("88888888")
+                .build();
+
+        TelemetryOperator sentinel = new TelemetryOperator(
+                999L, 22, "Unknown Operator", "unknown-operator@auto.jalsoochak.invalid", "UNKNOWN", null);
+        TelemetryOperatorWithSchema sentinelWithSchema = new TelemetryOperatorWithSchema("tenant_assam", sentinel);
+
+        when(telemetryTenantRepository.findSchemaNameByTenantId(22)).thenReturn(Optional.of("tenant_assam"));
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "99999999"))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "88888888"))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.getOrCreatePlaceholderScheme("tenant_assam", "99999999", "88888888"))
+                .thenReturn(55555L);
+        when(telemetryTenantRepository.findFirstPumpOperatorForScheme("tenant_assam", 55555L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.getOrCreateUnknownOperatorUserId("tenant_assam", 22)).thenReturn(999L);
+        when(telemetryTenantRepository.findOperatorById("tenant_assam", 999L)).thenReturn(Optional.of(sentinel));
+        when(operatorContextService.resolveOperatorLanguage(sentinelWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(localizationService.localizeMessage("Reading created successfully", "english"))
+                .thenReturn("Reading created successfully");
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder()
+                        .success(true)
+                        .message("Reading created successfully")
+                        .correlationId("corr-1")
+                        .qualityStatus("CONFIRMED")
+                        .build());
+
+        CreateReadingResponse response = service.processAssamReading(request, 22);
+
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class));
+        CreateReadingRequest captured = requestCaptor.getValue();
+        assertEquals(55555L, captured.getSchemeId());
+        assertEquals(
+                IngestionSource.PHONE_ABSENT | IngestionSource.UNKNOWN_SCHEME | IngestionSource.UNKNOWN_OPERATOR,
+                captured.getIngestionSource());
+        assertEquals("99999999", captured.getSubmittedStateSchemeId());
+        // A placeholder has no master row to reconcile against.
+        verify(telemetryTenantRepository, never()).recordSchemeIdMismatchIfAny(anyString(), any(), anyString(), anyString());
+    }
+
+    @Test
+    void processAssamReadingWithoutPhoneIsRejectedWhenLenientIngestionDisabled() {
+        // With the off-switch disabled there is no sentinel to fall back on, so a phone-less submission
+        // for a scheme with no mapped pump operator is rejected rather than credited to nobody.
+        ReflectionTestUtils.setField(service, "lenientIngestionEnabled", false);
+
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .build();
+
+        when(telemetryTenantRepository.findSchemaNameByTenantId(22)).thenReturn(Optional.of("tenant_assam"));
+        when(telemetryTenantRepository.findSchemeIdByStateSchemeId("tenant_assam", "30178236"))
+                .thenReturn(Optional.of(30178236L));
+        when(telemetryTenantRepository.findFirstPumpOperatorForScheme("tenant_assam", 30178236L))
+                .thenReturn(Optional.empty());
+        when(localizationService.resolveLanguageKeyForContact(null)).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(any(), anyString(), anyString()))
+                .thenReturn("Reading rejected");
+
+        CreateReadingResponse response = service.processAssamReading(request, 22);
+
+        assertNotNull(response);
+        assertFalse(response.isSuccess());
+        assertEquals("REJECTED", response.getQualityStatus());
+        assertEquals(TelemetryErrorCode.OPERATOR_NOT_MAPPED_TO_SCHEME, response.getErrorCode());
+        verify(telemetryTenantRepository, never()).getOrCreateUnknownOperatorUserId(anyString(), any());
+        verify(bfmReadingService, never()).createReading(any(), anyString(), any(), nullable(String.class), anyBoolean(), any(FlowVisionRetryMode.class));
     }
 
     @Test

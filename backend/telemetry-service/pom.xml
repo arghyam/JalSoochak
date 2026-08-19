@@ -25,6 +25,7 @@
         <lombok.version>1.18.32</lombok.version>
         <springdoc.version>2.5.0</springdoc.version>
         <resilience4j.version>2.1.0</resilience4j.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
         <sonar.coverage.exclusions>
             **/org/arghyam/jalsoochak/telemetry/dto/**,
             **/org/arghyam/jalsoochak/telemetry/entity/**,
@@ -136,6 +137,16 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
