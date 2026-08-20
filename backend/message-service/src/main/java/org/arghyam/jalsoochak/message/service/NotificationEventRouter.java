@@ -909,6 +909,19 @@ public class NotificationEventRouter {
         log.debug("[Router/DAILY_REPORT] corr={} resolved officer={} name='{}' hasContactId={}",
                 corr, officerUserId, officerName, officer.contactId() != null);
 
+        // Resolved before the report is built. A contact id of 0 while delivery is live means the opt-in
+        // never produced a Glific contact, and nothing downstream can recover from that: sending anyway
+        // comes back as "Receiver does not exist", and retrying cannot conjure a contact id while it
+        // stalls the whole partition. Doing it here means the dead end costs no PDF render and no MinIO
+        // upload — the previous order paid for both, then deleted the file and gave up.
+        long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
+        if (contactId <= 0 && glificWhatsAppService.isDailyReportDeliveryEnabled()) {
+            log.error("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
+                            + " — Glific opt-in returned no contact id (non-retryable)",
+                    corr, role, tenantId, officerUserId);
+            return;
+        }
+
         List<DailyReportPriorityRow> priorityRows;
         List<DailyReportSectionOfficerRow> sectionOfficerRows;
         String filename;
@@ -947,8 +960,6 @@ public class NotificationEventRouter {
         } catch (Exception cleanupEx) {
             log.warn("[Router/DAILY_REPORT] corr={} could not delete local PDF {}: {}", corr, localPath, cleanupEx.getMessage());
         }
-
-        long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
 
         // isRenderableKpis has already confirmed reportDate is a parseable ISO date. It is the day the
         // data covers (D-1) — the date the officer sees in the WhatsApp document name.

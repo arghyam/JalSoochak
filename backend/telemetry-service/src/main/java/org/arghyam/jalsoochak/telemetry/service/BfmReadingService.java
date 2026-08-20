@@ -556,21 +556,42 @@ public class BfmReadingService {
         if (correlationId == null || correlationId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "correlationId must be provided");
         }
-        return updateConfirmedReadingByCorrelationId(correlationId, confirmedReading);
+        return updateConfirmedReadingByCorrelationId(correlationId, confirmedReading, null);
     }
 
     @Transactional
     public CreateReadingResponse updateConfirmedReading(String correlationId, String phoneNumber, BigDecimal confirmedReading) {
+        return updateConfirmedReading(correlationId, phoneNumber, confirmedReading, null);
+    }
+
+    /**
+     * PHONE-OPTIONAL: a correction only needs one way to find the row it corrects — either the
+     * correlationId of the original submission or the submitter's phone (whose latest reading is
+     * corrected). Either alone is sufficient; correlationId wins when both are present.
+     *
+     * <p>{@code tenantId} is the tenant the caller authenticated as (API key). It is used on the
+     * correlationId path only, where there is no operator to derive a tenant from: it resolves the
+     * tenant schema and backstops the tenant on the published event. {@code null} is accepted for
+     * callers that have no authenticated tenant, which then fall back to {@link TenantContext}.
+     */
+    @Transactional
+    public CreateReadingResponse updateConfirmedReading(String correlationId,
+                                                        String phoneNumber,
+                                                        BigDecimal confirmedReading,
+                                                        Integer tenantId) {
         if (confirmedReading == null || confirmedReading.compareTo(BigDecimal.ZERO) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "confirmedReading must be a non-negative number");
         }
 
         if (correlationId != null && !correlationId.isBlank()) {
-            return updateConfirmedReadingByCorrelationId(correlationId.trim(), confirmedReading);
+            return updateConfirmedReadingByCorrelationId(correlationId.trim(), confirmedReading, tenantId);
         }
 
         if (phoneNumber == null || phoneNumber.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber must be provided");
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Either correlationId or phoneNumber must be provided"
+            );
         }
 
         var operatorWithSchema = glificOperatorContextService.resolveOperatorWithSchema(phoneNumber);
@@ -600,11 +621,10 @@ public class BfmReadingService {
                 .build();
     }
 
-    private CreateReadingResponse updateConfirmedReadingByCorrelationId(String correlationId, BigDecimal confirmedReading) {
-        String schemaName = TenantContext.getSchema();
-        if (schemaName == null || schemaName.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tenant could not be resolved");
-        }
+    private CreateReadingResponse updateConfirmedReadingByCorrelationId(String correlationId,
+                                                                        BigDecimal confirmedReading,
+                                                                        Integer tenantId) {
+        String schemaName = resolveSchemaForCorrelationUpdate(tenantId);
 
         if (confirmedReading == null || confirmedReading.compareTo(BigDecimal.ZERO) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "confirmedReading must be a non-negative number");
@@ -622,13 +642,19 @@ public class BfmReadingService {
                 RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading())
         );
 
-        Integer tenantId = null;
+        Integer eventTenantId = null;
         if (reading.createdBy() != null) {
-            tenantId = telemetryTenantRepository.findOperatorById(schemaName, reading.createdBy())
+            eventTenantId = telemetryTenantRepository.findOperatorById(schemaName, reading.createdBy())
                     .map(TelemetryOperator::tenantId)
                     .orElse(null);
         }
-        publishConfirmedReadingUpdate(tenantId, reading, confirmedReading);
+        // analytics-service drops the operator-attendance and water-quantity facts for any event with a
+        // null tenantId, so fall back to the tenant the caller authenticated as rather than publishing a
+        // correction that silently never reaches the dashboards.
+        if (eventTenantId == null) {
+            eventTenantId = tenantId;
+        }
+        publishConfirmedReadingUpdate(eventTenantId, reading, confirmedReading);
 
         return CreateReadingResponse.builder()
                 .success(true)
@@ -637,6 +663,27 @@ public class BfmReadingService {
                 .meterReading(confirmedReading)
                 .qualityStatus("CONFIRMED")
                 .build();
+    }
+
+    /**
+     * PHONE-OPTIONAL: the correlationId path has no operator to derive a schema from, so the tenant has
+     * to come from the request itself. The API-key tenant is preferred over the {@code X-Tenant-Code}
+     * header behind {@link TenantContext}: that header is unauthenticated, so letting it win would let a
+     * caller holding one tenant's API key reach another tenant's schema. The header stays as the
+     * fallback for callers that have no authenticated tenant (the correlationId-only overload).
+     */
+    private String resolveSchemaForCorrelationUpdate(Integer tenantId) {
+        if (tenantId != null) {
+            String apiKeySchema = telemetryTenantRepository.findSchemaNameByTenantId(tenantId).orElse(null);
+            if (apiKeySchema != null && !apiKeySchema.isBlank()) {
+                return apiKeySchema;
+            }
+        }
+        String contextSchema = TenantContext.getSchema();
+        if (contextSchema != null && !contextSchema.isBlank()) {
+            return contextSchema;
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tenant could not be resolved");
     }
 
     private void publishConfirmedReadingUpdate(Integer tenantId,

@@ -150,7 +150,9 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     @Test
-    void assamReadingsValidationFailureReturnsRejectedResponse() throws Exception {
+    void assamReadingsAcceptsPayloadWithoutPhoneNumber() throws Exception {
+        // PHONE-OPTIONAL: a submission that omits phone_number must reach the service (which infers the
+        // operator from the scheme) instead of being rejected by bean validation.
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
@@ -169,11 +171,36 @@ class SingleTenantTelemetryControllerUnitTest {
                                   "state_scheme_id": "30178236"
                                 }
                                 """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void assamReadingsValidationFailureReturnsRejectedResponse() throws Exception {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
+                .build();
+
+        mockMvc.perform(post("/api/v1/telemetry/readings")
+                        .header("X-Api-Key", "js_valid_key")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "reading_url": "https://example.com/meter.jpg",
+                                  "phone_number": "919999999999"
+                                }
+                                """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
                 .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
+                .andExpect(jsonPath("$.data.message")
+                        .value(containsString("Either stateSchemeId or centreSchemeId must be provided")));
     }
 
     @Test
@@ -194,14 +221,15 @@ class SingleTenantTelemetryControllerUnitTest {
                         .content("""
                                 {
                                   "reading_url": "https://example.com/meter.jpg",
-                                  "state_scheme_id": "30178236"
+                                  "phone_number": "919999999999"
                                 }
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
                 .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
+                .andExpect(jsonPath("$.data.message")
+                        .value(containsString("Either stateSchemeId or centreSchemeId must be provided")));
     }
 
     @Test
@@ -246,14 +274,15 @@ class SingleTenantTelemetryControllerUnitTest {
                         .content("""
                                 {
                                   "reading_url": "https://example.com/meter.jpg",
-                                  "state_scheme_id": "30178236"
+                                  "phone_number": "919999999999"
                                 }
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
                 .andExpect(jsonPath("$.data.errorCode").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.data.message").value(containsString("must not be blank")));
+                .andExpect(jsonPath("$.data.message")
+                        .value(containsString("Either stateSchemeId or centreSchemeId must be provided")));
     }
 
     @Test
@@ -518,11 +547,37 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     @Test
-    void updateReadingSetsBadRequestErrorCodeWhenPhoneNumberMissing() {
+    void updateReadingSetsBadRequestErrorCodeWhenBothIdentifiersMissing() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.of(22)),
                 new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .imageId("img-1")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.BAD_REQUEST, response.getBody().getData().getErrorCode());
+        assertEquals(
+                "Either correlationId or phoneNumber must be provided",
+                response.getBody().getData().getMessage()
+        );
+    }
+
+    @Test
+    void updateReadingSucceedsWithCorrelationIdAndNoPhoneNumber() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                bfmReadingService
         );
 
         ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
@@ -534,8 +589,57 @@ class SingleTenantTelemetryControllerUnitTest {
                         .build()
         );
 
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals(TelemetryErrorCode.BAD_REQUEST, response.getBody().getData().getErrorCode());
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(true, response.getBody().isSuccess());
+        assertEquals("corr-123", response.getBody().getData().getCorrelationId());
+        assertEquals("corr-123", bfmReadingService.lastCorrelationId);
+        assertNull(bfmReadingService.lastPhoneNumber);
+    }
+
+    @Test
+    void updateReadingPassesApiKeyTenantIdToService() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                bfmReadingService
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(22, bfmReadingService.lastTenantId);
+    }
+
+    @Test
+    void updateReadingStillAcceptsPhoneNumberWithoutCorrelationId() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                bfmReadingService
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .phoneNumber("919999999999")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNull(bfmReadingService.lastCorrelationId);
+        assertEquals("919999999999", bfmReadingService.lastPhoneNumber);
     }
 
     @Test
@@ -585,7 +689,10 @@ class SingleTenantTelemetryControllerUnitTest {
     void updateReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
         BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null) {
             @Override
-            public CreateReadingResponse updateConfirmedReading(String correlationId, String phoneNumber, BigDecimal confirmedReading) {
+            public CreateReadingResponse updateConfirmedReading(String correlationId,
+                                                                String phoneNumber,
+                                                                BigDecimal confirmedReading,
+                                                                Integer tenantId) {
                 throw new IllegalStateException("boom");
             }
         };
@@ -712,6 +819,9 @@ class SingleTenantTelemetryControllerUnitTest {
 
     private static final class StubBfmReadingService extends BfmReadingService {
         private final boolean throwError;
+        private String lastCorrelationId;
+        private String lastPhoneNumber;
+        private Integer lastTenantId;
 
         private StubBfmReadingService(boolean throwError) {
             super(null, null, null, null, null, null, null, null, null);
@@ -719,7 +829,13 @@ class SingleTenantTelemetryControllerUnitTest {
         }
 
         @Override
-        public CreateReadingResponse updateConfirmedReading(String correlationId, String phoneNumber, BigDecimal confirmedReading) {
+        public CreateReadingResponse updateConfirmedReading(String correlationId,
+                                                            String phoneNumber,
+                                                            BigDecimal confirmedReading,
+                                                            Integer tenantId) {
+            this.lastCorrelationId = correlationId;
+            this.lastPhoneNumber = phoneNumber;
+            this.lastTenantId = tenantId;
             if (throwError) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad request");
             }

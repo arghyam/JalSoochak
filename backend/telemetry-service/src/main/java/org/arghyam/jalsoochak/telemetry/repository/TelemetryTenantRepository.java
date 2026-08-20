@@ -751,6 +751,43 @@ public class TelemetryTenantRepository {
         return findUserIdsForSchemeByUserType(schemaName, schemeId, "SECTION_OFFICER");
     }
 
+    private static final String PUMP_OPERATOR_USER_TYPE = "PUMP_OPERATOR";
+
+    /**
+     * PHONE-OPTIONAL: the operator a submission without a phone number is credited to — the pump
+     * operator with the oldest active mapping to the scheme, so repeated submissions for the same
+     * scheme always land on the same user. Empty when the scheme has no active pump operator mapped
+     * to it; the caller then falls back to the tenant sentinel.
+     */
+    public Optional<TelemetryOperator> findFirstPumpOperatorForScheme(String schemaName, Long schemeId) {
+        validateSchemaName(schemaName);
+        if (schemeId == null) {
+            return Optional.empty();
+        }
+        String languageColumn = columnExists(schemaName, "user_table", "language_id")
+                ? "u.language_id"
+                : "NULL::integer";
+        String sql = String.format("""
+                SELECT u.id, u.tenant_id, u.title, u.email, u.phone_number, %s AS language_id
+                FROM %s.user_scheme_mapping_table usm
+                JOIN %s.user_table u
+                  ON u.id = usm.user_id
+                JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type
+                WHERE usm.scheme_id = ?
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND u.status = 1
+                  AND u.deleted_at IS NULL
+                  AND UPPER(COALESCE(ut.c_name, '')) = ?
+                ORDER BY usm.id
+                LIMIT 1
+                """, languageColumn, schemaName, schemaName);
+        List<TelemetryOperator> rows = jdbcTemplate.query(
+                sql, (rs, n) -> mapOperator(rs), schemeId, PUMP_OPERATOR_USER_TYPE);
+        return rows.stream().findFirst();
+    }
+
     private List<Long> findUserIdsForSchemeByUserType(String schemaName, Long schemeId, String userType) {
         validateSchemaName(schemaName);
         if (schemeId == null) {

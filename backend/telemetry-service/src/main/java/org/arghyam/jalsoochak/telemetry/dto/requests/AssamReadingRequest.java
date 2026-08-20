@@ -6,7 +6,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -38,7 +37,9 @@ public class AssamReadingRequest {
     @JsonProperty("centre_scheme_id")
     private String centreSchemeId;
 
-    @NotBlank
+    // PHONE-OPTIONAL: submissions may omit the phone number entirely. The operator is then inferred from
+    // the resolved scheme (first mapped pump operator, else the tenant sentinel) — see
+    // GlificImageWorkflowService#resolveOperatorFromScheme. A blank phone is treated the same as absent.
     @JsonProperty("phone_number")
     private String phoneNumber;
 

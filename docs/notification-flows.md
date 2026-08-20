@@ -324,16 +324,40 @@ All Glific and storage properties can be overridden via environment variables.
 | `glific.template.escalation-id` | `GLIFIC_ESCALATION_TEMPLATE_ID` | Yes | Glific HSM template ID for escalation document |
 | `glific.template.login-otp-id` | `GLIFIC_LOGIN_OTP_TEMPLATE_ID` | Yes | Glific HSM template ID for login OTP |
 | `glific.request-interval-ms` | — | No | Min ms between Glific API calls (default: 500) |
-| `minio.endpoint` | `MINIO_ENDPOINT` | Yes | MinIO server URL |
+| `minio.endpoint` | `MINIO_ENDPOINT` | Yes | **Internal** MinIO URL this service uploads to |
 | `minio.access-key` | `MINIO_ACCESS_KEY` | Yes | MinIO access key |
 | `minio.secret-key` | `MINIO_SECRET_KEY` | Yes | MinIO secret key |
 | `minio.bucket` | `MINIO_BUCKET` | No | Bucket name (default: `escalation-reports`) |
-| `minio.base-url` | `MINIO_BASE_URL` | No | Public base URL for PDF links |
+| `minio.base-url` | `MINIO_BASE_URL` | No | **Public** prefix of the URL handed to Glific — Meta downloads it from the public internet. Prod: `https://jalsoochak.jjmbrain.in/minio` |
+
+> **`minio.endpoint` and `minio.base-url` are different addresses.** The endpoint is where this
+> service uploads (internal is correct). The base URL is what Glific registers and Meta fetches from
+> its own network, so it must be publicly reachable *and* anonymously readable. An internal value
+> uploads fine, returns a Glific media id, and then fails inside Meta with
+> `(#131053) Media upload error … blocked by a destination filter` — the officer receives a document
+> that will not open, and nothing on our side reports a failure.
+>
+> The service now refuses to start when `notifications.daily-report.dry-run` or
+> `notifications.escalation.dry-run` is `false` while `minio.base-url` is a private, loopback or
+> single-label address (`PublicUrlValidator`), and `uploadMedia` refuses such a URL at send time.
+> Grant anonymous read on the bucket (`mc anonymous set download <alias>/escalation-reports`) and
+> verify from outside the network with
+> `curl -sSI https://jalsoochak.jjmbrain.in/minio/escalation-reports/<file>.pdf` before enabling
+> delivery — a public hostname with a private bucket trades Meta's 403 for MinIO's.
 | `app.base-url` | `APP_BASE_URL` | No | Public URL of message-service itself |
-| `notifications.whatsapp.dry-run` | `NOTIFICATIONS_WHATSAPP_DRY_RUN` | No | Master WhatsApp guard. Set `true` to suppress the shared account Glific calls (contact opt-in, login OTP, welcome flow, language update). `nudge`/`escalation` default to this value when their own flags are unset, so `true` still mutes everything |
+| `notifications.whatsapp.dry-run` | `NOTIFICATIONS_WHATSAPP_DRY_RUN` | No | Master WhatsApp guard. Set `true` to suppress the shared account Glific calls (login OTP, welcome flow, language update). Every purpose flag below defaults to this value when its own flag is unset, so `true` still mutes everything |
 | `notifications.nudge.dry-run` | `NOTIFICATIONS_NUDGE_DRY_RUN` | No | Set `true` to suppress only operator nudges (defaults to `notifications.whatsapp.dry-run`) |
 | `notifications.escalation.dry-run` | `NOTIFICATIONS_ESCALATION_DRY_RUN` | No | Set `true` to suppress only officer (SO/SDO) escalation documents (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver escalations while nudges stay muted |
+| `notifications.daily-report.dry-run` | `NOTIFICATIONS_DAILY_REPORT_DRY_RUN` | No | Set `true` to suppress only the officer Daily Water Service Situation Report (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver daily reports while everything else stays muted |
 | `notifications.sms.dry-run` | `NOTIFICATIONS_SMS_DRY_RUN` | No | Set `true` to suppress SMSCountry OTP delivery (login OTPs will not reach users) |
+
+> **Contact opt-in is not gated by `notifications.whatsapp.dry-run`.** `optinContact` sends the
+> recipient nothing — it registers the contact and returns the Glific contact id that every delivery
+> needs as its `receiverId`. Gating it on the master flag meant a configuration like
+> `NOTIFICATIONS_WHATSAPP_DRY_RUN=true` + `NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false` sent reports with
+> `receiverId=0`, which Glific rejects as `Receiver does not exist`. Opt-in is therefore suppressed
+> only when *every* purpose above is muted — which a lone `NOTIFICATIONS_WHATSAPP_DRY_RUN=true` still
+> does, since each purpose flag defaults to it.
 | `escalation.report.dir` | — | No | Local PDF output directory (default: `/tmp/escalation-reports/`) |
 
 ---

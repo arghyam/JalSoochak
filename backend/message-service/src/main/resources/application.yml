@@ -260,18 +260,30 @@ app:
 # ──────────────────────────────────────────────────────────────
 # Notification Guards (per channel / per purpose)
 # whatsapp.dry-run  → master WhatsApp guard for the shared account
-#   operations: contact opt-in, login OTP, welcome flow, language update.
-#   NUDGE and ESCALATION default to this value when their own flags are
-#   unset, so NOTIFICATIONS_WHATSAPP_DRY_RUN=true still mutes everything.
-# nudge.dry-run      → suppress only operator nudges (NOTIFICATIONS_NUDGE_DRY_RUN).
-# escalation.dry-run → suppress only officer (SO/SDO) escalation documents
+#   operations: login OTP, welcome flow, language update. Every purpose flag
+#   below defaults to this value when its own flag is unset, so
+#   NOTIFICATIONS_WHATSAPP_DRY_RUN=true still mutes everything.
+# nudge.dry-run        → suppress only operator nudges (NOTIFICATIONS_NUDGE_DRY_RUN).
+# escalation.dry-run   → suppress only officer (SO/SDO) escalation documents
 #   (NOTIFICATIONS_ESCALATION_DRY_RUN). Set to false to deliver escalations
 #   while nudges stay muted.
-# sms.dry-run        → suppress SMSCountry OTP delivery (NOTIFICATIONS_SMS_DRY_RUN);
+# daily-report.dry-run → suppress only the officer Daily Water Service Situation
+#   Report (NOTIFICATIONS_DAILY_REPORT_DRY_RUN).
+# sms.dry-run          → suppress SMSCountry OTP delivery (NOTIFICATIONS_SMS_DRY_RUN);
 #   note login OTPs will not reach users when enabled.
 #
+# Contact opt-in is NOT gated by whatsapp.dry-run. It sends the recipient nothing and
+# is the prerequisite for every delivery — without it receiverId is 0 and Glific
+# rejects the send with "Receiver does not exist". It is suppressed only when every
+# purpose above is muted, which a lone NOTIFICATIONS_WHATSAPP_DRY_RUN=true still does.
+#
+# To run daily reports live while everything else stays muted:
+#   NOTIFICATIONS_WHATSAPP_DRY_RUN=true      (OTP/welcome/language muted)
+#   NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false (daily reports delivered; opt-in goes live)
+#   GLIFIC_DAILY_REPORT_SO_TEMPLATE_ID / _SDO_TEMPLATE_ID must be set — startup fails fast otherwise.
+#
 # To run escalations live while keeping nudges muted:
-#   NOTIFICATIONS_WHATSAPP_DRY_RUN=false   (opt-in/OTP/welcome live)
+#   NOTIFICATIONS_WHATSAPP_DRY_RUN=false   (OTP/welcome live)
 #   NOTIFICATIONS_NUDGE_DRY_RUN=true       (nudges muted)
 #   NOTIFICATIONS_ESCALATION_DRY_RUN=false (escalations delivered)
 # ──────────────────────────────────────────────────────────────
@@ -329,7 +341,30 @@ smscountry:
   dlt-header-id: ${SMSCOUNTRY_DLT_HEADER_ID:1705177444898758356}
 
 # ──────────────────────────────────────────────────────────────
-# MinIO Object Storage (escalation PDF hosting)
+# MinIO Object Storage (escalation + daily report PDF hosting)
+#
+# endpoint and base-url are two DIFFERENT addresses. Setting them to the same
+# internal value is the mistake to avoid:
+#
+#   endpoint → where THIS SERVICE uploads to. Internal is correct
+#              (cluster IP, container name, localhost).
+#   base-url → the prefix of the URL handed to Glific. Glific registers it and
+#              META DOWNLOADS IT FROM THE PUBLIC INTERNET. Must be publicly
+#              reachable AND anonymously readable.
+#
+# Production: MINIO_BASE_URL=https://jalsoochak.jjmbrain.in/minio
+#   → https://jalsoochak.jjmbrain.in/minio/escalation-reports/<file>.pdf
+#
+# An internal address here uploads fine and returns a Glific media id, then fails
+# inside Meta with "(#131053) Media upload error … blocked by a destination
+# filter" — the officer gets a document that will not open. The service now
+# refuses to start when a document-sending purpose is live and base-url is a
+# private, loopback or single-label address.
+#
+# The bucket must allow anonymous GET (Meta sends no credentials):
+#   mc anonymous set download <alias>/escalation-reports
+# Verify from OUTSIDE the network before enabling delivery:
+#   curl -sSI https://jalsoochak.jjmbrain.in/minio/escalation-reports/<file>.pdf
 # ──────────────────────────────────────────────────────────────
 
 minio:

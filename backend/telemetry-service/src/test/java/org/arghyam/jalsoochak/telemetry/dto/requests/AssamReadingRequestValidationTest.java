@@ -78,6 +78,30 @@ class AssamReadingRequestValidationTest {
     }
 
     @Test
+    void validationPassesWhenPhoneNumberMissing() {
+        // PHONE-OPTIONAL: submissions may omit the phone; the operator is inferred from the scheme.
+        AssamReadingRequest request = baseRequestBuilder()
+                .phoneNumber(null)
+                .stateSchemeId("30178236")
+                .build();
+
+        Set<ConstraintViolation<AssamReadingRequest>> violations = VALIDATOR.validate(request);
+        assertEquals(0, violations.size());
+    }
+
+    @Test
+    void validationPassesWhenPhoneNumberBlank() {
+        // A blank phone is treated exactly like an absent one, not as a validation error.
+        AssamReadingRequest request = baseRequestBuilder()
+                .phoneNumber("   ")
+                .stateSchemeId("30178236")
+                .build();
+
+        Set<ConstraintViolation<AssamReadingRequest>> violations = VALIDATOR.validate(request);
+        assertEquals(0, violations.size());
+    }
+
+    @Test
     void validationFailsWhenReadingUrlAndConfirmedReadingMissing() {
         AssamReadingRequest request = baseRequestBuilder()
                 .readingUrl(null)
