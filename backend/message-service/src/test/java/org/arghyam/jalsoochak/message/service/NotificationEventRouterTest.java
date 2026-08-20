@@ -1336,20 +1336,23 @@ class NotificationEventRouterTest {
      * contact-resolution step. Sending with {@code contactId=0} made Glific answer
      * "Receiver does not exist", which the router turned into a rethrow and a Kafka retry loop that
      * stalled every other event on the partition.
+     *
+     * <p>The stop happens before the report is built: no PDF is rendered and nothing is uploaded, so a
+     * dead end costs neither a render nor a MinIO round-trip. The absent {@code generate}/{@code upload}
+     * stubs are part of the assertion — strict stubbing would flag them if the router still ran them.</p>
      */
     @Test
     void handleDailyReport_skipsWithoutRethrowing_whenOptInYieldsNoContactId() throws Exception {
         stubOfficerContact(null, "enc-title", "enc-phone");
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500025");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(glificWhatsAppService.optIn("919876500025")).thenReturn(0L);
         when(glificWhatsAppService.isDailyReportDeliveryEnabled()).thenReturn(true);
 
         router.route(DAILY_REPORT_JSON);
 
+        verifyNoInteractions(dailyReportPdfService);
+        verify(minioStorageService, never()).upload(any(Path.class));
         verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any());
         verify(kafkaProducer, never()).publishJson(eq("common-topic"), any());
     }

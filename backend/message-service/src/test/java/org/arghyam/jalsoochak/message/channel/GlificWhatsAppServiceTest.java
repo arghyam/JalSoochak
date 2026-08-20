@@ -825,6 +825,103 @@ class GlificWhatsAppServiceTest {
 
             verifyNoInteractions(client);
         }
+
+        @Test
+        void sendNudgeHsm_refusesZeroContactId() {
+            assertThatThrownBy(() -> service.sendNudgeHsm(0L, "Ramesh", "19 August 2026"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sendNudgeHsm");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void sendNudgeHsm_refusesNullContactId() {
+            assertThatThrownBy(() -> service.sendNudgeHsm(null, "Ramesh", "19 August 2026"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sendNudgeHsm");
+
+            verifyNoInteractions(client);
+        }
+
+        /**
+         * A flow start with {@code contactId=0} is answered with a bare {@code success=false}, which the
+         * caller turns into a rethrow and a Kafka retry — the least informative way to learn that the
+         * operator was never opted in.
+         */
+        @Test
+        void startNudgeFlow_refusesZeroContactId() {
+            assertThatThrownBy(() -> service.startNudgeFlow(0L, "Ramesh", "19 August 2026"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("startNudgeFlow");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void startNudgeFlow_refusesNullContactId() {
+            assertThatThrownBy(() -> service.startNudgeFlow(null, "Ramesh", "19 August 2026"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("startNudgeFlow");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void startWelcomeFlow_refusesZeroContactId() {
+            assertThatThrownBy(() -> service.startWelcomeFlow(0L, "Ramesh Kumar", "Madhya Pradesh"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("startWelcomeFlow");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void startWelcomeFlow_refusesNullContactId_onTheFlowIdOverride() {
+            assertThatThrownBy(() -> service.startWelcomeFlow(null, "welcome-flow-456", "Ramesh Kumar", "MP"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("startWelcomeFlow");
+
+            verifyNoInteractions(client);
+        }
+    }
+
+    /**
+     * The contact-id guard sits behind the dry-run return, so a muted purpose stays a silent no-op even
+     * when the contact was never opted in — dry-run is the state in which a contact id of 0 is expected.
+     */
+    @Nested
+    class UnresolvedContactIdUnderDryRun {
+
+        @Test
+        void sendNudgeHsm_isNoOp_withNoContactId() {
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+
+            assertThatCode(() -> service.sendNudgeHsm(0L, "Ramesh", "19 August 2026"))
+                    .doesNotThrowAnyException();
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void startNudgeFlow_isNoOp_withNoContactId() {
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+
+            assertThatCode(() -> service.startNudgeFlow(null, "Ramesh", "19 August 2026"))
+                    .doesNotThrowAnyException();
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void startWelcomeFlow_isNoOp_withNoContactId() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+
+            assertThatCode(() -> service.startWelcomeFlow(0L, "Ramesh Kumar", "MP"))
+                    .doesNotThrowAnyException();
+
+            verifyNoInteractions(client);
+        }
     }
 
     // ──────────── media URL must be fetchable by Meta, not just by us ───────────

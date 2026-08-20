@@ -283,10 +283,12 @@ public class GlificWhatsAppService {
     }
 
     /**
-     * Fails fast when a send is attempted without a resolved Glific contact id. A contact id of 0
-     * (or null) is what an opt-in that was suppressed or that returned nothing leaves behind; passing
-     * it to Glific costs a media upload and comes back as "Receiver does not exist", which then looks
-     * like a template problem in the logs.
+     * Fails fast when a send or flow start is attempted without a resolved Glific contact id. A contact
+     * id of 0 (or null) is what an opt-in that was suppressed or that returned nothing leaves behind;
+     * passing it to Glific costs a round-trip (a media upload, for the document templates) and comes
+     * back as "Receiver does not exist" or a bare {@code success=false}, which then looks like a
+     * template or flow problem in the logs. Called before the first {@code client.execute} of every
+     * contact-addressed operation, so the diagnosis reads correctly at the point of failure.
      */
     private static void requireContactId(Long contactId, String operation) {
         if (contactId == null || contactId <= 0) {
@@ -347,6 +349,7 @@ public class GlificWhatsAppService {
      */
     public void sendNudgeHsm(Long contactId, String operatorName, String date) {
         if (isDryRun(nudgeDryRun, "sendNudgeHsm")) return;
+        requireContactId(contactId, "sendNudgeHsm");
         JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
                 "templateId", nudgeTemplateId,
                 "receiverId", contactId,
@@ -520,6 +523,7 @@ public class GlificWhatsAppService {
      */
     public void startNudgeFlow(Long contactId, String operatorName, String date) {
         if (isDryRun(nudgeDryRun, "startNudgeFlow")) return;
+        requireContactId(contactId, "startNudgeFlow");
         if (nudgeFlowId == null || nudgeFlowId.isBlank()) {
             throw new IllegalStateException("glific.flow.nudge-id is not configured");
         }
@@ -571,6 +575,7 @@ public class GlificWhatsAppService {
      */
     public void startWelcomeFlow(Long contactId, String flowId, String name, String state) {
         if (isDryRun(whatsappDryRun, "startWelcomeFlow")) return;
+        requireContactId(contactId, "startWelcomeFlow");
         if (flowId == null || flowId.isBlank()) {
             throw new IllegalStateException("glific.flow.welcome-id is not configured");
         }

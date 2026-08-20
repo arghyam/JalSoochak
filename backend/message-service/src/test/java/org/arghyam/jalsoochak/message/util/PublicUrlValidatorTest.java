@@ -63,6 +63,24 @@ class PublicUrlValidatorTest {
                 .isNotNull();
     }
 
+    /**
+     * A fully-qualified name may end in the DNS root dot. It resolves exactly like the dot-less form,
+     * so the trailing dot must not smuggle an internal address past either the suffix list or the
+     * single-label check ("localhost." has a dot, so it used to read as a multi-label public name).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://localhost.:9000",
+            "http://minio.svc.cluster.local./bucket/file.pdf",
+            "http://minio.local.",
+            "http://storage.internal.",
+    })
+    void rejectsInternalNamesWrittenWithTheDnsRootDot(String url) {
+        assertThat(PublicUrlValidator.unreachableReason(url))
+                .as("expected %s to be rejected", url)
+                .isNotNull();
+    }
+
     /** 172.15 and 172.32 sit outside RFC 1918's 172.16/12 block and must not be swept up with it. */
     @ParameterizedTest
     @ValueSource(strings = {"http://172.15.0.1", "http://172.32.0.1", "http://100.63.0.1", "http://100.128.0.1"})
@@ -81,8 +99,24 @@ class PublicUrlValidatorTest {
             "http://minio.example.com:9000/bucket/file.pdf",
             "https://8.8.8.8/bucket/file.pdf",
             "https://storage.jjmbrain.in:443/minio/",
+            "https://example.com./bucket/file.pdf",   // root dot on an otherwise public name
     })
     void acceptsPubliclyResolvableAddresses(String url) {
+        assertThat(PublicUrlValidator.unreachableReason(url))
+                .as("expected %s to be accepted", url)
+                .isNull();
+    }
+
+    /**
+     * A bracketed IPv6 literal carries no dots, so the single-label rule — which exists to catch
+     * container names like {@code minio} — must not apply to it. Only the private-range check does.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "https://[2606:4700:4700::1111]/bucket/file.pdf",
+            "https://[2001:4860:4860::8888]:9000/bucket/file.pdf",
+    })
+    void acceptsPublicIpv6Literals(String url) {
         assertThat(PublicUrlValidator.unreachableReason(url))
                 .as("expected %s to be accepted", url)
                 .isNull();

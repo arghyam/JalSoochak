@@ -22,6 +22,7 @@ import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Configuration
 @Slf4j
@@ -98,8 +99,12 @@ public class KafkaConfig {
      * sent the officer another WhatsApp message.</p>
      *
      * <p>Swallowing the publish failure lets the offset commit, so the poison record is dropped after
-     * its normal retry budget. The full payload is logged at ERROR with its topic/partition/offset,
-     * which is the only copy left — replay it from there if the event still matters.</p>
+     * its normal retry budget. The record's topic/partition/offset is logged at ERROR so the event can
+     * still be replayed from the log if it matters. The payload itself stays at DEBUG and with phone
+     * numbers redacted: notification events carry operator and officer mobile numbers, which are PII
+     * and must never reach an INFO/WARN/ERROR line. Exception <em>messages</em> are held back for the
+     * same reason — a Glific or JDBC failure routinely echoes the payload it choked on — so ERROR
+     * carries the exception types and DEBUG carries the stack traces.</p>
      */
     static ConsumerRecordRecoverer neverBlockingRecoverer(ConsumerRecordRecoverer delegate) {
         return (consumerRecord, exception) -> {
@@ -108,11 +113,31 @@ public class KafkaConfig {
             } catch (Exception dltFailure) {
                 log.error("[Kafka] Dead-letter publish failed for {}-{}@{}; dropping the record to avoid an"
                                 + " endless redelivery loop (handlers with external side effects would re-run"
-                                + " on every pass). Original failure: {}. DLT failure: {}. Payload: {}",
+                                + " on every pass). Original failure: {}. DLT failure: {}."
+                                + " Enable DEBUG on this logger for the payload and stack traces.",
                         consumerRecord.topic(), consumerRecord.partition(), consumerRecord.offset(),
-                        exception == null ? "unknown" : exception.getMessage(),
-                        dltFailure.getMessage(), consumerRecord.value(), dltFailure);
+                        exception == null ? "unknown" : exception.getClass().getName(),
+                        dltFailure.getClass().getName());
+                log.debug("[Kafka] Dropped record {}-{}@{} payload (phone numbers redacted): {}",
+                        consumerRecord.topic(), consumerRecord.partition(), consumerRecord.offset(),
+                        redactPhoneNumbers(consumerRecord.value()), dltFailure);
             }
         };
+    }
+
+    private static final Pattern DIGIT_RUN = Pattern.compile("\\d{10,}");
+
+    /**
+     * Masks anything that looks like a phone number — a run of 10 or more digits, which covers both the
+     * bare 10-digit mobile and the {@code 91XXXXXXXXXX} E.164 form used throughout these events —
+     * keeping the last four digits so two records can still be told apart. Deliberately blunt: it will
+     * also mask a long numeric id, which is the right trade at DEBUG.
+     */
+    static String redactPhoneNumbers(Object payload) {
+        if (payload == null) {
+            return null;
+        }
+        return DIGIT_RUN.matcher(payload.toString()).replaceAll(m -> "*".repeat(m.group().length() - 4)
+                + m.group().substring(m.group().length() - 4));
     }
 }

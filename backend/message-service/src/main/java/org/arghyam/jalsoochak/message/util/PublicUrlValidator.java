@@ -61,7 +61,10 @@ public final class PublicUrlValidator {
         if (host == null || host.isBlank()) {
             return "URL has no host — it must be absolute";
         }
-        String lowerHost = host.toLowerCase();
+        // A fully-qualified name may carry the DNS root dot ("localhost.", "minio.svc.cluster.local.").
+        // It resolves exactly like the dot-less form, so drop it before classifying — otherwise the
+        // suffix list misses it and the trailing dot alone satisfies the multi-label check below.
+        String lowerHost = stripRootDot(host.toLowerCase());
 
         if (isPrivateIpLiteral(lowerHost)) {
             return "host " + host + " is a private or loopback address, unreachable from the public internet";
@@ -71,8 +74,9 @@ public final class PublicUrlValidator {
                 return "host " + host + " uses the private suffix '" + suffix + "'";
             }
         }
-        // A single-label host ("minio", "localhost") is a container or LAN name, never public DNS.
-        if (!lowerHost.contains(".")) {
+        // A single-label host ("minio", "localhost") is a container or LAN name, never public DNS. Only
+        // DNS names are labelled — an IPv6 literal carries no dots, and a public one is fine to fetch.
+        if (!isIpv6Literal(lowerHost) && !lowerHost.contains(".")) {
             return "host " + host + " is a single-label name, resolvable only inside the local network";
         }
         return null;
@@ -81,6 +85,21 @@ public final class PublicUrlValidator {
     /** Convenience form of {@link #unreachableReason(String)} for call sites that only need the verdict. */
     public static boolean isPubliclyReachable(String url) {
         return unreachableReason(url) == null;
+    }
+
+    /**
+     * Removes a single trailing DNS root dot. Only one: {@code "host.."} is not a valid name, so it is
+     * left alone to be judged on its own shape rather than normalised into a valid-looking one.
+     */
+    private static String stripRootDot(String host) {
+        return host.length() > 1 && host.endsWith(".") && !host.endsWith("..")
+                ? host.substring(0, host.length() - 1)
+                : host;
+    }
+
+    /** True for a bracketed IPv6 literal, the only form {@link URI#getHost()} returns for IPv6. */
+    private static boolean isIpv6Literal(String host) {
+        return host.startsWith("[") && host.endsWith("]");
     }
 
     /**
