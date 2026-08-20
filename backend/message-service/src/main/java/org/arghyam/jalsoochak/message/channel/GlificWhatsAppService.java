@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.message.util.PublicUrlValidator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -92,12 +93,16 @@ public class GlificWhatsAppService {
     private final ObjectMapper objectMapper;
 
     /**
-     * Master WhatsApp dry-run. Gates the shared account operations that are neither
-     * a nudge nor an escalation: contact opt-in, login OTP, welcome flow and language
-     * updates. The {@link #nudgeDryRun} and {@link #escalationDryRun} flags below default
-     * to this value when their own properties are unset, so a single
+     * Master WhatsApp dry-run. Gates the shared account operations that are neither a nudge, an
+     * escalation nor a daily report: login OTP, welcome flow and language updates. The
+     * {@link #nudgeDryRun}, {@link #escalationDryRun} and {@link #dailyReportDryRun} flags below
+     * default to this value when their own properties are unset, so a single
      * {@code NOTIFICATIONS_WHATSAPP_DRY_RUN=true} still suppresses every Glific call
      * (backwards compatible with the previous single-flag behaviour).
+     *
+     * <p>Contact opt-in is deliberately <em>not</em> gated on this flag — see
+     * {@link #isOptInDryRun()}. It sends the recipient nothing and is the prerequisite for every
+     * delivery, so muting account operations must not break a purpose that is switched live.</p>
      */
     @Value("${notifications.whatsapp.dry-run:false}")
     private boolean whatsappDryRun;
@@ -134,7 +139,8 @@ public class GlificWhatsAppService {
 
     /**
      * Suppresses only the Daily Water Service Situation Report document HSM (and its media upload).
-     * Defaults to {@link #whatsappDryRun}.
+     * Defaults to {@link #whatsappDryRun}. Set {@code NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false} to
+     * deliver officer daily reports while nudges, escalations and account operations stay muted.
      */
     @Value("${notifications.daily-report.dry-run:${notifications.whatsapp.dry-run:false}}")
     private boolean dailyReportDryRun;
@@ -147,16 +153,28 @@ public class GlificWhatsAppService {
     @Value("${glific.template.daily-report-sdo-id:}")
     private String dailyReportSdoTemplateId;
 
+    /**
+     * The prefix of every media URL handed to Glific. Read here — not only in
+     * {@code MinioStorageService} — because this is the class that owns the Glific contract and the
+     * only one that knows whether a document-sending purpose is live. Meta downloads the URL from the
+     * public internet, so an internal address must stop the service from starting rather than reach
+     * officers as an unopenable attachment.
+     */
+    @Value("${minio.base-url:}")
+    private String mediaBaseUrl;
+
     @PostConstruct
     void validateTemplates() {
-        if (whatsappDryRun && nudgeDryRun && escalationDryRun) {
+        if (isAllDryRun()) {
             log.warn("[Glific] DRY-RUN mode active — all Glific API calls will be suppressed."
                     + " Set NOTIFICATIONS_WHATSAPP_DRY_RUN=false for production.");
             return;
         }
-        if (nudgeDryRun || escalationDryRun || whatsappDryRun) {
-            log.warn("[Glific] Partial DRY-RUN — nudge={}, escalation={}, account-ops(opt-in/OTP/welcome/language)={}",
-                    nudgeDryRun, escalationDryRun, whatsappDryRun);
+        if (nudgeDryRun || escalationDryRun || dailyReportDryRun || whatsappDryRun) {
+            log.warn("[Glific] Partial DRY-RUN — nudge={}, escalation={}, daily-report={},"
+                            + " account-ops(OTP/welcome/language)={}. Contact opt-in stays live because"
+                            + " at least one delivery purpose is enabled.",
+                    nudgeDryRun, escalationDryRun, dailyReportDryRun, whatsappDryRun);
         }
         // Validate only the templates whose delivery is enabled.
         if (!nudgeDryRun && (nudgeFlowId == null || nudgeFlowId.isBlank())) {
@@ -196,6 +214,31 @@ public class GlificWhatsAppService {
                 requireNumericTemplateId(dailyReportSdoTemplateId, "glific.template.daily-report-sdo-id");
             }
         }
+        validateMediaBaseUrl();
+    }
+
+    /**
+     * Refuses to start when a document-sending purpose is live but {@code minio.base-url} is an
+     * address Meta cannot reach. Both the escalation and the daily report attach a MinIO PDF, and a
+     * wrong prefix here is invisible on our side: the upload succeeds, {@code createMessageMedia}
+     * returns a media id, the send is accepted, and only the recipient discovers the document will
+     * not open. Failing at startup keeps that from reaching officers at all.
+     */
+    private void validateMediaBaseUrl() {
+        boolean sendsDocuments = !dailyReportDryRun || !escalationDryRun;
+        if (!sendsDocuments) {
+            return;
+        }
+        String reason = PublicUrlValidator.unreachableReason(mediaBaseUrl);
+        if (reason != null) {
+            throw new IllegalStateException(
+                    "minio.base-url must be a publicly reachable URL when WhatsApp document delivery is"
+                    + " enabled, but '" + mediaBaseUrl + "' is unusable: " + reason
+                    + ". Glific hands this URL to Meta, which downloads it from the public internet and"
+                    + " rejects internal addresses with '(#131053) … blocked by a destination filter'."
+                    + " Set MINIO_BASE_URL to the public URL (e.g. https://jalsoochak.jjmbrain.in/minio)"
+                    + " — note minio.endpoint stays internal, it is only the upload address.");
+        }
     }
 
     private static void requireNumericTemplateId(String value, String propertyName) {
@@ -219,6 +262,40 @@ public class GlificWhatsAppService {
         return false;
     }
 
+    /** True only when every WhatsApp purpose is muted — no Glific call of any kind may be made. */
+    private boolean isAllDryRun() {
+        return whatsappDryRun && nudgeDryRun && escalationDryRun && dailyReportDryRun;
+    }
+
+    /**
+     * Dry-run guard for {@link #optIn}. Opt-in registers the contact with Glific and sends the
+     * recipient nothing, but it is the prerequisite for <em>every</em> delivery: without a real
+     * contact id, {@code receiverId} is 0 and Glific rejects the send with
+     * {@code "Receiver does not exist"}. It therefore follows {@link #isAllDryRun()} rather than the
+     * master {@link #whatsappDryRun} flag — muting account operations (OTP / welcome / language)
+     * must not break a purpose that is explicitly switched live, e.g.
+     * {@code NOTIFICATIONS_WHATSAPP_DRY_RUN=true} with {@code NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false}.
+     * A lone {@code NOTIFICATIONS_WHATSAPP_DRY_RUN=true} still mutes opt-in, because every purpose
+     * flag defaults to it.
+     */
+    private boolean isOptInDryRun() {
+        return isAllDryRun();
+    }
+
+    /**
+     * Fails fast when a send is attempted without a resolved Glific contact id. A contact id of 0
+     * (or null) is what an opt-in that was suppressed or that returned nothing leaves behind; passing
+     * it to Glific costs a media upload and comes back as "Receiver does not exist", which then looks
+     * like a template problem in the logs.
+     */
+    private static void requireContactId(Long contactId, String operation) {
+        if (contactId == null || contactId <= 0) {
+            throw new IllegalArgumentException(
+                    operation + " requires a resolved Glific contact id but got " + contactId
+                    + " — the contact was never opted in (check NOTIFICATIONS_* dry-run flags)");
+        }
+    }
+
     @Value("${glific.media.escalation-caption:Escalations}")
     private String escalationCaption;
 
@@ -240,6 +317,7 @@ public class GlificWhatsAppService {
      */
     public void sendLoginOtpHsm(Long contactId, String otp) {
         if (isDryRun(whatsappDryRun, "sendLoginOtpHsm")) return;
+        requireContactId(contactId, "sendLoginOtpHsm");
         if (loginOtpTemplateId == null || loginOtpTemplateId.isBlank()) {
             throw new IllegalStateException("glific.template.login-otp-id is not configured");
         }
@@ -256,7 +334,7 @@ public class GlificWhatsAppService {
      * Phone must be in E.164 format (e.g., 919876543210).
      */
     public Long optIn(String phone) {
-        if (isDryRun(whatsappDryRun, "optIn")) return 0L;
+        if (isDryRun(isOptInDryRun(), "optIn")) return 0L;
         log.debug("[Glific] Opting in contact");
         JsonNode response = client.execute(OPTIN_MUTATION, Map.of("phone", phone));
         checkErrors(response, "optinContact");
@@ -289,6 +367,16 @@ public class GlificWhatsAppService {
 
     private String uploadMediaInternal(String publicUrl, String caption, boolean dryRun) {
         if (isDryRun(dryRun, "uploadMedia")) return "dry-run-media-id";
+        // Last line of defence behind the startup check: a URL Meta cannot fetch produces a media id
+        // and an accepted send, so the failure would otherwise surface only as an attachment the
+        // officer cannot open. Refuse before the round-trip instead.
+        String reason = PublicUrlValidator.unreachableReason(publicUrl);
+        if (reason != null) {
+            throw new IllegalStateException(
+                    "Refusing to register media URL '" + publicUrl + "' with Glific: " + reason
+                    + ". Meta downloads this URL from the public internet — set MINIO_BASE_URL to the"
+                    + " public MinIO address.");
+        }
         log.debug("[Glific] Uploading media");
         JsonNode response = client.execute(CREATE_MESSAGE_MEDIA_MUTATION, Map.of(
                         "input", Map.of(
@@ -317,6 +405,8 @@ public class GlificWhatsAppService {
      */
     public void sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType, LocalDate reportDate) {
         if (isDryRun(dailyReportDryRun, "sendDailyReportHsm")) return;
+        // Checked before the media upload so a missing contact id costs no Glific round-trip.
+        requireContactId(contactId, "sendDailyReportHsm");
 
         String templateId = resolveDailyReportTemplateId(officerUserType);
         String mediaId = uploadMediaInternal(minioUrl, dailyReportDocumentName(reportDate), dailyReportDryRun);
@@ -351,6 +441,15 @@ public class GlificWhatsAppService {
                 : dailyReportCaption + " " + reportDate.format(DOCUMENT_NAME_DATE);
     }
 
+    /**
+     * Whether daily-report delivery is actually switched on. Lets a caller tell a configuration state
+     * (report muted, so a contact id of 0 is expected and harmless) from a genuine failure (report live
+     * but the officer has no Glific contact) without duplicating the dry-run properties.
+     */
+    public boolean isDailyReportDeliveryEnabled() {
+        return !dailyReportDryRun;
+    }
+
     /** SUB_DIVISIONAL_OFFICER uses its own template when configured; otherwise falls back to the SO template. */
     private String resolveDailyReportTemplateId(String officerUserType) {
         if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
@@ -375,6 +474,8 @@ public class GlificWhatsAppService {
      */
     public void sendEscalationHsm(Long contactId, String minioUrl) {
         if (isDryRun(escalationDryRun, "sendEscalationHsm")) return;
+        // Checked before the media upload so a missing contact id costs no Glific round-trip.
+        requireContactId(contactId, "sendEscalationHsm");
 
         String mediaId = uploadMedia(minioUrl);
 

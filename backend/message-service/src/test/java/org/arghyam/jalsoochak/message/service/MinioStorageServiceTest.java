@@ -89,6 +89,52 @@ class MinioStorageServiceTest {
         assertThat(url).contains(BUCKET);
     }
 
+    // ─────────────────── Glific-facing URL construction ────────────────────────
+
+    /**
+     * MINIO_BASE_URL is hand-written per environment, so a trailing slash is likely. The resulting
+     * {@code //escalation-reports/} is answered with a 404 by some reverse proxies rather than
+     * normalised, which would reach the officer as an unopenable attachment.
+     */
+    @Test
+    void publicUrlFor_trimsTrailingSlashesFromTheConfiguredBaseUrl() {
+        MinioStorageService service =
+                new MinioStorageService(minioClient, BUCKET, "https://jalsoochak.jjmbrain.in/minio/");
+
+        assertThat(service.publicUrlFor("daily_report_SECTION_OFFICER_16743_2026-08-19.pdf"))
+                .isEqualTo("https://jalsoochak.jjmbrain.in/minio/escalation-reports/"
+                        + "daily_report_SECTION_OFFICER_16743_2026-08-19.pdf");
+    }
+
+    @Test
+    void publicUrlFor_buildsTheProductionUrlShape_fromThePublicBaseUrl() {
+        MinioStorageService service =
+                new MinioStorageService(minioClient, BUCKET, "https://jalsoochak.jjmbrain.in/minio");
+
+        assertThat(service.publicUrlFor("daily_report_SECTION_OFFICER_16743_2026-08-19.pdf"))
+                .isEqualTo("https://jalsoochak.jjmbrain.in/minio/escalation-reports/"
+                        + "daily_report_SECTION_OFFICER_16743_2026-08-19.pdf");
+    }
+
+    /** Today's report names must survive encoding untouched — the encoding is insurance, not a rename. */
+    @Test
+    void publicUrlFor_leavesCurrentReportFilenamesUnchanged() {
+        MinioStorageService service = new MinioStorageService(minioClient, BUCKET, BASE_URL);
+
+        assertThat(service.publicUrlFor("escalation_L2_2026_04_16.pdf"))
+                .endsWith("/escalation_L2_2026_04_16.pdf");
+        assertThat(service.publicUrlFor("daily_report_SUB_DIVISIONAL_OFFICER_16363_2026-08-19.pdf"))
+                .endsWith("/daily_report_SUB_DIVISIONAL_OFFICER_16363_2026-08-19.pdf");
+    }
+
+    @Test
+    void publicUrlFor_percentEncodesCharactersThatWouldBreakTheUrl() {
+        MinioStorageService service = new MinioStorageService(minioClient, BUCKET, BASE_URL);
+
+        assertThat(service.publicUrlFor("daily report 19-08.pdf"))
+                .endsWith("/daily%20report%2019-08.pdf");
+    }
+
     // ──────────────────────────── upload failure ───────────────────────────────
 
     @Test

@@ -949,6 +949,15 @@ public class NotificationEventRouter {
         }
 
         long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
+        // A contact id of 0 while delivery is live means the opt-in never produced a Glific contact.
+        // Sending anyway burns a media upload and comes back as "Receiver does not exist", so stop here
+        // instead — retrying cannot conjure a contact id, and a retry loop stalls the whole partition.
+        if (contactId <= 0 && glificWhatsAppService.isDailyReportDeliveryEnabled()) {
+            log.error("[Router/DAILY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
+                            + " — Glific opt-in returned no contact id (non-retryable)",
+                    corr, role, tenantId, officerUserId);
+            return;
+        }
 
         // isRenderableKpis has already confirmed reportDate is a parseable ISO date. It is the day the
         // data covers (D-1) — the date the officer sees in the WhatsApp document name.

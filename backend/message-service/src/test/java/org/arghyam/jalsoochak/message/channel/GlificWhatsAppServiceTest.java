@@ -54,6 +54,9 @@ class GlificWhatsAppServiceTest {
         ReflectionTestUtils.setField(service, "escalationTemplateId", "2");   // must be numeric for Integer.parseInt
         ReflectionTestUtils.setField(service, "escalationCaption", "Escalations");
         ReflectionTestUtils.setField(service, "escalationThumbnail", "");
+        // Glific hands media URLs to Meta, which fetches them from the public internet, so every
+        // sending path now requires a publicly reachable prefix.
+        ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
     }
 
     // ──────────────────────────── optIn ────────────────────────────────────────
@@ -513,6 +516,21 @@ class GlificWhatsAppServiceTest {
     }
 
     @Test
+    void validateTemplates_throwsWhenDailyReportLiveButSoTemplateIdMissing_evenIfEveryOtherPurposeIsDry() {
+        // The all-dry short circuit used to ignore the daily-report flag, so this configuration
+        // started up without ever validating the template that the live purpose needs.
+        ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+        ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+        ReflectionTestUtils.setField(service, "escalationDryRun", true);
+        ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+        ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "");
+
+        assertThatThrownBy(() -> service.validateTemplates())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("daily-report-so-id");
+    }
+
+    @Test
     void validateTemplates_passesWhenDailyReportTemplateIdsAreNumeric() {
         ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
         ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
@@ -562,7 +580,7 @@ class GlificWhatsAppServiceTest {
         when(client.execute(contains("createAndSendMessage"), anyMap()))
                 .thenReturn(mapper.readTree("{\"createAndSendMessage\":{\"message\":{\"id\":\"1\"}}}"));
 
-        service.sendDailyReportHsm(555L, "https://minio/report.pdf", "SECTION_OFFICER",
+        service.sendDailyReportHsm(555L, "https://minio.example.com/report.pdf", "SECTION_OFFICER",
                 LocalDate.of(2026, 8, 13));
 
         ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
@@ -570,7 +588,7 @@ class GlificWhatsAppServiceTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> input = (Map<String, Object>) vars.getValue().get("input");
         assertThat(input).containsEntry("caption", "Daily Water Service Situation Report 13-08-2026");
-        assertThat(input).containsEntry("url", "https://minio/report.pdf");
+        assertThat(input).containsEntry("url", "https://minio.example.com/report.pdf");
     }
 
     // ──────────────────────────── dry-run mode ─────────────────────────────────
@@ -580,10 +598,11 @@ class GlificWhatsAppServiceTest {
 
         @BeforeEach
         void enableDryRun() {
-            // Master + both purpose flags on → every Glific call suppressed.
+            // Master + every purpose flag on → every Glific call suppressed, opt-in included.
             ReflectionTestUtils.setField(service, "whatsappDryRun", true);
             ReflectionTestUtils.setField(service, "nudgeDryRun", true);
             ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
         }
 
         @Test
@@ -642,6 +661,14 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
 
             service.sendLoginOtpHsm(99L, "123456");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void sendDailyReportHsm_isNoOp() {
+            service.sendDailyReportHsm(0L, "https://minio.example.com/daily.pdf", "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19));
 
             verifyNoInteractions(client);
         }
@@ -711,15 +738,204 @@ class GlificWhatsAppServiceTest {
         }
 
         @Test
-        void optIn_followsMasterFlag_notEscalationFlag() {
-            // Opt-in is an account operation: it stays muted under the master flag
-            // even when escalation delivery is enabled.
+        void optIn_staysLive_whenEscalationDeliveryIsEnabled() throws Exception {
+            // Opt-in is the prerequisite for delivery, not a message: muting the account operations
+            // must not strip the contact id out from under an escalation that is switched live.
             ReflectionTestUtils.setField(service, "nudgeDryRun", true);
             ReflectionTestUtils.setField(service, "escalationDryRun", false);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
             ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            when(client.execute(contains("optinContact"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"optinContact":{"contact":{"id":42},"errors":[]}}
+                    """));
+
+            assertThat(service.optIn("919876543210")).isEqualTo(42L);
+        }
+
+        /**
+         * Regression: the exact production configuration behind "Receiver does not exist" —
+         * master/nudge/escalation muted, daily report switched live. Opt-in was gated on the master
+         * flag, so it returned 0 and the daily report was sent with {@code receiverId=0}.
+         */
+        @Test
+        void optIn_staysLive_whenOnlyDailyReportDeliveryIsEnabled() throws Exception {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            when(client.execute(contains("optinContact"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"optinContact":{"contact":{"id":16363},"errors":[]}}
+                    """));
+
+            assertThat(service.optIn("919876543210")).isEqualTo(16363L);
+        }
+
+        @Test
+        void optIn_isMuted_onlyWhenEveryPurposeIsDry() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
 
             assertThat(service.optIn("919876543210")).isEqualTo(0L);
             verifyNoInteractions(client);
+        }
+    }
+
+    // ─────────────── unresolved contact id must never reach Glific ──────────────
+
+    /**
+     * A {@code receiverId} of 0 is what a suppressed or failed opt-in leaves behind. Glific answers it
+     * with "Receiver does not exist", which reads like a template fault, so the send is refused before
+     * the media upload spends a round-trip.
+     */
+    @Nested
+    class UnresolvedContactId {
+
+        @Test
+        void sendDailyReportHsm_refusesZeroContactId_withoutUploadingMedia() {
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(0L, "https://minio.example.com/daily.pdf",
+                    "SECTION_OFFICER", LocalDate.of(2026, 8, 19)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sendDailyReportHsm");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void sendEscalationHsm_refusesNullContactId_withoutUploadingMedia() {
+            assertThatThrownBy(() -> service.sendEscalationHsm(null, "https://minio.example.com/escalation.pdf"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sendEscalationHsm");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void sendLoginOtpHsm_refusesZeroContactId() {
+            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-tmpl-1");
+
+            assertThatThrownBy(() -> service.sendLoginOtpHsm(0L, "654321"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sendLoginOtpHsm");
+
+            verifyNoInteractions(client);
+        }
+    }
+
+    // ──────────── media URL must be fetchable by Meta, not just by us ───────────
+
+    /**
+     * Glific registers the media URL and Meta downloads it from the public internet. An internal
+     * address uploads fine, yields a media id and an accepted send, and fails only inside Meta with
+     * {@code (#131053) … blocked by a destination filter} — so the officer receives a document that
+     * will not open and nothing on our side says why.
+     */
+    @Nested
+    class MediaBaseUrlMustBePublic {
+
+        @Test
+        void validateTemplates_failsFast_whenDailyReportIsLiveButMediaBaseUrlIsInternal() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://192.168.20.143:9000");
+
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("minio.base-url")
+                    .hasMessageContaining("MINIO_BASE_URL");
+        }
+
+        @Test
+        void validateTemplates_failsFast_whenEscalationIsLiveButMediaBaseUrlIsInternal() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", false);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://localhost:9000");
+
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("minio.base-url");
+        }
+
+        @Test
+        void validateTemplates_passes_withThePublicProductionBaseUrl() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+
+            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+        }
+
+        /** A localhost MinIO is normal for local and CI runs, where nothing is delivered. */
+        @Test
+        void validateTemplates_toleratesAnInternalBaseUrl_whenNoDocumentIsEverSent() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://localhost:9000");
+
+            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+        }
+
+        @Test
+        void sendDailyReportHsm_refusesAnInternalUrl_withoutCallingGlific() {
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16363L,
+                    "http://192.168.20.143:9000/escalation-reports/daily_report.pdf",
+                    "SECTION_OFFICER", LocalDate.of(2026, 8, 19)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("MINIO_BASE_URL");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void sendEscalationHsm_refusesAnInternalUrl_withoutCallingGlific() {
+            assertThatThrownBy(() -> service.sendEscalationHsm(55L,
+                    "http://minio:9000/escalation-reports/escalation.pdf"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("MINIO_BASE_URL");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void sendDailyReportHsm_registersThePublicUrl_andSends() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
+            ReflectionTestUtils.setField(service, "dailyReportCaption", "Daily Water Service Situation Report");
+            String publicUrl = "https://jalsoochak.jjmbrain.in/minio/escalation-reports/"
+                    + "daily_report_SECTION_OFFICER_16743_2026-08-19.pdf";
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":{"id":"28569193"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":{"id":1,"body":"b","isHsm":true},"errors":[]}}
+                    """));
+
+            service.sendDailyReportHsm(16743L, publicUrl, "SECTION_OFFICER", LocalDate.of(2026, 8, 19));
+
+            ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
+            verify(client).execute(contains("createMessageMedia"), vars.capture());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> input = (Map<String, Object>) vars.getValue().get("input");
+            assertThat(input).containsEntry("url", publicUrl).containsEntry("source_url", publicUrl);
+            verify(client).execute(contains("createAndSendMessage"), anyMap());
         }
     }
 }
