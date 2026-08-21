@@ -27,6 +27,17 @@ spring:
 
   kafka:
     bootstrap-servers: localhost:9092
+    listener:
+      # Consumer threads draining common-topic. Effective only up to the topic's partition count —
+      # Kafka hands out whole partitions, so on a 1-partition topic the extra threads idle and this
+      # value changes nothing. Nothing here declares a partition count, so a broker-auto-created
+      # common-topic has exactly one: run `kafka-topics --describe --topic common-topic` and, if
+      # needed, `kafka-topics --alter --topic common-topic --partitions 3`.
+      #
+      # Why it matters: at 1 thread a daily-report run (one event per officer, each a PDF render +
+      # MinIO upload + Glific calls throttled 500ms apart) occupies the only consumer for minutes,
+      # and login OTPs queued behind it can expire before they are ever sent.
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
     consumer:
       group-id: message-service-group
       auto-offset-reset: earliest

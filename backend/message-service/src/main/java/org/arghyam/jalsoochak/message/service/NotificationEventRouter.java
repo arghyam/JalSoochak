@@ -10,6 +10,10 @@ import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
+import org.arghyam.jalsoochak.message.exception.TransientMailException;
+import org.arghyam.jalsoochak.message.kafka.KafkaConfig;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -114,6 +118,7 @@ public class NotificationEventRouter {
     private final AccountEmailService accountEmailService;
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
+    private final MeterRegistry meterRegistry;
 
     @Value("${escalation.report.dir:/tmp/escalation-reports/}")
     private String reportDir;
@@ -530,14 +535,23 @@ public class NotificationEventRouter {
                         }
                     })
                     .doOnError(e -> {
-                        // Retryable failure (5xx, network issue) — log error; exception will propagate to Kafka container
-                        log.error("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed (retryable): {}", e.getMessage());
+                        // The adapter has already spent its one connection-failure retry by this point.
+                        // Nothing further is attempted: see onErrorResume below.
+                        log.error("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed: {}", e.getMessage());
                         log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → ERROR: {}", phone, e.getMessage());
                     })
                     .onErrorResume(e -> {
-                        // Swallow retryable errors to prevent Kafka retries of the entire event
-                        // (OTP sends are time-sensitive; a delayed retry would deliver an expired OTP)
-                        log.warn("[Router/SEND_LOGIN_OTP/SMS] Suppressing retryable error to prevent Kafka retry");
+                        // Terminal. A Kafka-level retry is wrong for an OTP: the ladder's last rung
+                        // lands ~130s out, past the 60s resend cooldown, and requestOtp revokes the
+                        // previous code when the user resends — so a late retry delivers a dead code
+                        // that burns one of their three verification attempts. It would also hold the
+                        // partition for the duration, delaying other users' OTPs.
+                        //
+                        // Note this swallow is belt-and-braces rather than the mechanism: subscribe()
+                        // below is fire-and-forget, so the listener thread has already returned and
+                        // the error surfaces on a Netty event-loop thread. It could not reach the
+                        // container in any case.
+                        log.warn("[Router/SEND_LOGIN_OTP/SMS] Giving up on this OTP; the user can request a new one");
                         return Mono.empty();
                     })
                     .subscribe();
@@ -691,10 +705,31 @@ public class NotificationEventRouter {
         log.debug("[Router/EMAIL_DLT] Publishing to DLT originalEventType={}", originalEventType);
         try {
             kafkaProducer.publishJson(ACCOUNT_EMAIL_DLT_TOPIC, payload);
+            countDeadLetter("deadlettered", ACCOUNT_EMAIL_DLT_TOPIC, originalEventType);
         } catch (Exception e) {
             log.error("[Router/EMAIL_DLT] Failed to publish to DLT originalEventType={}: {}", originalEventType, e.getMessage());
             // Do not rethrow — DLT publish failure must not trigger Kafka retries on the original handler.
+            // The email is now lost outright, which is exactly what the "dropped" counter is for.
+            countDeadLetter("dropped", ACCOUNT_EMAIL_DLT_TOPIC, originalEventType);
         }
+    }
+
+    /**
+     * Records a dead-letter outcome so it is visible outside the log file.
+     *
+     * <p>Nothing consumes {@code account-email-dlt} or {@code welcome-message-dlt} — replay is a
+     * deliberate ops action, not an automatic one — which means a dead-lettered notification and a
+     * successfully delivered one look identical from the outside: silence. This counter is what makes
+     * the difference alertable. Shares {@link KafkaConfig#DEADLETTER_COUNTER} with the container-level
+     * paths so one Grafana rule covers every way a notification can be lost.
+     */
+    private void countDeadLetter(String outcome, String topic, String originalEventType) {
+        Counter.builder(KafkaConfig.DEADLETTER_COUNTER)
+                .tag("outcome", outcome)
+                .tag("topic", topic)
+                .tag("event_type", originalEventType == null ? "unknown" : originalEventType)
+                .register(meterRegistry)
+                .increment();
     }
 
     /**

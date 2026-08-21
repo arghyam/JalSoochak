@@ -8,7 +8,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.util.retry.Retry;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -34,6 +36,33 @@ public class SmsCountryService implements SmsSender {
 
     private static final String MESSAGE_TEMPLATE =
             "Your OTP for Jalsoochak login is %s. Do not share this OTP. Valid for %d minutes.";
+
+    /**
+     * Shortened from 30s. An OTP the user is waiting on is already a failed login long before
+     * then, and the shorter ceiling leaves room for the one retry below inside the same window.
+     */
+    private static final Duration SEND_TIMEOUT = Duration.ofSeconds(20);
+
+    /**
+     * One immediate retry, and only when the request never reached SMSCountry.
+     *
+     * <p>Deliberately the narrowest possible policy. This is not the Kafka back-off ladder and
+     * must never become it: an OTP is valid for 10 minutes, the user may resend after 60s, and
+     * {@code OtpService.requestOtp} revokes the previous code when they do — so a retry that
+     * lands late delivers a dead code the user will type and fail on, burning one of their three
+     * attempts. A sub-second retry lands far inside that window and cannot race the resend.
+     *
+     * <p>{@link WebClientRequestException} means the request never completed — DNS, connection
+     * refused, reset mid-flight — so nothing was sent and nothing can be duplicated. Timeouts and
+     * 5xx are excluded on purpose: SMSCountry may already have queued the message, and every
+     * duplicate SMS costs money.
+     */
+    private static final Retry CONNECT_FAILURE_RETRY = Retry
+            .fixedDelay(1, Duration.ofMillis(500))
+            .filter(WebClientRequestException.class::isInstance)
+            // Surface the original connection failure rather than Reactor's RetryExhaustedException,
+            // so the log line below names what actually went wrong.
+            .onRetryExhaustedThrow((spec, signal) -> signal.failure());
 
     private final WebClient webClient;
 
@@ -108,7 +137,8 @@ public class SmsCountryService implements SmsSender {
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .timeout(Duration.ofSeconds(30))
+                .timeout(SEND_TIMEOUT)
+                .retryWhen(CONNECT_FAILURE_RETRY)
                 .flatMap(response -> {
                     if (response == null) {
                         log.error("[SMSCountry] SMS OTP delivery failed: empty response body");
