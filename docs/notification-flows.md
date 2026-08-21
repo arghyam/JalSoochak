@@ -349,7 +349,21 @@ All Glific and storage properties can be overridden via environment variables.
 | `notifications.nudge.dry-run` | `NOTIFICATIONS_NUDGE_DRY_RUN` | No | Set `true` to suppress only operator nudges (defaults to `notifications.whatsapp.dry-run`) |
 | `notifications.escalation.dry-run` | `NOTIFICATIONS_ESCALATION_DRY_RUN` | No | Set `true` to suppress only officer (SO/SDO) escalation documents (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver escalations while nudges stay muted |
 | `notifications.daily-report.dry-run` | `NOTIFICATIONS_DAILY_REPORT_DRY_RUN` | No | Set `true` to suppress only the officer Daily Water Service Situation Report (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver daily reports while everything else stays muted |
+| `notifications.daily-report.delivery-mode` | `NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` | No | `DOCUMENT` (default) sends the report as a PDF attachment, which Meta downloads from `minio.base-url` itself. `LINK` sends a text HSM whose "View Report" button carries the MinIO path, so Meta fetches nothing and the officer's phone opens the PDF — the way past the India-only firewall that makes the attachment fail with `(#131053)`. See the note below |
+| `glific.template.daily-report-so-link-id` | `GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID` | Only in `LINK` mode | SECTION_OFFICER link template. Startup fails without it when daily reports are live and the mode is `LINK` |
+| `glific.template.daily-report-sdo-link-id` | `GLIFIC_DAILY_REPORT_SDO_LINK_TEMPLATE_ID` | No | SUB_DIVISIONAL_OFFICER link template; falls back to the SO link template when blank |
+| `daily-report.link.button-base-url` | `DAILY_REPORT_LINK_BUTTON_BASE_URL` | No | Mirror of the URL prefix frozen into the approved link template, e.g. `https://jalsoochak.jjmbrain.in/minio/`. When set it must equal `minio.base-url` + `/` or startup fails |
 | `notifications.sms.dry-run` | `NOTIFICATIONS_SMS_DRY_RUN` | No | Set `true` to suppress SMSCountry OTP delivery (login OTPs will not reach users) |
+
+> **Daily report `LINK` mode.** The link template's button URL is a fixed prefix plus a variable Meta
+> appends to it, e.g. `https://jalsoochak.jjmbrain.in/minio/{{1}}` with
+> `{{1}} = escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf`. The prefix is frozen
+> at template approval, so it must equal `minio.base-url` + `/`, and **staging and production need
+> their own approved template** (different hosts). The bucket travels inside the variable, so renaming
+> the bucket stays a configuration change. Body variables are `{{1}}` officer name and `{{2}}` report
+> date (`dd-MM-yyyy`, the day the data covers), with the URL suffix passed last —
+> `parameters = [name, date, suffix]`. `MINIO_BASE_URL` must still be publicly reachable and
+> anonymously readable in this mode: it is what the officer's phone opens.
 
 > **Contact opt-in is not gated by `notifications.whatsapp.dry-run`.** `optinContact` sends the
 > recipient nothing — it registers the contact and returns the Glific contact id that every delivery

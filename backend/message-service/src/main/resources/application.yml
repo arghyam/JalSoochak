@@ -246,6 +246,14 @@ daily-report:
       # sections — the remaining sections renumber automatically. analytics-service reads the same
       # property (same env var) and skips computing their data while they are hidden, so flip both.
       enabled: ${DAILY_REPORT_OUTAGE_SECTIONS_ENABLED:false}
+  link:
+    # Optional mirror of the URL prefix frozen into the approved LINK template, e.g.
+    # https://jalsoochak.jjmbrain.in/minio/ (mind the trailing slash). When set it must equal
+    # minio.base-url + "/" or the service refuses to start. This is the only check that catches an
+    # environment deployed with another environment's template id or MINIO_BASE_URL: Glific accepts
+    # the send either way, so otherwise the officer is the first to notice the button leads nowhere.
+    # Leave blank to skip the check (a startup warning is logged instead).
+    button-base-url: ${DAILY_REPORT_LINK_BUTTON_BASE_URL:}
 
 # Base URL used to construct the public PDF download link sent via WhatsApp.
 # For local dev: http://localhost:8085
@@ -280,7 +288,10 @@ app:
 # To run daily reports live while everything else stays muted:
 #   NOTIFICATIONS_WHATSAPP_DRY_RUN=true      (OTP/welcome/language muted)
 #   NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false (daily reports delivered; opt-in goes live)
-#   GLIFIC_DAILY_REPORT_SO_TEMPLATE_ID / _SDO_TEMPLATE_ID must be set — startup fails fast otherwise.
+#   Then, per delivery-mode (see notifications.daily-report.delivery-mode below), startup fails fast
+#   unless the templates that mode sends are configured:
+#     DOCUMENT → GLIFIC_DAILY_REPORT_SO_TEMPLATE_ID (numeric; _SDO_TEMPLATE_ID optional)
+#     LINK     → GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID (_SDO_LINK_TEMPLATE_ID optional)
 #
 # To run escalations live while keeping nudges muted:
 #   NOTIFICATIONS_WHATSAPP_DRY_RUN=false   (OTP/welcome live)
@@ -297,6 +308,20 @@ notifications:
     dry-run: ${NOTIFICATIONS_ESCALATION_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
   daily-report:
     dry-run: ${NOTIFICATIONS_DAILY_REPORT_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
+    
+    # How the report PDF reaches the officer. DOCUMENT | LINK (case-insensitive).
+    #
+    #   DOCUMENT — the PDF as a WhatsApp document. Glific registers the MinIO URL and META
+    #              DOWNLOADS IT ITSELF. Production MinIO answers Indian source addresses only, so
+    #              that download fails inside Meta with "(#131053) Media upload error — Your server
+    #              hosting media content did not respond back in time" and the officer receives an
+    #              attachment that will not open.
+    #   LINK     — a text HSM whose "View Report" button carries the MinIO path. Meta fetches
+    #              nothing; the officer's phone opens the PDF, from inside India, when they tap it.
+    #              Requires an approved link template (glific.template.daily-report-*-link-id).
+    #
+    # Rollback is this flag plus a restart — both paths stay in the code.
+    delivery-mode: ${NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE:DOCUMENT}
   sms:
     dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
 
@@ -316,6 +341,14 @@ glific:
     login-otp-id: ${GLIFIC_LOGIN_OTP_TEMPLATE_ID:}
     daily-report-so-id: ${GLIFIC_DAILY_REPORT_SO_TEMPLATE_ID:}
     daily-report-sdo-id: ${GLIFIC_DAILY_REPORT_SDO_TEMPLATE_ID:}
+    # Link templates — used only when notifications.daily-report.delivery-mode=LINK. These are text
+    # HSMs with a dynamic-URL button, NOT document templates, so they are separate approvals.
+    # Variables: {{1}} officer name, {{2}} report date (dd-MM-yyyy), then the button's URL suffix.
+    # The button's fixed prefix is frozen at approval and must equal MINIO_BASE_URL + "/", which is
+    # why staging and production each need their own template id.
+    daily-report-so-link-id: ${GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID:}
+    # Optional — falls back to the SO link template when blank.
+    daily-report-sdo-link-id: ${GLIFIC_DAILY_REPORT_SDO_LINK_TEMPLATE_ID:}
   flow:
     nudge-id: ${GLIFIC_NUDGE_FLOW_ID:}
     welcome-id: ${GLIFIC_WELCOME_FLOW_ID:38949}

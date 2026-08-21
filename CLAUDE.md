@@ -144,6 +144,25 @@ Message text is fetched from `common_schema.tenant_config_master_table` using th
   `GLIFIC_ESCALATION_TEMPLATE_ID`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`,
   `MINIO_BUCKET`, `MINIO_BASE_URL`
 
+### Daily report delivery mode (DOCUMENT | LINK)
+`NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` switches how the daily report PDF reaches the officer;
+both paths live in `GlificWhatsAppService.sendDailyReportHsm`:
+- `DOCUMENT` (default) — the two-step media send above. **Meta downloads `minio.base-url` itself**,
+  which the India-only firewall in front of production MinIO blocks: `(#131053) Media upload error —
+  Your server hosting media content did not respond back in time`.
+- `LINK` — one `sendHsmMessage` with a dynamic-URL "View Report" button and **no media step**. Meta
+  fetches nothing; the officer's phone opens the PDF. `parameters = [officerName, reportDate
+  (dd-MM-yyyy), urlSuffix]` — body variables first, the button's URL suffix **last**, because Glific
+  forwards the list to Gupshup as a flat `params` array filled in order of occurrence.
+- The button's URL prefix is frozen when Meta approves the template and must equal `minio.base-url`
+  + `/`; only the suffix (`escalation-reports/daily_report_<ROLE>_<id>_<date>.pdf`) varies per
+  message. Keeping the bucket in the suffix means a bucket rename needs no new template, but a
+  **different host does** — staging and production each need their own approved template
+  (`GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID`, optional `…_SDO_LINK_TEMPLATE_ID`). Set
+  `DAILY_REPORT_LINK_BUTTON_BASE_URL` to have that agreement checked at startup.
+- `minio.base-url` must still be public and anonymously readable in `LINK` mode — it is what the
+  recipient's phone opens, and what Meta resolves once when reviewing the template.
+
 ### Privacy rule
 Phone numbers are PII — log them only at `DEBUG` level. Never include raw phone numbers in
 `INFO`/`WARN`/`ERROR` log statements.
