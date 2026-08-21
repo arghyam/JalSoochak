@@ -79,15 +79,17 @@ public class NotificationEventRouter {
      * Dead-letter topic for {@code SEND_INVITE_EMAIL}, {@code SEND_REINVITE_EMAIL},
      * and {@code SEND_PASSWORD_RESET_EMAIL} per-recipient failures.
      *
-     * <p>Messages are published here — and the handler returns without rethrowing —
-     * for all failure modes: malformed event payload, missing required fields
-     * ({@code to}, {@code inviteLink}, {@code resetLink}), or an SMTP-level error.
+     * <p>Messages are published here — and the handler returns without rethrowing — for the
+     * failure modes a replay cannot fix: malformed event payload, missing required fields
+     * ({@code to}, {@code inviteLink}, {@code resetLink}), and any
+     * {@link org.arghyam.jalsoochak.message.exception.PermanentMailException} from the adapter
+     * (4xx, bad credentials, or an ambiguous timeout where retrying risks a duplicate).
      *
-     * <p>Email delivery is <em>not</em> idempotent: rethrowing on failure would
-     * trigger Kafka's retry/back-off policy and could cause duplicate emails to be
-     * sent to the same recipient. Routing to this DLT instead lets the Kafka
-     * container move on while preserving the failed record for ops investigation
-     * and controlled replay.
+     * <p>A {@link TransientMailException} — 429, 5xx, connection failure — takes the opposite
+     * path: the handler rethrows, the container applies its back-off ladder, and an exhausted
+     * record lands on {@code common-topic.DLT} instead. Nothing reached the recipient in those
+     * cases, so a replay cannot duplicate an email. This mirrors the classify-then-retry shape
+     * the daily-report handler already uses.
      *
      * <p>This service intentionally does <em>not</em> consume this topic.
      * Re-consuming from the same service that produces here would create an
@@ -599,8 +601,12 @@ public class NotificationEventRouter {
                         event.getInviteLink(), event.getExpiryHours());
             }
             log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={}", event.getRole());
+        } catch (TransientMailException e) {
+            log.error("[Router/INVITE_EMAIL] Transient email failure, rethrowing for container retry: {}",
+                    e.getMessage());
+            throw e;
         } catch (Exception e) {
-            log.error("[Router/INVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            log.error("[Router/INVITE_EMAIL] Permanent email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
@@ -627,8 +633,12 @@ public class NotificationEventRouter {
         try {
             accountEmailService.sendReinviteEmail(event.getTo(), event.getName(), event.getInviteLink(), event.getExpiryHours());
             log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={}", event.getRole());
+        } catch (TransientMailException e) {
+            log.error("[Router/REINVITE_EMAIL] Transient email failure, rethrowing for container retry: {}",
+                    e.getMessage());
+            throw e;
         } catch (Exception e) {
-            log.error("[Router/REINVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            log.error("[Router/REINVITE_EMAIL] Permanent email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
@@ -655,8 +665,13 @@ public class NotificationEventRouter {
         try {
             accountEmailService.sendPasswordResetEmail(event.getTo(), event.getResetLink(), event.getExpiryMinutes());
             log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched");
+        } catch (TransientMailException e) {
+            log.error("[Router/PASSWORD_RESET_EMAIL] Transient email failure, rethrowing for container retry: {}",
+                    e.getMessage());
+            throw e;
         } catch (Exception e) {
-            log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
+            log.error("[Router/PASSWORD_RESET_EMAIL] Permanent email delivery failure, routing to DLT: {}",
+                    e.getMessage());
             publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
         }
     }
