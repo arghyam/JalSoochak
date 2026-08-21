@@ -4,8 +4,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
+import org.arghyam.jalsoochak.message.exception.PermanentMailException;
+import org.arghyam.jalsoochak.message.exception.TransientMailException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.MailException;
+import org.springframework.mail.MailSendException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
@@ -58,9 +61,18 @@ public class SmtpMailSender implements EmailSender {
         try {
             javaMailSender.send(message);
             log.info("[SmtpMailSender] sent template={}", request.template());
+        } catch (MailSendException e) {
+            // Raised when the transport itself failed — host unreachable, connection refused, the
+            // 30s spring.mail timeouts expiring. The SMTP conversation never reached DATA, so no
+            // copy is in flight and a replay is safe.
+            log.error("[SmtpMailSender] failure template={}: transport error: {}",
+                    request.template(), e.getMessage(), e);
+            throw new TransientMailException("SmtpMailSender transport failure for " + request.template(), e);
         } catch (MailException e) {
+            // MailAuthenticationException, MailParseException, MailPreparationException — bad
+            // credentials or a message we built wrong. Identical on every replay.
             log.error("[SmtpMailSender] failure template={}: {}", request.template(), e.getMessage(), e);
-            throw new RuntimeException("SmtpMailSender failure for " + request.template(), e);
+            throw new PermanentMailException("SmtpMailSender failure for " + request.template(), e);
         }
     }
 
