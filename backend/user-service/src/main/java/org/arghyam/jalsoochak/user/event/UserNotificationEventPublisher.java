@@ -21,6 +21,19 @@ public class UserNotificationEventPublisher {
 
     public static final String COMMON_TOPIC = "common-topic";
 
+    /**
+     * Login OTPs go to their own topic rather than {@link #COMMON_TOPIC}.
+     *
+     * <p>Six services subscribe to common-topic, so publishing OTPs there handed the plaintext code
+     * and the user's phone number to five services with no use for them. It also queued each OTP
+     * behind whatever batch traffic common-topic was carrying — a daily-report run occupies that bus
+     * for minutes, and an OTP expires in ten.
+     *
+     * <p>message-service consumes both topics during the migration, so this can be rolled forward or
+     * back independently of a message-service deploy.
+     */
+    public static final String OTP_TOPIC = "otp-topic";
+
     private final KafkaProducer kafkaProducer;
 
     public void publishInviteEmailAfterCommit(InviteEmailEvent event) {
@@ -40,9 +53,9 @@ public class UserNotificationEventPublisher {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    boolean ok = kafkaProducer.publishJson(COMMON_TOPIC, event);
+                    boolean ok = kafkaProducer.publishJson(OTP_TOPIC, event);
                     if (!ok) {
-                        log.warn("[notification-event] Failed to publish SEND_LOGIN_OTP event to topic={}", COMMON_TOPIC);
+                        log.warn("[notification-event] Failed to publish SEND_LOGIN_OTP event to topic={}", OTP_TOPIC);
                     } else if (staffUserId != null && tenantCode != null) {
                         log.info("OTP requested for staffUserId={} tenantCode={}", staffUserId, tenantCode);
                     }
@@ -50,9 +63,9 @@ public class UserNotificationEventPublisher {
             });
         } else {
             log.warn("[notification-event] No active transaction; publishing SEND_LOGIN_OTP event immediately");
-            boolean ok = kafkaProducer.publishJson(COMMON_TOPIC, event);
+            boolean ok = kafkaProducer.publishJson(OTP_TOPIC, event);
             if (!ok) {
-                log.warn("[notification-event] Failed to publish SEND_LOGIN_OTP event to topic={}", COMMON_TOPIC);
+                log.warn("[notification-event] Failed to publish SEND_LOGIN_OTP event to topic={}", OTP_TOPIC);
             } else if (staffUserId != null && tenantCode != null) {
                 log.info("OTP requested for staffUserId={} tenantCode={}", staffUserId, tenantCode);
             }

@@ -29,6 +29,7 @@ import static org.mockito.Mockito.when;
 class UserNotificationEventPublisherTest {
 
     private static final String COMMON_TOPIC = UserNotificationEventPublisher.COMMON_TOPIC;
+    private static final String OTP_TOPIC = UserNotificationEventPublisher.OTP_TOPIC;
 
     @Mock private KafkaProducer kafkaProducer;
 
@@ -163,29 +164,45 @@ class UserNotificationEventPublisherTest {
         @DisplayName("publishes immediately (single-arg overload) when no active transaction")
         void publishesImmediatelySingleArg() {
             SendLoginOtpEvent event = anOtpEvent();
-            when(kafkaProducer.publishJson(eq(COMMON_TOPIC), eq(event))).thenReturn(true);
+            when(kafkaProducer.publishJson(eq(OTP_TOPIC), eq(event))).thenReturn(true);
 
             publisher.publishLoginOtpAfterCommit(event);
 
-            verify(kafkaProducer).publishJson(COMMON_TOPIC, event);
+            verify(kafkaProducer).publishJson(OTP_TOPIC, event);
+        }
+
+        /**
+         * The regression that matters: common-topic has six subscribers, so an OTP published there
+         * hands the plaintext code and the user's phone number to five services with no use for them.
+         */
+        @Test
+        @DisplayName("never publishes an OTP to the shared common-topic")
+        void neverPublishesOtpToCommonTopic() {
+            SendLoginOtpEvent event = anOtpEvent();
+            when(kafkaProducer.publishJson(any(), any())).thenReturn(true);
+
+            publisher.publishLoginOtpAfterCommit(event, 42L, "MP");
+
+            verify(kafkaProducer, never()).publishJson(eq(COMMON_TOPIC), any());
+            verify(kafkaProducer).publishJson(OTP_TOPIC, event);
         }
 
         @Test
         @DisplayName("publishes immediately (three-arg overload) with staffUserId and tenantCode")
         void publishesImmediatelyWithStaffInfo() {
             SendLoginOtpEvent event = anOtpEvent();
-            when(kafkaProducer.publishJson(eq(COMMON_TOPIC), eq(event))).thenReturn(true);
+            when(kafkaProducer.publishJson(eq(OTP_TOPIC), eq(event))).thenReturn(true);
 
             publisher.publishLoginOtpAfterCommit(event, 99L, "MP");
 
-            verify(kafkaProducer).publishJson(COMMON_TOPIC, event);
+            verify(kafkaProducer).publishJson(OTP_TOPIC, event);
         }
 
         @Test
         @DisplayName("registers synchronization when transaction is active (three-arg overload)")
         void registersWithActiveTransaction() {
             SendLoginOtpEvent event = anOtpEvent();
-            when(kafkaProducer.publishJson(eq(COMMON_TOPIC), eq(event))).thenReturn(true);
+            when(kafkaProducer.publishJson(eq(OTP_TOPIC), eq(event))).thenReturn(true);
 
             List<TransactionSynchronization> captured = new ArrayList<>();
             try (MockedStatic<TransactionSynchronizationManager> tsm =
@@ -198,7 +215,7 @@ class UserNotificationEventPublisherTest {
 
                 verify(kafkaProducer, never()).publishJson(any(), any());
                 captured.get(0).afterCommit();
-                verify(kafkaProducer).publishJson(COMMON_TOPIC, event);
+                verify(kafkaProducer).publishJson(OTP_TOPIC, event);
             }
         }
 
@@ -206,7 +223,7 @@ class UserNotificationEventPublisherTest {
         @DisplayName("handles Kafka failure gracefully when no transaction (returns false)")
         void kafkaFailureNoTransaction() {
             SendLoginOtpEvent event = anOtpEvent();
-            when(kafkaProducer.publishJson(eq(COMMON_TOPIC), eq(event))).thenReturn(false);
+            when(kafkaProducer.publishJson(eq(OTP_TOPIC), eq(event))).thenReturn(false);
 
             publisher.publishLoginOtpAfterCommit(event, null, null); // must not throw
         }
@@ -215,7 +232,7 @@ class UserNotificationEventPublisherTest {
         @DisplayName("handles after-commit Kafka failure gracefully")
         void afterCommitKafkaFailure() {
             SendLoginOtpEvent event = anOtpEvent();
-            when(kafkaProducer.publishJson(eq(COMMON_TOPIC), eq(event))).thenReturn(false);
+            when(kafkaProducer.publishJson(eq(OTP_TOPIC), eq(event))).thenReturn(false);
 
             List<TransactionSynchronization> captured = new ArrayList<>();
             try (MockedStatic<TransactionSynchronizationManager> tsm =
