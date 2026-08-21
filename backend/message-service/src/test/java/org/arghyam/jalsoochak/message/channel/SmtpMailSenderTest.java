@@ -3,12 +3,15 @@ package org.arghyam.jalsoochak.message.channel;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
+import org.arghyam.jalsoochak.message.exception.PermanentMailException;
+import org.arghyam.jalsoochak.message.exception.TransientMailException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mail.MailAuthenticationException;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -110,7 +113,8 @@ class SmtpMailSenderTest {
     }
 
     @Test
-    void send_throwsRuntimeException_whenMailExceptionOccurs() {
+    void send_throwsTransient_whenTransportFails() {
+        // The SMTP conversation never reached DATA, so no copy is in flight and a replay is safe.
         doThrow(new MailSendException("SMTP connection refused"))
                 .when(javaMailSender).send(any(SimpleMailMessage.class));
 
@@ -118,7 +122,21 @@ class SmtpMailSenderTest {
                 "user@example.com",
                 MailTemplate.PASSWORD_RESET,
                 Map.of("reset_link", "https://reset", "expiry_minutes", 15))))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(TransientMailException.class)
+                .hasMessageContaining("SmtpMailSender transport failure");
+    }
+
+    @Test
+    void send_throwsPermanent_whenCredentialsAreRejected() {
+        // Bad credentials fail identically however many times the event is replayed.
+        doThrow(new MailAuthenticationException("535 authentication failed"))
+                .when(javaMailSender).send(any(SimpleMailMessage.class));
+
+        assertThatThrownBy(() -> smtpMailSender.send(new MailRequest(
+                "user@example.com",
+                MailTemplate.PASSWORD_RESET,
+                Map.of("reset_link", "https://reset", "expiry_minutes", 15))))
+                .isInstanceOf(PermanentMailException.class)
                 .hasMessageContaining("SmtpMailSender failure");
     }
 }

@@ -151,4 +151,34 @@ class KafkaProducerTest {
 
         verify(kafkaTemplate, never()).send(anyString(), anyString());
     }
+
+    /**
+     * The dead-letter payloads this producer writes carry the recipient's email address
+     * ({@code account-email-dlt}) and phone number ({@code welcome-message-dlt}). Neither may
+     * appear in a log line above DEBUG.
+     */
+    @Test
+    void redactSensitive_masksRecipientAddressOnDeadLetterPayloads() {
+        String json = "{\"retryId\":\"abc\",\"eventType\":\"ACCOUNT_EMAIL_FAILED\","
+                + "\"originalEventType\":\"SEND_INVITE_EMAIL\",\"to\":\"officer@tenant.in\"}";
+
+        String redacted = KafkaProducer.redactSensitive(json);
+
+        assertThat(redacted).doesNotContain("officer@tenant.in");
+        assertThat(redacted).contains("ACCOUNT_EMAIL_FAILED").contains("SEND_INVITE_EMAIL").contains("abc");
+    }
+
+    @Test
+    void redactSensitive_masksPhoneNumberOnWelcomeDeadLetterPayloads() {
+        String json = "{\"retryId\":\"xyz\",\"phone\":\"919876543210\",\"tenantSchema\":\"tenant_mp\"}";
+
+        String redacted = KafkaProducer.redactSensitive(json);
+
+        assertThat(redacted).doesNotContain("919876543210").contains("tenant_mp");
+    }
+
+    @Test
+    void redactSensitive_returnsNullForNull() {
+        assertThat(KafkaProducer.redactSensitive(null)).isNull();
+    }
 }

@@ -28,7 +28,13 @@ import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
 import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
+import org.arghyam.jalsoochak.message.exception.PermanentMailException;
+import org.arghyam.jalsoochak.message.exception.TransientMailException;
+import org.arghyam.jalsoochak.message.kafka.KafkaConfig;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.mockito.Spy;
 import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,6 +91,14 @@ class NotificationEventRouterTest {
 
     @Mock
     private PiiEncryptionService piiEncryptionService;
+
+    /**
+     * A real registry rather than a mock: {@code Counter.builder(...).register(registry)} goes
+     * through the registry's own internals, which a bare Mockito mock cannot satisfy. {@code @Spy}
+     * makes {@code @InjectMocks} pick up this instance.
+     */
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks
     private NotificationEventRouter router;
@@ -540,6 +554,122 @@ class NotificationEventRouterTest {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("email_delivery_error");
         }));
+    }
+
+    // ─────────── Transient vs permanent: which failures earn a Kafka retry ───────────
+
+    @Test
+    void route_rethrowsAndSkipsDlt_whenInviteEmailFailsTransiently() {
+        // 429/5xx/connection failures delivered nothing, so the container should replay the event
+        // rather than bury it on a topic nobody consumes.
+        doThrow(new TransientMailException("SendGrid returned HTTP 503", null))
+                .when(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"op@tenant.in","name":"Dev",
+                 "role":"NEW_ROLE","inviteLink":"https://link","expiryHours":24}
+                """))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(kafkaProducer, never()).publishJson(eq("account-email-dlt"), any());
+    }
+
+    /**
+     * Nothing consumes account-email-dlt, so this counter is the only signal that a user never got
+     * their invite. Without it, a dead-lettered email and a delivered one are indistinguishable.
+     */
+    @Test
+    void route_countsADeadLetteredEmail_soTheSilentFailureIsAlertable() {
+        doThrow(new PermanentMailException("SendGrid returned HTTP 400", null))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com",
+                 "resetLink":"https://reset?token=abc","expiryMinutes":30}
+                """);
+
+        var counter = ((SimpleMeterRegistry) meterRegistry)
+                .find(KafkaConfig.DEADLETTER_COUNTER)
+                .tag("outcome", "deadlettered")
+                .tag("event_type", "SEND_PASSWORD_RESET_EMAIL")
+                .counter();
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void route_countsADroppedEmail_whenEvenTheDeadLetterPublishFails() {
+        doThrow(new PermanentMailException("SendGrid returned HTTP 400", null))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        doThrow(new RuntimeException("broker unavailable"))
+                .when(kafkaProducer).publishJson(eq("account-email-dlt"), any());
+
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com",
+                 "resetLink":"https://reset?token=abc","expiryMinutes":30}
+                """);
+
+        // Lost outright rather than parked — the outcome that should page someone.
+        var counter = ((SimpleMeterRegistry) meterRegistry)
+                .find(KafkaConfig.DEADLETTER_COUNTER).tag("outcome", "dropped").counter();
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void route_routesToDlt_whenInviteEmailFailsPermanently() {
+        doThrow(new PermanentMailException("SendGrid returned HTTP 400", null))
+                .when(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"op@tenant.in","name":"Dev",
+                 "role":"NEW_ROLE","inviteLink":"https://link","expiryHours":24}
+                """);
+
+        verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
+    }
+
+    @Test
+    void route_rethrowsAndSkipsDlt_whenPasswordResetFailsTransiently() {
+        doThrow(new TransientMailException("SendGrid returned HTTP 429", null))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com",
+                 "resetLink":"https://reset?token=abc","expiryMinutes":30}
+                """))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(kafkaProducer, never()).publishJson(eq("account-email-dlt"), any());
+    }
+
+    @Test
+    void route_rethrowsAndSkipsDlt_whenReinviteFailsTransiently() {
+        doThrow(new TransientMailException("connection reset", null))
+                .when(accountEmailService).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"SEND_REINVITE_EMAIL","to":"op@tenant.in","name":"Sunita",
+                 "inviteLink":"https://link","expiryHours":72}
+                """))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(kafkaProducer, never()).publishJson(eq("account-email-dlt"), any());
+    }
+
+    @Test
+    void route_routesToDlt_whenEmailFailsWithAnUnclassifiedError() {
+        // An adapter that throws neither type must still be treated as permanent: a duplicate
+        // email is worse than a delayed one, so the safe default is "do not replay".
+        doThrow(new IllegalStateException("something odd"))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com",
+                 "resetLink":"https://reset?token=abc","expiryMinutes":30}
+                """);
+
+        verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
 
     // ──────────────────────── SEND_REINVITE_EMAIL ──────────────────────────────

@@ -2,6 +2,8 @@ package org.arghyam.jalsoochak.message.channel;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.http.Fault;
+import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -185,5 +187,68 @@ class SmsCountryServiceTest {
         boolean result = service.sendOtp("919876543210", "123456", 5).block();
 
         assertThat(result).isFalse();
+    }
+
+    // ───────────────────── connection-failure retry ─────────────────────
+
+    /**
+     * A connection that never reached SMSCountry sent nothing, so one immediate retry cannot
+     * duplicate an SMS — and at 500ms it lands far inside the OTP's 10-minute life, with no chance
+     * of racing the user's 60s resend (which revokes the code this event carries).
+     */
+    @Test
+    void sendOtp_retriesOnceWhenTheConnectionFails_thenSucceeds() {
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .inScenario("flaky-connection").whenScenarioStateIs(Scenario.STARTED)
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER))
+                .willSetStateTo("recovered"));
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .inScenario("flaky-connection").whenScenarioStateIs("recovered")
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(SUCCESS_RESPONSE)));
+
+        Boolean result = service.sendOtp("919876543210", "123456", 5).block();
+
+        assertThat(result).isTrue();
+        wireMockServer.verify(2, postRequestedFor(urlEqualTo(SMS_PATH)));
+    }
+
+    @Test
+    void sendOtp_givesUpAfterOneRetry_whenTheConnectionKeepsFailing() {
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+
+        // Still an error signal, per the port's contract for a transient failure.
+        assertThatThrownBy(() -> service.sendOtp("919876543210", "123456", 5).block())
+                .isInstanceOf(RuntimeException.class);
+
+        // Exactly one retry — this must never grow into a back-off ladder.
+        wireMockServer.verify(2, postRequestedFor(urlEqualTo(SMS_PATH)));
+    }
+
+    /**
+     * A 5xx may mean SMSCountry already queued the message. Retrying would risk a second SMS at
+     * our cost, so the retry filter deliberately excludes it — the caller still sees the error.
+     */
+    @Test
+    void sendOtp_doesNotRetryServerErrors() {
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .willReturn(aResponse().withStatus(503).withBody("upstream unavailable")));
+
+        assertThatThrownBy(() -> service.sendOtp("919876543210", "123456", 5).block())
+                .isInstanceOf(RuntimeException.class);
+
+        wireMockServer.verify(1, postRequestedFor(urlEqualTo(SMS_PATH)));
+    }
+
+    @Test
+    void sendOtp_doesNotRetryClientErrors() {
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .willReturn(aResponse().withStatus(401).withBody("bad credentials")));
+
+        assertThat(service.sendOtp("919876543210", "123456", 5).block()).isFalse();
+
+        wireMockServer.verify(1, postRequestedFor(urlEqualTo(SMS_PATH)));
     }
 }
