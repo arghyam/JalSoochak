@@ -16,9 +16,20 @@ public class KafkaConsumer {
     private final ObjectMapper objectMapper;
     private final TenantConfigRepository tenantConfigRepository;
 
+    /**
+     * This service takes no action on common-topic events; the listener exists only for visibility.
+     * The payload must not be logged: common-topic carries operator and officer phone numbers, and
+     * — until it moved to its own topic — the plaintext login OTP. Event type alone is enough here.
+     */
     @KafkaListener(topics = "common-topic", groupId = "${spring.kafka.consumer.group-id}")
     public void consume(String message) {
-        log.info("[telemetry-service] Received message from common-topic: {}", message);
+        String eventType;
+        try {
+            eventType = objectMapper.readTree(message).path("eventType").asText("UNKNOWN");
+        } catch (Exception e) {
+            eventType = "UNPARSEABLE";
+        }
+        log.info("[telemetry-service] Received message from common-topic: eventType={}", eventType);
     }
 
     @KafkaListener(topics = "tenant-service-topic", groupId = "${spring.kafka.consumer.group-id}")

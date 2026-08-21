@@ -9,6 +9,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
 @Component
 @RequiredArgsConstructor
@@ -16,6 +17,29 @@ import java.util.concurrent.CompletableFuture;
 public class KafkaProducer {
 
     private static final String TOPIC = "user-service-topic";
+
+    /**
+     * JSON keys whose values must never reach a log file. Two kinds live here: outright secrets
+     * (the OTP, passwords) and single-use links, which are bearer credentials — anyone holding a
+     * password-reset URL can take the account. Phone numbers and email addresses are PII under
+     * the same rule that keeps them out of INFO everywhere else in the platform.
+     */
+    private static final Pattern SENSITIVE_KEYS = Pattern.compile(
+            "(\"(?:OTP|otp|password|officerPhoneNumber|phoneNumber|phone|recipientPhone"
+                    + "|to|email|inviteLink|resetLink|activationLink)\"\\s*:\\s*)\"(?:[^\"\\\\]|\\\\.)*\"",
+            Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Masks the values of {@link #SENSITIVE_KEYS} so a DEBUG payload dump stays useful for
+     * shape-checking an event without disclosing its contents. Deliberately a string rewrite
+     * rather than a re-parse: this runs on the publish path and must not be able to throw.
+     */
+    static String redactSensitive(String json) {
+        if (json == null) {
+            return null;
+        }
+        return SENSITIVE_KEYS.matcher(json).replaceAll("$1\"***\"");
+    }
 
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
@@ -31,8 +55,12 @@ public class KafkaProducer {
     public boolean publishJson(String topic, Object event) {
         try {
             String json = objectMapper.writeValueAsString(event);
-            // Log the full payload so operators can confirm what other services will consume.
-            log.info("[kafka:publish] topic={} payload={}", topic, json);
+            // Never log the payload at INFO. SEND_LOGIN_OTP carries the plaintext OTP and the
+            // officer's phone number; the invite and password-reset events carry single-use
+            // links that are credentials in their own right. @ToString.Exclude on the event does
+            // not help here — Jackson serialises the field regardless of what toString() hides.
+            log.info("[kafka:publish] topic={} event={}", topic, event.getClass().getSimpleName());
+            log.debug("[kafka:publish] topic={} payload={}", topic, redactSensitive(json));
 
             CompletableFuture<SendResult<String, String>> fut = kafkaTemplate.send(topic, json);
             fut.whenComplete((res, ex) -> {
