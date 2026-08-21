@@ -2,6 +2,12 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alert rules are evaluated here and visible under Prometheus → Alerts. There is no Alertmanager in
+# this stack, so firing rules do not notify anyone on their own — point a Grafana alert at the same
+# jalsoochak_deadletter_total metric, or add an Alertmanager service, to get them delivered.
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:

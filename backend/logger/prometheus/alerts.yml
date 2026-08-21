@@ -1,0 +1,45 @@
+groups:
+  # Every dead-letter path in message-service increments jalsoochak_deadletter_total.
+  # These rules exist because nothing consumes the dead-letter topics: replay is a deliberate ops
+  # action, so without an alert a lost notification and a delivered one look identical from outside.
+  - name: notification-delivery
+    rules:
+      # outcome="dropped" means the record is gone — the dead-letter publish itself failed and the
+      # record was discarded to avoid an endless redelivery loop. Nothing can recover it.
+      - alert: NotificationDropped
+        expr: increase(jalsoochak_deadletter_total{outcome="dropped"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "message-service dropped a notification outright"
+          description: >-
+            {{ $value }} notification(s) discarded on topic {{ $labels.topic }} in the last 15m.
+            The dead-letter publish failed, so these are unrecoverable. Check whether
+            {{ $labels.topic }}.DLT exists on the broker — auto.create.topics.enable=false is the
+            usual cause. The affected topic/partition/offset is logged at ERROR by message-service.
+
+      # outcome="deadlettered" is recoverable, but only if a human looks.
+      - alert: NotificationDeadLettered
+        expr: increase(jalsoochak_deadletter_total{outcome="deadlettered"}[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "message-service dead-lettered notifications"
+          description: >-
+            {{ $value }} notification(s) dead-lettered on {{ $labels.topic }} in the last hour
+            (event_type={{ $labels.event_type }}). Recoverable via replay — each record carries a
+            deterministic retryId and originalEventType so a replay can deduplicate.
+
+      # A sustained rate suggests a provider outage rather than isolated bad records.
+      - alert: NotificationDeadLetterRateHigh
+        expr: sum(rate(jalsoochak_deadletter_total[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "message-service is dead-lettering notifications continuously"
+          description: >-
+            Sustained dead-letter rate over 10m. Likely a provider outage (SendGrid, SMSCountry,
+            Glific) or a broker problem rather than individual malformed events.
