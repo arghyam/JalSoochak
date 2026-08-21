@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -19,9 +20,11 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.sql.ResultSet;
 import java.util.List;
+import java.util.Map;
 
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
@@ -32,8 +35,12 @@ import org.arghyam.jalsoochak.message.exception.PermanentMailException;
 import org.arghyam.jalsoochak.message.exception.TransientMailException;
 import org.arghyam.jalsoochak.message.kafka.KafkaConfig;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
+import org.arghyam.jalsoochak.message.metrics.NotificationMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheus.PrometheusConfig;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.mockito.Spy;
 import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
@@ -100,6 +107,13 @@ class NotificationEventRouterTest {
     @Spy
     private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
+    /**
+     * Real, not mocked, for the same reason as {@link #meterRegistry}: assertions below read the
+     * counters back out, so the increments have to actually happen.
+     */
+    @Spy
+    private NotificationMetrics notificationMetrics = new NotificationMetrics(meterRegistry);
+
     @InjectMocks
     private NotificationEventRouter router;
 
@@ -114,6 +128,17 @@ class NotificationEventRouterTest {
         ReflectionTestUtils.setField(router, "baseUrl", "https://example.com");
         lenient().when(piiEncryptionService.hmac(anyString()))
                 .thenAnswer(inv -> "hash_" + inv.getArgument(0, String.class));
+        // publishJson now reports whether the broker acknowledged the record. Default to "yes" so
+        // existing cases exercise the normal path; the drop cases override it explicitly.
+        lenient().when(kafkaProducer.publishJson(anyString(), any())).thenReturn(true);
+    }
+
+    /** Reads a send-outcome counter back out of the registry. */
+    private double sendCount(String channel, String eventType, String outcome) {
+        var counter = meterRegistry.find(NotificationMetrics.SEND_COUNTER)
+                .tag("channel", channel).tag("event_type", eventType).tag("outcome", outcome)
+                .counter();
+        return counter == null ? 0.0 : counter.count();
     }
 
     /**
@@ -874,18 +899,38 @@ class NotificationEventRouterTest {
         verifyNoInteractions(whatsAppChannel, glificWhatsAppService);
     }
 
+    /**
+     * A failed WhatsApp OTP is terminal, exactly like the SMS branch. Throwing here would buy the
+     * common-topic retry ladder — SEND_LOGIN_OTP is still accepted there during the migration — whose
+     * last rung lands past the 60s resend cooldown, after {@code requestOtp} has revoked this code.
+     * The user would be handed a dead OTP and lose one of three verification attempts, while the
+     * partition stayed occupied and delayed other logins.
+     */
     @Test
-    void route_rethrowsException_whenLoginOtpDeliveryFails() {
+    void route_doesNotRethrow_whenWhatsAppLoginOtpDeliveryFails() {
         when(glificWhatsAppService.optIn(anyString())).thenReturn(55L);
-        when(whatsAppChannel.sendLoginOtp(anyLong(), anyString()))
-                .thenReturn(false);
+        when(whatsAppChannel.sendLoginOtp(anyLong(), anyString())).thenReturn(false);
 
-        assertThatThrownBy(() -> router.route("""
+        assertThatCode(() -> router.route("""
                 {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"222222",
                  "deliveryChannel":"WHATSAPP","glific_id":"","officerPhoneNumber":"919000000002"}
-                """))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Notification event processing failed");
+                """)).doesNotThrowAnyException();
+
+        verify(whatsAppChannel).sendLoginOtp(55L, "222222");
+    }
+
+    @Test
+    void route_doesNotRethrow_whenTheWhatsAppOptInForALoginOtpThrows() {
+        // Glific being down must not park an OTP on the retry ladder either.
+        when(glificWhatsAppService.optIn(anyString()))
+                .thenThrow(new RuntimeException("Glific unavailable"));
+
+        assertThatCode(() -> router.route("""
+                {"eventType":"SEND_LOGIN_OTP","officerName":"SO","OTP":"222333",
+                 "deliveryChannel":"WHATSAPP","glific_id":"","officerPhoneNumber":"919000000003"}
+                """)).doesNotThrowAnyException();
+
+        verifyNoInteractions(whatsAppChannel);
     }
 
     // ──────────────────────── SEND_WELCOME_MESSAGE ─────────────────────────────
@@ -917,6 +962,83 @@ class NotificationEventRouterTest {
 
         verify(glificWhatsAppService, never()).startWelcomeFlow(anyLong(), anyString(), anyString());
         verify(kafkaProducer).publishJson(eq("welcome-message-dlt"), any());
+    }
+
+    /**
+     * welcome-message-dlt is as unconsumed as account-email-dlt, so it needs the same counter or an
+     * operator who never got their welcome message leaves no trace outside the log file.
+     */
+    @Test
+    void route_countsADeadLetteredWelcomeMessage_soTheSilentFailureIsAlertable() {
+        stubWelcomeLookup("mp", "919222222222", List.of());
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
+
+        router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919222222222"]}
+                """);
+
+        var counter = ((SimpleMeterRegistry) meterRegistry)
+                .find(KafkaConfig.DEADLETTER_COUNTER)
+                .tag("outcome", "deadlettered")
+                .tag("topic", "welcome-message-dlt")
+                .counter();
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void route_countsADroppedWelcomeMessage_andDoesNotRethrow_whenTheDeadLetterPublishFails() {
+        stubWelcomeLookup("mp", "919222222222", List.of());
+        when(messageTemplateService.findStateName(anyInt())).thenReturn("");
+        doThrow(new RuntimeException("broker unavailable"))
+                .when(kafkaProducer).publishJson(eq("welcome-message-dlt"), any());
+
+        // Rethrowing would send the handler back round the retry ladder and re-send the welcome
+        // message to every operator that already received one.
+        assertThatCode(() -> router.route("""
+                {"eventType":"SEND_WELCOME_MESSAGE","tenantCode":"mp",
+                 "pumpOperatorPhones":["919222222222"]}
+                """)).doesNotThrowAnyException();
+
+        var counter = ((SimpleMeterRegistry) meterRegistry)
+                .find(KafkaConfig.DEADLETTER_COUNTER)
+                .tag("outcome", "dropped")
+                .tag("topic", "welcome-message-dlt")
+                .counter();
+        assertThat(counter).isNotNull();
+        assertThat(counter.count()).isEqualTo(1.0);
+    }
+
+    /**
+     * Prometheus requires every sample of a metric to carry the same label keys, and Micrometer
+     * enforces that at registration time — the second registration of {@code jalsoochak.deadletter}
+     * with a different tag set throws. Both paths share the counter, so if their tag keys ever drift
+     * apart one of them dies at runtime and takes the dead-letter alerts with it.
+     *
+     * <p>{@link SimpleMeterRegistry} does not enforce this, which is exactly why this one test uses
+     * a real {@link PrometheusMeterRegistry}. Its counterpart on the container side is
+     * {@code KafkaConfigTest#deadLetterCounter_usesTheSameTagKeysAsTheRouter}; the two assert the
+     * same key set from opposite ends because the recoverer is not visible from this package.
+     */
+    @Test
+    void deadLetterCounter_registersTheAgreedTagKeys() {
+        PrometheusMeterRegistry prometheus = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        ReflectionTestUtils.setField(router, "meterRegistry", prometheus);
+
+        doThrow(new PermanentMailException("SendGrid returned HTTP 400", null))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+
+        assertThatCode(() -> router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com",
+                 "resetLink":"https://reset?token=abc","expiryMinutes":30}
+                """)).doesNotThrowAnyException();
+
+        assertThat(prometheus.find(KafkaConfig.DEADLETTER_COUNTER).counters())
+                .isNotEmpty()
+                .allSatisfy(counter -> assertThat(counter.getId().getTags())
+                        .extracting(Tag::getKey)
+                        .containsExactlyInAnyOrder("outcome", "topic", "event_type"));
     }
 
     @Test
@@ -1106,6 +1228,227 @@ class NotificationEventRouterTest {
         verify(glificWhatsAppService).optIn("919876543210");
     }
 
+    // ───────────────────── send-outcome metrics ────────────────────────
+    //
+    // The OTP channels are why this counter exists. otp-topic runs FixedBackOff(0, 0) and both OTP
+    // branches swallow their own failures on purpose — retrying an OTP hands the user a code that
+    // requestOtp has already revoked — so an OTP failure reaches no recoverer, increments no
+    // dead-letter counter, and fires none of the dead-letter alerts. Before this counter, an
+    // SMSCountry outage was visible only as a log line nobody was watching.
+
+    @Test
+    void route_countsAFailedSmsOtp_soAProviderOutageIsVisibleToMonitoring() {
+        when(smsSender.sendOtp(anyString(), anyString(), anyInt()))
+                .thenReturn(Mono.error(new RuntimeException("SMSCountry OTP send failed (server error)")));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500030","expiryMinutes":5}
+                """);
+
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.FAILED)).isEqualTo(1.0);
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.SENT)).isZero();
+    }
+
+    /** A 4xx from the provider: terminal, and distinct from an outage. */
+    @Test
+    void route_countsARejectedSmsOtp_separatelyFromAFailure() {
+        when(smsSender.sendOtp(anyString(), anyString(), anyInt())).thenReturn(Mono.just(false));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500031","expiryMinutes":5}
+                """);
+
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.REJECTED)).isEqualTo(1.0);
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.FAILED)).isZero();
+    }
+
+    @Test
+    void route_countsASentSmsOtp() {
+        when(smsSender.sendOtp(anyString(), anyString(), anyInt())).thenReturn(Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500032","expiryMinutes":5}
+                """);
+
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.SENT)).isEqualTo(1.0);
+    }
+
+    @Test
+    void route_countsAFailedWhatsAppOtp() {
+        when(whatsAppChannel.sendLoginOtp(anyLong(), anyString())).thenReturn(false);
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"WHATSAPP","glific_id":4242}
+                """);
+
+        assertThat(sendCount("WHATSAPP", "SEND_LOGIN_OTP", NotificationMetrics.FAILED)).isEqualTo(1.0);
+    }
+
+    /** A thrown Glific error is the same outcome as a false return — the user got nothing. */
+    @Test
+    void route_countsAThrownWhatsAppOtpFailure() {
+        when(whatsAppChannel.sendLoginOtp(anyLong(), anyString()))
+                .thenThrow(new RuntimeException("Glific auth token expired"));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"WHATSAPP","glific_id":4242}
+                """);
+
+        assertThat(sendCount("WHATSAPP", "SEND_LOGIN_OTP", NotificationMetrics.FAILED)).isEqualTo(1.0);
+    }
+
+    /** An unusable event is a producer bug, not a delivery failure, and alerts separately. */
+    @Test
+    void route_countsASkippedOtp_whenTheEventIsUnusable() {
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":""}
+                """);
+
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.SKIPPED)).isEqualTo(1.0);
+        verifyNoInteractions(smsSender);
+    }
+
+    @Test
+    void route_countsASentInviteEmail() {
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"officer@tenant.in","name":"Asha",
+                 "role":"SECTION_OFFICER","inviteLink":"https://x.in/a?t=tok","expiryHours":48}
+                """);
+
+        assertThat(sendCount("EMAIL", "SEND_INVITE_EMAIL", NotificationMetrics.SENT)).isEqualTo(1.0);
+    }
+
+    /**
+     * Counted per attempt on purpose. The container is about to retry, so the same send may increment
+     * this several times — which is what makes the rate meaningful when a provider is down.
+     */
+    @Test
+    void route_countsATransientEmailFailure_andStillRethrowsForContainerRetry() {
+        doThrow(new TransientMailException("SendGrid returned HTTP 503", new RuntimeException()))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+
+        assertThatThrownBy(() -> router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"officer@tenant.in",
+                 "resetLink":"https://x.in/r?t=tok","expiryMinutes":30}
+                """))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(sendCount("EMAIL", "SEND_PASSWORD_RESET_EMAIL", NotificationMetrics.FAILED)).isEqualTo(1.0);
+    }
+
+    @Test
+    void route_countsAPermanentEmailFailureAsRejected() {
+        doThrow(new PermanentMailException("SendGrid returned HTTP 401", new RuntimeException()))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"officer@tenant.in",
+                 "resetLink":"https://x.in/r?t=tok","expiryMinutes":30}
+                """);
+
+        assertThat(sendCount("EMAIL", "SEND_PASSWORD_RESET_EMAIL", NotificationMetrics.REJECTED)).isEqualTo(1.0);
+    }
+
+    // ───────────────── account-email failure notices (shape + accounting) ─────────────────
+
+    /**
+     * The record is a failure notice, not a replayable command. An invite link is a single-use bearer
+     * credential — whoever holds the URL can take the account — and this topic is long-retention and
+     * consumed by nothing. Recovery is to re-issue from user-service, which mints a fresh link, so the
+     * record carries who to re-issue to and deliberately not the link itself.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void route_failureNoticeIdentifiesTheRecipientButNeverCarriesTheInviteLink() {
+        doThrow(new PermanentMailException("SendGrid returned HTTP 400", new RuntimeException()))
+                .when(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"officer@tenant.in","name":"Asha",
+                 "role":"SECTION_OFFICER","inviteLink":"https://x.in/a?token=SECRET","expiryHours":48}
+                """);
+
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaProducer).publishJson(eq("account-email-dlt"), payloadCaptor.capture());
+        Map<String, Object> payload = (Map<String, Object>) payloadCaptor.getValue();
+
+        assertThat(payload).containsEntry("to", "officer@tenant.in")
+                .containsEntry("originalEventType", "SEND_INVITE_EMAIL")
+                .containsEntry("recipientRole", "SECTION_OFFICER")
+                .containsKey("failureId");
+        // The whole point of the record's shape.
+        assertThat(payload).doesNotContainKey("inviteLink");
+        assertThat(payload.toString()).doesNotContain("SECRET");
+    }
+
+    /** Deterministic in recipient and flow, so repeat failures for one person collapse downstream. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void route_failureNoticeIdIsStableAcrossRepeatedFailuresForTheSameRecipient() {
+        doThrow(new PermanentMailException("SendGrid returned HTTP 400", new RuntimeException()))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        String event = """
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"officer@tenant.in",
+                 "resetLink":"https://x.in/r?t=tok","expiryMinutes":30}
+                """;
+
+        router.route(event);
+        router.route(event);
+
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaProducer, times(2)).publishJson(eq("account-email-dlt"), payloadCaptor.capture());
+        List<Object> payloads = payloadCaptor.getAllValues();
+        assertThat(((Map<String, Object>) payloads.get(0)).get("failureId"))
+                .isEqualTo(((Map<String, Object>) payloads.get(1)).get("failureId"));
+    }
+
+    /**
+     * The accounting bug this closes: publishJson used to return without waiting for the broker, so a
+     * rejected publish surfaced asynchronously and never reached the catch. The router took the silent
+     * return as success and counted "deadlettered" — reporting a recoverable park for an email that was
+     * actually lost, and leaving the one outcome that must page someone invisible.
+     */
+    @Test
+    void route_countsADroppedEmail_whenTheFailureNoticeIsNotAcknowledgedByTheBroker() {
+        doThrow(new PermanentMailException("SendGrid returned HTTP 401", new RuntimeException()))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        when(kafkaProducer.publishJson(eq("account-email-dlt"), any())).thenReturn(false);
+
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"officer@tenant.in",
+                 "resetLink":"https://x.in/r?t=tok","expiryMinutes":30}
+                """);
+
+        assertThat(deadLetterCount("dropped", "account-email-dlt")).isEqualTo(1.0);
+        assertThat(deadLetterCount("deadlettered", "account-email-dlt")).isZero();
+    }
+
+    @Test
+    void route_countsADeadLetteredEmail_whenTheBrokerAcknowledgesTheFailureNotice() {
+        doThrow(new PermanentMailException("SendGrid returned HTTP 401", new RuntimeException()))
+                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"officer@tenant.in",
+                 "resetLink":"https://x.in/r?t=tok","expiryMinutes":30}
+                """);
+
+        assertThat(deadLetterCount("deadlettered", "account-email-dlt")).isEqualTo(1.0);
+        assertThat(deadLetterCount("dropped", "account-email-dlt")).isZero();
+    }
+
+    private double deadLetterCount(String outcome, String topic) {
+        var counter = meterRegistry.find(KafkaConfig.DEADLETTER_COUNTER)
+                .tag("outcome", outcome).tag("topic", topic).counter();
+        return counter == null ? 0.0 : counter.count();
+    }
+
     // ───────────────────── SEND_LOGIN_OTP — SMS channel ────────────────────────
 
     @Test
@@ -1191,6 +1534,83 @@ class NotificationEventRouterTest {
                 """);
 
         verifyNoInteractions(whatsAppChannel, smsSender, glificWhatsAppService);
+    }
+
+    // ────────── SEND_LOGIN_OTP / SMS — the handler waits for the outcome ──────────
+    //
+    // The handler used to call .subscribe() and return immediately, so the listener thread finished
+    // the record while the HTTP call was still in flight and the offset committed against an outcome
+    // nobody knew yet. A restart inside that window lost the OTP with no counter and no log line.
+    // These four tests pin the replacement: block for a bounded time, classify what came back, and
+    // never let it reach the container.
+
+    @Test
+    void route_waitsForTheSmsOtpOutcome_beforeReturning() {
+        when(smsSender.sendOtp("919876500040", "123456", 5))
+                .thenReturn(Mono.just(true).delayElement(Duration.ofMillis(200)));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500040","expiryMinutes":5}
+                """);
+
+        // The whole point: fire-and-forget would return well before the 200ms delay elapsed and
+        // leave this counter at zero.
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.SENT)).isEqualTo(1.0);
+    }
+
+    /**
+     * A provider that accepts the connection and then stalls. The wait has to be bounded — otherwise
+     * one hung TLS connection parks an OTP listener thread until max.poll.interval.ms evicts the
+     * consumer from its group.
+     */
+    @Test
+    void route_countsFailed_andDoesNotThrow_whenTheSmsSendExceedsTheWaitBudget() {
+        ReflectionTestUtils.setField(router, "smsSendTimeout", Duration.ofMillis(100));
+        when(smsSender.sendOtp(anyString(), anyString(), anyInt())).thenReturn(Mono.never());
+
+        assertThatCode(() -> router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500041","expiryMinutes":5}
+                """)).doesNotThrowAnyException();
+
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.FAILED)).isEqualTo(1.0);
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.SENT)).isZero();
+    }
+
+    /**
+     * An empty completion is not one of the three states {@code SmsSender} documents, so the outcome
+     * is unknown — which is a failure, not the {@code rejected} that {@code Mono.just(false)} means.
+     */
+    @Test
+    void route_countsFailed_whenTheSmsSendCompletesWithoutAnOutcome() {
+        when(smsSender.sendOtp(anyString(), anyString(), anyInt())).thenReturn(Mono.empty());
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500042","expiryMinutes":5}
+                """);
+
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.FAILED)).isEqualTo(1.0);
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.REJECTED)).isZero();
+    }
+
+    /**
+     * Blocking makes the error reachable by the caller for the first time, so the swallow that used
+     * to be belt-and-braces is now load-bearing: without it {@code route}'s outer catch would wrap
+     * this and hand the container a retry of a login OTP.
+     */
+    @Test
+    void route_doesNotRethrow_whenTheSmsSendErrors() {
+        when(smsSender.sendOtp(anyString(), anyString(), anyInt()))
+                .thenReturn(Mono.error(new RuntimeException("SMSCountry OTP send failed (server error)")));
+
+        assertThatCode(() -> router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456",
+                 "deliveryChannel":"SMS","officerPhoneNumber":"919876500043","expiryMinutes":5}
+                """)).doesNotThrowAnyException();
+
+        assertThat(sendCount("SMS", "SEND_LOGIN_OTP", NotificationMetrics.FAILED)).isEqualTo(1.0);
     }
 
     // ────────────── SEND_INVITE_EMAIL — STATE_ADMIN with stateName ──────────────

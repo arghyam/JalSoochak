@@ -113,11 +113,21 @@ public class SendGridMailSender implements EmailSender {
             }
             throw new PermanentMailException(detail, e);
         } catch (WebClientRequestException e) {
-            // The request never completed against SendGrid — DNS, connection refused, reset mid-flight.
-            log.error("[SendGridMailSender] failure template={}: request never completed: {}",
+            // Transient only when the connection never opened — DNS failure, connection refused. A
+            // reset or a broken pipe part-way through is a different case: the request body may
+            // already have been written and accepted, so retrying could deliver a second copy. Same
+            // reasoning as the timeout branch below, applied at the transport layer.
+            if (ConnectionFailures.neverReachedProvider(e)) {
+                log.error("[SendGridMailSender] failure template={}: never connected to SendGrid: {}",
+                        request.template(), e.getMessage(), e);
+                throw new TransientMailException(
+                        "SendGridMailSender could not reach SendGrid for " + request.template(), e);
+            }
+            log.error("[SendGridMailSender] failure template={}: connection broke mid-request, treating as"
+                            + " non-retryable to avoid a duplicate send: {}",
                     request.template(), e.getMessage(), e);
-            throw new TransientMailException(
-                    "SendGridMailSender could not reach SendGrid for " + request.template(), e);
+            throw new PermanentMailException(
+                    "SendGridMailSender lost the connection mid-request for " + request.template(), e);
         } catch (RuntimeException e) {
             if (isTimeout(e)) {
                 // Ambiguous: SendGrid may have accepted the payload before we gave up at sendTimeout.

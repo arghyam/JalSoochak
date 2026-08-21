@@ -62,12 +62,21 @@ public class SmtpMailSender implements EmailSender {
             javaMailSender.send(message);
             log.info("[SmtpMailSender] sent template={}", request.template());
         } catch (MailSendException e) {
-            // Raised when the transport itself failed — host unreachable, connection refused, the
-            // 30s spring.mail timeouts expiring. The SMTP conversation never reached DATA, so no
-            // copy is in flight and a replay is safe.
-            log.error("[SmtpMailSender] failure template={}: transport error: {}",
+            // MailSendException covers the whole SMTP conversation, not just its opening: a read
+            // timeout waiting for the final 250 after DATA lands here too, and by then the server
+            // may well have accepted the message. Only a connection that never opened is provably
+            // safe to replay; everything else is ambiguous and goes to the DLT rather than risking
+            // a second password-reset email.
+            if (ConnectionFailures.neverReachedProvider(e)) {
+                log.error("[SmtpMailSender] failure template={}: never connected to the SMTP host: {}",
+                        request.template(), e.getMessage(), e);
+                throw new TransientMailException("SmtpMailSender transport failure for " + request.template(), e);
+            }
+            log.error("[SmtpMailSender] failure template={}: send failed after the connection opened,"
+                            + " treating as non-retryable to avoid a duplicate send: {}",
                     request.template(), e.getMessage(), e);
-            throw new TransientMailException("SmtpMailSender transport failure for " + request.template(), e);
+            throw new PermanentMailException(
+                    "SmtpMailSender send failed mid-conversation for " + request.template(), e);
         } catch (MailException e) {
             // MailAuthenticationException, MailParseException, MailPreparationException — bad
             // credentials or a message we built wrong. Identical on every replay.

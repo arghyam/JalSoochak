@@ -16,6 +16,10 @@ import org.springframework.mail.MailSendException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 
+import jakarta.mail.MessagingException;
+
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -113,9 +117,11 @@ class SmtpMailSenderTest {
     }
 
     @Test
-    void send_throwsTransient_whenTransportFails() {
-        // The SMTP conversation never reached DATA, so no copy is in flight and a replay is safe.
-        doThrow(new MailSendException("SMTP connection refused"))
+    void send_throwsTransient_whenTheConnectionIsNeverEstablished() {
+        // Connection refused: no SMTP conversation happened at all, so no copy is in flight and a
+        // replay is safe.
+        doThrow(new MailSendException("Mail server connection failed",
+                new MessagingException("connect failed", new ConnectException("Connection refused"))))
                 .when(javaMailSender).send(any(SimpleMailMessage.class));
 
         assertThatThrownBy(() -> smtpMailSender.send(new MailRequest(
@@ -124,6 +130,38 @@ class SmtpMailSenderTest {
                 Map.of("reset_link", "https://reset", "expiry_minutes", 15))))
                 .isInstanceOf(TransientMailException.class)
                 .hasMessageContaining("SmtpMailSender transport failure");
+    }
+
+    @Test
+    void send_throwsPermanent_whenTheSendFailsAfterTheConnectionOpened() {
+        // MailSendException also covers failures late in the conversation — a read timeout waiting
+        // for the 250 after DATA, for instance. The server may already have accepted the message,
+        // so retrying risks a second password-reset email. Ambiguous means permanent here.
+        doThrow(new MailSendException("Failed message: read timed out after DATA",
+                new MessagingException("Exception reading response",
+                        new SocketTimeoutException("Read timed out"))))
+                .when(javaMailSender).send(any(SimpleMailMessage.class));
+
+        assertThatThrownBy(() -> smtpMailSender.send(new MailRequest(
+                "user@example.com",
+                MailTemplate.PASSWORD_RESET,
+                Map.of("reset_link", "https://reset", "expiry_minutes", 15))))
+                .isInstanceOf(PermanentMailException.class)
+                .hasMessageContaining("mid-conversation");
+    }
+
+    @Test
+    void send_throwsPermanent_whenTheTransportFailureCarriesNoIdentifiableCause() {
+        // Nothing in the cause chain proves the connection never opened, so delivery cannot be
+        // ruled out and the event goes to the DLT rather than round the retry ladder.
+        doThrow(new MailSendException("SMTP send failed"))
+                .when(javaMailSender).send(any(SimpleMailMessage.class));
+
+        assertThatThrownBy(() -> smtpMailSender.send(new MailRequest(
+                "user@example.com",
+                MailTemplate.PASSWORD_RESET,
+                Map.of("reset_link", "https://reset", "expiry_minutes", 15))))
+                .isInstanceOf(PermanentMailException.class);
     }
 
     @Test

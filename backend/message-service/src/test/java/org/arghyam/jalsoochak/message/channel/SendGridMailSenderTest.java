@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.message.channel;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
@@ -185,12 +186,24 @@ class SendGridMailSenderTest {
 
     @Test
     void send_throwsTransient_whenSendGridIsUnreachable() {
-        // Point the sender at a port nothing is listening on: the request never completes,
-        // so nothing could have been delivered and a replay is safe.
+        // Point the sender at a port nothing is listening on: the connection is refused, so no byte
+        // of the request was ever transmitted and a replay is safe.
         ReflectionTestUtils.setField(sender, "apiUrl", "http://localhost:1");
 
         assertThatThrownBy(() -> sender.send(passwordReset()))
                 .isInstanceOf(TransientMailException.class);
+    }
+
+    @Test
+    void send_throwsPermanent_whenTheConnectionDropsMidRequest() {
+        // A reset after the connection opened is ambiguous: SendGrid may already have read and
+        // accepted the body. Retrying could send a second password-reset email, so this is
+        // deliberately permanent — the same call made for a timeout.
+        wireMockServer.stubFor(post(urlEqualTo(MAIL_SEND_PATH))
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+
+        assertThatThrownBy(() -> sender.send(passwordReset()))
+                .isInstanceOf(PermanentMailException.class);
     }
 
     @Test

@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+import java.util.regex.Pattern;
+
 @Component
 @Slf4j
 public class KafkaConsumer {
@@ -24,6 +26,19 @@ public class KafkaConsumer {
         } catch (Exception e) {
             eventType = "UNPARSEABLE";
         }
-        log.info("[scheme-service] Received message from common-topic: eventType={}", eventType);
+        log.info("[scheme-service] Received message from common-topic: eventType={}", safeEventType(eventType));
+    }
+
+    private static final Pattern EVENT_TYPE_SHAPE = Pattern.compile("[A-Za-z0-9_.-]{1,64}");
+
+    /**
+     * The event type is payload data, and this is the only part of the payload that reaches an INFO
+     * line. Producers only ever set it to a constant, but nothing on the consume side enforces that:
+     * a value carrying a newline would let a crafted event write extra lines into the log and forge
+     * entries for other services. Anything outside the shape a real event type has is replaced
+     * rather than escaped, so no attacker-chosen text is logged at all.
+     */
+    private static String safeEventType(String eventType) {
+        return EVENT_TYPE_SHAPE.matcher(eventType).matches() ? eventType : "INVALID";
     }
 }

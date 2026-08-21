@@ -364,11 +364,21 @@ All Glific and storage properties can be overridden via environment variables.
 
 ## Dead-Letter Topics
 
-| Topic | Published by | Consumed by |
-|---|---|---|
-| `welcome-message-dlt` | message-service | External ops/monitoring consumer |
+None of these are consumed by message-service itself — doing so would create an unbounded retry loop. They are alerted on instead; see `backend/logger/prometheus/alerts.yml`.
 
-The DLT is not consumed by message-service itself — doing so would create an unbounded retry loop. Each record carries a deterministic `retryId` (UUID v3) for idempotent replay. Configure alerting (e.g., Kafka consumer-lag alerts) on this topic to detect delivery failures.
+**Whether a record can be replayed differs by topic, and the difference matters.**
+
+| Topic | Published by | Carries the original event? | Recovery |
+|---|---|---|---|
+| `common-topic.DLT` | Kafka container recoverer | Yes, whole | Replay. Only transient failures land here, so nothing reached the recipient and a replay cannot duplicate. |
+| `welcome-message-dlt` | message-service | Enough to rebuild (`tenantSchema` + `phone`) | Replay, deduplicating on `retryId`. |
+| `account-email-dlt` | message-service | **No** | Re-issue, not replay. |
+
+`account-email-dlt` is a **failure notice, not a replay queue**. The invite and password-reset links are single-use bearer credentials — whoever holds the URL can take the account — so they are deliberately not copied onto a long-retention topic that nothing consumes. They would be expired by the time anyone read them anyway (invites in hours, resets in minutes).
+
+Recovery is therefore to re-issue: an operator triggers a fresh invite or reset in user-service, which mints a new token and publishes a new event. The record carries `to`, `originalEventType` and `recipientRole` to identify who needs that. Its `failureId` is a deterministic key for deduplicating repeated failures for the same recipient — **not** a replay token, which is why it is not called `retryId` like the welcome one.
+
+Both message-service topics also increment `jalsoochak_deadletter_total`, tagged `outcome="deadlettered"` (parked) or `outcome="dropped"` (the dead-letter publish itself was not acknowledged, so the notification is gone with no record anywhere).
 
 ---
 

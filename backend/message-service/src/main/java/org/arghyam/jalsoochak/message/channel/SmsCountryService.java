@@ -52,14 +52,17 @@ public class SmsCountryService implements SmsSender {
      * lands late delivers a dead code the user will type and fail on, burning one of their three
      * attempts. A sub-second retry lands far inside that window and cannot race the resend.
      *
-     * <p>{@link WebClientRequestException} means the request never completed — DNS, connection
-     * refused, reset mid-flight — so nothing was sent and nothing can be duplicated. Timeouts and
-     * 5xx are excluded on purpose: SMSCountry may already have queued the message, and every
+     * <p>The filter is narrower than {@link WebClientRequestException} alone: that exception also
+     * covers a connection reset part-way through the request, by which point the POST body may
+     * already have been written and accepted. Only a connection that never opened — DNS failure,
+     * connection refused — provably sent nothing and can be replayed for free. Timeouts and 5xx are
+     * excluded for the same reason: SMSCountry may already have queued the message, and every
      * duplicate SMS costs money.
      */
     private static final Retry CONNECT_FAILURE_RETRY = Retry
             .fixedDelay(1, Duration.ofMillis(500))
-            .filter(WebClientRequestException.class::isInstance)
+            .filter(t -> t instanceof WebClientRequestException
+                    && ConnectionFailures.neverReachedProvider(t))
             // Surface the original connection failure rather than Reactor's RetryExhaustedException,
             // so the log line below names what actually went wrong.
             .onRetryExhaustedThrow((spec, signal) -> signal.failure());

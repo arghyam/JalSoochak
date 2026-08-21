@@ -9,6 +9,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -71,8 +72,17 @@ public class KafkaConfig {
      */
     private final MeterRegistry meterRegistry;
 
-    public KafkaConfig(ObjectProvider<MeterRegistry> meterRegistryProvider) {
+    /**
+     * Boot's binding of {@code spring.kafka.*}. Optional for the same reason as the registry above —
+     * slice tests construct this class directly — in which case {@link #consumerFactory()} falls back
+     * to the explicitly-set properties alone.
+     */
+    private final KafkaProperties kafkaProperties;
+
+    public KafkaConfig(ObjectProvider<MeterRegistry> meterRegistryProvider,
+                       ObjectProvider<KafkaProperties> kafkaPropertiesProvider) {
         this.meterRegistry = meterRegistryProvider.getIfAvailable();
+        this.kafkaProperties = kafkaPropertiesProvider.getIfAvailable();
     }
 
     // ── Producer ──────────────────────────────────────────────
@@ -93,9 +103,40 @@ public class KafkaConfig {
 
     // ── Consumer ──────────────────────────────────────────────
 
+    /**
+     * Builds the consumer from {@code spring.kafka.consumer.*} <em>and then</em> pins what this class
+     * depends on.
+     *
+     * <p>Seeding from {@link KafkaProperties#buildConsumerProperties()} is the part that matters.
+     * Declaring this bean backs off Boot's own auto-configured {@code ConsumerFactory}, so the
+     * previous version — which built a bare four-entry map — silently discarded every consumer
+     * setting in {@code application.yml}. {@code max-poll-records}, {@code max.poll.interval.ms},
+     * {@code session.timeout.ms} and {@code enable-auto-commit} were all dead config: the running
+     * consumer used Kafka's client defaults instead, i.e. <strong>500 records per poll against a
+     * 5-minute</strong> {@code max.poll.interval.ms}, not the 50-against-10-minutes the file
+     * describes.
+     *
+     * <p>That combination is what makes a slow batch dangerous. The interval is measured between
+     * {@code poll()} calls, so it has to cover the whole batch: 500 records that each cost a SendGrid
+     * call (20s cap), a Glific call (30s cap) or a PDF render plus a MinIO upload cannot finish inside
+     * five minutes. The consumer is then evicted from its group mid-batch, its offsets are never
+     * committed, and the partition is reassigned — so every record it had already processed is
+     * redelivered and every notification in it is sent a second time. The bounded budget in
+     * {@code application.yml} is what prevents that, and it only takes effect now that these
+     * properties are actually read.
+     *
+     * <p>Explicit puts win over the file for the four settings the code itself relies on: the
+     * deserializers are fixed by the {@code String} listener signature, and bootstrap/group-id keep
+     * the existing {@code @Value} contract so an override reaches both this bean and the rest of the
+     * class.
+     */
     @Bean
     public ConsumerFactory<String, String> consumerFactory() {
-        Map<String, Object> props = new HashMap<>();
+        // null SslBundles: this service talks PLAINTEXT to the broker and configures no
+        // spring.ssl.bundle, which is the only thing the argument is consulted for.
+        Map<String, Object> props = kafkaProperties == null
+                ? new HashMap<>()
+                : new HashMap<>(kafkaProperties.buildConsumerProperties(null));
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
@@ -115,9 +156,12 @@ public class KafkaConfig {
         backOff.setMaxInterval(60_000L);      // cap at 60s per retry
         // 4 retries — 10s, 20s, 40s, 60s (130s of waiting) — then the recoverer runs. The limit is
         // compared against the elapsed time *before* each interval is handed out, so a 90s budget
-        // still permits the 60s attempt that starts at 70s. Retries block this partition, and
-        // common-topic carries every event type, so keep the total well under
-        // max.poll.interval.ms (600s).
+        // still permits the 60s attempt that starts at 70s.
+        //
+        // What bounds this is the poll budget, not the total ladder: each rung is a separate sleep
+        // followed by a seek and a fresh poll, so the longest single rung (60s) is what has to fit
+        // between two poll() calls alongside the rest of the batch. See the arithmetic against
+        // max-poll-records in application.yml — that is the number to redo if either changes.
         backOff.setMaxElapsedTime(90_000L);
         // Route exhausted messages to <topic>.DLT rather than silently dropping them
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(
@@ -265,6 +309,16 @@ public class KafkaConfig {
      */
     public static final String DEADLETTER_COUNTER = "jalsoochak.deadletter";
 
+    /**
+     * Tag keys must match {@code NotificationEventRouter.countDeadLetter} exactly. Prometheus
+     * requires every sample of a metric to carry the same label set, and Micrometer enforces that
+     * at registration: the second registration of {@code jalsoochak.deadletter} with a different
+     * set of tag keys throws, so a mismatch here would break whichever path happened to run second
+     * — silently disarming the alerts this counter exists to feed.
+     *
+     * <p>The container-level recoverer has no parsed event to name, so {@code event_type} is
+     * {@code "unknown"} rather than absent.
+     */
     private static void count(MeterRegistry meterRegistry, String outcome, String topic) {
         if (meterRegistry == null) {
             return;
@@ -272,6 +326,7 @@ public class KafkaConfig {
         Counter.builder(DEADLETTER_COUNTER)
                 .tag("outcome", outcome)
                 .tag("topic", topic == null ? "unknown" : topic)
+                .tag("event_type", "unknown")
                 .register(meterRegistry)
                 .increment();
     }

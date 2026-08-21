@@ -192,12 +192,34 @@ class SmsCountryServiceTest {
     // ───────────────────── connection-failure retry ─────────────────────
 
     /**
-     * A connection that never reached SMSCountry sent nothing, so one immediate retry cannot
-     * duplicate an SMS — and at 500ms it lands far inside the OTP's 10-minute life, with no chance
-     * of racing the user's 60s resend (which revokes the code this event carries).
+     * A connection that was refused sent nothing, so one immediate retry cannot duplicate an SMS —
+     * and at 500ms it lands far inside the OTP's 10-minute life, with no chance of racing the user's
+     * 60s resend (which revokes the code this event carries).
+     *
+     * <p>Attempt counting is not available here — nothing is listening to count them — so the 500ms
+     * fixed delay is the observable: a single attempt returns immediately, a retried one cannot.
      */
     @Test
-    void sendOtp_retriesOnceWhenTheConnectionFails_thenSucceeds() {
+    void sendOtp_retriesOnce_whenTheConnectionIsRefused() {
+        ReflectionTestUtils.setField(service, "baseUrl", "http://localhost:1/v0.1");
+
+        long startedAt = System.nanoTime();
+        assertThatThrownBy(() -> service.sendOtp("919876543210", "123456", 5).block())
+                .isInstanceOf(RuntimeException.class);
+        long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000;
+
+        // One retry at a 500ms fixed delay, and exactly one — this must never grow into a ladder.
+        assertThat(elapsedMillis).isGreaterThanOrEqualTo(400L);
+        assertThat(elapsedMillis).isLessThan(1_500L);
+    }
+
+    /**
+     * A reset once the connection is open is <em>not</em> a safe retry: SMSCountry may already have
+     * read the POST body and queued the message, and a duplicate OTP SMS costs money and can hand
+     * the user a code that no longer matches what the login flow expects.
+     */
+    @Test
+    void sendOtp_doesNotRetry_whenTheConnectionDropsMidRequest() {
         wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
                 .inScenario("flaky-connection").whenScenarioStateIs(Scenario.STARTED)
                 .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER))
@@ -208,23 +230,11 @@ class SmsCountryServiceTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody(SUCCESS_RESPONSE)));
 
-        Boolean result = service.sendOtp("919876543210", "123456", 5).block();
-
-        assertThat(result).isTrue();
-        wireMockServer.verify(2, postRequestedFor(urlEqualTo(SMS_PATH)));
-    }
-
-    @Test
-    void sendOtp_givesUpAfterOneRetry_whenTheConnectionKeepsFailing() {
-        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
-                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
-
-        // Still an error signal, per the port's contract for a transient failure.
+        // The second stub would succeed if a retry happened; the error surfacing proves none did.
         assertThatThrownBy(() -> service.sendOtp("919876543210", "123456", 5).block())
                 .isInstanceOf(RuntimeException.class);
 
-        // Exactly one retry — this must never grow into a back-off ladder.
-        wireMockServer.verify(2, postRequestedFor(urlEqualTo(SMS_PATH)));
+        wireMockServer.verify(1, postRequestedFor(urlEqualTo(SMS_PATH)));
     }
 
     /**

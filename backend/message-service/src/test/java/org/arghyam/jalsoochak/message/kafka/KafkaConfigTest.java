@@ -1,14 +1,22 @@
 package org.arghyam.jalsoochak.message.kafka;
 
+import java.util.Map;
+
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.util.backoff.FixedBackOff;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheus.PrometheusConfig;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -163,7 +171,7 @@ class KafkaConfigTest {
      */
     @Test
     void kafkaListenerContainerFactory_drainsCommonTopicOnMoreThanOneThread() {
-        KafkaConfig config = new KafkaConfig(new SimpleObjectProvider<>(new SimpleMeterRegistry()));
+        KafkaConfig config = new KafkaConfig(new SimpleObjectProvider<>(new SimpleMeterRegistry()), new SimpleObjectProvider<KafkaProperties>(null));
         ReflectionTestUtils.setField(config, "bootstrapServers", "localhost:9092");
         ReflectionTestUtils.setField(config, "groupId", "message-service-group");
         ReflectionTestUtils.setField(config, "listenerConcurrency", 3);
@@ -173,6 +181,75 @@ class KafkaConfigTest {
 
         assertThat(factory.getContainerProperties()).isNotNull();
         assertThat((Integer) ReflectionTestUtils.getField(factory, "concurrency")).isEqualTo(3);
+    }
+
+    // ───────────────────────── consumer poll budget ─────────────────────────
+
+    /**
+     * Declaring a {@code ConsumerFactory} bean backs off Boot's auto-configured one, so this class is
+     * the only thing that decides what the consumer is built from. The previous version built a bare
+     * four-entry map, which silently discarded every {@code spring.kafka.consumer.*} setting in
+     * {@code application.yml} — the running consumer used Kafka's client defaults instead, i.e. 500
+     * records per poll against a 5-minute {@code max.poll.interval.ms} rather than the bounded budget
+     * the file describes.
+     *
+     * <p>That is not a cosmetic drift. {@code max.poll.interval.ms} is measured between {@code poll()}
+     * calls and so must cover the whole batch; 500 records that each cost a SendGrid or Glific call
+     * cannot finish inside five minutes. The consumer is then evicted mid-batch without committing and
+     * the partition is reassigned, so every record it had already handled is redelivered — and every
+     * notification in it sent twice.
+     */
+    @Test
+    void consumerFactory_appliesThePollBudgetFromConfiguration() {
+        KafkaProperties properties = new KafkaProperties();
+        properties.getConsumer().setMaxPollRecords(5);
+        properties.getConsumer().getProperties().put("max.poll.interval.ms", "900000");
+
+        KafkaConfig config = new KafkaConfig(
+                new SimpleObjectProvider<>(new SimpleMeterRegistry()), new SimpleObjectProvider<>(properties));
+        ReflectionTestUtils.setField(config, "bootstrapServers", "localhost:9092");
+        ReflectionTestUtils.setField(config, "groupId", "message-service-group");
+
+        Map<String, Object> props = config.consumerFactory().getConfigurationProperties();
+
+        assertThat(props.get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG)).isEqualTo(5);
+        assertThat(props.get("max.poll.interval.ms")).isEqualTo("900000");
+    }
+
+    /**
+     * The four settings the code itself depends on must win over the file: the deserializers are fixed
+     * by the {@code String} listener signature, and bootstrap/group-id keep the {@code @Value}
+     * contract so one override reaches both this bean and the rest of the class.
+     */
+    @Test
+    void consumerFactory_pinsTheSettingsTheListenersDependOn() {
+        KafkaProperties properties = new KafkaProperties();
+        properties.getConsumer().setAutoOffsetReset("latest");
+        properties.getConsumer().setGroupId("some-other-group");
+
+        KafkaConfig config = new KafkaConfig(
+                new SimpleObjectProvider<>(new SimpleMeterRegistry()), new SimpleObjectProvider<>(properties));
+        ReflectionTestUtils.setField(config, "bootstrapServers", "localhost:9092");
+        ReflectionTestUtils.setField(config, "groupId", "message-service-group");
+
+        Map<String, Object> props = config.consumerFactory().getConfigurationProperties();
+
+        assertThat(props.get(ConsumerConfig.GROUP_ID_CONFIG)).isEqualTo("message-service-group");
+        assertThat(props.get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG)).isEqualTo("earliest");
+        assertThat(props.get(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG)).isEqualTo(StringDeserializer.class);
+        assertThat(props.get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG)).isEqualTo(StringDeserializer.class);
+    }
+
+    /** Slice tests construct this class directly, with no Boot property binding present. */
+    @Test
+    void consumerFactory_stillBuilds_withoutKafkaProperties() {
+        KafkaConfig config = new KafkaConfig(
+                new SimpleObjectProvider<>(new SimpleMeterRegistry()), new SimpleObjectProvider<KafkaProperties>(null));
+        ReflectionTestUtils.setField(config, "bootstrapServers", "localhost:9092");
+        ReflectionTestUtils.setField(config, "groupId", "message-service-group");
+
+        assertThat(config.consumerFactory().getConfigurationProperties())
+                .containsEntry(ConsumerConfig.GROUP_ID_CONFIG, "message-service-group");
     }
 
     // ───────────────────────── OTP topic isolation ─────────────────────────
@@ -191,7 +268,7 @@ class KafkaConfigTest {
 
     @Test
     void otpListenerContainerFactory_runsOnItsOwnThreadsIndependentOfCommonTopic() {
-        KafkaConfig config = new KafkaConfig(new SimpleObjectProvider<>(new SimpleMeterRegistry()));
+        KafkaConfig config = new KafkaConfig(new SimpleObjectProvider<>(new SimpleMeterRegistry()), new SimpleObjectProvider<KafkaProperties>(null));
         ReflectionTestUtils.setField(config, "bootstrapServers", "localhost:9092");
         ReflectionTestUtils.setField(config, "groupId", "message-service-group");
         ReflectionTestUtils.setField(config, "listenerConcurrency", 3);
@@ -207,7 +284,7 @@ class KafkaConfigTest {
 
     @Test
     void otpTopic_isDeclaredSoABrokerWithAutoCreateDisabledStillGetsIt() {
-        KafkaConfig config = new KafkaConfig(new SimpleObjectProvider<>(new SimpleMeterRegistry()));
+        KafkaConfig config = new KafkaConfig(new SimpleObjectProvider<>(new SimpleMeterRegistry()), new SimpleObjectProvider<KafkaProperties>(null));
         ReflectionTestUtils.setField(config, "otpTopicPartitions", 3);
         ReflectionTestUtils.setField(config, "otpTopicReplicas", (short) 1);
 
@@ -217,9 +294,49 @@ class KafkaConfigTest {
         assertThat(topic.numPartitions()).isEqualTo(3);
     }
 
+    /**
+     * The container recoverer and {@code NotificationEventRouter.countDeadLetter} share one counter
+     * name. Prometheus requires every sample of a metric to carry the same label keys and Micrometer
+     * enforces it at registration, so a drift between the two paths does not degrade the metric — it
+     * throws on whichever path runs second, silently disarming the dead-letter alerts.
+     *
+     * <p>{@link SimpleMeterRegistry} does not enforce this, hence the real registry here. The
+     * counterpart assertion lives in {@code NotificationEventRouterTest}; the recoverer is not
+     * visible from that package, so each end pins the same key set independently.
+     */
+    @Test
+    void deadLetterCounter_usesTheSameTagKeysAsTheRouter() {
+        PrometheusMeterRegistry prometheus = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+
+        KafkaConfig.neverBlockingRecoverer((rec, ex) -> { }, prometheus).accept(record(), new IllegalStateException("boom"));
+
+        assertThat(prometheus.find(KafkaConfig.DEADLETTER_COUNTER).counters())
+                .isNotEmpty()
+                .allSatisfy(counter -> assertThat(counter.getId().getTags())
+                        .extracting(Tag::getKey)
+                        .containsExactlyInAnyOrder("outcome", "topic", "event_type"));
+    }
+
+    @Test
+    void deadLetterCounter_survivesBothOutcomesAgainstARealPrometheusRegistry() {
+        PrometheusMeterRegistry prometheus = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        ConsumerRecordRecoverer failing = (rec, ex) -> {
+            throw new IllegalStateException("DLT publish failed");
+        };
+
+        KafkaConfig.neverBlockingRecoverer((rec, ex) -> { }, prometheus).accept(record(), new IllegalStateException("boom"));
+
+        // "dropped" and "deadlettered" differ only in a tag value, never in a tag key.
+        assertThatCode(() -> KafkaConfig.neverBlockingRecoverer(failing, prometheus)
+                .accept(record(), new IllegalStateException("boom")))
+                .doesNotThrowAnyException();
+
+        assertThat(prometheus.find(KafkaConfig.DEADLETTER_COUNTER).counters()).hasSize(2);
+    }
+
     @Test
     void kafkaListenerContainerFactory_honoursAConfiguredConcurrency() {
-        KafkaConfig config = new KafkaConfig(new SimpleObjectProvider<>(new SimpleMeterRegistry()));
+        KafkaConfig config = new KafkaConfig(new SimpleObjectProvider<>(new SimpleMeterRegistry()), new SimpleObjectProvider<KafkaProperties>(null));
         ReflectionTestUtils.setField(config, "bootstrapServers", "localhost:9092");
         ReflectionTestUtils.setField(config, "groupId", "message-service-group");
         ReflectionTestUtils.setField(config, "listenerConcurrency", 1);
