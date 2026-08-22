@@ -13,7 +13,7 @@ through configuration, and new providers can be added without touching the inges
 | `OcrProviderSettings` | Resolved per-tenant config: provider id, endpoint URL, API key, auth header. |
 | `OcrProviderResolver` | Reads a tenant's `ocr_*` config keys → `OcrProviderSettings` (or `null` = use default provider unchanged). |
 | `OcrProviderRegistry` | Indexes all `MeterReadingExtractor` beans by id; dispatches by provider id, falling back to the default on an unknown id. |
-| `FlowVisionReadingsRetryService` | Shared resilience (retry / circuit-breaker / bulkhead) wrapping whichever provider is resolved. |
+| `FlowVisionReadingsRetryService` | Resilience wrapping whichever provider is resolved: **per-provider retry + circuit breaker** (isolation), **shared bulkhead** (global concurrency cap). |
 
 Call flow (in `BfmReadingService.createReading`):
 
@@ -58,10 +58,22 @@ Global defaults live under `flowvision:` in `application.yml`
 No changes to `BfmReadingService`, the resilience layer, or persistence are required — the registry
 discovers the new bean at startup.
 
-## Notes / follow-ups
+## Resilience isolation
 
-- **Resilience budget is shared** across providers (single `flowvisionReadings` retry/circuit-breaker/
-  bulkhead instance). This contains any slow OCR backend but does not isolate one provider's failures
-  from another's; per-provider circuit breakers are a possible future refinement.
+Each provider gets its **own retry + circuit breaker**, so a failing/slow AI backend trips only its own
+breaker and cannot open the default provider's:
+
+- The built-in `flowvision` provider (and the null-settings default path) use the tuned
+  `flowvisionReadings` instances configured in `application.yml`.
+- Any other provider gets instances named `flowvisionReadings-<providerId>`, **derived from the default
+  instance's config** — so tuning (max-attempts, window, thresholds) and the transient-exception
+  predicates are inherited identically, while open/closed state and metrics are independent. No extra
+  YAML is required to onboard a provider; per-provider metrics are tagged by instance name automatically.
+- The **bulkhead is shared** (one `flowvisionReadings` instance): it is a *global* cap on concurrent OCR
+  calls protecting the ingestion threads, and is deliberately not split per provider (that would let total
+  concurrency grow as the sum across providers).
+
+## Notes
+
 - API keys resolved via `env:` are never persisted in the DB and are logged only in line with the
   project's PII/secret rules (never at INFO+).
