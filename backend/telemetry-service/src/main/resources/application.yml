@@ -64,6 +64,13 @@ telemetry:
 
 flowvision:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
+  # Default OCR/AI provider id used when a tenant sets no `ocr_provider` config key. Providers are
+  # pluggable per state/tenant: implement MeterReadingExtractor, register it as a bean, and point the
+  # tenant's `ocr_provider` (+ optional `ocr_url` / `ocr_api_key` / `ocr_auth_header`) config at its id.
+  default-provider: ${FLOWVISION_DEFAULT_PROVIDER:flowvision}
+  # Optional auth for the global-default FlowVision endpoint (per-tenant keys override via `ocr_api_key`).
+  api-key: ${FLOWVISION_API_KEY:}
+  auth-header: ${FLOWVISION_AUTH_HEADER:Authorization}
   bypass-system-proxy: ${FLOWVISION_BYPASS_SYSTEM_PROXY:true}
   http:
     connect-timeout-ms: ${FLOWVISION_CONNECT_TIMEOUT_MS:5000}

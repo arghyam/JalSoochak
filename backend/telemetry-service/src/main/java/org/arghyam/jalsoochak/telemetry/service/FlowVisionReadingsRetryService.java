@@ -17,22 +17,35 @@ public class FlowVisionReadingsRetryService {
 
     static final String INSTANCE_NAME = "flowvisionReadings";
     private final FlowVisionService flowVisionService;
+    private final OcrProviderRegistry ocrProviderRegistry;
     private final Retry retry;
     private final CircuitBreaker circuitBreaker;
     private final Bulkhead bulkhead;
 
     public FlowVisionReadingsRetryService(FlowVisionService flowVisionService,
+                                          OcrProviderRegistry ocrProviderRegistry,
                                           RetryRegistry retryRegistry,
                                           CircuitBreakerRegistry circuitBreakerRegistry,
                                           BulkheadRegistry bulkheadRegistry) {
         this.flowVisionService = flowVisionService;
+        this.ocrProviderRegistry = ocrProviderRegistry;
         this.retry = retryRegistry.retry(INSTANCE_NAME);
         this.circuitBreaker = circuitBreakerRegistry.circuitBreaker(INSTANCE_NAME);
         this.bulkhead = bulkheadRegistry.bulkhead(INSTANCE_NAME);
     }
 
+    /** Resilient extraction against the global-default FlowVision endpoint. */
     public FlowVisionResult extractReading(String readingUrl) {
-        Supplier<FlowVisionResult> supplier = () -> flowVisionService.extractReadingOrThrow(readingUrl);
+        return extractReading(readingUrl, null);
+    }
+
+    /**
+     * Resilient extraction against the tenant-resolved provider. {@code null} settings use the built-in
+     * default provider. The retry / circuit-breaker / bulkhead budget ({@value #INSTANCE_NAME}) is shared
+     * across providers so any slow OCR backend is contained without starving telemetry ingestion.
+     */
+    public FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings) {
+        Supplier<FlowVisionResult> supplier = () -> invokeExtractor(readingUrl, settings);
         Supplier<FlowVisionResult> resilientSupplier = Retry.decorateSupplier(
                 retry,
                 CircuitBreaker.decorateSupplier(circuitBreaker, Bulkhead.decorateSupplier(bulkhead, supplier))
@@ -49,6 +62,13 @@ public class FlowVisionReadingsRetryService {
             }
             throw ex;
         }
+    }
+
+    private FlowVisionResult invokeExtractor(String readingUrl, OcrProviderSettings settings) {
+        if (settings == null || ocrProviderRegistry == null) {
+            return flowVisionService.extractReadingOrThrow(readingUrl);
+        }
+        return ocrProviderRegistry.get(settings.providerId()).extractReadingOrThrow(readingUrl, settings);
     }
 
     private String imageUrlHash(String readingUrl) {

@@ -82,7 +82,9 @@ class BfmReadingServiceRolloverTest {
                 glificOperatorContextService,
                 null,
                 readingChannelResolver,
-                new RolloverResolutionService(true, new ObjectMapper()));
+                new RolloverResolutionService(true, new ObjectMapper()),
+                null,
+                null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
     }
 
