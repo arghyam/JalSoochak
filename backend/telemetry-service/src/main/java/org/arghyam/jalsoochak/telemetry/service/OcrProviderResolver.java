@@ -74,10 +74,16 @@ public class OcrProviderResolver {
             return null;
         }
 
+        String resolvedUrl = url.orElse(defaultEndpointUrl);
+        // Only inherit the global FlowVision key when the endpoint is still the default one; a tenant that
+        // points at a custom endpoint without its own ocr_api_key must NOT have the default key sent there.
+        boolean endpointIsDefault = resolvedUrl.equals(defaultEndpointUrl);
+        String rawApiKey = apiKey.orElseGet(() -> endpointIsDefault ? blankToNull(defaultApiKey) : null);
+
         OcrProviderSettings settings = new OcrProviderSettings(
                 provider.orElse(defaultProviderId),
-                url.orElse(defaultEndpointUrl),
-                resolveSecret(apiKey.orElse(blankToNull(defaultApiKey))),
+                resolvedUrl,
+                resolveSecret(rawApiKey),
                 authHeader.orElse(defaultAuthHeader)
         );
         log.debug("Resolved OCR provider '{}' for tenantId={}", settings.providerId(), tenantId);

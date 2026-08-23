@@ -64,8 +64,12 @@ public class FlowVisionReadingsRetryService {
      * only its own breaker; the bulkhead (concurrency cap) is shared across providers.
      */
     public FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings) {
-        ResilienceBundle bundle = bundleFor(settings);
-        Supplier<FlowVisionResult> supplier = () -> invokeExtractor(readingUrl, settings);
+        // Resolve the extractor once so the resilience instance follows the provider that actually serves
+        // the call: an unknown/mis-typed id degrades to FlowVision in the registry, and must then use the
+        // default breaker rather than spawning a phantom instance named after a provider that never runs.
+        MeterReadingExtractor extractor = resolveExtractor(settings);
+        ResilienceBundle bundle = bundleFor(extractor);
+        Supplier<FlowVisionResult> supplier = () -> invokeExtractor(extractor, readingUrl, settings);
         Supplier<FlowVisionResult> resilientSupplier = Retry.decorateSupplier(
                 bundle.retry(),
                 CircuitBreaker.decorateSupplier(bundle.circuitBreaker(), Bulkhead.decorateSupplier(bulkhead, supplier))
@@ -76,7 +80,7 @@ public class FlowVisionReadingsRetryService {
         } catch (Exception ex) {
             if (FlowVisionTransientFailures.isServiceUnavailable(ex)) {
                 log.warn("FlowVision /readings retry exhausted provider={} imageUrlHash={} reason={}",
-                        providerLabel(settings),
+                        providerLabel(extractor),
                         imageUrlHash(readingUrl),
                         sanitizeLogValue(ex.getMessage()));
                 throw new FlowVisionReadingsUnavailableException("FlowVision readings service is temporarily unavailable", ex);
@@ -86,12 +90,25 @@ public class FlowVisionReadingsRetryService {
     }
 
     /**
-     * The resilience bundle for the resolved provider. Default/unset settings — and the built-in
-     * {@code flowvision} provider — use the shared, tuned {@value #INSTANCE_NAME} instances; any other
-     * provider gets its own derived instances so its failures cannot open the default breaker.
+     * The provider that will actually serve the call: {@code null} settings (or a null registry, as in
+     * some unit tests) use the built-in FlowVision service; otherwise the registry resolves the configured
+     * id, degrading to the default provider for an unknown id.
      */
-    private ResilienceBundle bundleFor(OcrProviderSettings settings) {
-        String key = providerKey(settings);
+    private MeterReadingExtractor resolveExtractor(OcrProviderSettings settings) {
+        if (settings == null || ocrProviderRegistry == null) {
+            return flowVisionService;
+        }
+        return ocrProviderRegistry.get(settings.providerId());
+    }
+
+    /**
+     * The resilience bundle keyed on the RESOLVED provider. The built-in {@code flowvision} provider —
+     * where unknown/mis-typed ids also degrade — uses the shared, tuned {@value #INSTANCE_NAME} instances;
+     * any other registered provider gets its own derived instances so its failures cannot open the default
+     * breaker (and a typo cannot spawn a phantom breaker that never matches a real backend).
+     */
+    private ResilienceBundle bundleFor(MeterReadingExtractor extractor) {
+        String key = providerKey(extractor);
         if (key == null) {
             return defaultBundle;
         }
@@ -107,27 +124,27 @@ public class FlowVisionReadingsRetryService {
         return new ResilienceBundle(retry, circuitBreaker);
     }
 
-    /** Normalised provider id, or {@code null} for the default provider / no override (default bundle). */
-    private String providerKey(OcrProviderSettings settings) {
-        if (settings == null || ocrProviderRegistry == null || settings.providerId() == null) {
+    /** Normalised id of the resolved provider, or {@code null} for the default provider (default bundle). */
+    private String providerKey(MeterReadingExtractor extractor) {
+        if (extractor == null || extractor.providerId() == null) {
             return null;
         }
-        String normalized = settings.providerId().trim().toLowerCase(Locale.ROOT);
+        String normalized = extractor.providerId().trim().toLowerCase(Locale.ROOT);
         if (normalized.isEmpty() || normalized.equals(OcrProviderSettings.DEFAULT_PROVIDER_ID)) {
             return null;
         }
         return normalized;
     }
 
-    private FlowVisionResult invokeExtractor(String readingUrl, OcrProviderSettings settings) {
+    private FlowVisionResult invokeExtractor(MeterReadingExtractor extractor, String readingUrl, OcrProviderSettings settings) {
         if (settings == null || ocrProviderRegistry == null) {
             return flowVisionService.extractReadingOrThrow(readingUrl);
         }
-        return ocrProviderRegistry.get(settings.providerId()).extractReadingOrThrow(readingUrl, settings);
+        return extractor.extractReadingOrThrow(readingUrl, settings);
     }
 
-    private String providerLabel(OcrProviderSettings settings) {
-        String key = providerKey(settings);
+    private String providerLabel(MeterReadingExtractor extractor) {
+        String key = providerKey(extractor);
         return key == null ? OcrProviderSettings.DEFAULT_PROVIDER_ID : key;
     }
 

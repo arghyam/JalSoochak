@@ -101,6 +101,44 @@ class OcrProviderResolverTest {
         assertNull(settings.apiKey());
     }
 
+    @Test
+    void doesNotInheritDefaultApiKeyWhenTenantOverridesEndpoint() {
+        OcrProviderResolver keyed = keyedResolver("global-key");
+        stub("ocr_url", "https://custom/extract"); // custom endpoint, no ocr_api_key
+
+        OcrProviderSettings settings = keyed.resolve(TENANT);
+
+        assertEquals("https://custom/extract", settings.endpointUrl());
+        assertNull(settings.apiKey());
+    }
+
+    @Test
+    void inheritsDefaultApiKeyWhenEndpointStaysDefault() {
+        OcrProviderResolver keyed = keyedResolver("global-key");
+        stub("ocr_provider", "flowvision"); // override path triggered, but endpoint unchanged
+
+        OcrProviderSettings settings = keyed.resolve(TENANT);
+
+        assertEquals(DEFAULT_URL, settings.endpointUrl());
+        assertEquals("global-key", settings.apiKey());
+    }
+
+    @Test
+    void tenantApiKeyIsUsedEvenWithCustomEndpoint() {
+        OcrProviderResolver keyed = keyedResolver("global-key");
+        stub("ocr_url", "https://custom/extract");
+        stub("ocr_api_key", "tenant-key");
+
+        OcrProviderSettings settings = keyed.resolve(TENANT);
+
+        assertEquals("tenant-key", settings.apiKey());
+    }
+
+    private OcrProviderResolver keyedResolver(String defaultApiKey) {
+        return new OcrProviderResolver(
+                tenantConfigRepository, environment, DEFAULT_PROVIDER, DEFAULT_URL, defaultApiKey, "Authorization");
+    }
+
     private void stub(String key, String value) {
         when(tenantConfigRepository.findConfigValue(TENANT, key)).thenReturn(Optional.of(value));
     }

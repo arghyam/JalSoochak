@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -107,5 +108,37 @@ class FlowVisionReadingsRetryServiceProviderIsolationTest {
 
         CircuitBreaker defaultBreaker = cbRegistry.circuitBreaker(FlowVisionReadingsRetryService.INSTANCE_NAME);
         assertEquals(1, defaultBreaker.getMetrics().getNumberOfSuccessfulCalls());
+    }
+
+    @Test
+    void unknownProviderRecordsOnTheDefaultBreakerNotAPhantomInstance() {
+        // Registry knows only the built-in flowvision provider (which fails transiently here).
+        MeterReadingExtractor flowvision = mock(MeterReadingExtractor.class);
+        when(flowvision.providerId()).thenReturn("flowvision");
+        when(flowvision.extractReadingOrThrow(anyString(), any(OcrProviderSettings.class)))
+                .thenThrow(new ResourceAccessException("Read timed out"));
+        OcrProviderRegistry registry = new OcrProviderRegistry(List.of(flowvision), "flowvision");
+
+        CircuitBreakerRegistry cbRegistry = CircuitBreakerRegistry.ofDefaults();
+        FlowVisionReadingsRetryService service = new FlowVisionReadingsRetryService(
+                mock(FlowVisionService.class),
+                registry,
+                RetryRegistry.of(RetryConfig.custom()
+                        .maxAttempts(1)
+                        .retryExceptions(FlowVisionTransientFailures.retriableExceptions())
+                        .build()),
+                cbRegistry,
+                BulkheadRegistry.ofDefaults());
+
+        // A mis-typed provider id degrades to FlowVision in the registry.
+        OcrProviderSettings unknown =
+                new OcrProviderSettings("typo-provider", "https://custom/extract", "k", "Authorization");
+        assertThrows(FlowVisionReadingsUnavailableException.class, () -> service.extractReading(URL, unknown));
+
+        // Failure is recorded on the shared default breaker; no phantom per-provider instance is created.
+        assertEquals(1, cbRegistry.circuitBreaker(FlowVisionReadingsRetryService.INSTANCE_NAME)
+                .getMetrics().getNumberOfFailedCalls());
+        assertTrue(cbRegistry.find(FlowVisionReadingsRetryService.PROVIDER_INSTANCE_PREFIX + "typo-provider").isEmpty(),
+                "unknown provider must not spawn a phantom resilience instance");
     }
 }

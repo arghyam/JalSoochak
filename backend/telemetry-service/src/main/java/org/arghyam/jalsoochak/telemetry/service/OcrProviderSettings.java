@@ -30,4 +30,13 @@ public record OcrProviderSettings(
     public String resolvedAuthHeaderName() {
         return (authHeaderName == null || authHeaderName.isBlank()) ? DEFAULT_AUTH_HEADER : authHeaderName;
     }
+
+    /** Redacts {@link #apiKey()} so an accidental log of a settings object never leaks the secret. */
+    @Override
+    public String toString() {
+        return "OcrProviderSettings[providerId=" + providerId
+                + ", endpointUrl=" + endpointUrl
+                + ", apiKey=" + (hasApiKey() ? "***REDACTED***" : null)
+                + ", authHeaderName=" + authHeaderName + "]";
+    }
 }

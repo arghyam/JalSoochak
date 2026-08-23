@@ -63,12 +63,17 @@ discovers the new bean at startup.
 Each provider gets its **own retry + circuit breaker**, so a failing/slow AI backend trips only its own
 breaker and cannot open the default provider's:
 
+- The instance is keyed on the **resolved** provider (the extractor the registry actually returns), not
+  the raw configured id.
 - The built-in `flowvision` provider (and the null-settings default path) use the tuned
-  `flowvisionReadings` instances configured in `application.yml`.
-- Any other provider gets instances named `flowvisionReadings-<providerId>`, **derived from the default
-  instance's config** — so tuning (max-attempts, window, thresholds) and the transient-exception
-  predicates are inherited identically, while open/closed state and metrics are independent. No extra
-  YAML is required to onboard a provider; per-provider metrics are tagged by instance name automatically.
+  `flowvisionReadings` instances configured in `application.yml`. An **unknown/mis-typed `ocr_provider`**
+  degrades to FlowVision in the registry, so it also uses these default instances — it never spawns a
+  phantom `flowvisionReadings-<typo>` breaker that would never match a real backend.
+- Any other registered provider gets instances named `flowvisionReadings-<providerId>`, **derived from
+  the default instance's config** — so tuning (max-attempts, window, thresholds) and the
+  transient-exception predicates are inherited identically, while open/closed state and metrics are
+  independent. No extra YAML is required to onboard a provider; per-provider metrics are tagged by
+  instance name automatically.
 - The **bulkhead is shared** (one `flowvisionReadings` instance): it is a *global* cap on concurrent OCR
   calls protecting the ingestion threads, and is deliberately not split per provider (that would let total
   concurrency grow as the sum across providers).
