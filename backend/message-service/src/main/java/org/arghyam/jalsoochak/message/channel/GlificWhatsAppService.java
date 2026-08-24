@@ -27,6 +27,9 @@ import java.util.Map;
  *       and {@code parameters[0]} = localized body text.</li>
  * </ol>
  * </p>
+ * <p>Daily report: either shape, chosen by {@code notifications.daily-report.delivery-mode} — see
+ * {@link DailyReportDeliveryMode}. {@code LINK} mode is a single {@code sendHsmMessage} with
+ * {{1}} = officer name, {{2}} = report date and the button's URL suffix last.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -41,6 +44,11 @@ public class GlificWhatsAppService {
               }
             }""";
 
+    /**
+     * The plain HSM send. Shared by every template whose variables are all text — the nudge, the
+     * login OTP and the daily report in {@link DailyReportDeliveryMode#LINK} mode. Only the document
+     * templates need the two-step {@code createMessageMedia} + {@code createAndSendMessage} pair.
+     */
     private static final String NUDGE_HSM_MUTATION = """
             mutation sendHsmMessage($templateId: ID!, $receiverId: ID!, $parameters: [String]) {
               sendHsmMessage(templateId: $templateId, receiverId: $receiverId, parameters: $parameters) {
@@ -154,6 +162,34 @@ public class GlificWhatsAppService {
     private String dailyReportSdoTemplateId;
 
     /**
+     * Chooses how the daily report reaches the officer — {@code DOCUMENT} (PDF attachment, which Meta
+     * must download itself) or {@code LINK} (dynamic-URL button, which Meta never fetches). Bound as a
+     * String and parsed on use so an unrecognised value fails loudly with the valid ones named, and so
+     * an unset property behaves exactly as before this mode existed.
+     */
+    @Value("${notifications.daily-report.delivery-mode:DOCUMENT}")
+    private String dailyReportDeliveryMode;
+
+    /** Text HSM template id (dynamic-URL button) for the SECTION_OFFICER daily report — LINK mode. */
+    @Value("${glific.template.daily-report-so-link-id:}")
+    private String dailyReportSoLinkTemplateId;
+
+    /** Text HSM template id (dynamic-URL button) for the SUB_DIVISIONAL_OFFICER daily report — LINK mode. */
+    @Value("${glific.template.daily-report-sdo-link-id:}")
+    private String dailyReportSdoLinkTemplateId;
+
+    /**
+     * Optional mirror of the URL prefix frozen into the approved LINK template, e.g.
+     * {@code https://jalsoochak.jjmbrain.in/minio/}. When set it must match the prefix this service
+     * strips off the MinIO URL to build the button's variable ({@link #mediaUrlPrefix()}); a mismatch
+     * fails startup. It is the only check that catches an environment deployed with another
+     * environment's template id or base URL — the send still succeeds in that case, and the officer is
+     * the one who discovers the button leads nowhere.
+     */
+    @Value("${daily-report.link.button-base-url:}")
+    private String dailyReportLinkButtonBaseUrl;
+
+    /**
      * The prefix of every media URL handed to Glific. Read here — not only in
      * {@code MinioStorageService} — because this is the class that owns the Glific contract and the
      * only one that knows whether a document-sending purpose is live. Meta downloads the URL from the
@@ -200,21 +236,74 @@ public class GlificWhatsAppService {
                     "glific.template.login-otp-id must be configured — SEND_LOGIN_OTP events cannot be delivered without it");
         }
         if (!dailyReportDryRun) {
-            if (isBlank(dailyReportSoTemplateId)) {
-                throw new IllegalStateException(
-                        "glific.template.daily-report-so-id must be configured when daily-report delivery is enabled"
-                        + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports)");
-            }
-            // sendDailyReportHsm does Integer.parseInt on the resolved template id, so fail fast at
-            // startup on a non-numeric id rather than per-message (retry → DLT) at delivery time.
-            requireNumericTemplateId(dailyReportSoTemplateId, "glific.template.daily-report-so-id");
-            // The SDO id is optional (resolveDailyReportTemplateId falls back to the SO template),
-            // so validate it only when it has been configured.
-            if (!isBlank(dailyReportSdoTemplateId)) {
-                requireNumericTemplateId(dailyReportSdoTemplateId, "glific.template.daily-report-sdo-id");
+            // Only the templates the configured mode actually sends are required. A LINK deployment
+            // never reads the document ids and vice versa, so demanding both would force every
+            // environment to carry configuration it does not use.
+            switch (deliveryMode()) {
+                case DOCUMENT -> validateDailyReportDocumentTemplates();
+                case LINK -> validateDailyReportLinkTemplates();
             }
         }
         validateMediaBaseUrl();
+    }
+
+    private void validateDailyReportDocumentTemplates() {
+        if (isBlank(dailyReportSoTemplateId)) {
+            throw new IllegalStateException(
+                    "glific.template.daily-report-so-id must be configured when daily-report delivery is enabled"
+                    + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports)");
+        }
+        // sendDailyReportDocumentHsm does Integer.parseInt on the resolved template id, so fail fast at
+        // startup on a non-numeric id rather than per-message (retry → DLT) at delivery time.
+        requireNumericTemplateId(dailyReportSoTemplateId, "glific.template.daily-report-so-id");
+        // The SDO id is optional (resolveDailyReportTemplateId falls back to the SO template),
+        // so validate it only when it has been configured.
+        if (!isBlank(dailyReportSdoTemplateId)) {
+            requireNumericTemplateId(dailyReportSdoTemplateId, "glific.template.daily-report-sdo-id");
+        }
+    }
+
+    /**
+     * LINK mode passes the template id to {@code sendHsmMessage} as a GraphQL {@code ID!}, so unlike
+     * the document path it is never parsed as an int and needs no numeric check — an id that does not
+     * exist comes back as a Glific error rather than a {@link NumberFormatException}.
+     */
+    private void validateDailyReportLinkTemplates() {
+        if (isBlank(dailyReportSoLinkTemplateId)) {
+            throw new IllegalStateException(
+                    "glific.template.daily-report-so-link-id must be configured when daily-report delivery is"
+                    + " enabled and notifications.daily-report.delivery-mode=LINK"
+                    + " (set NOTIFICATIONS_DAILY_REPORT_DRY_RUN=true to suppress daily reports,"
+                    + " or NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE=DOCUMENT to send the PDF as an attachment)");
+        }
+        validateLinkButtonBaseUrl();
+    }
+
+    /**
+     * Cross-checks the optional {@code daily-report.link.button-base-url} against the prefix that
+     * {@link #linkSuffix(String)} will strip. The approved template owns that prefix and it cannot be
+     * changed after approval, so if the two disagree every button we send resolves against the wrong
+     * host or path — a failure invisible on our side, because Glific accepts the send either way.
+     */
+    private void validateLinkButtonBaseUrl() {
+        String expected = mediaUrlPrefix();
+        if (isBlank(dailyReportLinkButtonBaseUrl)) {
+            log.warn("[Glific] daily-report.link.button-base-url is not set. Button links will be built as"
+                            + " '{}<bucket>/<file>.pdf' — confirm that prefix is exactly the one frozen into"
+                            + " the approved LINK template, because a mismatch is only visible to the officer"
+                            + " tapping the button. Set DAILY_REPORT_LINK_BUTTON_BASE_URL to have this"
+                            + " checked at startup.", expected);
+            return;
+        }
+        if (!expected.equals(dailyReportLinkButtonBaseUrl.trim())) {
+            throw new IllegalStateException(
+                    "daily-report.link.button-base-url is '" + dailyReportLinkButtonBaseUrl.trim()
+                    + "' but minio.base-url yields the prefix '" + expected + "'. These must be identical:"
+                    + " the first is the prefix frozen into the approved WhatsApp template, the second is"
+                    + " what this service strips off the MinIO URL to build the button's variable."
+                    + " A mismatch delivers a button pointing at the wrong host or path — most likely one"
+                    + " environment was deployed with another environment's template id or MINIO_BASE_URL.");
+        }
     }
 
     /**
@@ -237,7 +326,10 @@ public class GlificWhatsAppService {
                     + ". Glific hands this URL to Meta, which downloads it from the public internet and"
                     + " rejects internal addresses with '(#131053) … blocked by a destination filter'."
                     + " Set MINIO_BASE_URL to the public URL (e.g. https://jalsoochak.jjmbrain.in/minio)"
-                    + " — note minio.endpoint stays internal, it is only the upload address.");
+                    + " — note minio.endpoint stays internal, it is only the upload address."
+                    + " In LINK mode Meta no longer downloads the file, but this same prefix is what the"
+                    + " officer's phone opens and what is frozen into the approved template, so it must be"
+                    + " publicly reachable there too.");
         }
     }
 
@@ -395,22 +487,41 @@ public class GlificWhatsAppService {
     }
 
     /**
-     * Sends the Daily Water Service Situation Report document HSM to an officer. Two-step, like
-     * {@link #sendEscalationHsm}: upload the PDF via {@code createMessageMedia}, then
-     * {@code createAndSendMessage} with the {@code mediaId} as the document header. The Glific
-     * template is chosen by officer role (SO vs SDO).
+     * Sends the Daily Water Service Situation Report to an officer, in whichever shape
+     * {@code notifications.daily-report.delivery-mode} selects:
+     * <ul>
+     *   <li>{@link DailyReportDeliveryMode#DOCUMENT} — the PDF as a document HSM. Meta downloads the
+     *       MinIO URL itself, which the India-only firewall in front of production MinIO blocks.</li>
+     *   <li>{@link DailyReportDeliveryMode#LINK} — a text HSM whose "View Report" button carries the
+     *       MinIO path. Meta fetches nothing; the officer's phone opens the PDF when they tap it.</li>
+     * </ul>
+     * The dry-run guard and the contact-id check are shared, so a suppressed report costs no work and
+     * a missing contact id costs no Glific round-trip in either mode.
      *
      * @param contactId       Glific contact id of the officer
      * @param minioUrl        publicly reachable URL of the report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
-     * @param reportDate      the day the report's data covers (D-1) — appended to the document name
-     *                        the recipient sees in WhatsApp; null falls back to the bare caption
+     * @param reportDate      the day the report's data covers (D-1). In DOCUMENT mode it is appended
+     *                        to the document name the recipient sees, and null falls back to the bare
+     *                        caption; in LINK mode it is template variable {{2}} and is required
+     * @param officerName     the officer's name, template variable {{1}} in LINK mode; blank or null
+     *                        degrades to "Officer". Unused in DOCUMENT mode
      */
-    public void sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType, LocalDate reportDate) {
+    public void sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType,
+                                   LocalDate reportDate, String officerName) {
         if (isDryRun(dailyReportDryRun, "sendDailyReportHsm")) return;
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
         requireContactId(contactId, "sendDailyReportHsm");
 
+        switch (deliveryMode()) {
+            case DOCUMENT -> sendDailyReportDocumentHsm(contactId, minioUrl, officerUserType, reportDate);
+            case LINK -> sendDailyReportLinkHsm(contactId, minioUrl, officerUserType, reportDate, officerName);
+        }
+    }
+
+    /** The original two-step document send: register the PDF as media, then send it as the header. */
+    private void sendDailyReportDocumentHsm(Long contactId, String minioUrl, String officerUserType,
+                                            LocalDate reportDate) {
         String templateId = resolveDailyReportTemplateId(officerUserType);
         String mediaId = uploadMediaInternal(minioUrl, dailyReportDocumentName(reportDate), dailyReportDryRun);
 
@@ -426,6 +537,94 @@ public class GlificWhatsAppService {
         JsonNode response = client.execute(CREATE_AND_SEND_MESSAGE_MUTATION, Map.of("input", input));
         checkErrors(response, "createAndSendMessage");
         log.debug("[Glific] Daily report HSM sent to contactId={}", contactId);
+    }
+
+    /**
+     * The link send: one {@code sendHsmMessage} and no media step at all. The template's button URL is
+     * a fixed prefix plus a variable that Meta appends to it, so the only thing that travels per
+     * message is the part after that prefix — {@code escalation-reports/daily_report_….pdf}. Keeping
+     * the bucket inside the variable rather than inside the frozen prefix is what makes a future bucket
+     * rename a configuration change instead of a new template approval.
+     *
+     * <p>Parameter order matters and is not ours to choose: Glific forwards the list to Gupshup as a
+     * flat {@code params} array filled in order of occurrence, body variables first and the button's
+     * URL suffix last.</p>
+     */
+    private void sendDailyReportLinkHsm(Long contactId, String minioUrl, String officerUserType,
+                                        LocalDate reportDate, String officerName) {
+        String templateId = resolveDailyReportLinkTemplateId(officerUserType);
+        if (isBlank(templateId)) {
+            throw new IllegalStateException(
+                    "glific.template.daily-report-so-link-id is not configured — LINK mode cannot send");
+        }
+        // Required, unlike the document path where a null date only costs the date in the filename:
+        // here it is template variable {{2}} and Glific rejects a null parameter outright.
+        if (reportDate == null) {
+            throw new IllegalArgumentException(
+                    "sendDailyReportHsm in LINK mode requires the report date — it is template variable {{2}}");
+        }
+        String urlSuffix = linkSuffix(minioUrl);
+        String name = isBlank(officerName) ? "Officer" : officerName.trim();
+        String role = isBlank(officerUserType) ? "UNKNOWN" : officerUserType.trim();
+
+        JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
+                "templateId", templateId,
+                "receiverId", contactId,
+                "parameters", List.of(name, reportDate.format(DOCUMENT_NAME_DATE), urlSuffix)));
+        checkErrors(response, "sendHsmMessage");
+        // Mode logged at INFO so a run can be told apart from a document run straight from the log
+        // file. The router's result=/role= line is untouched, so the counting recipes in
+        // mydocs/DAILY_REPORT_DELIVERY_LOGS.md keep working.
+        log.info("[Glific] Daily report HSM sent mode=LINK role={}", role);
+        log.debug("[Glific] Daily report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
+    }
+
+    /**
+     * The value of the LINK template's dynamic-URL variable: the MinIO URL with the prefix the template
+     * already owns stripped off, e.g.
+     * {@code escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf}.
+     *
+     * <p>Throws rather than guessing when the URL does not sit under the configured prefix. Meta
+     * appends this value to the frozen prefix verbatim, so a URL from some other host would silently
+     * produce a button pointing at a path that does not exist — and Glific would accept the send.
+     * Refusing here turns that into a failed delivery that gets logged and retried.</p>
+     */
+    String linkSuffix(String minioUrl) {
+        String prefix = mediaUrlPrefix();
+        if (minioUrl == null || !minioUrl.startsWith(prefix)) {
+            throw new IllegalStateException(
+                    "Cannot build the daily report link: '" + minioUrl + "' does not start with the"
+                    + " template's URL prefix '" + prefix + "' (from minio.base-url). Meta appends the"
+                    + " remainder to that prefix verbatim, so the button would point somewhere that does"
+                    + " not exist. Check MINIO_BASE_URL against the approved template.");
+        }
+        String suffix = minioUrl.substring(prefix.length());
+        if (suffix.isBlank()) {
+            throw new IllegalStateException(
+                    "Cannot build the daily report link: '" + minioUrl + "' is the bare prefix '" + prefix
+                    + "' with no object path after it");
+        }
+        return suffix;
+    }
+
+    /**
+     * {@code minio.base-url} with exactly one trailing slash — the prefix the LINK template owns.
+     * Mirrors the trailing-slash trimming in {@code MinioStorageService.publicUrlFor}, because the two
+     * have to agree on where the prefix ends for {@link #linkSuffix(String)} to strip it: that value is
+     * hand-written per environment and one ending in {@code /minio/} would otherwise leave a leading
+     * slash on the suffix.
+     */
+    private String mediaUrlPrefix() {
+        String prefix = mediaBaseUrl == null ? "" : mediaBaseUrl.trim();
+        while (prefix.endsWith("/")) {
+            prefix = prefix.substring(0, prefix.length() - 1);
+        }
+        return prefix + "/";
+    }
+
+    /** The configured delivery mode; parsed on use so an unknown value fails loudly wherever it is read. */
+    private DailyReportDeliveryMode deliveryMode() {
+        return DailyReportDeliveryMode.from(dailyReportDeliveryMode);
     }
 
     /**
@@ -460,6 +659,18 @@ public class GlificWhatsAppService {
             return dailyReportSdoTemplateId;
         }
         return dailyReportSoTemplateId;
+    }
+
+    /**
+     * Same SDO→SO fallback as {@link #resolveDailyReportTemplateId} but over the LINK templates, so a
+     * deployment that has approved only one template still delivers to both roles.
+     */
+    private String resolveDailyReportLinkTemplateId(String officerUserType) {
+        if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
+                && !isBlank(dailyReportSdoLinkTemplateId)) {
+            return dailyReportSdoLinkTemplateId;
+        }
+        return dailyReportSoLinkTemplateId;
     }
 
     /**

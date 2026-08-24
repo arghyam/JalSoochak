@@ -154,21 +154,25 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
-     * Sends the Daily Water Service Situation Report PDF (document HSM) to an officer via Glific
-     * using an already-resolved Glific contact ID. The template is chosen by officer role.
+     * Sends the Daily Water Service Situation Report to an officer via Glific using an already-resolved
+     * Glific contact ID. The template is chosen by officer role, and the shape — PDF attachment or a
+     * "View Report" link button — by {@code notifications.daily-report.delivery-mode}.
      *
      * @param contactId       Glific contact ID of the officer
      * @param documentUrl     publicly reachable MinIO URL of the report PDF
      * @param officerUserType SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
      * @param reportDate      the day the report's data covers (D-1); shown in the document name the
-     *                        officer sees in WhatsApp
+     *                        officer sees in WhatsApp, and template variable {{2}} in link mode
+     * @param officerName     the officer's name; template variable {{1}} in link mode, unused for the
+     *                        document. Not logged — see the privacy rule in CLAUDE.md
      * @return {@code true} if the message was accepted by Glific
      */
-    public boolean sendDailyReport(long contactId, String documentUrl, String officerUserType, LocalDate reportDate) {
+    public boolean sendDailyReport(long contactId, String documentUrl, String officerUserType,
+                                   LocalDate reportDate, String officerName) {
         String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
         try {
             // Send with the same token that is logged, so the template picked matches the counted role.
-            glificWhatsAppService.sendDailyReportHsm(contactId, documentUrl, role, reportDate);
+            glificWhatsAppService.sendDailyReportHsm(contactId, documentUrl, role, reportDate, officerName);
             log.info("[WHATSAPP] Daily report HSM sent role={}", role);
             log.debug("[WHATSAPP] Daily report HSM sent role={} contactId={}", role, contactId);
             return true;
