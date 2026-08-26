@@ -8,6 +8,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.QueryTimeoutException;
@@ -214,15 +216,27 @@ class UserSecurityEvaluatorTest {
         }
 
         @Test
-        @DisplayName("can access user when tenant is SUSPENDED")
-        void allowedWhenTenantSuspended() {
+        @DisplayName("is denied when tenant is SUSPENDED")
+        void deniedWhenTenantSuspended() {
             when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(4)); // SUSPENDED
-            when(userCommonRepository.userBelongsToTenant(10L, "MP")).thenReturn(true);
 
             boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
 
-            assertTrue(result);
+            assertFalse(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("is denied when tenant is INACTIVE")
+        void deniedWhenTenantInactive() {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid")).thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(0)); // INACTIVE
+
+            boolean result = evaluator.canAccessUser(10L, stateAdminAuth("MP"));
+
+            assertFalse(result);
+            verify(userCommonRepository, never()).userBelongsToTenant(anyLong(), anyString());
         }
 
         @Test
@@ -439,6 +453,17 @@ class UserSecurityEvaluatorTest {
             when(userCommonRepository.findAdminUserByUuid("sa-uuid"))
                     .thenReturn(Optional.of(activeAdminRow("sa-uuid")));
             when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.empty());
+
+            assertFalse(evaluator.canAccessTenant("MP", stateAdminAuth("MP")));
+        }
+
+        @ParameterizedTest(name = "STATE_ADMIN denied for tenant status {0}")
+        @ValueSource(ints = {0, 4, 6}) // INACTIVE, SUSPENDED, ARCHIVED
+        @DisplayName("STATE_ADMIN denied for INACTIVE, SUSPENDED and ARCHIVED tenants")
+        void stateAdmin_blockedTenantStatus_returnsFalse(int tenantStatus) {
+            when(userCommonRepository.findAdminUserByUuid("sa-uuid"))
+                    .thenReturn(Optional.of(activeAdminRow("sa-uuid")));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(tenantStatus));
 
             assertFalse(evaluator.canAccessTenant("MP", stateAdminAuth("MP")));
         }
