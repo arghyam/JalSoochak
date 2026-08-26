@@ -26,7 +26,7 @@ public class DailyReportSectionOfficerRow {
     private int schemesSupplying;
     private int schemesNotSupplying;
     private double avgLpcd;
-    private double avgMld;
+    private double avgKld;
     private double regularSupplyPctWeek;
     private double readingSubmissionPct;
     private int anomalousCount;

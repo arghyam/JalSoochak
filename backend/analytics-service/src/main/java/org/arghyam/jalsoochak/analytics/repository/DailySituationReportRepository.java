@@ -142,7 +142,7 @@ public class DailySituationReportRepository {
 
     /**
      * Total litres supplied across the officer's schemes on {@code day}
-     * (sum of {@code fact_water_quantity_table.water_quantity}). Basis for MLD and LPCD.
+     * (sum of {@code fact_water_quantity_table.water_quantity}). Basis for KLD and LPCD.
      */
     public long sumWaterSuppliedOnDay(Integer tenantId, Long userId, LocalDate day, Long supervisorUserId) {
         String sql = """

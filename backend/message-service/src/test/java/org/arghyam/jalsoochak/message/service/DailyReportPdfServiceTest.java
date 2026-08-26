@@ -60,12 +60,12 @@ class DailyReportPdfServiceTest {
                 .totalSchemes(148)
                 .yesterday(DailyReportKpis.DayKpis.builder()
                         .schemesSupplying(142).schemesNotSupplying(6)
-                        .avgLpcd(63).avgMld(18.4)
+                        .avgLpcd(63).avgKld(18.4)
                         .regularSupplyPctWeek(92).readingSubmissionPct(97)
                         .anomalousCount(11).build())
                 .previousDay(DailyReportKpis.DayKpis.builder()
                         .schemesSupplying(140).schemesNotSupplying(8)
-                        .avgLpcd(61).avgMld(18.1)
+                        .avgLpcd(61).avgKld(18.1)
                         .regularSupplyPctWeek(97).readingSubmissionPct(96)
                         .anomalousCount(15).build())
                 .reasonsForNoSupply(List.of(
@@ -94,12 +94,12 @@ class DailyReportPdfServiceTest {
                 DailyReportSectionOfficerRow.builder()
                         .officerName("Alice").officerMobile("919868595001")
                         .totalSchemes(154).schemesSupplying(148).schemesNotSupplying(6)
-                        .avgLpcd(67).avgMld(678).regularSupplyPctWeek(32).readingSubmissionPct(78)
+                        .avgLpcd(67).avgKld(18432.5).regularSupplyPctWeek(32).readingSubmissionPct(78)
                         .anomalousCount(8).build(),
                 DailyReportSectionOfficerRow.builder()
                         .officerName("Bob").officerMobile("919868595002")
                         .totalSchemes(90).schemesSupplying(80).schemesNotSupplying(10)
-                        .avgLpcd(55).avgMld(400).regularSupplyPctWeek(60).readingSubmissionPct(88)
+                        .avgLpcd(55).avgKld(9640.2).regularSupplyPctWeek(60).readingSubmissionPct(88)
                         .anomalousCount(2).build());
     }
 
@@ -314,7 +314,7 @@ class DailyReportPdfServiceTest {
         assertThat(text).contains("▼");
         assertThat(text).contains("+2");
         assertThat(text).contains("-2");
-        // Average MLD 18.4 vs 18.1 → +0.3, rounded (no floating-point long-decimal leak).
+        // Average KLD 18.4 vs 18.1 → +0.3, rounded (no floating-point long-decimal leak).
         assertThat(text).contains("+0.3");
         assertThat(text).doesNotContain("0.29999");
     }
@@ -432,6 +432,28 @@ class DailyReportPdfServiceTest {
     }
 
     @Test
+    void generate_sdoReport_kldValueFitsOnOneLineInSummaryTable() throws Exception {
+        // The KLD column carries values a thousand times larger than the MLD figures it replaced
+        // (18.4 MLD → 18400 KLD), so a five-digit-plus-decimal value has to stay inside the narrow
+        // breakdown column. A wrapped cell would split the number across two lines ("18432"+".5")
+        // and read as a different figure, so assert PDFTextStripper extracts it as one token.
+        String filename = service.generate(
+                sampleKpis(), 700L, "SDO Kumar", "SUB_DIVISIONAL_OFFICER", samplePriority(), sampleSectionOfficers());
+        try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            String text = new PDFTextStripper().getText(doc);
+            // Alice's 7-character value and Bob's, each as one unbroken token.
+            assertThat(text).contains("18432.5", "9640.2");
+        }
+    }
+
+    @Test
+    void generate_kpiTableLabelsKldNotMld() throws Exception {
+        String text = renderText(sampleKpis(), samplePriority()).replaceAll("\\s+", " ");
+
+        assertThat(text).contains("Average KLD").doesNotContain("Average MLD");
+    }
+
+    @Test
     void generate_dashboardUrlIsEmbeddedAsClickableLinkAnnotation() throws Exception {
         // The dashboard URL must be a real PDF link annotation (not just plain text) so it is
         // clickable in every viewer — including WhatsApp/mobile viewers that don't auto-detect
@@ -467,7 +489,7 @@ class DailyReportPdfServiceTest {
     void generate_trendArrowsAreColoured_greenForImprovement_redForDeterioration() throws Exception {
         // Positive KPIs: Supplying 142 vs 140 → up arrow, green. Negative KPIs: Not-supplying 6 vs 8
         // and Anomalous 11 vs 15 → down arrows, also green because falling is the improvement there.
-        // Average MLD 18.4 vs 18.1 → up, green. Regular Supply 92 vs 97 → down on a positive KPI, red.
+        // Average KLD 18.4 vs 18.1 → up, green. Regular Supply 92 vs 97 → down on a positive KPI, red.
         // Rendered to a raster and pixel-sampled: everything else in the report is black text, white
         // background, or a blue link, so strongly green / red pixels can only be the trend arrows.
         String filename = service.generate(
@@ -514,12 +536,12 @@ class DailyReportPdfServiceTest {
                 .totalSchemes(148)
                 .yesterday(DailyReportKpis.DayKpis.builder()
                         .schemesSupplying(142).schemesNotSupplying(notSupplyingYesterday)
-                        .avgLpcd(63).avgMld(18.4)
+                        .avgLpcd(63).avgKld(18.4)
                         .regularSupplyPctWeek(92).readingSubmissionPct(97)
                         .anomalousCount(anomalousYesterday).build())
                 .previousDay(DailyReportKpis.DayKpis.builder()
                         .schemesSupplying(142).schemesNotSupplying(notSupplyingPrevious)
-                        .avgLpcd(63).avgMld(18.4)
+                        .avgLpcd(63).avgKld(18.4)
                         .regularSupplyPctWeek(92).readingSubmissionPct(97)
                         .anomalousCount(anomalousPrevious).build())
                 .reasonsForNoSupply(List.of())

@@ -111,7 +111,7 @@ public class DailyReportPdfService {
     private static final String KPI_SCHEMES_SUPPLYING = "Schemes Supplying Water";
     private static final String KPI_SCHEMES_NOT_SUPPLYING = "Schemes Not Supplying Water";
     private static final String KPI_AVERAGE_LPCD = "Average LPCD";
-    private static final String KPI_AVERAGE_MLD = "Average MLD";
+    private static final String KPI_AVERAGE_KLD = "Average KLD";
     private static final String KPI_REGULAR_SUPPLY = "Regular Supply (%) past 1 week";
     private static final String KPI_READING_SUBMISSION = "Reading Submission (%)";
     private static final String KPI_ANOMALOUS_SUBMISSIONS = "Anomalous Submissions";
@@ -217,7 +217,7 @@ public class DailyReportPdfService {
                     String[] soHeader = {
                             "Section Officer Name", "Mobile No.", KPI_TOTAL_SCHEMES,
                             KPI_SCHEMES_SUPPLYING, KPI_SCHEMES_NOT_SUPPLYING,
-                            KPI_AVERAGE_LPCD, KPI_AVERAGE_MLD, "Regular Supply (%) for past 1 week",
+                            KPI_AVERAGE_LPCD, KPI_AVERAGE_KLD, "Regular Supply (%) for past 1 week",
                             KPI_READING_SUBMISSION, KPI_ANOMALOUS_SUBMISSIONS + "*"};
                     // Centre the numeric KPI columns; keep the name and mobile identifier columns left.
                     boolean[] soCenter = {false, false, true, true, true, true, true, true, true, true};
@@ -293,7 +293,7 @@ public class DailyReportPdfService {
         rows.add(intRow(KPI_SCHEMES_SUPPLYING, y.getSchemesSupplying(), p.getSchemesSupplying()));
         rows.add(intRow(KPI_SCHEMES_NOT_SUPPLYING, y.getSchemesNotSupplying(), p.getSchemesNotSupplying()));
         rows.add(dblRow(KPI_AVERAGE_LPCD, y.getAvgLpcd(), p.getAvgLpcd(), ""));
-        rows.add(dblRow(KPI_AVERAGE_MLD, y.getAvgMld(), p.getAvgMld(), ""));
+        rows.add(dblRow(KPI_AVERAGE_KLD, y.getAvgKld(), p.getAvgKld(), ""));
         rows.add(dblRow(KPI_REGULAR_SUPPLY, y.getRegularSupplyPctWeek(), p.getRegularSupplyPctWeek(), "%"));
         rows.add(dblRow(KPI_READING_SUBMISSION, y.getReadingSubmissionPct(), p.getReadingSubmissionPct(), "%"));
         rows.add(intRow(KPI_ANOMALOUS_SUBMISSIONS, y.getAnomalousCount(), p.getAnomalousCount()));
@@ -336,7 +336,7 @@ public class DailyReportPdfService {
                     String.valueOf(r.getTotalSchemes()),
                     String.valueOf(r.getSchemesSupplying()),
                     String.valueOf(r.getSchemesNotSupplying()),
-                    fmt(r.getAvgLpcd()), fmt(r.getAvgMld()),
+                    fmt(r.getAvgLpcd()), fmt(r.getAvgKld()),
                     fmt(r.getRegularSupplyPctWeek()) + "%", fmt(r.getReadingSubmissionPct()) + "%",
                     String.valueOf(r.getAnomalousCount())});
         }

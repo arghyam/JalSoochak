@@ -1126,9 +1126,9 @@ class NotificationEventRouterTest {
             {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
              "officerUserId":500,"officerUserType":"SECTION_OFFICER",
              "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
-                     "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,
+                     "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgKld":1200.0,
                                   "regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
-                     "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,
+                     "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgKld":1100.0,
                                     "regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4}}}
             """;
 
@@ -1184,11 +1184,11 @@ class NotificationEventRouterTest {
                 {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
                  "officerUserId":500,"officerUserType":"SUB_DIVISIONAL_OFFICER",
                  "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
-                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
-                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
+                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgKld":1200.0,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgKld":1100.0,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
                          "sectionOfficerSummaries":[
-                           {"officerUserId":601,"totalSchemes":154,"schemesSupplying":148,"schemesNotSupplying":6,"avgLpcd":67.0,"avgMld":678.0,"regularSupplyPctWeek":32.0,"readingSubmissionPct":78.0,"anomalousCount":8},
-                           {"officerUserId":602,"totalSchemes":90,"schemesSupplying":80,"schemesNotSupplying":10,"avgLpcd":55.0,"avgMld":400.0,"regularSupplyPctWeek":60.0,"readingSubmissionPct":88.0,"anomalousCount":2}]}}
+                           {"officerUserId":601,"totalSchemes":154,"schemesSupplying":148,"schemesNotSupplying":6,"avgLpcd":67.0,"avgKld":18432.5,"regularSupplyPctWeek":32.0,"readingSubmissionPct":78.0,"anomalousCount":8},
+                           {"officerUserId":602,"totalSchemes":90,"schemesSupplying":80,"schemesNotSupplying":10,"avgLpcd":55.0,"avgKld":9640.2,"regularSupplyPctWeek":60.0,"readingSubmissionPct":88.0,"anomalousCount":2}]}}
                 """;
 
         // SDO's own contact (WHERE id = ?) — stored WhatsApp id.
@@ -1366,8 +1366,8 @@ class NotificationEventRouterTest {
                 {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
                  "officerUserId":500,"officerUserType":"SECTION_OFFICER",
                  "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
-                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
-                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
+                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgKld":1200.0,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgKld":1100.0,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
                          "priorityActions":[{"schemeId":7,"issue":"Pump Failure","daysNoSupply":5}]}}
                 """;
 
@@ -1451,8 +1451,8 @@ class NotificationEventRouterTest {
                 {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
                  "officerUserId":500,"officerUserType":"SECTION_OFFICER",
                  "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
-                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
-                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
+                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgKld":1200.0,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
+                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgKld":1100.0,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
                          "priorityActions":[{"schemeId":7,"issue":"Pump Failure","daysNoSupply":5}]}}
                 """;
 
