@@ -60,6 +60,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -321,6 +323,48 @@ class AuthServiceImplTest {
                     () -> authService.login(loginRequest("sa@example.com", "pass")));
 
             verify(keycloakClient, never()).obtainToken(anyString(), anyString());
+        }
+
+        @ParameterizedTest(name = "STATE_ADMIN blocked for tenant status {0}")
+        @ValueSource(ints = {0, 4, 6}) // INACTIVE, SUSPENDED, ARCHIVED
+        @DisplayName("STATE_ADMIN: should be denied login for INACTIVE, SUSPENDED and ARCHIVED tenants")
+        void login_stateAdmin_blockedTenantStatus_throwsForbidden(int tenantStatus) {
+            when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(tenantStatus));
+
+            assertThrows(ForbiddenAccessException.class,
+                    () -> authService.login(loginRequest("sa@example.com", "pass")));
+
+            // Credentials must never be exchanged once the tenant gate rejects the login.
+            verify(keycloakClient, never()).obtainToken(anyString(), anyString());
+        }
+
+        @ParameterizedTest(name = "STATE_ADMIN allowed for tenant status {0}")
+        @ValueSource(ints = {1, 2, 3, 5}) // ONBOARDED, CONFIGURED, ACTIVE, DEGRADED
+        @DisplayName("STATE_ADMIN: should still log in for operational tenant statuses")
+        void login_stateAdmin_operationalTenantStatus_succeeds(int tenantStatus) {
+            when(userCommonRepository.findAdminUserByEmail("sa@example.com")).thenReturn(Optional.of(stateAdminRow()));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(tenantStatus));
+            when(keycloakClient.obtainToken("sa@example.com", "pass")).thenReturn(tokenResponse());
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+
+            AuthResult result = authService.login(loginRequest("sa@example.com", "pass"));
+
+            assertNotNull(result);
+            assertEquals(FAKE_JWT, result.tokenResponse().getAccessToken());
+        }
+
+        @ParameterizedTest(name = "SUPER_USER allowed for tenant status {0}")
+        @ValueSource(ints = {0, 4, 6}) // INACTIVE, SUSPENDED, ARCHIVED
+        @DisplayName("SUPER_USER: should still log in for INACTIVE, SUSPENDED and ARCHIVED tenants")
+        void login_superUser_blockedTenantStatus_succeeds(int tenantStatus) {
+            when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakClient.obtainToken("user@example.com", "pass")).thenReturn(tokenResponse());
+
+            AuthResult result = authService.login(loginRequest("user@example.com", "pass"));
+
+            assertNotNull(result);
+            assertEquals("SUPER_USER", result.tokenResponse().getRole());
         }
     }
 

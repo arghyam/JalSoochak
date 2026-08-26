@@ -135,23 +135,23 @@ class TenantSecurityEvaluatorTest {
     }
 
     @Test
-    @DisplayName("Returns true when tenant is SUSPENDED — STATE_ADMIN can access suspended tenants")
-    void isOwnTenant_suspendedTenant_returnsTrue() {
+    @DisplayName("Returns false when tenant is SUSPENDED — STATE_ADMIN cannot access suspended tenants")
+    void isOwnTenant_suspendedTenant_returnsFalse() {
         setUpJwtContext("mp");
         when(tenantCommonRepository.findById(1))
                 .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("SUSPENDED").build()));
 
-        assertTrue(tenantSecurityEvaluator.isOwnTenant(1));
+        assertFalse(tenantSecurityEvaluator.isOwnTenant(1));
     }
 
     @Test
-    @DisplayName("Returns true when tenant is INACTIVE — STATE_ADMIN can access inactive tenants")
-    void isOwnTenant_inactiveTenant_returnsTrue() {
+    @DisplayName("Returns false when tenant is INACTIVE — STATE_ADMIN cannot access inactive tenants")
+    void isOwnTenant_inactiveTenant_returnsFalse() {
         setUpJwtContext("mp");
         when(tenantCommonRepository.findById(1))
                 .thenReturn(Optional.of(TenantResponseDTO.builder().stateCode("mp").status("INACTIVE").build()));
 
-        assertTrue(tenantSecurityEvaluator.isOwnTenant(1));
+        assertFalse(tenantSecurityEvaluator.isOwnTenant(1));
     }
 
     @Test
