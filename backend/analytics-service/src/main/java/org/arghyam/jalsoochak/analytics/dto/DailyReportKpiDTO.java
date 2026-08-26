@@ -64,8 +64,8 @@ public class DailyReportKpiDTO {
         private int schemesNotSupplying;
         /** Average Litres Per Capita per Day across the officer's schemes for the day. */
         private double avgLpcd;
-        /** Total Million Litres per Day supplied across the officer's schemes for the day. */
-        private double avgMld;
+        /** Total Kilo Litres per Day supplied across the officer's schemes for the day. */
+        private double avgKld;
         /** Regular-supply percentage over the 7-day window ending on the day (0-100). */
         private double regularSupplyPctWeek;
         /** Reading-submission percentage for the single day (0-100). */
@@ -110,7 +110,7 @@ public class DailyReportKpiDTO {
         private int schemesSupplying;
         private int schemesNotSupplying;
         private double avgLpcd;
-        private double avgMld;
+        private double avgKld;
         private double regularSupplyPctWeek;
         private double readingSubmissionPct;
         private int anomalousCount;
