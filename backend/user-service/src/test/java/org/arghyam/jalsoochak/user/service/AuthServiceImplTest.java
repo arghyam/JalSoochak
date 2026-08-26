@@ -157,6 +157,11 @@ class AuthServiceImplTest {
         return new AdminUserRow(2L, "kc-sa", "sa@example.com", "91XXXXXXXXXX", 1, 2, "STATE_ADMIN", AdminUserStatus.ACTIVE, 0, null);
     }
 
+    /** SUPER_USER-equivalent role that lives on a real tenant (tenantId 1), not the system tenant. */
+    private AdminUserRow superStateAdminRow() {
+        return new AdminUserRow(3L, "kc-ssa", "ssa@example.com", "91XXXXXXXXXX", 1, 4, "SUPER_STATE_ADMIN", AdminUserStatus.ACTIVE, 0, null);
+    }
+
     private AdminUserRow deactivatedUser() {
         return new AdminUserRow(1L, "kc-uuid", "user@example.com", "91XXXXXXXXXX", 0, 1, "SUPER_USER", AdminUserStatus.INACTIVE, 0, null);
     }
@@ -354,10 +359,9 @@ class AuthServiceImplTest {
             assertEquals(FAKE_JWT, result.tokenResponse().getAccessToken());
         }
 
-        @ParameterizedTest(name = "SUPER_USER allowed for tenant status {0}")
-        @ValueSource(ints = {0, 4, 6}) // INACTIVE, SUSPENDED, ARCHIVED
-        @DisplayName("SUPER_USER: should still log in for INACTIVE, SUSPENDED and ARCHIVED tenants")
-        void login_superUser_blockedTenantStatus_succeeds(int tenantStatus) {
+        @Test
+        @DisplayName("SUPER_USER: home tenant is the system tenant (0), so no tenant status is ever consulted")
+        void login_superUser_systemTenant_skipsTenantStatusLookup() {
             when(userCommonRepository.findAdminUserByEmail("user@example.com")).thenReturn(Optional.of(superUserRow()));
             when(keycloakClient.obtainToken("user@example.com", "pass")).thenReturn(tokenResponse());
 
@@ -365,6 +369,27 @@ class AuthServiceImplTest {
 
             assertNotNull(result);
             assertEquals("SUPER_USER", result.tokenResponse().getRole());
+            // The bypass is structural: tenantId 0 short-circuits validateTenantStatus, so the
+            // tenant gate is never reached — no status can block a SUPER_USER login.
+            verify(userCommonRepository, never()).findTenantStatusByTenantId(any());
+        }
+
+        @ParameterizedTest(name = "SUPER_STATE_ADMIN allowed for tenant status {0}")
+        @ValueSource(ints = {0, 4, 6}) // INACTIVE, SUSPENDED, ARCHIVED
+        @DisplayName("SUPER_STATE_ADMIN: a SUPER_USER-equivalent role on a real tenant still logs in when the tenant is blocked")
+        void login_superStateAdmin_blockedTenantStatus_succeeds(int tenantStatus) {
+            // tenantId 1 is a real tenant, so validateTenantStatus does reach TenantAccessValidator
+            // and the status below is genuinely evaluated against the role.
+            when(userCommonRepository.findAdminUserByEmail("ssa@example.com")).thenReturn(Optional.of(superStateAdminRow()));
+            when(userCommonRepository.findTenantStatusByTenantId(1)).thenReturn(Optional.of(tenantStatus));
+            when(keycloakClient.obtainToken("ssa@example.com", "pass")).thenReturn(tokenResponse());
+            when(userCommonRepository.findTenantStateCodeById(1)).thenReturn(Optional.of("MP"));
+
+            AuthResult result = authService.login(loginRequest("ssa@example.com", "pass"));
+
+            assertNotNull(result);
+            assertEquals("SUPER_STATE_ADMIN", result.tokenResponse().getRole());
+            assertEquals(FAKE_JWT, result.tokenResponse().getAccessToken());
         }
     }
 

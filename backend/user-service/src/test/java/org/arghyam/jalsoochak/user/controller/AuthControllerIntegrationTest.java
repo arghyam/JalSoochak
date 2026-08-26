@@ -286,11 +286,19 @@ class AuthControllerIntegrationTest {
                     .andExpect(status().isForbidden());
         }
 
-        @ParameterizedTest(name = "tenant status {0} → 200 for SUPER_USER")
-        @ValueSource(ints = {TENANT_STATUS_INACTIVE, TENANT_STATUS_SUSPENDED, TENANT_STATUS_ARCHIVED})
-        @DisplayName("SUPER_USER login still succeeds for INACTIVE, SUSPENDED and ARCHIVED tenants → 200")
-        void login_superUser_blockedTenantStatus_returns200(int tenantStatus) throws Exception {
-            jdbcTemplate.update("UPDATE common_schema.tenant_master_table SET status = ? WHERE id = 1", tenantStatus);
+        @Test
+        @DisplayName("SUPER_USER on the system tenant bypasses the tenant gate entirely → 200")
+        void login_superUser_systemTenant_bypassesTenantStatusCheck() throws Exception {
+            // The system tenant (id 0) has no row in tenant_master_table, so if the login ever
+            // looked its status up the request would fail with "Tenant not found". Asserting the
+            // missing row is what makes the 200 below proof of the bypass rather than of a
+            // permissive status.
+            Integer systemTenantRows = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM common_schema.tenant_master_table WHERE id = 0", Integer.class);
+            assertEquals(0, systemTenantRows);
+
+            // Put every real tenant in a blocked status — none of them is the SUPER_USER's tenant.
+            jdbcTemplate.update("UPDATE common_schema.tenant_master_table SET status = ?", TENANT_STATUS_SUSPENDED);
             // tenantId 0 = system tenant, which is the SUPER_USER's home tenant
             seedUser("kc-super", "super@example.com", 0, ADMIN_LEVEL_SUPER_USER, 1);
             stubKeycloakToken(200, KEYCLOAK_TOKEN_RESPONSE);
@@ -298,7 +306,9 @@ class AuthControllerIntegrationTest {
             mockMvc.perform(post("/api/v1/auth/login")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"email\":\"super@example.com\",\"password\":\"Pass@123\"}"))
-                    .andExpect(status().isOk());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.user_role").value("SUPER_USER"))
+                    .andExpect(jsonPath("$.data.tenant_id").doesNotExist());
         }
 
         @Test
