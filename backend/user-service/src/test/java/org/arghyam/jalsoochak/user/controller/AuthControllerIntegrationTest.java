@@ -27,6 +27,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.keycloak.admin.client.Keycloak;
 import org.mockito.Answers;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -64,9 +66,16 @@ import jakarta.ws.rs.core.Response;
 class AuthControllerIntegrationTest {
 
     // Tenant status codes — mirrors TenantStatusEnum in tenant-service
+    private static final int TENANT_STATUS_INACTIVE   = 0;
     private static final int TENANT_STATUS_ONBOARDED  = 1;
     private static final int TENANT_STATUS_CONFIGURED = 2;
+    private static final int TENANT_STATUS_SUSPENDED  = 4;
     private static final int TENANT_STATUS_DEGRADED   = 5;
+    private static final int TENANT_STATUS_ARCHIVED   = 6;
+
+    // admin_level values from user_type_master_table (see sql/test-schema.sql)
+    private static final int ADMIN_LEVEL_SUPER_USER  = 1;
+    private static final int ADMIN_LEVEL_STATE_ADMIN = 2;
 
     private static final String KEYCLOAK_TOKEN_RESPONSE = """
             {"access_token":"test-at","refresh_token":"test-rt","expires_in":300,\
@@ -261,6 +270,45 @@ class AuthControllerIntegrationTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"email\":\"deactivated@example.com\",\"password\":\"Pass@123\"}"))
                     .andExpect(status().isForbidden());
+        }
+
+        @ParameterizedTest(name = "tenant status {0} → 403")
+        @ValueSource(ints = {TENANT_STATUS_INACTIVE, TENANT_STATUS_SUSPENDED, TENANT_STATUS_ARCHIVED})
+        @DisplayName("STATE_ADMIN login is blocked for INACTIVE, SUSPENDED and ARCHIVED tenants → 403")
+        void login_stateAdmin_blockedTenantStatus_returns403(int tenantStatus) throws Exception {
+            jdbcTemplate.update("UPDATE common_schema.tenant_master_table SET status = ? WHERE id = 1", tenantStatus);
+            seedUser("kc-blocked-sa", "blocked-sa@example.com", 1, ADMIN_LEVEL_STATE_ADMIN, 1);
+            stubKeycloakToken(200, KEYCLOAK_TOKEN_RESPONSE);
+
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"blocked-sa@example.com\",\"password\":\"Pass@123\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("SUPER_USER on the system tenant bypasses the tenant gate entirely → 200")
+        void login_superUser_systemTenant_bypassesTenantStatusCheck() throws Exception {
+            // The system tenant (id 0) has no row in tenant_master_table, so if the login ever
+            // looked its status up the request would fail with "Tenant not found". Asserting the
+            // missing row is what makes the 200 below proof of the bypass rather than of a
+            // permissive status.
+            Integer systemTenantRows = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM common_schema.tenant_master_table WHERE id = 0", Integer.class);
+            assertEquals(0, systemTenantRows);
+
+            // Put every real tenant in a blocked status — none of them is the SUPER_USER's tenant.
+            jdbcTemplate.update("UPDATE common_schema.tenant_master_table SET status = ?", TENANT_STATUS_SUSPENDED);
+            // tenantId 0 = system tenant, which is the SUPER_USER's home tenant
+            seedUser("kc-super", "super@example.com", 0, ADMIN_LEVEL_SUPER_USER, 1);
+            stubKeycloakToken(200, KEYCLOAK_TOKEN_RESPONSE);
+
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"super@example.com\",\"password\":\"Pass@123\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.user_role").value("SUPER_USER"))
+                    .andExpect(jsonPath("$.data.tenant_id").doesNotExist());
         }
 
         @Test

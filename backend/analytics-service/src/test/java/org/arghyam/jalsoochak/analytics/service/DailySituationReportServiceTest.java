@@ -25,7 +25,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link DailySituationReportService} — verifies the KPI assembly math
- * (MLD, LPCD, percentages, trend inputs), the SDO breakdown's scheme scoping, and the outage-section
+ * (KLD, LPCD, percentages, trend inputs), the SDO breakdown's scheme scoping, and the outage-section
  * toggle, using mocked repositories.
  */
 @ExtendWith(MockitoExtension.class)
@@ -97,7 +97,7 @@ class DailySituationReportServiceTest {
         DailyReportKpiDTO.DayKpis y = dto.getYesterday();
         assertThat(y.getSchemesSupplying()).isEqualTo(8);
         assertThat(y.getSchemesNotSupplying()).isEqualTo(2);
-        assertThat(y.getAvgMld()).isCloseTo(0.5, within(0.001));       // 500000 / 1e6
+        assertThat(y.getAvgKld()).isCloseTo(500.0, within(0.001));     // 500000 / 1e3
         assertThat(y.getAvgLpcd()).isCloseTo(500.0, within(0.001));    // 500000 / 1000
         assertThat(y.getReadingSubmissionPct()).isCloseTo(90.0, within(0.001)); // 9/10
         assertThat(y.getRegularSupplyPctWeek()).isCloseTo(71.4, within(0.05));  // 50/(10*7)

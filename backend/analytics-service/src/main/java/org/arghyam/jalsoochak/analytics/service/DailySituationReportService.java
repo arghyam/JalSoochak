@@ -188,7 +188,7 @@ public class DailySituationReportService {
                 .schemesSupplying(day.getSchemesSupplying())
                 .schemesNotSupplying(day.getSchemesNotSupplying())
                 .avgLpcd(day.getAvgLpcd())
-                .avgMld(day.getAvgMld())
+                .avgKld(day.getAvgKld())
                 .regularSupplyPctWeek(day.getRegularSupplyPctWeek())
                 .readingSubmissionPct(day.getReadingSubmissionPct())
                 .anomalousCount(day.getAnomalousCount())
@@ -217,7 +217,7 @@ public class DailySituationReportService {
                 .mapToInt(DailyReportKpiDTO.TypeCount::getCount)
                 .sum();
 
-        double avgMld = round1(litres / 1_000_000.0);
+        double avgKld = round1(litres / 1_000.0);
         double avgLpcd = population > 0 ? round1((double) litres / population) : 0.0;
         double regularSupplyPctWeek = totalSchemes > 0
                 ? round1(100.0 * supplyDaysWeek / ((long) totalSchemes * SUPPLY_WINDOW_DAYS)) : 0.0;
@@ -228,7 +228,7 @@ public class DailySituationReportService {
                 .schemesSupplying(supplying)
                 .schemesNotSupplying(Math.max(totalSchemes - supplying, 0))
                 .avgLpcd(avgLpcd)
-                .avgMld(avgMld)
+                .avgKld(avgKld)
                 .regularSupplyPctWeek(regularSupplyPctWeek)
                 .readingSubmissionPct(readingSubmissionPct)
                 .anomalousCount(anomalyCount)

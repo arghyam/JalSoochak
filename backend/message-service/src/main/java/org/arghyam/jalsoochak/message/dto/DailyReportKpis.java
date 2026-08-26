@@ -44,7 +44,7 @@ public class DailyReportKpis {
         private int schemesSupplying;
         private int schemesNotSupplying;
         private double avgLpcd;
-        private double avgMld;
+        private double avgKld;
         private double regularSupplyPctWeek;
         private double readingSubmissionPct;
         private int anomalousCount;
@@ -100,7 +100,7 @@ public class DailyReportKpis {
         private int schemesSupplying;
         private int schemesNotSupplying;
         private double avgLpcd;
-        private double avgMld;
+        private double avgKld;
         private double regularSupplyPctWeek;
         private double readingSubmissionPct;
         private int anomalousCount;

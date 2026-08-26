@@ -1041,7 +1041,7 @@ public class NotificationEventRouter {
                     .schemesSupplying(s.getSchemesSupplying())
                     .schemesNotSupplying(s.getSchemesNotSupplying())
                     .avgLpcd(s.getAvgLpcd())
-                    .avgMld(s.getAvgMld())
+                    .avgKld(s.getAvgKld())
                     .regularSupplyPctWeek(s.getRegularSupplyPctWeek())
                     .readingSubmissionPct(s.getReadingSubmissionPct())
                     .anomalousCount(s.getAnomalousCount())
