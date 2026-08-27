@@ -108,11 +108,11 @@ notification:
       api-url: https://api.sendgrid.com
       api-key: ${SENDGRID_API_KEY}
       templates:
-        password-reset: ${SENDGRID_TEMPLATE_PASSWORD_RESET:d-9d83de3639254c18b86fa2834f4a5db1}
-        reinvitation: ${SENDGRID_TEMPLATE_REINVITATION:d-3710ff4d9d874cf1950c589c6f71d752}
-        default-invitation: ${SENDGRID_TEMPLATE_DEFAULT_INVITATION:d-7721978b67bf4f0083891657ed584447}
-        super-user-invitation: ${SENDGRID_TEMPLATE_SUPER_USER_INVITATION:d-6ff964820aae4e03866dd39f64976287}
-        state-admin-invitation: ${SENDGRID_TEMPLATE_STATE_ADMIN_INVITATION:d-ec98926fa9ed4046b3bf9b85c7a1a7e3}
+        password-reset: ${SENDGRID_TEMPLATE_PASSWORD_RESET:d-f7088f302ac146faa4c165b7539e4cd9}
+        reinvitation: ${SENDGRID_TEMPLATE_REINVITATION:d-b3e1cb24d3bc40b3b8c3f0c19c8cff79}
+        default-invitation: ${SENDGRID_TEMPLATE_DEFAULT_INVITATION:d-4f225581b47a4c0ea8e1b84d4be740cb}
+        super-user-invitation: ${SENDGRID_TEMPLATE_SUPER_USER_INVITATION:d-c0f4763d5bd948d0879d4bec9e015646}
+        state-admin-invitation: ${SENDGRID_TEMPLATE_STATE_ADMIN_INVITATION:d-20c14eb80ba84feb87b157f4b1cf4bbc}
 
     # ── SMTP plain-text templates (used when provider: smtp) ─────────────────
     # Placeholders: {name}, {activation_link}, {expiry_hours},
