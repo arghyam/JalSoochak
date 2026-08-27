@@ -1459,7 +1459,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _fail("--tenant-dsn (or $TENANT_DSN) is required")
     if args.execute and not args.skip_analytics and not args.analytics_dsn:
         return _fail("--analytics-dsn (or $ANALYTICS_DSN) is required unless --skip-analytics")
-    if args.limit and args.execute and not args.additive:
+    if args.limit is not None and args.limit <= 0:
+        return _fail("--limit must be a positive number of rows")
+    if args.limit is not None and args.execute and not args.additive:
         # A truncated file is a truncated statement of who covers what: the
         # officers it does reach lose every scheme listed past the cut, because
         # the removal rule reads their absence as the CSV taking them away.
@@ -1476,7 +1478,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     LOG.info("Reading %s …", args.csv)
     rows, csv_issues = load_csv(args.csv, args.header_row, args.encoding)
-    if args.limit:
+    if args.limit is not None:
         rows = rows[: args.limit]
         keep = {r.row_no for r in rows}
         csv_issues = [i for i in csv_issues if i["row_no"] in keep]

@@ -155,7 +155,6 @@ def writers(conn):
             cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
             cur.execute(f"CREATE SCHEMA {schema}")
             cur.execute(SCHEME_DDL.format(schema=schema))
-    conn.commit()
 
     pii = _pii()
     made = {
@@ -448,7 +447,6 @@ def analytics(conn):
         cur.execute("DROP SCHEMA IF EXISTS analytics_schema CASCADE")
         cur.execute("CREATE SCHEMA analytics_schema")
         cur.execute(DIM_SCHEME_DDL)
-    conn.commit()
     yield AnalyticsWriter(conn, TENANT_ID)
     conn.rollback()
 

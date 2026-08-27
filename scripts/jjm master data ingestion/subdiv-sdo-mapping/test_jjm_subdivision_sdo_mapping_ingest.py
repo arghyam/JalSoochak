@@ -108,7 +108,9 @@ def write_csv(tmp_path, *lines: str, header: str = CSV_HEADER) -> str:
 
 
 def rows_of(tmp_path, *lines: str, header: str = CSV_HEADER):
-    return load_csv(write_csv(tmp_path, *lines, header=header), header_row=2, encoding="utf-8")
+    rows, issues, _ = load_csv(
+        write_csv(tmp_path, *lines, header=header), header_row=2, encoding="utf-8")
+    return rows, issues
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,13 +147,19 @@ class TestLoadCsv:
     def test_accepts_both_spellings_of_the_public_id_column(self, tmp_path):
         """The state misspells it 'pubic_id'. A corrected re-export must not
         break the tool, and neither must the original."""
-        typo, _ = rows_of(tmp_path, "SDV-1,Alpha,USR-1,A,9000000001")
-        fixed, _ = rows_of(
-            tmp_path, "SDV-1,Alpha,USR-1,A,9000000001", header=FIXED_CSV_HEADER
+        typo, _, typo_column = load_csv(
+            write_csv(tmp_path, "SDV-1,Alpha,USR-1,A,9000000001"),
+            header_row=2, encoding="utf-8",
+        )
+        fixed, _, fixed_column = load_csv(
+            write_csv(tmp_path, "SDV-1,Alpha,USR-1,A,9000000001", header=FIXED_CSV_HEADER),
+            header_row=2, encoding="utf-8",
         )
 
         assert typo[0].user_public_id == "USR-1"
         assert fixed[0].user_public_id == "USR-1"
+        # Which spelling was read is reported, not silently absorbed.
+        assert (typo_column, fixed_column) == ("pubic_id", "public_id")
 
     def test_public_id_wins_over_the_typo_when_both_are_present(self):
         assert resolve_public_id_column(["subdivision", "pubic_id", "public_id"]) == "public_id"
@@ -221,7 +229,7 @@ class TestLoadCsv:
         if not os.path.exists(csv_path):
             pytest.skip("the state export is not checked out here")
 
-        rows, _ = load_csv(csv_path, header_row=2, encoding="utf-8-sig")
+        rows, _, _ = load_csv(csv_path, header_row=2, encoding="utf-8-sig")
 
         assert len(rows) == 106
         assert all(r.role == SDO_ROLE for r in rows)
@@ -438,7 +446,7 @@ class TestSubDivisionResolution:
     def test_resolves_a_sub_division_by_title(self, db, tmp_path):
         division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
         sub = seed_dept(db, "Kathiatoli", SUB_DIVISION_LEVEL, parent_id=division)
-        seed_scheme(db, "S1", sub)
+        scheme = seed_scheme(db, "S1", sub)
 
         plan = plan_for(db, tmp_path, "SDV-052,Kathiatoli,USR-1,A,9000000001")
 
@@ -446,7 +454,7 @@ class TestSubDivisionResolution:
         assert resolved.category == DIV_MATCHED
         assert resolved.matched_by == BY_TITLE
         assert resolved.node_id == sub
-        assert resolved.scheme_ids == {*resolved.scheme_ids}
+        assert resolved.scheme_ids == {scheme}
         assert len(resolved.scheme_ids) == 1
 
     def test_a_division_of_the_same_name_is_not_a_candidate(self, db, tmp_path):

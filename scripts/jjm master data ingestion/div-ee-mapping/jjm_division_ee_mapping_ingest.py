@@ -610,11 +610,12 @@ def resolve_divisions(
     by_title: dict[str, list[int]] = defaultdict(list)
     by_core: dict[str, list[int]] = defaultdict(list)
     for node in nodes.values():
+        if node.level != db.division_level:
+            continue
         if node.state_dept_id:
             by_state_id[node.state_dept_id.strip().lower()].append(node.id)
-        if node.level == db.division_level:
-            by_title[norm_name(node.title)].append(node.id)
-            by_core[title_core(node.title, db.node_kind.title_suffixes)].append(node.id)
+        by_title[norm_name(node.title)].append(node.id)
+        by_core[title_core(node.title, db.node_kind.title_suffixes)].append(node.id)
 
     owners = db.load_state_dept_id_owners(p.public_id for p in plans.values() if p.public_id)
 
@@ -792,9 +793,15 @@ def collapse_engineers(rows: list[MappingRow]) -> tuple[list[UserRow], dict[str,
         # Later rows win on name, matching the scheme ingest; the disagreement
         # is reported either way.
         last_named = member_rows[-1]
+        # The state only fills public_id on some of a person's rows, so take the
+        # first one that carries a code rather than losing it to row order.
+        public_id = next(
+            (r.user_public_id for r in member_rows if r.user_public_id),
+            first.user_public_id,
+        )
         user_rows.append(UserRow(
             row_no=first.row_no,
-            public_id=first.user_public_id,
+            public_id=public_id,
             name=last_named.name,
             phone_raw=first.phone_raw,
             phone=first.phone,

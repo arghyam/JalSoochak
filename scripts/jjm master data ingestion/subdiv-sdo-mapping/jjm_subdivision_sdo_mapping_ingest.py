@@ -297,8 +297,12 @@ def resolve_public_id_column(columns: Iterable[str]) -> Optional[str]:
     return None
 
 
-def load_csv(path: str, header_row: int, encoding: str) -> tuple[list[SdoMappingRow], list[dict]]:
-    """Read the CSV and normalise every row. Returns (rows, per-row issue records).
+def load_csv(path: str, header_row: int,
+             encoding: str) -> tuple[list[SdoMappingRow], list[dict], str]:
+    """Read the CSV and normalise every row.
+
+    Returns (rows, per-row issue records, the public-id spelling this file used)
+    — the last of these so run_info can say which one was read.
 
     The state's export puts a title line above the header, hence the header_row
     argument; keep_default_na is off so a phone like '0091…' survives as text
@@ -387,7 +391,7 @@ def load_csv(path: str, header_row: int, encoding: str) -> tuple[list[SdoMapping
                 "issue": detail,
             })
 
-    return rows, issue_records
+    return rows, issue_records, public_id_column
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -915,7 +919,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _fail(str(exc))
 
     LOG.info("Reading %s …", args.csv)
-    rows, csv_issues = load_csv(args.csv, args.header_row, args.encoding)
+    rows, csv_issues, public_id_column = load_csv(args.csv, args.header_row, args.encoding)
     if args.limit:
         rows = rows[: args.limit]
         keep = {r.row_no for r in rows}
@@ -976,6 +980,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             "analytics": "skipped" if args.skip_analytics else "included",
             "phones_in_report": "full" if args.include_pii else "masked",
             "role": f"{SDO_ROLE} for every row; never created by this tool",
+            "officer_public_id_column": public_id_column + (
+                " (the state export's misspelling of 'public_id')"
+                if public_id_column == "pubic_id" else ""
+            ),
             "role_updates": "withheld" if args.no_role_updates else "applied",
             "sdos_without_schemes": "onboarded" if args.create_users_without_schemes
             else "skipped",

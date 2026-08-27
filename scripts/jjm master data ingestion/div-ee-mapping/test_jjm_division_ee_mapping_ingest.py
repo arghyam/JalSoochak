@@ -618,20 +618,23 @@ class TestResolveDivisions:
         """V37's partial UNIQUE index would reject a second owner, so the
         collision is reported instead of aborting the run."""
         target = seed_dept(db, "Alpha Division", 4)
-        owner = seed_dept(db, "Beta Division", 4, state_dept_id="DIV-2")
+        gamma = seed_dept(db, "Gamma Division", 4)
+        # A node at another level already holds DIV-2; the index V37 creates is
+        # over the whole table, so it collides with Gamma's claim on the code.
+        owner = seed_dept(db, "Beta Sub Division", 5, state_dept_id="DIV-2")
         rows, _ = rows_of(
             tmp_path,
             "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer",
-            "DIV-2,Alpha Division,USR-2,B,9000000002,executive-engineer",
+            "DIV-2,Gamma Division,USR-2,B,9000000002,executive-engineer",
         )
 
         plans, _ = resolve_divisions(rows, db)
 
         assert plans["div-1"].node_id == target
         assert plans["div-1"].state_dept_id_change == (None, "DIV-1")
-        # DIV-2 resolves to Beta on its state id, which it already carries.
-        assert plans["div-2"].node_id == owner
+        assert plans["div-2"].node_id == gamma
         assert plans["div-2"].state_dept_id_change is None
+        assert f"node id {owner}" in plans["div-2"].withheld["state_dept_id"]
 
     def test_two_csv_ids_for_one_node_write_neither(self, db, tmp_path):
         """Only one of them could ever stick; picking one would be a coin toss."""

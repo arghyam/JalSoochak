@@ -509,7 +509,10 @@ class UserDb(TenantDb):
         """lower(state_user_id) -> id of the live user already holding it."""
         if not self.with_state_user_id:
             return {}
-        wanted = [c for c in dict.fromkeys(c.strip() for c in codes) if c]
+        # Callers look these up by lower(code), so the query has to match that
+        # way too — otherwise a code we hold in another case reads as free and
+        # we write a second copy of the same state id.
+        wanted = [c for c in dict.fromkeys(c.strip().lower() for c in codes) if c]
         if not wanted:
             return {}
         owners: dict[str, int] = {}
@@ -518,7 +521,7 @@ class UserDb(TenantDb):
                 cur.execute(f"""
                     SELECT lower(state_user_id), id
                     FROM {self.schema}.user_table
-                    WHERE deleted_at IS NULL AND state_user_id = ANY(%s)
+                    WHERE deleted_at IS NULL AND lower(state_user_id) = ANY(%s)
                 """, (wanted[start:start + 5000],))
                 for code, uid in cur:
                     owners.setdefault(code, uid)

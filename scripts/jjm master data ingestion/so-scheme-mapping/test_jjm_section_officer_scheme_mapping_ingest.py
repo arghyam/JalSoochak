@@ -382,6 +382,14 @@ class TestCli:
 
         assert "--limit cannot be combined" not in caplog.text
 
+    def test_a_zero_limit_is_refused_rather_than_ignored(self, tmp_path, caplog):
+        """A falsy limit used to slip past both the guard and the slice, so
+        --limit 0 --execute quietly ran the whole file."""
+        code = main(_cli(tmp_path, "--limit", "0", "--execute"))
+
+        assert code == 2
+        assert "--limit must be a positive number of rows" in caplog.text
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Database-backed fixtures

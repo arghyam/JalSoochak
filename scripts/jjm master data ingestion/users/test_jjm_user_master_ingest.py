@@ -419,6 +419,20 @@ class TestClassifyUsers:
         assert FIELD_STATE_USER_ID not in decisions[0].changes
         assert f"user id {owner}" in decisions[0].withheld[FIELD_STATE_USER_ID]
 
+    def test_an_owner_holding_the_code_in_another_case_still_counts(self, db, roles):
+        """The owner lookup is keyed on lower(code); a code we already hold in
+        another case must not read as free."""
+        owner = seed_user(db, "First Owner", "919000000001", roles["PUMP_OPERATOR"],
+                          state_user_id="usr-1")
+        seed_user(db, "Other Person", "919000000002", roles["PUMP_OPERATOR"])
+
+        decisions = classify_users(
+            [_row(3, "USR-1", "Other Person", "919000000002", "PUMP_OPERATOR")], db
+        )
+
+        assert FIELD_STATE_USER_ID not in decisions[0].changes
+        assert f"user id {owner}" in decisions[0].withheld[FIELD_STATE_USER_ID]
+
     def test_duplicate_and_invalid_rows_never_reach_the_database(self, db):
         rows = [
             _row(3, "USR-1", "A", "919000000001", "PUMP_OPERATOR"),
