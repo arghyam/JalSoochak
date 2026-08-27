@@ -30,6 +30,7 @@ from jjm_user_master_ingest import (  # noqa: E402
     CAT_EXISTING,
     CAT_INVALID,
     CAT_NEW,
+    CAT_ROLE_NOT_INGESTED,
     FIELD_NAME,
     FIELD_ROLE,
     FIELD_STATE_USER_ID,
@@ -38,6 +39,8 @@ from jjm_user_master_ingest import (  # noqa: E402
     UserDb,
     UserDecision,
     UserRow,
+    EMAIL_PREFIXES,
+    INGESTED_ROLES,
     UserWriter,
     build_role_plans,
     canonical_role,
@@ -53,10 +56,9 @@ from jjm_user_master_ingest import IngestPlan  # noqa: E402
 DSN = os.environ.get("JJM_TEST_DSN", "postgresql://postgres:testpw@localhost:55432/shared_db")
 SCHEMA = "tenant_usertest"
 LEGACY_SCHEMA = "tenant_usertest_prev36"
-# Roles invented for these tests. Real deployments cannot hold them, so "a role we
-# do not have yet" stays true whatever the target database already contains.
-NEW_ROLE = "ZZ_TEST_KHALASI"
-NEW_ROLE_2 = "ZZ_TEST_EXECUTIVE_ENGINEER"
+# The one in-scope role a stock deployment does not hold. The db fixture deletes
+# it so "a role we do not have yet" is true whatever the target database contains.
+NEW_ROLE = "EXECUTIVE_ENGINEER"
 TENANT_ID = 1
 ACTOR_ID = 1
 
@@ -185,11 +187,11 @@ class TestCanonicalRole:
         ("section-officer", "SECTION_OFFICER"),
         ("sdo", "SUB_DIVISIONAL_OFFICER"),
         ("executive-engineer", "EXECUTIVE_ENGINEER"),
-        ("jal-sahayak", "JAL_SAHAYAK"),
-        ("khalasi", "KHALASI"),
-        # Unknown roles are canonicalised, not dropped — that is how a new role
-        # reaches user_type_master_table.
-        ("block-coordinator", "BLOCK_COORDINATOR"),
+        # Everything below is off the allow-list: no canonical name, so the
+        # row is skipped rather than onboarded under an invented role.
+        ("jal-sahayak", ""),
+        ("khalasi", ""),
+        ("block-coordinator", ""),
         ("", ""),
         ("!!!", ""),
     ])
@@ -199,7 +201,13 @@ class TestCanonicalRole:
     def test_email_prefix_per_role(self):
         assert email_prefix("PUMP_OPERATOR") == "po_"
         assert email_prefix("SUB_DIVISIONAL_OFFICER") == "sdo_"
+        assert email_prefix("EXECUTIVE_ENGINEER") == "ee_"
+        # Defensive only — every allow-listed role has a prefix of its own.
         assert email_prefix("BLOCK_COORDINATOR") == "usr_"
+
+    def test_every_allow_listed_role_has_an_email_prefix(self):
+        """A role without one would mint addresses under the fallback prefix."""
+        assert INGESTED_ROLES <= set(EMAIL_PREFIXES)
 
 
 class TestSafeMask:
@@ -207,6 +215,71 @@ class TestSafeMask:
         assert safe_mask("919000000001") == "91XXXXXXXX01"
         assert safe_mask("1234") == "XXXX"
         assert safe_mask("") == ""
+
+
+class TestRolesOutOfScope:
+    """Only jal-mitra, section-officer, sdo and executive-engineer are ingested."""
+
+    def test_load_csv_marks_them_without_calling_the_row_broken(self, tmp_path):
+        path = tmp_path / "users.csv"
+        path.write_text(
+            CSV_HEADER
+            + "USR-1,Sahayak Person,9000000001,jal-sahayak\n"
+            + "USR-2,Khalasi Person,9000000002,khalasi\n"
+            + "USR-3,Mitra Person,9000000003,jal-mitra\n",
+            encoding="utf-8",
+        )
+
+        rows, issues = load_csv(str(path), header_row=2, encoding="utf-8")
+
+        assert [r.role_not_ingested for r in rows] == [True, True, False]
+        # Not a blocking issue: the row is legible, just out of scope.
+        assert all(r.blocking_issues == [] for r in rows)
+        role_issues = [i for i in issues if i["issue_kind"] == "role"]
+        assert len(role_issues) == 2
+        assert "jal-sahayak" in role_issues[0]["issue"]
+        assert rows[2].role == "PUMP_OPERATOR"
+
+    def test_they_are_categorised_as_skipped_and_never_written(self, db):
+        rows = [
+            UserRow(row_no=3, public_id="USR-1", name="Sahayak Person",
+                    phone_raw="919000000001", phone="919000000001",
+                    role_raw="jal-sahayak", role=""),
+            _row(4, "USR-2", "Mitra Person", "919000000002", "PUMP_OPERATOR"),
+        ]
+
+        decisions = classify_users(rows, db)
+
+        assert decisions[0].category == CAT_ROLE_NOT_INGESTED
+        assert decisions[0].will_write is False
+        assert "jal-sahayak" in decisions[0].reason
+        assert decisions[1].category == CAT_NEW
+
+    def test_an_out_of_scope_row_does_not_knock_out_its_phone_twin(self, db):
+        """A khalasi row sharing a jal-mitra's number must not skip the jal-mitra:
+        a role we are not ingesting has no say over one we are."""
+        rows = [
+            UserRow(row_no=3, public_id="USR-1", name="Same Person",
+                    phone_raw="919000000001", phone="919000000001",
+                    role_raw="khalasi", role=""),
+            _row(4, "USR-2", "Same Person", "919000000001", "PUMP_OPERATOR"),
+        ]
+
+        decisions = classify_users(rows, db)
+
+        assert decisions[0].category == CAT_ROLE_NOT_INGESTED
+        assert decisions[1].category == CAT_NEW
+
+    def test_two_in_scope_rows_on_one_phone_still_skip_each_other(self, db):
+        """The duplicate rule is unchanged for rows that are both candidates."""
+        rows = [
+            _row(3, "USR-1", "A", "919000000001", "SECTION_OFFICER"),
+            _row(4, "USR-2", "B", "919000000001", "SUB_DIVISIONAL_OFFICER"),
+        ]
+
+        decisions = classify_users(rows, db)
+
+        assert [d.category for d in decisions] == [CAT_DUPLICATE, CAT_DUPLICATE]
 
 
 class TestFindCsvDuplicates:
@@ -225,27 +298,35 @@ class TestFindCsvDuplicates:
 
 
 class TestBuildRolePlans:
-    def test_splits_roles_into_existing_create_and_blocked(self):
+    def test_splits_roles_into_existing_create_blocked_and_skipped(self):
         from jjm_user_master_ingest import UserTypeRow
 
+        khalasi = UserRow(row_no=6, public_id="USR-4", name="D", phone_raw="919000000004",
+                          phone="919000000004", role_raw="khalasi", role="")
         decisions = [
             UserDecision(_row(3, "USR-1", "A", "919000000001", "PUMP_OPERATOR"), CAT_NEW),
             UserDecision(_row(4, "USR-2", "B", "919000000002", NEW_ROLE), CAT_NEW),
-            UserDecision(_row(5, "USR-3", "C", "919000000003", "JAL_SAHAYAK"), CAT_EXISTING),
+            UserDecision(_row(5, "USR-3", "C", "919000000003", "SECTION_OFFICER"), CAT_EXISTING),
+            UserDecision(khalasi, CAT_ROLE_NOT_INGESTED),
             # Skipped rows must not drag a role into existence.
-            UserDecision(_row(6, "USR-4", "D", "919000000004", "GHOST_ROLE"), CAT_INVALID),
+            UserDecision(_row(7, "USR-5", "E", "919000000005", "SUB_DIVISIONAL_OFFICER"),
+                         CAT_INVALID),
         ]
         user_types = {
             "PUMP_OPERATOR": UserTypeRow(4, "PUMP_OPERATOR", False),
-            "JAL_SAHAYAK": UserTypeRow(9, "JAL_SAHAYAK", True),
+            "SECTION_OFFICER": UserTypeRow(9, "SECTION_OFFICER", True),
         }
 
         plans = {p.role: p for p in build_role_plans(decisions, user_types)}
 
         assert plans["PUMP_OPERATOR"].action == "existing"
         assert plans[NEW_ROLE].action == "create"
-        assert plans["JAL_SAHAYAK"].action == "blocked_soft_deleted"
-        assert "GHOST_ROLE" not in plans
+        assert plans["SECTION_OFFICER"].action == "blocked_soft_deleted"
+        # Out-of-scope roles are reported by their CSV slug, with a row count,
+        # so the operator can see what the run left out.
+        assert plans["khalasi"].action == "not_ingested"
+        assert plans["khalasi"].csv_rows == 1
+        assert "SUB_DIVISIONAL_OFFICER" not in plans
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -287,8 +368,8 @@ def db(conn):
         # Rolled back with everything else; guarantees a clean slate even if a
         # previous interrupted run left one behind.
         cur.execute(
-            "DELETE FROM common_schema.user_type_master_table WHERE c_name = ANY(%s)",
-            ([NEW_ROLE, NEW_ROLE_2],),
+            "DELETE FROM common_schema.user_type_master_table WHERE c_name = %s",
+            (NEW_ROLE,),
         )
         cur.execute(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
         cur.execute(f"CREATE SCHEMA {SCHEMA}")
@@ -446,6 +527,109 @@ class TestClassifyUsers:
 
         assert [d.category for d in decisions] == [CAT_DUPLICATE, CAT_DUPLICATE, CAT_INVALID]
         assert all(not d.will_write for d in decisions)
+
+
+class TestOfficerPromotionGate:
+    """Promotions into GATED_TARGET_ROLES need --allow-officer-promotions."""
+
+    def test_promotion_to_executive_engineer_is_withheld_by_default(self, db, roles):
+        """A sheet must not widen someone's access on its own say-so."""
+        seed_user(db, "Officer Person", "919000000001", roles["SECTION_OFFICER"])
+
+        decision = classify_users(
+            [_row(3, "USR-1", "Officer Person", "919000000001", "EXECUTIVE_ENGINEER")], db
+        )[0]
+
+        assert FIELD_ROLE not in decision.changes
+        assert decision.gated_promotion is True
+        assert "--allow-officer-promotions" in decision.withheld[FIELD_ROLE]
+        # Everything else about the row still applies.
+        assert decision.changes[FIELD_STATE_USER_ID] == (None, "USR-1")
+
+    @pytest.mark.parametrize("held", [
+        "SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER", "PUMP_OPERATOR",
+    ])
+    def test_the_gate_is_on_the_target_role_not_the_starting_point(self, db, roles, held):
+        seed_user(db, "Person", "919000000001", roles[held])
+
+        decision = classify_users(
+            [_row(3, "USR-1", "Person", "919000000001", "EXECUTIVE_ENGINEER")], db
+        )[0]
+
+        assert decision.gated_promotion is True
+        assert FIELD_ROLE not in decision.changes
+
+    def test_allow_officer_promotions_applies_it(self, db, roles):
+        seed_user(db, "Officer Person", "919000000001", roles["SUB_DIVISIONAL_OFFICER"])
+
+        decision = classify_users(
+            [_row(3, "USR-1", "Officer Person", "919000000001", "EXECUTIVE_ENGINEER")],
+            db, allow_promotions=True,
+        )[0]
+
+        assert decision.changes[FIELD_ROLE] == ("SUB_DIVISIONAL_OFFICER", "EXECUTIVE_ENGINEER")
+        assert decision.gated_promotion is False
+        assert FIELD_ROLE not in decision.withheld
+
+    def test_a_new_executive_engineer_is_onboarded_not_gated(self, db):
+        """The gate is about promotions. Onboarding is not a promotion."""
+        decision = classify_users(
+            [_row(3, "USR-1", "Fresh Engineer", "919000000002", "EXECUTIVE_ENGINEER")], db
+        )[0]
+
+        assert decision.category == CAT_NEW
+        assert decision.gated_promotion is False
+        assert decision.withheld == {}
+
+    def test_an_existing_executive_engineer_is_not_a_promotion(self, db, roles):
+        with db.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO common_schema.user_type_master_table (c_name) VALUES (%s) "
+                "ON CONFLICT (c_name) DO NOTHING", ("EXECUTIVE_ENGINEER",))
+        engineer = {name: row.id for name, row in db.load_user_types().items()}
+        seed_user(db, "Engineer Person", "919000000001", engineer["EXECUTIVE_ENGINEER"])
+
+        decision = classify_users(
+            [_row(3, "", "Engineer Person", "919000000001", "EXECUTIVE_ENGINEER")], db
+        )[0]
+
+        assert decision.changes == {}
+        assert decision.gated_promotion is False
+
+    def test_an_ungated_role_change_still_applies_by_default(self, db, roles):
+        seed_user(db, "Field Person", "919000000001", roles["PUMP_OPERATOR"])
+
+        decision = classify_users(
+            [_row(3, "", "Field Person", "919000000001", "SECTION_OFFICER")], db
+        )[0]
+
+        assert decision.changes[FIELD_ROLE] == ("PUMP_OPERATOR", "SECTION_OFFICER")
+        assert decision.gated_promotion is False
+
+    def test_no_role_updates_wins_over_allow_promotions(self, db, roles):
+        """--no-role-updates means no role changes at all, gated or otherwise."""
+        seed_user(db, "Officer Person", "919000000001", roles["SECTION_OFFICER"])
+
+        decision = classify_users(
+            [_row(3, "", "Officer Person", "919000000001", "EXECUTIVE_ENGINEER")],
+            db, update_roles=False, allow_promotions=True,
+        )[0]
+
+        assert FIELD_ROLE not in decision.changes
+        assert "--no-role-updates" in decision.withheld[FIELD_ROLE]
+        assert decision.gated_promotion is False
+
+    def test_an_admin_is_protected_even_from_a_promotion(self, db, roles):
+        """PROTECTED_ROLES is checked first: the message must name the real reason."""
+        seed_user(db, "Admin Person", "919000000001", roles["STATE_ADMIN"])
+
+        decision = classify_users(
+            [_row(3, "", "Admin Person", "919000000001", "EXECUTIVE_ENGINEER")],
+            db, allow_promotions=True,
+        )[0]
+
+        assert FIELD_ROLE not in decision.changes
+        assert "STATE_ADMIN" in decision.withheld[FIELD_ROLE]
 
 
 class TestInsertUsers:
@@ -668,22 +852,23 @@ class TestCreateRoles:
     def test_creates_only_the_missing_roles(self, db, writer, roles):
         plans = [
             RolePlan("PUMP_OPERATOR", ["jal-mitra"], 10, roles["PUMP_OPERATOR"], "existing"),
-            RolePlan(NEW_ROLE, ["zz-test-khalasi"], 3, None, "create"),
-            RolePlan(NEW_ROLE_2, ["zz-test-executive-engineer"], 2, None, "create"),
+            RolePlan(NEW_ROLE, ["executive-engineer"], 43, None, "create"),
+            # An out-of-scope role is in the report but must never be created.
+            RolePlan("khalasi", ["khalasi"], 143, None, "not_ingested"),
         ]
 
         created = writer.create_roles(plans)
 
-        assert sorted(created) == sorted([NEW_ROLE, NEW_ROLE_2])
+        assert list(created) == [NEW_ROLE]
         with db.conn.cursor() as cur:
             cur.execute(
                 "SELECT c_name, created_by FROM common_schema.user_type_master_table "
-                "WHERE c_name = ANY(%s)", ([NEW_ROLE, NEW_ROLE_2],)
+                "WHERE upper(c_name) = ANY(%s)", ([NEW_ROLE, "KHALASI"],)
             )
             rows = dict(cur.fetchall())
         # created_by carries an FK to tenant_admin_user_master_table, which
         # --actor-id is not an id in — it stays NULL rather than breaking.
-        assert rows == {NEW_ROLE: None, NEW_ROLE_2: None}
+        assert rows == {NEW_ROLE: None}
 
 
 class TestExecuteTenant:
@@ -691,7 +876,7 @@ class TestExecuteTenant:
         existing = seed_user(db, "Old Name", "919000000001", roles["PUMP_OPERATOR"])
         rows = [
             _row(3, "USR-1", "New Name", "919000000001", "SECTION_OFFICER"),
-            _row(4, "USR-2", "Khalasi Person", "919000000002", NEW_ROLE),
+            _row(4, "USR-2", "Engineer Person", "919000000002", NEW_ROLE),
         ]
         decisions = classify_users(rows, db)
         plan = plan_of(decisions, db)
@@ -712,7 +897,7 @@ class TestExecuteTenant:
             assert cur.fetchone() == (NEW_ROLE, "USR-2")
 
     def test_no_create_roles_aborts_before_writing_anything(self, db, writer):
-        rows = [_row(3, "USR-2", "Khalasi Person", "919000000002", NEW_ROLE)]
+        rows = [_row(3, "USR-2", "Engineer Person", "919000000002", NEW_ROLE)]
         plan = plan_of(classify_users(rows, db), db)
 
         with pytest.raises(SystemExit, match=NEW_ROLE):

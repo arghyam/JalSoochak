@@ -29,6 +29,7 @@ The phone number is the identity, exactly as it is everywhere else in the
 platform: the CSV number is normalised to the 91XXXXXXXXXX form the DB stores,
 HMAC-hashed, and looked up against user_table.phone_number_hash.
 
+  role outside this ingestion's scope            -> skip the row (see Roles)
   no live user with this number                  -> insert
   exactly one live user                          -> update the fields that differ
   number repeated within the CSV                 -> skip every row for it
@@ -52,20 +53,41 @@ state_user_id  OPT-IN, --with-state-user-id. The CSV's public_id: filled in when
                against a tenant that has not been migrated yet. A later run with
                the option on backfills every public_id.
 role           the CSV master is authoritative, so a differing role is applied
-               (--no-role-updates leaves every existing role alone). One
-               exception, always reported, never silent: an account holding an
-               administrative role (see PROTECTED_ROLES) is never demoted by a
-               spreadsheet.
+               (--no-role-updates leaves every existing role alone). Two
+               exceptions, always reported, never silent:
+
+                 * an account holding an administrative role (PROTECTED_ROLES)
+                   is never demoted by a spreadsheet;
+                 * a promotion into a GATED_TARGET_ROLE — EXECUTIVE_ENGINEER,
+                   most often from SECTION_OFFICER or SUB_DIVISIONAL_OFFICER —
+                   needs --allow-officer-promotions. The gate is on the target
+                   role, so no starting point slips past it, and it covers role
+                   *changes* only: a new user the CSV already lists as an
+                   EXECUTIVE_ENGINEER is onboarded as one.
+
+               Either way the row's name and state_user_id still apply; only the
+               role is held back, and the conflicts sheet lists every instance.
 
 Phone number, email, password and status of an existing user are never touched.
 
 Roles
 -----
-Every role named by the CSV is mapped to its canonical c_name (ROLE_ALIASES);
-an unrecognised one is canonicalised as UPPER_SNAKE_CASE. Canonical names that
-common_schema.user_type_master_table does not hold yet are created by an execute
-run (--no-create-roles aborts instead). New roles are listed in the workbook's
-role_summary sheet — read it before executing.
+ROLE_ALIASES is an allow-list, and only four roles are in scope:
+
+  jal-mitra           -> PUMP_OPERATOR
+  section-officer     -> SECTION_OFFICER
+  sdo                 -> SUB_DIVISIONAL_OFFICER
+  executive-engineer  -> EXECUTIVE_ENGINEER
+
+Every other role in the CSV — jal-sahayak and khalasi in the Assam master, and
+anything a future export invents — is skipped as ROLE_NOT_INGESTED. Those rows
+are counted in the workbook's role_summary sheet and listed one by one in
+csv_issues, so what was left out is visible rather than merely absent. They are
+never onboarded and never create a user type.
+
+Of the four, only EXECUTIVE_ENGINEER is missing from a stock deployment; an
+execute run inserts it into common_schema.user_type_master_table
+(--no-create-roles aborts instead). Check role_summary before executing.
 
 PII
 ---
@@ -154,9 +176,12 @@ LOG = logging.getLogger("jjm-user-ingest")
 CSV_COLUMNS = ["public_id", "name", "phone", "role"]
 
 # CSV role slug -> common_schema.user_type_master_table.c_name.
-# Anything not listed here is canonicalised as UPPER_SNAKE_CASE and, if we do
-# not hold it yet, created — so a new role in a future sheet is onboarded rather
-# than silently dropped, and is always surfaced in the role_summary sheet first.
+#
+# This is an ALLOW-LIST, and the only roles this ingestion covers. A CSV row
+# naming anything else — jal-sahayak, khalasi, or a role invented in some future
+# export — is skipped as ROLE_NOT_INGESTED and reported, never guessed at and
+# never turned into a new user type. Widening the scope means adding the slug
+# here (plus an EMAIL_PREFIXES entry) and nothing else.
 ROLE_ALIASES = {
     "jal-mitra": "PUMP_OPERATOR",
     "jalmitra": "PUMP_OPERATOR",
@@ -168,14 +193,28 @@ ROLE_ALIASES = {
     "sub-divisional-officer": "SUB_DIVISIONAL_OFFICER",
     "executive-engineer": "EXECUTIVE_ENGINEER",
     "ee": "EXECUTIVE_ENGINEER",
-    "jal-sahayak": "JAL_SAHAYAK",
-    "khalasi": "KHALASI",
 }
+
+# The canonical names the allow-list can produce. Of these, only
+# EXECUTIVE_ENGINEER is missing from a stock deployment, so it is the only role
+# an execute run can ever create.
+INGESTED_ROLES = frozenset(ROLE_ALIASES.values())
 
 # Accounts holding one of these are never demoted by the CSV: a spreadsheet
 # listing someone as a field role must not strip an administrator's access.
 # Their name and state_user_id are still reconciled; only the role is withheld.
 PROTECTED_ROLES = {"SUPER_USER", "STATE_ADMIN", "SUPER_STATE_ADMIN", "SUPPORT_ADMIN"}
+
+# Moving an EXISTING user into one of these is a promotion into a senior
+# departmental post — most often SECTION_OFFICER or SUB_DIVISIONAL_OFFICER ->
+# EXECUTIVE_ENGINEER. It is withheld and reported unless
+# --allow-officer-promotions is passed, so a widened access level is always a
+# decision somebody made rather than a side effect of importing a sheet.
+#
+# Gating is on the TARGET role, so no starting point slips past it. It applies
+# to role *changes* only: onboarding a brand-new user the CSV already lists as
+# an EXECUTIVE_ENGINEER is not a promotion and is never gated.
+GATED_TARGET_ROLES = {"EXECUTIVE_ENGINEER"}
 
 # PumpOperatorUploadChunkProcessor.emailPrefix — the generated login address for
 # an onboarded user is derived from their phone number and role.
@@ -184,9 +223,9 @@ EMAIL_PREFIXES = {
     "SECTION_OFFICER": "so_",
     "SUB_DIVISIONAL_OFFICER": "sdo_",
     "EXECUTIVE_ENGINEER": "ee_",
-    "JAL_SAHAYAK": "js_",
-    "KHALASI": "kh_",
 }
+# Unreachable while every allow-listed role has a prefix above; kept so that
+# adding a role to ROLE_ALIASES cannot silently produce a "None…" address.
 DEFAULT_EMAIL_PREFIX = "usr_"
 
 # user_table columns update_users may touch, with the cast each one needs in the
@@ -208,23 +247,25 @@ FIELD_STATE_USER_ID = "state_user_id"
 CAT_NEW = "NEW_USER"
 CAT_EXISTING = "EXISTING_USER"
 CAT_DUPLICATE = "DUPLICATE_WITHIN_CSV"
+CAT_ROLE_NOT_INGESTED = "ROLE_NOT_INGESTED"
 CAT_INVALID = "INVALID_CSV_ROW"
 
-CATEGORY_ORDER = [CAT_NEW, CAT_EXISTING, CAT_DUPLICATE, CAT_INVALID]
+CATEGORY_ORDER = [CAT_NEW, CAT_EXISTING, CAT_DUPLICATE, CAT_ROLE_NOT_INGESTED, CAT_INVALID]
 CATEGORY_ACTION = {
     CAT_NEW: "insert",
     CAT_EXISTING: "update (only the fields that differ)",
     CAT_DUPLICATE: "skip",
+    CAT_ROLE_NOT_INGESTED: "skip",
     CAT_INVALID: "skip",
 }
 CATEGORY_DESCRIPTION = {
     CAT_NEW: "No live user holds this phone number",
     CAT_EXISTING: "One live user holds this phone number",
     CAT_DUPLICATE: "The phone number or public_id appears on more than one CSV row",
+    CAT_ROLE_NOT_INGESTED: "The row's role is outside this ingestion's scope "
+                           "(see ROLE_ALIASES) — deliberately not onboarded",
     CAT_INVALID: "CSV row cannot be used (blank name/role or unusable phone number)",
 }
-
-SAFE_ROLE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -244,22 +285,22 @@ def clean(value: Any) -> str:
     return "" if text.lower() in {"nan", "none", "null"} else text
 
 
-def canonical_role(raw: Any) -> str:
-    """'sdo' -> 'SUB_DIVISIONAL_OFFICER', 'jal-sahayak' -> 'JAL_SAHAYAK'.
-
-    Unknown slugs are canonicalised rather than rejected, because a role we do
-    not know yet is exactly the case the CSV is expected to introduce. The
-    result must still look like a role name — anything else returns '' and the
-    row is reported as invalid instead of creating a junk user type.
-    """
+def role_slug(raw: Any) -> str:
+    """'Jal Mitra' / 'JAL_MITRA' -> 'jal-mitra'. Punctuation-insensitive."""
     text = clean(raw).lower()
     if not text:
         return ""
-    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
-    if slug in ROLE_ALIASES:
-        return ROLE_ALIASES[slug]
-    candidate = slug.replace("-", "_").upper()
-    return candidate if SAFE_ROLE_RE.match(candidate) else ""
+    return re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+
+
+def canonical_role(raw: Any) -> str:
+    """'sdo' -> 'SUB_DIVISIONAL_OFFICER'; anything off the allow-list -> ''.
+
+    Returning '' is what marks a row as out of scope. Roles are deliberately not
+    invented from the slug: creating a user type from a spreadsheet value would
+    let one bad cell add a permission level nobody reviewed.
+    """
+    return ROLE_ALIASES.get(role_slug(raw), "")
 
 
 def email_prefix(role: str) -> str:
@@ -287,13 +328,22 @@ class UserRow:
     phone_raw: str
     phone: str                  # normalised 91XXXXXXXXXX, '' when unusable
     role_raw: str
-    role: str                   # canonical c_name, '' when unusable
+    role: str                   # canonical c_name, '' when off the allow-list
     issues: list[str] = field(default_factory=list)
 
     @property
     def blocking_issues(self) -> list[str]:
         """Issues that stop the row from being written at all."""
         return [i for i in self.issues if i.startswith("row:")]
+
+    @property
+    def role_not_ingested(self) -> bool:
+        """A role was given, and it is one this ingestion does not cover.
+
+        Distinct from a blocking issue: the row is fine, we are simply not
+        onboarding that kind of person.
+        """
+        return bool(self.role_raw) and not self.role
 
 
 def load_csv(path: str, header_row: int, encoding: str) -> tuple[list[UserRow], list[dict]]:
@@ -351,7 +401,12 @@ def load_csv(path: str, header_row: int, encoding: str) -> tuple[list[UserRow], 
         if not role_raw:
             issues.append("row:blank role")
         elif not role:
-            issues.append(f"row:role '{role_raw}' does not canonicalise to a usable role name")
+            # Not a "row:" issue — the row is legible, its role is simply
+            # outside what this ingestion onboards.
+            issues.append(
+                f"role:'{role_raw}' is not a role this ingestion covers "
+                f"(covered: {', '.join(sorted(INGESTED_ROLES))}) — row skipped"
+            )
 
         row = UserRow(
             row_no=row_no,
@@ -378,8 +433,18 @@ def load_csv(path: str, header_row: int, encoding: str) -> tuple[list[UserRow], 
     return rows, issue_records
 
 
+def candidate_rows(rows: list[UserRow]) -> list[UserRow]:
+    """The rows this run would actually write — everything else is already out.
+
+    Duplicate detection runs over these alone, so a khalasi row cannot knock out
+    the jal-mitra row that happens to share its phone number: a role we are not
+    ingesting has no say over one we are.
+    """
+    return [r for r in rows if not r.blocking_issues and not r.role_not_ingested]
+
+
 def find_csv_duplicates(rows: list[UserRow]) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
-    """Phones and public_ids repeated *within the CSV*.
+    """Phones and public_ids repeated among the candidate rows.
 
     Both break the 1:1 contract: one person cannot be reconciled against two
     rows that disagree on name, role or public_id, and two rows sharing a
@@ -387,7 +452,7 @@ def find_csv_duplicates(rows: list[UserRow]) -> tuple[dict[str, list[int]], dict
     """
     by_phone: dict[str, list[int]] = defaultdict(list)
     by_public_id: dict[str, list[int]] = defaultdict(list)
-    for row in rows:
+    for row in candidate_rows(rows):
         if row.phone:
             by_phone[row.phone].append(row.row_no)
         if row.public_id:
@@ -547,6 +612,10 @@ class UserDecision:
     changes: dict[str, tuple[Any, Any]] = field(default_factory=dict)
     # Fields deliberately left alone, with the reason. Always reported.
     withheld: dict[str, str] = field(default_factory=dict)
+    # True when the withheld role was a promotion into a GATED_TARGET_ROLE —
+    # counted separately so the operator can see how many are waiting on
+    # --allow-officer-promotions rather than on a data fix.
+    gated_promotion: bool = False
     # Set on insert, so the analytics projection can address the new row.
     email: str = ""
 
@@ -586,6 +655,7 @@ def classify_users(
     rows: list[UserRow],
     db: UserDb,
     update_roles: bool = True,
+    allow_promotions: bool = False,
 ) -> list[UserDecision]:
     """Resolve every CSV row against the tenant DB in bulk."""
     dup_phone, dup_public_id = find_csv_duplicates(rows)
@@ -596,6 +666,12 @@ def classify_users(
     for row in rows:
         if row.blocking_issues:
             decisions.append(UserDecision(row, CAT_INVALID, reason="; ".join(row.blocking_issues)))
+            continue
+        if row.role_not_ingested:
+            decisions.append(UserDecision(
+                row, CAT_ROLE_NOT_INGESTED,
+                reason=f"role '{row.role_raw}' is outside this ingestion's scope",
+            ))
             continue
         if row.phone in dup_phone:
             others = [r for r in dup_phone[row.phone] if r != row.row_no]
@@ -640,7 +716,9 @@ def classify_users(
         decision.existing_role = match["role"]
         decision.existing_state_user_id = match["state_user_id"]
         decision.existing_status = match["status"]
-        _compute_changes(decision, owners, update_roles, db.with_state_user_id)
+        _compute_changes(
+            decision, owners, update_roles, db.with_state_user_id, allow_promotions
+        )
 
     return decisions
 
@@ -663,6 +741,7 @@ def _compute_changes(
     owners: dict[str, int],
     update_roles: bool,
     with_state_user_id: bool,
+    allow_promotions: bool,
 ) -> None:
     """Fill decision.changes / .withheld with what an update would apply."""
     row = decision.row
@@ -693,6 +772,12 @@ def _compute_changes(
                 f"user id {decision.existing_id} holds the administrative role "
                 f"{decision.existing_role}; the CSV's {row.role} is not applied"
             )
+        elif row.role in GATED_TARGET_ROLES and not allow_promotions:
+            decision.gated_promotion = True
+            decision.withheld[FIELD_ROLE] = (
+                f"promotion {decision.existing_role or 'no role'} -> {row.role} "
+                f"withheld — pass --allow-officer-promotions to apply it"
+            )
         else:
             decision.changes[FIELD_ROLE] = (decision.existing_role or None, row.role)
 
@@ -707,20 +792,31 @@ class RolePlan:
     csv_slugs: list[str]
     csv_rows: int
     existing_id: Optional[int]
-    action: str          # existing | create | blocked_soft_deleted
+    action: str          # existing | create | blocked_soft_deleted | not_ingested
 
 
 def build_role_plans(
     decisions: list[UserDecision], user_types: dict[str, UserTypeRow]
 ) -> list[RolePlan]:
-    """Which roles the CSV needs, and which of them we do not hold yet."""
+    """Every role the CSV names: the ones we ingest, and the ones we skip.
+
+    The skipped ones are listed too, with their row counts — a role silently
+    missing from this report would be indistinguishable from a role absent from
+    the CSV, and the whole point is that the operator can see what was left out.
+    """
     slugs: dict[str, set[str]] = defaultdict(set)
     counts: Counter = Counter()
+    skipped_counts: Counter = Counter()
+
     for decision in decisions:
-        if not decision.will_write or not decision.row.role:
+        row = decision.row
+        if decision.category == CAT_ROLE_NOT_INGESTED:
+            skipped_counts[role_slug(row.role_raw)] += 1
             continue
-        counts[decision.row.role] += 1
-        slugs[decision.row.role].add(decision.row.role_raw.lower())
+        if not decision.will_write or not row.role:
+            continue
+        counts[row.role] += 1
+        slugs[row.role].add(row.role_raw.lower())
 
     plans: list[RolePlan] = []
     for role in sorted(counts):
@@ -737,6 +833,16 @@ def build_role_plans(
             csv_rows=counts[role],
             existing_id=existing_id,
             action=action,
+        ))
+
+    # No canonical name exists for these — they are shown by their CSV slug.
+    for slug in sorted(skipped_counts):
+        plans.append(RolePlan(
+            role=slug,
+            csv_slugs=[slug],
+            csv_rows=skipped_counts[slug],
+            existing_id=None,
+            action="not_ingested",
         ))
     return plans
 
@@ -925,6 +1031,8 @@ class IngestPlan:
     dup_public_id: dict[str, list[int]]
     # False = the CSV's public_id is reported but never written (V36 not needed).
     with_state_user_id: bool = False
+    # False = promotions into a GATED_TARGET_ROLE are reported, not applied.
+    allow_promotions: bool = False
 
     def by_category(self) -> dict[str, list[UserDecision]]:
         grouped: dict[str, list[UserDecision]] = defaultdict(list)
@@ -936,12 +1044,17 @@ class IngestPlan:
     def blocked_roles(self) -> list[RolePlan]:
         return [p for p in self.role_plans if p.action == "blocked_soft_deleted"]
 
+    @property
+    def gated_promotions(self) -> list[UserDecision]:
+        return [d for d in self.decisions if d.gated_promotion]
+
 
 def build_plan(
     rows: list[UserRow],
     csv_issues: list[dict],
     db: UserDb,
     update_roles: bool = True,
+    allow_promotions: bool = False,
 ) -> IngestPlan:
     LOG.info("Classifying %d CSV rows …", len(rows))
     dup_phone, dup_public_id = find_csv_duplicates(rows)
@@ -951,13 +1064,16 @@ def build_plan(
             len(dup_phone), len(dup_public_id),
         )
 
-    decisions = classify_users(rows, db, update_roles)
+    decisions = classify_users(rows, db, update_roles, allow_promotions)
 
     user_types = db.load_user_types()
     role_plans = build_role_plans(decisions, user_types)
     for plan in role_plans:
         if plan.action == "create":
             LOG.warning("Role %s is not in user_type_master_table — %d CSV rows need it",
+                        plan.role, plan.csv_rows)
+        elif plan.action == "not_ingested":
+            LOG.warning("Role '%s' is outside this ingestion's scope — %d CSV rows skipped",
                         plan.role, plan.csv_rows)
 
     return IngestPlan(
@@ -968,6 +1084,7 @@ def build_plan(
         dup_phone=dup_phone,
         dup_public_id=dup_public_id,
         with_state_user_id=db.with_state_user_id,
+        allow_promotions=allow_promotions,
     )
 
 
@@ -1000,10 +1117,12 @@ def build_summary_frame(plan: IngestPlan) -> pd.DataFrame:
     })
 
     existing = grouped.get(CAT_EXISTING, [])
-    no_op = [d for d in existing if not d.changes]
+    # A row whose only difference was withheld is NOT up to date — it is waiting
+    # on a decision, and is counted on the withheld line below instead.
+    no_op = [d for d in existing if not d.changes and not d.withheld]
     records.append({
         "category": "(of the matched rows) already up to date",
-        "what it means": "matched a live user but no field differs",
+        "what it means": "matched a live user, nothing differs, nothing withheld",
         "action": "no write",
         "csv rows": len(no_op),
     })
@@ -1020,9 +1139,20 @@ def build_summary_frame(plan: IngestPlan) -> pd.DataFrame:
         })
     records.append({
         "category": "fields withheld (reported, never written)",
-        "what it means": "protected role, or a public_id another user already owns",
+        "what it means": "protected role, gated promotion, or a public_id another "
+                         "user already owns",
         "action": "no write",
         "csv rows": len([d for d in plan.decisions if d.withheld]),
+    })
+    records.append({
+        "category": "…of those, promotions to "
+                    f"{'/'.join(sorted(GATED_TARGET_ROLES))}",
+        "what it means": "an existing user the CSV promotes; applied only under "
+                         "--allow-officer-promotions"
+        if not plan.allow_promotions
+        else "already applied — --allow-officer-promotions is set",
+        "action": "no write" if not plan.allow_promotions else "update",
+        "csv rows": len(plan.gated_promotions),
     })
     return pd.DataFrame.from_records(records)
 
@@ -1038,6 +1168,8 @@ def build_role_frame(plan: IngestPlan) -> pd.DataFrame:
                 "existing": "already in user_type_master_table",
                 "create": "INSERT into user_type_master_table",
                 "blocked_soft_deleted": "BLOCKED: the role exists but is soft-deleted",
+                "not_ingested": "NOT INGESTED: outside this ingestion's scope, "
+                                "every row with this role is skipped",
             }[p.action],
         }
         for p in plan.role_plans
@@ -1080,6 +1212,9 @@ def build_conflict_frame(plan: IngestPlan, include_pii: bool) -> pd.DataFrame:
     show = (lambda p: p) if include_pii else safe_mask
     records = []
     for decision in plan.decisions:
+        # Out-of-scope roles are not conflicts — they are counted in
+        # role_summary and listed row by row in csv_issues, and putting several
+        # hundred of them here would bury the rows that do need a decision.
         if decision.category in (CAT_DUPLICATE, CAT_INVALID):
             records.append({
                 "row_no": decision.row.row_no,
@@ -1256,9 +1391,16 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--no-role-updates", action="store_true",
                         help="never change an existing user's role, even when the CSV "
                              "disagrees; the difference is still reported")
+    parser.add_argument("--allow-officer-promotions", action="store_true",
+                        help="apply role changes that promote an existing user into "
+                             f"{', '.join(sorted(GATED_TARGET_ROLES))}. Withheld and "
+                             "reported by default, whatever role the user holds today; "
+                             "onboarding a new user the CSV already lists in that role "
+                             "is unaffected. Has no effect under --no-role-updates")
     parser.add_argument("--no-create-roles", action="store_true",
-                        help="abort instead of inserting roles the CSV needs and "
-                             "user_type_master_table does not hold")
+                        help="abort instead of inserting an in-scope role that "
+                             "user_type_master_table does not hold (EXECUTIVE_ENGINEER "
+                             "on a stock deployment)")
     parser.add_argument("--with-state-user-id", action="store_true",
                         help="also reconcile the CSV's public_id into "
                              "user_table.state_user_id. Needs V36 to have been applied; "
@@ -1318,7 +1460,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         tenant_id = args.tenant_id or db.resolve_tenant_id()
         LOG.info("Tenant id %d, schema %s", tenant_id, db.schema)
 
-        plan = build_plan(rows, csv_issues, db, update_roles=not args.no_role_updates)
+        plan = build_plan(
+            rows, csv_issues, db,
+            update_roles=not args.no_role_updates,
+            allow_promotions=args.allow_officer_promotions,
+        )
 
         context = {
             "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -1331,6 +1477,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             "analytics": "skipped" if args.skip_analytics else "included",
             "phones_in_report": "full" if args.include_pii else "masked",
             "role_updates": "withheld" if args.no_role_updates else "applied",
+            "promotions_into_" + "_".join(sorted(GATED_TARGET_ROLES)):
+                "applied" if args.allow_officer_promotions else "WITHHELD (reported only)",
             "new_roles": "blocked" if args.no_create_roles else "created",
             "state_user_id": "reconciled (needs V36)" if args.with_state_user_id
             else "OUT OF SCOPE — public_id is not written",
@@ -1417,9 +1565,15 @@ def _print_summary(plan: IngestPlan) -> None:
         LOG.info("%-46s %8d", f"existing users / {field_name} updated",
                  len([d for d in existing if field_name in d.changes]))
     LOG.info("%-46s %8d", "existing users / unchanged",
-             len([d for d in existing if not d.changes]))
+             len([d for d in existing if not d.changes and not d.withheld]))
     LOG.info("%-46s %8d", "fields withheld (see conflicts sheet)",
              len([d for d in plan.decisions if d.withheld]))
+    if plan.gated_promotions:
+        LOG.warning(
+            "%-46s %8d  pass --allow-officer-promotions to apply",
+            f"promotions to {'/'.join(sorted(GATED_TARGET_ROLES))} WITHHELD",
+            len(plan.gated_promotions),
+        )
     LOG.info("─" * 72)
     for role_plan in plan.role_plans:
         LOG.info("%-46s %8d  %s", f"role / {role_plan.role}", role_plan.csv_rows,
