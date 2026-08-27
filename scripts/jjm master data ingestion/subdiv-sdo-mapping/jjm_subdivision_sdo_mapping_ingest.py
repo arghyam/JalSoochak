@@ -912,6 +912,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _fail("--tenant-dsn (or $TENANT_DSN) is required")
     if args.execute and not args.skip_analytics and not args.analytics_dsn:
         return _fail("--analytics-dsn (or $ANALYTICS_DSN) is required unless --skip-analytics")
+    if args.limit is not None and args.limit < 1:
+        return _fail("--limit must be a positive number of rows")
 
     try:
         pii = PiiCrypto(os.environ.get("PII_ENCRYPTION_KEY", ""), os.environ.get("PII_HMAC_KEY", ""))
@@ -920,7 +922,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     LOG.info("Reading %s …", args.csv)
     rows, csv_issues, public_id_column = load_csv(args.csv, args.header_row, args.encoding)
-    if args.limit:
+    if args.limit is not None:
         rows = rows[: args.limit]
         keep = {r.row_no for r in rows}
         csv_issues = [i for i in csv_issues if i["row_no"] in keep]

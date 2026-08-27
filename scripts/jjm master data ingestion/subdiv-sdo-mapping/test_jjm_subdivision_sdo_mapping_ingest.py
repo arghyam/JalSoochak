@@ -77,6 +77,7 @@ from jjm_subdivision_sdo_mapping_ingest import (  # noqa: E402
     build_plan,
     execute_tenant,
     load_csv,
+    main,
     node_path,
     resolve_public_id_column,
     unusable_roles,
@@ -342,6 +343,29 @@ class TestUnusableRoles:
 
         assert len(problems) == 1
         assert "soft-deleted" in problems[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The CLI guard
+# ─────────────────────────────────────────────────────────────────────────────
+
+# A DSN nothing can be listening on, so a run that gets *past* the guard dies on
+# connect instead of writing to whatever tenant the runner happens to have.
+UNREACHABLE_DSN = "postgresql://postgres:x@127.0.0.1:1/none"
+
+
+class TestCli:
+    def test_a_limit_below_one_is_refused(self, tmp_path, caplog):
+        """A falsy limit used to slip past the slice entirely, so --limit 0 read
+        as 'every row' rather than as the rehearsal it asks for."""
+        code = main([
+            "--csv", write_csv(tmp_path, "SDV-1,Alpha,USR-1,A,9000000001"),
+            "--actor-id", "1", "--tenant-dsn", UNREACHABLE_DSN, "--skip-analytics",
+            "--out", str(tmp_path / "out.xlsx"), "--limit", "0",
+        ])
+
+        assert code == 2
+        assert "--limit must be a positive number of rows" in caplog.text
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -636,6 +636,20 @@ class TestResolveDivisions:
         assert plans["div-2"].state_dept_id_change is None
         assert f"node id {owner}" in plans["div-2"].withheld["state_dept_id"]
 
+    def test_an_owner_holding_the_code_in_another_case_still_counts(self, db, tmp_path):
+        """The owner lookup is keyed on lower(code); a code we already hold in
+        another case must not read as free."""
+        gamma = seed_dept(db, "Gamma Division", 4)
+        owner = seed_dept(db, "Beta Sub Division", 5, state_dept_id="div-2")
+        rows, _ = rows_of(
+            tmp_path, "DIV-2,Gamma Division,USR-1,A,9000000001,executive-engineer")
+
+        plans, _ = resolve_divisions(rows, db)
+
+        assert plans["div-2"].node_id == gamma
+        assert plans["div-2"].state_dept_id_change is None
+        assert f"node id {owner}" in plans["div-2"].withheld["state_dept_id"]
+
     def test_two_csv_ids_for_one_node_write_neither(self, db, tmp_path):
         """Only one of them could ever stick; picking one would be a coin toss."""
         node = seed_dept(db, "Alpha Division", 4)
