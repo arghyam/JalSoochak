@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
+import org.arghyam.jalsoochak.message.channel.DailyReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.GlificSendResult;
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
@@ -855,7 +857,7 @@ public class NotificationEventRouter {
      *
      * <p>Every terminal outcome — one per officer — is logged with a {@code result=} tag and a
      * {@code role=} field so daily-report delivery can be counted per role straight from the logs
-     * (see {@code mydocs/DAILY_REPORT_DELIVERY_LOGS.md}). {@code result=GENERATED} marks a rendered
+     * . {@code result=GENERATED} marks a rendered
      * PDF and {@code result=SENT} a confirmed WhatsApp delivery, so the two are counted separately.</p>
      */
     private void handleDailySituationReport(JsonNode root) throws Exception {
@@ -964,16 +966,30 @@ public class NotificationEventRouter {
         // isRenderableKpis has already confirmed reportDate is a parseable ISO date. It is the day the
         // data covers (D-1) — the date the officer sees in the WhatsApp document name.
         LocalDate reportDate = LocalDate.parse(kpis.getReportDate());
-        boolean sent = whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType, reportDate, officerName);
-        if (!sent) {
-            log.error("[Router/DAILY_REPORT] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}",
-                    corr, role, tenantId, officerUserId);
-            throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + corr + " WhatsApp daily report delivery failed");
+        DailyReportSendOutcome outcome =
+                whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType, reportDate, officerName);
+        if (!outcome.accepted()) {
+            DailyReportSendOutcome.Failure failure = outcome.failure();
+            // stage= and glificErrorKey= are appended *after* officer=
+            log.error("[Router/DAILY_REPORT] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
+                            + " stage={} glificErrorKey={}",
+                    corr, role, tenantId, officerUserId, failure.stage(), failure.errorKeyForLog());
+            throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + corr
+                    + " WhatsApp daily report delivery failed at stage=" + failure.stage());
         }
+        GlificSendResult sendResult = outcome.result();
         String loggableUrl = minioUrl.replaceFirst("\\?.*$", "");
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
-        log.info("[Router/DAILY_REPORT] corr={} result=SENT role={} tenant={} officer={} priorityRows={} tookMs={} ({})",
-                corr, role, tenantId, officerUserId, priorityRows.size(), tookMs, loggableUrl);
+        // result=SENT means Glific ACCEPTED the send — it is not a WhatsApp delivery confirmation.
+        // glificMsgId is what lets the delivery status Gupshup and Meta later report to Glific be
+        // matched back to this officer; see GlificDeliveryReconciliationService. Every new field goes after officer= to preserve
+        // the field adjacency the log-counting recipes rely on.
+        log.info("[Router/DAILY_REPORT] corr={} result=SENT role={} tenant={} officer={}"
+                        + " stage=GLIFIC_ACCEPTED glificMsgId={} glificContactId={} mode={} templateId={}"
+                        + " priorityRows={} tookMs={} ({})",
+                corr, role, tenantId, officerUserId,
+                sendResult.messageIdForLog(), contactId, sendResult.modeForLog(), sendResult.templateIdForLog(),
+                priorityRows.size(), tookMs, loggableUrl);
     }
 
     /**

@@ -23,6 +23,10 @@ import java.time.LocalDate;
 import java.sql.ResultSet;
 import java.util.List;
 
+import org.arghyam.jalsoochak.message.channel.DailyReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.DailyReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.GlificSendResult;
+import org.arghyam.jalsoochak.message.channel.GlificSendStage;
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
@@ -1153,7 +1157,7 @@ class NotificationEventRouterTest {
                 .thenReturn("daily_report_x.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
-                .thenReturn(true);
+                .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
@@ -1236,7 +1240,8 @@ class NotificationEventRouterTest {
         when(dailyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), anyList()))
                 .thenReturn("sdo.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/sdo.pdf");
-        when(whatsAppChannel.sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER", LocalDate.of(2026, 7, 7), "SDO Kumar")).thenReturn(true);
+        when(whatsAppChannel.sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER", LocalDate.of(2026, 7, 7), "SDO Kumar"))
+                .thenReturn(acceptedSend());
 
         router.route(sdoJson);
 
@@ -1318,7 +1323,7 @@ class NotificationEventRouterTest {
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
         when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
-                .thenReturn(true);
+                .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
@@ -1425,7 +1430,8 @@ class NotificationEventRouterTest {
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
                 .thenReturn("f.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod")).thenReturn(true);
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
+                .thenReturn(acceptedSend());
 
         router.route(json);
 
@@ -1470,7 +1476,8 @@ class NotificationEventRouterTest {
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
                 .thenReturn("f.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod")).thenReturn(true);
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
+                .thenReturn(acceptedSend());
 
         router.route(json);
 
@@ -1479,5 +1486,132 @@ class NotificationEventRouterTest {
         assertThat(cap.getValue()).isEmpty();
         verify(jdbcTemplate, never()).query(argThat(sql -> sql != null && sql.contains("PUMP_OPERATOR")),
                 any(RowMapper.class), eq(7));
+    }
+
+
+    // ───────────────── delivery-status join keys on the SENT line ─────────────────
+
+    /**
+     * {@code result=SENT} means Glific ACCEPTED the send, not that WhatsApp delivered it. The
+     * {@code glificMsgId} on this line is the only join key that lets the delivery status Gupshup and
+     * Meta later report back to Glific be matched to this officer — losing it breaks reconciliation
+     * silently, so it is asserted rather than assumed.
+     */
+    @Test
+    void handleDailyReport_sentLineCarriesTheGlificJoinKeys() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(acceptedSend());
+
+        String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
+
+        assertThat(sent)
+                .contains("glificMsgId=241952654")
+                .contains("glificContactId=12345")
+                .contains("mode=LINK")
+                .contains("templateId=880557")
+                .contains("stage=GLIFIC_ACCEPTED");
+    }
+
+    /**
+     * The counting grep for the adjacent run
+     * {@code result=… role=… tenant=… officer=…}. Every new field must therefore be appended after
+     * {@code officer=}, never inserted between them, or a year of documented one-liners breaks.
+     */
+    @Test
+    void handleDailyReport_sentLinePreservesTheFieldAdjacencyTheCountingRecipesRelyOn() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(acceptedSend());
+
+        String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
+
+        assertThat(sent).containsPattern("result=SENT role=SECTION_OFFICER tenant=1 officer=500");
+    }
+
+    /**
+     * The 20 Aug 2026 incident collapsed every cause into one FAILED_DELIVERY token. The stage says
+     * which half of the handoff broke, and Glific's own error key comes with it.
+     */
+    @Test
+    void handleDailyReport_failedDeliveryLineCarriesTheStageAndGlificErrorKey() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
+
+        String failed = captureRouterLog(DAILY_REPORT_JSON, "result=FAILED_DELIVERY");
+
+        assertThat(failed)
+                .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
+                .contains("stage=MEDIA_REGISTER")
+                .contains("glificErrorKey=media");
+    }
+
+    /** A dry-run is still accepted, and reports no message id rather than a placeholder id. */
+    @Test
+    void handleDailyReport_sentLineShowsNoMessageIdForASuppressedSend() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.accepted(
+                        GlificSendResult.suppressed(DailyReportDeliveryMode.LINK)));
+
+        String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
+
+        assertThat(sent).contains("glificMsgId=none").contains("templateId=-");
+    }
+
+    /**
+     * Routes the event with a log appender attached and returns the first line containing
+     * {@code needle}. Tolerates the router rethrowing, which the failure paths do by design.
+     */
+    private String captureRouterLog(String json, String needle) {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(NotificationEventRouter.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            router.route(json);
+        } catch (RuntimeException expected) {
+            // Delivery failures rethrow so the Kafka container retries; the log line is what matters here.
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        return appender.list.stream()
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.contains(needle))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no log line containing '" + needle + "'; lines were "
+                        + appender.list.stream()
+                                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).toList()));
+    }
+
+    /**
+     * A successful Glific acceptance, carrying the message id the router now logs. Glific returns
+     * {@code message { id }} on every send and the router puts it on the {@code result=SENT} line —
+     * it is the join key the delivery-status reconciliation matches back to this officer.
+     */
+    private static DailyReportSendOutcome acceptedSend() {
+        return DailyReportSendOutcome.accepted(
+                new GlificSendResult("241952654", "880557", DailyReportDeliveryMode.LINK));
     }
 }

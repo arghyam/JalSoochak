@@ -506,22 +506,29 @@ public class GlificWhatsAppService {
      *                        caption; in LINK mode it is template variable {{2}} and is required
      * @param officerName     the officer's name, template variable {{1}} in LINK mode; blank or null
      *                        degrades to "Officer". Unused in DOCUMENT mode
+     * @return the Glific message id, template id and mode of the accepted send — the join key that
+     *         lets the delivery status Gupshup and Meta report back to Glific later be matched to this
+     *         officer. A dry-run returns {@link GlificSendResult#suppressed} with a null message id
      */
-    public void sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType,
-                                   LocalDate reportDate, String officerName) {
-        if (isDryRun(dailyReportDryRun, "sendDailyReportHsm")) return;
+    public GlificSendResult sendDailyReportHsm(Long contactId, String minioUrl, String officerUserType,
+                                               LocalDate reportDate, String officerName) {
+        if (isDryRun(dailyReportDryRun, "sendDailyReportHsm")) {
+            // Reported leniently: a suppressed send must not start failing because the mode property
+            // has a typo, which is the behaviour before this method returned anything at all.
+            return GlificSendResult.suppressed(deliveryModeOrNull());
+        }
         // Checked before the media upload so a missing contact id costs no Glific round-trip.
         requireContactId(contactId, "sendDailyReportHsm");
 
-        switch (deliveryMode()) {
+        return switch (deliveryMode()) {
             case DOCUMENT -> sendDailyReportDocumentHsm(contactId, minioUrl, officerUserType, reportDate);
             case LINK -> sendDailyReportLinkHsm(contactId, minioUrl, officerUserType, reportDate, officerName);
-        }
+        };
     }
 
     /** The original two-step document send: register the PDF as media, then send it as the header. */
-    private void sendDailyReportDocumentHsm(Long contactId, String minioUrl, String officerUserType,
-                                            LocalDate reportDate) {
+    private GlificSendResult sendDailyReportDocumentHsm(Long contactId, String minioUrl, String officerUserType,
+                                                        LocalDate reportDate) {
         String templateId = resolveDailyReportTemplateId(officerUserType);
         String mediaId = uploadMediaInternal(minioUrl, dailyReportDocumentName(reportDate), dailyReportDryRun);
 
@@ -536,7 +543,9 @@ public class GlificWhatsAppService {
 
         JsonNode response = client.execute(CREATE_AND_SEND_MESSAGE_MUTATION, Map.of("input", input));
         checkErrors(response, "createAndSendMessage");
-        log.debug("[Glific] Daily report HSM sent to contactId={}", contactId);
+        String messageId = extractMessageId(response, "createAndSendMessage");
+        log.debug("[Glific] Daily report HSM sent to contactId={} glificMsgId={}", contactId, messageId);
+        return new GlificSendResult(messageId, templateId, DailyReportDeliveryMode.DOCUMENT);
     }
 
     /**
@@ -550,8 +559,8 @@ public class GlificWhatsAppService {
      * flat {@code params} array filled in order of occurrence, body variables first and the button's
      * URL suffix last.</p>
      */
-    private void sendDailyReportLinkHsm(Long contactId, String minioUrl, String officerUserType,
-                                        LocalDate reportDate, String officerName) {
+    private GlificSendResult sendDailyReportLinkHsm(Long contactId, String minioUrl, String officerUserType,
+                                                    LocalDate reportDate, String officerName) {
         String templateId = resolveDailyReportLinkTemplateId(officerUserType);
         if (isBlank(templateId)) {
             throw new IllegalStateException(
@@ -572,11 +581,11 @@ public class GlificWhatsAppService {
                 "receiverId", contactId,
                 "parameters", List.of(name, reportDate.format(DOCUMENT_NAME_DATE), urlSuffix)));
         checkErrors(response, "sendHsmMessage");
-        // Mode logged at INFO so a run can be told apart from a document run straight from the log
-        // file. The router's result=/role= line is untouched, so the counting recipes in
-        // mydocs/DAILY_REPORT_DELIVERY_LOGS.md keep working.
-        log.info("[Glific] Daily report HSM sent mode=LINK role={}", role);
+        String messageId = extractMessageId(response, "sendHsmMessage");
+        log.info("[Glific] Daily report HSM sent mode=LINK role={} glificMsgId={} templateId={}",
+                role, messageId, templateId);
         log.debug("[Glific] Daily report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
+        return new GlificSendResult(messageId, templateId, DailyReportDeliveryMode.LINK);
     }
 
     /**
@@ -625,6 +634,23 @@ public class GlificWhatsAppService {
     /** The configured delivery mode; parsed on use so an unknown value fails loudly wherever it is read. */
     private DailyReportDeliveryMode deliveryMode() {
         return DailyReportDeliveryMode.from(dailyReportDeliveryMode);
+    }
+
+    /**
+     * The configured delivery mode, or {@code null} when the property is unparseable.
+     *
+     * <p>Used only on the dry-run path, which reports the mode for the log line but must not start
+     * throwing on a typo it never used to read. A live send still goes through {@link #deliveryMode()}
+     * and still fails loudly.</p>
+     */
+    private DailyReportDeliveryMode deliveryModeOrNull() {
+        try {
+            return deliveryMode();
+        } catch (IllegalStateException e) {
+            log.warn("[Glific] Suppressed daily report: delivery-mode '{}' is not DOCUMENT or LINK;"
+                    + " reporting mode as unknown", dailyReportDeliveryMode);
+            return null;
+        }
     }
 
     /**
@@ -820,17 +846,40 @@ public class GlificWhatsAppService {
         log.debug("[Glific] Contact language updated contactId={} languageId={}", contactId, glificLanguageId);
     }
 
+    /**
+     * Throws when a mutation came back with a non-empty {@code errors} array.
+     *
+     * <p>Throws {@link GlificMutationException} rather than a bare {@link RuntimeException}, with the
+     * message unchanged: callers that only catch {@code Exception} behave exactly as before, while
+     * those that need to know <em>which</em> mutation failed (to tag a
+     * {@link GlificSendStage}) can read it off the exception instead of parsing the text.</p>
+     */
     private void checkErrors(JsonNode response, String mutationKey) {
         JsonNode mutationNode = response.path(mutationKey);
         if (mutationNode.isMissingNode() || mutationNode.isNull()) {
-            throw new RuntimeException("Glific GraphQL response missing key: " + mutationKey);
+            throw new GlificMutationException(mutationKey, null,
+                    "Glific GraphQL response missing key: " + mutationKey);
         }
         JsonNode errors = mutationNode.path("errors");
         if (errors.isArray() && !errors.isEmpty()) {
             String msg = errors.toString();
             log.error("[Glific] GraphQL errors in {}: {}", mutationKey, msg);
-            throw new RuntimeException("Glific GraphQL error in " + mutationKey + ": " + msg);
+            throw new GlificMutationException(mutationKey, errors.path(0).path("key").asText(null),
+                    "Glific GraphQL error in " + mutationKey + ": " + msg);
         }
+    }
+
+    /**
+     * Lifts {@code message.id} out of a send response.
+     *
+     * <p>Both send mutations already return it and both used to discard it. It is the only join key
+     * between a report we sent and the delivery status Glific later receives from Gupshup, so a
+     * missing id is returned as {@code null} rather than an empty string — the caller must be able to
+     * tell "Glific gave us no id" from "the id is blank".</p>
+     */
+    private static String extractMessageId(JsonNode response, String mutationKey) {
+        String id = response.path(mutationKey).path("message").path("id").asText(null);
+        return (id == null || id.isBlank()) ? null : id;
     }
 
     /**

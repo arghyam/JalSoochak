@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.message.kafka;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.message.util.PhoneRedactor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -22,7 +23,6 @@ import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 @Configuration
 @Slf4j
@@ -125,19 +125,17 @@ public class KafkaConfig {
         };
     }
 
-    private static final Pattern DIGIT_RUN = Pattern.compile("\\d{10,}");
-
     /**
      * Masks anything that looks like a phone number — a run of 10 or more digits, which covers both the
      * bare 10-digit mobile and the {@code 91XXXXXXXXXX} E.164 form used throughout these events —
-     * keeping the last four digits so two records can still be told apart. Deliberately blunt: it will
-     * also mask a long numeric id, which is the right trade at DEBUG.
+     * keeping the last four digits so two records can still be told apart.
+     *
+     * <p>Delegates to {@link PhoneRedactor}, which the Glific delivery-status reader also uses: a
+     * Gupshup failure payload carries the recipient's raw number in its {@code destination} field, so
+     * the same masking is needed there. Kept as a method here so this class's existing callers and
+     * tests are unaffected.</p>
      */
     static String redactPhoneNumbers(Object payload) {
-        if (payload == null) {
-            return null;
-        }
-        return DIGIT_RUN.matcher(payload.toString()).replaceAll(m -> "*".repeat(m.group().length() - 4)
-                + m.group().substring(m.group().length() - 4));
+        return PhoneRedactor.redact(payload);
     }
 }

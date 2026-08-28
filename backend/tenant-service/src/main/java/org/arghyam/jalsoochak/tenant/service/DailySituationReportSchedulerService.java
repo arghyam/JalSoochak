@@ -53,7 +53,7 @@ public class DailySituationReportSchedulerService {
                 correlationId, tenantId, schema, reportDate, roles);
 
         // Requested-count per role — the denominator the downstream GENERATED/SENT counts reconcile
-        // against (see mydocs/DAILY_REPORT_DELIVERY_LOGS.md). LinkedHashMap keeps the configured order.
+        // against . LinkedHashMap keeps the configured order.
         Map<String, Integer> requestedByRole = new LinkedHashMap<>();
         int count = 0;
         for (String role : roles) {
