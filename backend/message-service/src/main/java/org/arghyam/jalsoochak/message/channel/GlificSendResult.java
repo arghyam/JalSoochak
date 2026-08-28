@@ -35,6 +35,18 @@ public record GlificSendResult(String messageId, String templateId, DailyReportD
         return messageId != null && !messageId.isBlank();
     }
 
+    /**
+     * True when nothing was sent because a dry-run flag suppressed it.
+     *
+     * <p>Equivalent to "no message id" only because a live send that came back without one is now
+     * refused outright ({@code GlificMissingMessageIdException}) instead of returning a result. That
+     * makes {@link #suppressed} the sole way to build an accepted result with no id, and lets a caller
+     * log a suppressed report as itself rather than as a send with a missing join key.</p>
+     */
+    public boolean isSuppressed() {
+        return !hasMessageId();
+    }
+
     /** The message id for logging, or {@value #NO_MESSAGE_ID}. */
     public String messageIdForLog() {
         return hasMessageId() ? messageId : NO_MESSAGE_ID;

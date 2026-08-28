@@ -1325,11 +1325,12 @@ class GlificWhatsAppServiceTest {
         }
 
         /**
-         * A response with no id must yield null, never an empty string or a placeholder: reconciliation
-         * has to be able to tell "Glific gave us no id" from "the id is blank".
+         * A send with no id must not come back as a result at all. Returning one reported the report as
+         * accepted while it carried no join key — counted as delivered and simultaneously invisible to
+         * reconciliation, which is the one combination that cannot be noticed later.
          */
         @Test
-        void aMissingIdBecomesNullNotAPlaceholder() throws Exception {
+        void aSendThatReturnsNoIdIsRefused() throws Exception {
             ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
             ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
             when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
@@ -1337,12 +1338,33 @@ class GlificWhatsAppServiceTest {
                     {"sendHsmMessage":{"message":{},"errors":[]}}
                     """));
 
-            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
-                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMissingMessageIdException.class)
+                    .hasMessageContaining("returned no message.id")
+                    .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
+                            .isEqualTo("sendHsmMessage"));
+        }
 
-            assertThat(result.messageId()).isNull();
-            assertThat(result.hasMessageId()).isFalse();
-            assertThat(result.messageIdForLog()).isEqualTo("none");
+        /** The document path shares {@code extractMessageId}, so it must refuse a blank id too. */
+        @Test
+        void documentMode_refusesASendThatReturnsABlankId() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":{"id":77,"url":"u"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":{"id":"  "},"errors":[]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMissingMessageIdException.class)
+                    .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
+                            .isEqualTo("createAndSendMessage"));
         }
 
         /** A dry-run reports the mode but never a message id — a fake one would poison reconciliation. */

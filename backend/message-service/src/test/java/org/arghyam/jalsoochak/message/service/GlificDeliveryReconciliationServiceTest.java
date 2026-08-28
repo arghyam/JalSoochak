@@ -382,6 +382,51 @@ class GlificDeliveryReconciliationServiceTest {
         }
 
         /**
+         * The case the separate line exists for. A low-balance failure on a real daily-report template,
+         * to a contact that maps to a real officer, used to be counted twice: once on the ACCOUNT-LEVEL
+         * line and again as that officer's own failure. The second reading is the damaging one — a
+         * failedOfficers line names officers whose data is fine and whose reports were never charged.
+         */
+        @Test
+        void anAccountLevelFailureIsKeptOutOfTheOfficerTallies() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6275488L, officer(16733L, SO)));
+            stubStatus("ERROR", lowBalance("233212612", 6275488L));
+
+            service.reconcile(from, to);
+
+            assertThat(logLines()).anyMatch(l -> l.contains("ACCOUNT-LEVEL FAILURE"));
+            assertThat(logLines()).noneMatch(l -> l.contains("failedOfficers:"));
+            assertThat(logLines()).noneMatch(l -> l.contains("result=DELIVERY_FAILED"));
+            assertThat(summaryTotal())
+                    .contains("matched=0")
+                    .contains("discardedAccountLevel=1")
+                    .contains("failedByRole={}")
+                    .contains("failedByCode={}");
+        }
+
+        /**
+         * The exclusion is scoped to the configured codes: an ordinary recipient failure in the same
+         * window must still be counted against its officer.
+         */
+        @Test
+        void anOrdinaryFailureAlongsideAnAccountLevelOneIsStillCounted() {
+            stubTenants(tenant(74, "MH"));
+            stubOfficers(Map.of(6275488L, officer(16733L, SO), 6275489L, officer(16734L, SO)));
+            stubStatus("ERROR", lowBalance("1", 6275488L), undeliverable("2", 6275489L));
+
+            service.reconcile(from, to);
+
+            assertThat(logLines()).anyMatch(l -> l.contains("failedOfficers:")
+                    && l.contains("errorCode=131026")
+                    && l.contains("officers=[16734]"));
+            assertThat(summaryTotal())
+                    .contains("matched=1")
+                    .contains("discardedAccountLevel=1")
+                    .contains("failedByCode={131026=1}");
+        }
+
+        /**
          * A low-balance rejection can arrive with a null templateId — the real sample did — so it would
          * be filtered out before ever reaching the tally. It is counted over the unfiltered set for
          * exactly that reason.

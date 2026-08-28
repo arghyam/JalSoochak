@@ -248,6 +248,17 @@ class WhatsAppChannelTest {
                 "(#131053) Media upload error"))).isEqualTo(GlificSendStage.MEDIA_REGISTER);
     }
 
+    /**
+     * A send Glific accepted but returned no id for. It subclasses {@link GlificMutationException}, so
+     * it would otherwise be swept into {@link GlificSendStage#SEND} and retried — sending the officer a
+     * second copy of a report Glific already holds.
+     */
+    @Test
+    void stageOf_tagsAnAcceptedSendThatReturnedNoMessageId() {
+        assertThat(WhatsAppChannel.stageOf(new GlificMissingMessageIdException("sendHsmMessage")))
+                .isEqualTo(GlificSendStage.SEND_NO_MESSAGE_ID);
+    }
+
     @Test
     void stageOf_tagsARejectedSend() {
         assertThat(WhatsAppChannel.stageOf(new GlificMutationException("sendHsmMessage", "receiver",

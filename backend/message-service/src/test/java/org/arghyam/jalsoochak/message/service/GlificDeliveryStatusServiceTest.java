@@ -14,7 +14,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -65,17 +64,21 @@ class GlificDeliveryStatusServiceTest {
     @Mock
     private GlificGraphQLClient client;
 
-    @InjectMocks
-    private GlificDeliveryStatusService service;
-
     private final ObjectMapper mapper = new ObjectMapper();
+
+    /**
+     * Built through the constructor Spring itself uses, so the test's own mapper is the one the service
+     * parses with — no field reflection, and a changed dependency list breaks compilation instead of
+     * leaving a silently null field.
+     */
+    private GlificDeliveryStatusService service;
 
     private final Instant from = Instant.parse("2026-08-27T00:30:00Z");
     private final Instant to = Instant.parse("2026-08-27T06:30:00Z");
 
     @BeforeEach
     void setUp() {
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "objectMapper", mapper);
+        service = new GlificDeliveryStatusService(client, mapper);
     }
 
     // ──────────────────────────── query construction ───────────────────────────

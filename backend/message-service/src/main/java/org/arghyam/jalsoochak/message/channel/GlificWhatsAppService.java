@@ -870,16 +870,23 @@ public class GlificWhatsAppService {
     }
 
     /**
-     * Lifts {@code message.id} out of a send response.
+     * Lifts {@code message.id} out of a send response, refusing one that came back without it.
      *
      * <p>Both send mutations already return it and both used to discard it. It is the only join key
-     * between a report we sent and the delivery status Glific later receives from Gupshup, so a
-     * missing id is returned as {@code null} rather than an empty string — the caller must be able to
-     * tell "Glific gave us no id" from "the id is blank".</p>
+     * between a report we sent and the delivery status Glific later receives from Gupshup, so a send
+     * that produced no id is not a success to report: it counted as delivered and dropped out of
+     * reconciliation in the same step, invisibly. Throwing turns that into a logged, counted outcome.</p>
+     *
+     * <p>A suppressed send never reaches here — {@link #sendDailyReportHsm} returns
+     * {@link GlificSendResult#suppressed} before any mutation runs, and that path keeps its null
+     * message id. So a missing id at this point is always the live anomaly, never the dry-run.</p>
      */
     private static String extractMessageId(JsonNode response, String mutationKey) {
         String id = response.path(mutationKey).path("message").path("id").asText(null);
-        return (id == null || id.isBlank()) ? null : id;
+        if (id == null || id.isBlank()) {
+            throw new GlificMissingMessageIdException(mutationKey);
+        }
+        return id;
     }
 
     /**

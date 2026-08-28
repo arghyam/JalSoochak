@@ -1560,9 +1560,13 @@ class NotificationEventRouterTest {
                 .contains("glificErrorKey=media");
     }
 
-    /** A dry-run is still accepted, and reports no message id rather than a placeholder id. */
+    /**
+     * A dry-run is accepted but nothing was sent, so it gets its own result token. Sharing
+     * {@code result=SENT} with a real send meant a fully muted deployment counted as one that delivered
+     * reports — and the line carried a {@code stage=GLIFIC_ACCEPTED} that never happened.
+     */
     @Test
-    void handleDailyReport_sentLineShowsNoMessageIdForASuppressedSend() throws Exception {
+    void handleDailyReport_suppressedSendIsNotCountedAsSent() throws Exception {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
@@ -1572,9 +1576,80 @@ class NotificationEventRouterTest {
                 .thenReturn(DailyReportSendOutcome.accepted(
                         GlificSendResult.suppressed(DailyReportDeliveryMode.LINK)));
 
-        String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
 
-        assertThat(sent).contains("glificMsgId=none").contains("templateId=-");
+        assertThat(lines).noneMatch(l -> l.contains("result=SENT"));
+        assertThat(lines).filteredOn(l -> l.contains("result=SUPPRESSED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=SUPPRESSED role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("mode=LINK")
+                        .doesNotContain("stage=GLIFIC_ACCEPTED")
+                        .doesNotContain("glificMsgId="));
+    }
+
+    /**
+     * A {@code block()} timeout is the one failure a retry makes worse: Glific may already have created
+     * and sent the message, so re-driving the event delivers the officer a second copy of the same
+     * report. It is recorded for reconciliation and swallowed, not rethrown for the Kafka container.
+     */
+    @Test
+    void handleDailyReport_aTimeoutIsRecordedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.TIMEOUT, null, "Timeout on blocking read for 30000 MILLISECONDS"));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).anyMatch(l -> l.contains("result=FAILED_DELIVERY") && l.contains("stage=TIMEOUT"));
+        assertThat(lines).filteredOn(l -> l.contains("result=DELIVERY_UNCONFIRMED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=DELIVERY_UNCONFIRMED role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("stage=TIMEOUT")
+                        .contains("(non-retryable)"));
+    }
+
+    /**
+     * The same ambiguity, reached the other way: Glific reported no errors but returned no
+     * {@code message.id}, so it holds a message we can never match a status to. A retry is a guaranteed
+     * duplicate, which is why this stage joins TIMEOUT rather than being rethrown.
+     */
+    @Test
+    void handleDailyReport_aSendWithNoMessageIdIsRecordedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(GlificSendStage.SEND_NO_MESSAGE_ID, null,
+                        "Glific accepted sendHsmMessage but returned no message.id"));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).anyMatch(l -> l.contains("result=DELIVERY_UNCONFIRMED")
+                && l.contains("stage=SEND_NO_MESSAGE_ID"));
+    }
+
+    /** Every other failure stage still rethrows, so the Kafka container can apply its retry policy. */
+    @Test
+    void handleDailyReport_aRejectedSendStillRethrowsForRetry() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
+
+        assertThatThrownBy(() -> router.route(DAILY_REPORT_JSON))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
     }
 
     /**
@@ -1582,6 +1657,20 @@ class NotificationEventRouterTest {
      * {@code needle}. Tolerates the router rethrowing, which the failure paths do by design.
      */
     private String captureRouterLog(String json, String needle) {
+        List<String> lines = captureRouterLogs(json);
+        return lines.stream()
+                .filter(m -> m.contains(needle))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no log line containing '" + needle + "'; lines were "
+                        + lines));
+    }
+
+    /**
+     * Every line the router logs while routing one event. Needed wherever the assertion is about which
+     * result token was <em>not</em> emitted — a suppressed send must produce no {@code result=SENT}
+     * line at all, which no single-line lookup can show.
+     */
+    private List<String> captureRouterLogs(String json) {
         ch.qos.logback.classic.Logger logger =
                 (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(NotificationEventRouter.class);
         ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
@@ -1591,18 +1680,14 @@ class NotificationEventRouterTest {
         try {
             router.route(json);
         } catch (RuntimeException expected) {
-            // Delivery failures rethrow so the Kafka container retries; the log line is what matters here.
+            // Delivery failures rethrow so the Kafka container retries; the log lines are what matter here.
         } finally {
             logger.detachAppender(appender);
             appender.stop();
         }
         return appender.list.stream()
                 .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
-                .filter(m -> m.contains(needle))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("no log line containing '" + needle + "'; lines were "
-                        + appender.list.stream()
-                                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).toList()));
+                .toList();
     }
 
     /**

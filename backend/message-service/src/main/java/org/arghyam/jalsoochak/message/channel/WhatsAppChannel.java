@@ -200,6 +200,10 @@ public class WhatsAppChannel implements NotificationChannel {
         if (isBlockTimeout(ex)) {
             return GlificSendStage.TIMEOUT;
         }
+        // A subclass of GlificMutationException, so it must be matched before the branch below.
+        if (ex instanceof GlificMissingMessageIdException) {
+            return GlificSendStage.SEND_NO_MESSAGE_ID;
+        }
         if (ex instanceof GlificMutationException gme) {
             // createMessageMedia is the DOCUMENT-mode media step — the 20 Aug (#131053) failure —
             // and needs a completely different fix from a rejected send.

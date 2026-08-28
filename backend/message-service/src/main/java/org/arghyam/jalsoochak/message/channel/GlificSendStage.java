@@ -21,6 +21,16 @@ public enum GlificSendStage {
     SEND,
 
     /**
+     * Glific accepted the send but returned no {@code message.id}
+     * ({@link GlificMissingMessageIdException}).
+     *
+     * <p>Ambiguous in the same way as {@link #TIMEOUT}, and for a stronger reason: the mutation
+     * returned no errors, so Glific has the message and a retry sends a duplicate. What is lost is the
+     * join key, which means only a reconciliation pass against Glific can say whether it arrived.</p>
+     */
+    SEND_NO_MESSAGE_ID,
+
+    /**
      * The 30 s {@code block()} in {@link GlificGraphQLClient} expired.
      *
      * <p>Its own token because it is the one failure a retry makes <em>worse</em>: Glific may already

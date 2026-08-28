@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.message.service;
 
 import org.arghyam.jalsoochak.message.channel.DailyReportSendOutcome;
 import org.arghyam.jalsoochak.message.channel.GlificSendResult;
+import org.arghyam.jalsoochak.message.channel.GlificSendStage;
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
@@ -139,6 +140,9 @@ public class NotificationEventRouter {
     private boolean dailyReportOutageDetailSectionsEnabled;
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
+
+    /** The presigned query string on a MinIO URL — stripped before any URL is logged. */
+    private static final String URL_QUERY_SUFFIX = "\\?.*$";
 
     @PostConstruct
     void validateBaseUrl() {
@@ -844,7 +848,7 @@ public class NotificationEventRouter {
         if (!sent) {
             throw new IllegalStateException("[Router/ESCALATION] WhatsApp escalation delivery failed");
         }
-        String loggableUrl = minioUrl.replaceFirst("\\?.*$", "");
+        String loggableUrl = loggableUrl(minioUrl);
         log.info("[Router/ESCALATION] level={} → {} ({})", level, sent ? "SENT" : "FAILED", loggableUrl);
         log.debug("[Router/ESCALATION] officer={} level={} → {} ({})", officerPhone, level,
                 sent ? "SENT" : "FAILED", loggableUrl);
@@ -856,9 +860,14 @@ public class NotificationEventRouter {
      * sends the document HSM via Glific. Mirrors {@link #handleEscalation}.
      *
      * <p>Every terminal outcome — one per officer — is logged with a {@code result=} tag and a
-     * {@code role=} field so daily-report delivery can be counted per role straight from the logs
-     * . {@code result=GENERATED} marks a rendered
-     * PDF and {@code result=SENT} a confirmed WhatsApp delivery, so the two are counted separately.</p>
+     * {@code role=} field so daily-report delivery can be counted per role straight from the logs.
+     * {@code result=GENERATED} marks a rendered PDF and {@code result=SENT} a send Glific
+     * <em>accepted</em>, so the two are counted separately. Three more tags keep the SENT count honest:
+     * {@code SUPPRESSED} is a dry-run that reached no Glific mutation, {@code FAILED_DELIVERY} a
+     * rejected send, and {@code DELIVERY_UNCONFIRMED} one Glific may have sent but cannot confirm —
+     * the last of which is deliberately <strong>not</strong> retried (see
+     * {@link #isAmbiguousDelivery}). None of them means WhatsApp delivered anything; only
+     * {@link GlificDeliveryReconciliationService} can say that.</p>
      */
     private void handleDailySituationReport(JsonNode root) throws Exception {
         int tenantId = root.path("tenantId").asInt(0);
@@ -966,20 +975,66 @@ public class NotificationEventRouter {
         // isRenderableKpis has already confirmed reportDate is a parseable ISO date. It is the day the
         // data covers (D-1) — the date the officer sees in the WhatsApp document name.
         LocalDate reportDate = LocalDate.parse(kpis.getReportDate());
+        DailyReportLogCtx logCtx = new DailyReportLogCtx(corr, role, tenantId, officerUserId);
         DailyReportSendOutcome outcome =
                 whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType, reportDate, officerName);
+        long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {
-            DailyReportSendOutcome.Failure failure = outcome.failure();
-            // stage= and glificErrorKey= are appended *after* officer=
-            log.error("[Router/DAILY_REPORT] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
-                            + " stage={} glificErrorKey={}",
-                    corr, role, tenantId, officerUserId, failure.stage(), failure.errorKeyForLog());
-            throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + corr
+            reportFailedDelivery(logCtx, outcome.failure(), reportDate, loggableUrl(minioUrl));
+            return;
+        }
+        logSendResult(logCtx, outcome.result(), contactId, priorityRows.size(), tookMs, loggableUrl(minioUrl));
+    }
+
+    /**
+     * The four fields every {@code [Router/DAILY_REPORT]} line opens with, kept together so the
+     * {@code result= role= tenant= officer=} adjacency the log-counting recipes grep for cannot drift
+     * apart between the handler and the lines it delegates.
+     */
+    private record DailyReportLogCtx(String corr, String role, int tenantId, long officerUserId) {}
+
+    /**
+     * Logs a rejected send and decides whether the event may be retried.
+     *
+     * <p>Rethrows for the stages a retry can actually repair. It does <em>not</em> rethrow for a stage
+     * after which Glific may already hold the message ({@link #isAmbiguousDelivery}): re-driving the
+     * event would send the officer a second copy of the same report, which is worse than the missing
+     * confirmation it was trying to fix. Those are recorded for reconciliation instead.</p>
+     */
+    private void reportFailedDelivery(DailyReportLogCtx ctx, DailyReportSendOutcome.Failure failure,
+                                      LocalDate reportDate, String loggableUrl) {
+        // stage= and glificErrorKey= are appended *after* officer=
+        log.error("[Router/DAILY_REPORT] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
+                        + " stage={} glificErrorKey={}",
+                ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                failure.stage(), failure.errorKeyForLog());
+        if (!isAmbiguousDelivery(failure.stage())) {
+            throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + ctx.corr()
                     + " WhatsApp daily report delivery failed at stage=" + failure.stage());
         }
-        GlificSendResult sendResult = outcome.result();
-        String loggableUrl = minioUrl.replaceFirst("\\?.*$", "");
-        long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        log.warn("[Router/DAILY_REPORT] corr={} result=DELIVERY_UNCONFIRMED role={} tenant={} officer={}"
+                        + " stage={} reportDate={} (non-retryable) — Glific may already have sent this"
+                        + " report, so the event is not retried. Settle it against Glific's own delivery"
+                        + " status for this officer; see GlificDeliveryReconciliationService ({})",
+                ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                failure.stage(), reportDate, loggableUrl);
+    }
+
+    /**
+     * Logs an accepted send — or a suppressed one, which is not the same event and no longer shares a
+     * line with it. A dry-run reached no Glific mutation at all: it has no {@code GLIFIC_ACCEPTED}
+     * stage, no message id and nothing for reconciliation to match, so counting it as {@code SENT}
+     * reported a muted deployment as a delivering one.
+     */
+    private void logSendResult(DailyReportLogCtx ctx, GlificSendResult sendResult, long contactId,
+                               int priorityRows, long tookMs, String loggableUrl) {
+        if (sendResult.isSuppressed()) {
+            log.info("[Router/DAILY_REPORT] corr={} result=SUPPRESSED role={} tenant={} officer={}"
+                            + " mode={} priorityRows={} tookMs={} ({})",
+                    ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                    sendResult.modeForLog(), priorityRows, tookMs, loggableUrl);
+            return;
+        }
         // result=SENT means Glific ACCEPTED the send — it is not a WhatsApp delivery confirmation.
         // glificMsgId is what lets the delivery status Gupshup and Meta later report to Glific be
         // matched back to this officer; see GlificDeliveryReconciliationService. Every new field goes after officer= to preserve
@@ -987,9 +1042,23 @@ public class NotificationEventRouter {
         log.info("[Router/DAILY_REPORT] corr={} result=SENT role={} tenant={} officer={}"
                         + " stage=GLIFIC_ACCEPTED glificMsgId={} glificContactId={} mode={} templateId={}"
                         + " priorityRows={} tookMs={} ({})",
-                corr, role, tenantId, officerUserId,
+                ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                 sendResult.messageIdForLog(), contactId, sendResult.modeForLog(), sendResult.templateIdForLog(),
-                priorityRows.size(), tookMs, loggableUrl);
+                priorityRows, tookMs, loggableUrl);
+    }
+
+    /**
+     * Stages after which Glific may already have created and sent the message, so the event must not be
+     * retried: a {@code block()} timeout, and a mutation that returned no errors but no message id
+     * either. Both leave delivery unconfirmed rather than failed, and only Glific can settle which.
+     */
+    private static boolean isAmbiguousDelivery(GlificSendStage stage) {
+        return stage == GlificSendStage.TIMEOUT || stage == GlificSendStage.SEND_NO_MESSAGE_ID;
+    }
+
+    /** A MinIO URL with any presigned query string stripped, so a signature never reaches a log line. */
+    private static String loggableUrl(String url) {
+        return url.replaceFirst(URL_QUERY_SUFFIX, "");
     }
 
     /**

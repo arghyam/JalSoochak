@@ -190,12 +190,16 @@ public class GlificDeliveryReconciliationService {
      *                                correctness requirement: an inbound message's {@code receiver} is
      *                                our own org contact, not an officer
      * @param discardedOtherTemplates outbound HSMs belonging to nudges, OTPs or other templates
+     * @param discardedAccountLevel   messages taken out of the per-officer tallies because their failure
+     *                                is account-wide. Reported so {@code windowScanned} still adds up
+     *                                from the categories below it
      * @param accountLevelFailures    failures whose code is account-wide, counted across the
      *                                <em>unfiltered</em> set — a low-balance rejection can arrive with
      *                                a null {@code templateId} and would otherwise be filtered away
      */
     private record WindowScan(List<GlificMessageStatus> matched, int windowScanned, int discardedInbound,
-                              int discardedOtherTemplates, Map<String, Integer> accountLevelFailures) {}
+                              int discardedOtherTemplates, int discardedAccountLevel,
+                              Map<String, Integer> accountLevelFailures) {}
 
     private WindowScan scanWindow(Instant from, Instant to, Set<Integer> templateIds) {
         List<GlificMessageStatus> matched = new ArrayList<>();
@@ -204,6 +208,7 @@ public class GlificDeliveryReconciliationService {
         int windowScanned = 0;
         int discardedInbound = 0;
         int discardedOtherTemplates = 0;
+        int discardedAccountLevel = 0;
 
         for (String status : STATUSES_TO_CHECK) {
             int count = glificDeliveryStatusService.countMessages(from, to, status, dateColumn);
@@ -216,6 +221,12 @@ public class GlificDeliveryReconciliationService {
             for (GlificMessageStatus message : page) {
                 if (isAccountLevel(message, accountLevelCodes)) {
                     accountLevel.merge(message.failureKey(), 1, Integer::sum);
+                    // Counted on the ACCOUNT-LEVEL FAILURE line and nowhere else. Letting it fall through
+                    // would also count it as that officer's failure — the very double-reporting this
+                    // classification exists to prevent, and the reading (a mass recipient-data problem)
+                    // that a zero Gupshup balance most invites.
+                    discardedAccountLevel++;
+                    continue;
                 }
                 if (!message.isOutboundHsm()) {
                     discardedInbound++;
@@ -226,7 +237,8 @@ public class GlificDeliveryReconciliationService {
                 }
             }
         }
-        return new WindowScan(matched, windowScanned, discardedInbound, discardedOtherTemplates, accountLevel);
+        return new WindowScan(matched, windowScanned, discardedInbound, discardedOtherTemplates,
+                discardedAccountLevel, accountLevel);
     }
 
     private static boolean isAccountLevel(GlificMessageStatus message, Set<String> accountLevelCodes) {
@@ -434,12 +446,13 @@ public class GlificDeliveryReconciliationService {
     private void logTotal(Instant from, Instant to, int tenants, Tally total, WindowScan scan,
                           int unmappedContacts, long tookMs) {
         log.info("[GlificStatus] summaryTotal: window={}→{} tenants={} matched={} windowScanned={}"
-                        + " discardedInbound={} discardedOtherTemplates={} unmappedContacts={}"
-                        + " deliveredByRole={} readByRole={} failedByRole={} failedByCode={}"
-                        + " pending={} unknownStatus={} tookMs={}",
+                        + " discardedInbound={} discardedOtherTemplates={} discardedAccountLevel={}"
+                        + " unmappedContacts={} deliveredByRole={} readByRole={} failedByRole={}"
+                        + " failedByCode={} pending={} unknownStatus={} tookMs={}",
                 from, to, tenants, total.matched, scan.windowScanned(), scan.discardedInbound(),
-                scan.discardedOtherTemplates(), unmappedContacts, total.deliveredByRole, total.readByRole,
-                total.failedByRole, total.failedByCode, total.pending, total.unknownStatus, tookMs);
+                scan.discardedOtherTemplates(), scan.discardedAccountLevel(), unmappedContacts,
+                total.deliveredByRole, total.readByRole, total.failedByRole, total.failedByCode,
+                total.pending, total.unknownStatus, tookMs);
     }
 
     /**
@@ -455,7 +468,8 @@ public class GlificDeliveryReconciliationService {
                 log.error("[GlificStatus] ACCOUNT-LEVEL FAILURE: errorCode={} affected={} message(s) in the"
                                 + " window — this is a Gupshup account condition (e.g. low balance), not an"
                                 + " officer or recipient problem. Messages counted here include ones outside"
-                                + " the daily-report templates.",
+                                + " the daily-report templates, and are excluded from every per-officer and"
+                                + " per-tenant tally above.",
                         code, count));
     }
 

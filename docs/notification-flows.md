@@ -357,6 +357,26 @@ All Glific and storage properties can be overridden via environment variables.
 | `minio.secret-key`              | `MINIO_SECRET_KEY`              | Yes      | MinIO secret key                                                                                                                         |
 | `minio.bucket`                  | `MINIO_BUCKET`                  | No       | Bucket name (default: `escalation-reports`)                                                                                              |
 | `minio.base-url`                | `MINIO_BASE_URL`                | No       | **Public** prefix of the URL handed to Glific — Meta downloads it from the public internet. Prod: `https://jalsoochak.jjmbrain.in/minio` |
+| `app.base-url` | `APP_BASE_URL` | No | Public URL of message-service itself |
+| `escalation.report.dir` | — | No | Local PDF output directory (default: `/tmp/escalation-reports/`) |
+| `notifications.whatsapp.dry-run` | `NOTIFICATIONS_WHATSAPP_DRY_RUN` | No | Master WhatsApp guard. Set `true` to suppress the shared account Glific calls (login OTP, welcome flow, language update). Every purpose flag below defaults to this value when its own flag is unset, so `true` still mutes everything |
+| `notifications.nudge.dry-run` | `NOTIFICATIONS_NUDGE_DRY_RUN` | No | Set `true` to suppress only operator nudges (defaults to `notifications.whatsapp.dry-run`) |
+| `notifications.escalation.dry-run` | `NOTIFICATIONS_ESCALATION_DRY_RUN` | No | Set `true` to suppress only officer (SO/SDO) escalation documents (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver escalations while nudges stay muted |
+| `notifications.daily-report.dry-run` | `NOTIFICATIONS_DAILY_REPORT_DRY_RUN` | No | Set `true` to suppress only the officer Daily Water Service Situation Report (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver daily reports while everything else stays muted. A suppressed report is logged as `result=SUPPRESSED`, never as `result=SENT` |
+| `notifications.daily-report.delivery-mode` | `NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` | No | `DOCUMENT` (default) sends the report as a PDF attachment, which Meta downloads from `minio.base-url` itself. `LINK` sends a text HSM whose "View Report" button carries the MinIO path, so Meta fetches nothing and the officer's phone opens the PDF — the way past the India-only firewall that makes the attachment fail with `(#131053)`. See the note below |
+| `glific.template.daily-report-so-link-id` | `GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID` | Only in `LINK` mode | SECTION_OFFICER link template. Startup fails without it when daily reports are live and the mode is `LINK` |
+| `glific.template.daily-report-sdo-link-id` | `GLIFIC_DAILY_REPORT_SDO_LINK_TEMPLATE_ID` | No | SUB_DIVISIONAL_OFFICER link template; falls back to the SO link template when blank |
+| `daily-report.link.button-base-url` | `DAILY_REPORT_LINK_BUTTON_BASE_URL` | No | Mirror of the URL prefix frozen into the approved link template, e.g. `https://jalsoochak.jjmbrain.in/minio/`. When set it must equal `minio.base-url` + `/` or startup fails |
+| `notifications.sms.dry-run` | `NOTIFICATIONS_SMS_DRY_RUN` | No | Set `true` to suppress SMSCountry OTP delivery (login OTPs will not reach users) |
+| `glific.status.reconcile.enabled` | `GLIFIC_STATUS_RECONCILE_ENABLED` | No | Default `false`. Turns on the daily-report delivery-status reconciliation — see the note below |
+| `glific.status.reconcile.interval-ms` | `GLIFIC_STATUS_RECONCILE_INTERVAL_MS` | No | Default `1800000` (30 min) between passes |
+| `glific.status.reconcile.initial-delay-ms` | `GLIFIC_STATUS_RECONCILE_INITIAL_DELAY_MS` | No | Default `600000` (10 min) after startup |
+| `glific.status.reconcile.window-hours` | `GLIFIC_STATUS_RECONCILE_WINDOW_HOURS` | No | Default `6`. Rolling look-back, **not** a fixed hour — the daily-report cron is per-tenant configurable, so no single hour suits every tenant. Keep it tight: a wide window costs pages of unrelated traffic |
+| `glific.status.reconcile.page-size` | `GLIFIC_STATUS_RECONCILE_PAGE_SIZE` | No | Default `250` messages per Glific page |
+| `glific.status.reconcile.max-pages` | `GLIFIC_STATUS_RECONCILE_MAX_PAGES` | No | Default `40`. Hard stop per status so a pathological window cannot consume the whole Glific throttle budget. Hitting it logs a `WARN` — truncated results would silently under-report delivery |
+| `glific.status.reconcile.date-column` | `GLIFIC_STATUS_RECONCILE_DATE_COLUMN` | No | Default `inserted_at`, the column Glific's `dateRange` filters on. `updated_at` moves on every status change and would let a message drift out of its send window |
+| `glific.status.reconcile.template-ids` | `GLIFIC_STATUS_RECONCILE_TEMPLATE_IDS` | No | Blank = derive from the `glific.template.daily-report-*` ids. `MessageFilter` has no `templateId`, so daily reports are separated from nudges/OTPs **client-side** against this list |
+| `glific.status.reconcile.account-level-error-codes` | `GLIFIC_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES` | No | Default `9999` ("low balance"). Codes that are properties of the Gupshup **account**, not of a recipient — reported on their own `ACCOUNT-LEVEL FAILURE` line and excluded from every per-officer and per-tenant tally, rather than counted as N officer failures |
 
 > **`minio.endpoint` and `minio.base-url` are different addresses.** The endpoint is where this
 > service uploads (internal is correct). The base URL is what Glific registers and Meta fetches from
@@ -372,25 +392,6 @@ All Glific and storage properties can be overridden via environment variables.
 > verify from outside the network with
 > `curl -sSI https://jalsoochak.jjmbrain.in/minio/escalation-reports/<file>.pdf` before enabling
 > delivery — a public hostname with a private bucket trades Meta's 403 for MinIO's.
-> | `app.base-url` | `APP_BASE_URL` | No | Public URL of message-service itself |
-> | `notifications.whatsapp.dry-run` | `NOTIFICATIONS_WHATSAPP_DRY_RUN` | No | Master WhatsApp guard. Set `true` to suppress the shared account Glific calls (login OTP, welcome flow, language update). Every purpose flag below defaults to this value when its own flag is unset, so `true` still mutes everything |
-> | `notifications.nudge.dry-run` | `NOTIFICATIONS_NUDGE_DRY_RUN` | No | Set `true` to suppress only operator nudges (defaults to `notifications.whatsapp.dry-run`) |
-> | `notifications.escalation.dry-run` | `NOTIFICATIONS_ESCALATION_DRY_RUN` | No | Set `true` to suppress only officer (SO/SDO) escalation documents (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver escalations while nudges stay muted |
-> | `notifications.daily-report.dry-run` | `NOTIFICATIONS_DAILY_REPORT_DRY_RUN` | No | Set `true` to suppress only the officer Daily Water Service Situation Report (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver daily reports while everything else stays muted |
-> | `notifications.daily-report.delivery-mode` | `NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` | No | `DOCUMENT` (default) sends the report as a PDF attachment, which Meta downloads from `minio.base-url` itself. `LINK` sends a text HSM whose "View Report" button carries the MinIO path, so Meta fetches nothing and the officer's phone opens the PDF — the way past the India-only firewall that makes the attachment fail with `(#131053)`. See the note below |
-> | `glific.template.daily-report-so-link-id` | `GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID` | Only in `LINK` mode | SECTION_OFFICER link template. Startup fails without it when daily reports are live and the mode is `LINK` |
-> | `glific.template.daily-report-sdo-link-id` | `GLIFIC_DAILY_REPORT_SDO_LINK_TEMPLATE_ID` | No | SUB_DIVISIONAL_OFFICER link template; falls back to the SO link template when blank |
-> | `daily-report.link.button-base-url` | `DAILY_REPORT_LINK_BUTTON_BASE_URL` | No | Mirror of the URL prefix frozen into the approved link template, e.g. `https://jalsoochak.jjmbrain.in/minio/`. When set it must equal `minio.base-url` + `/` or startup fails |
-> | `notifications.sms.dry-run` | `NOTIFICATIONS_SMS_DRY_RUN` | No | Set `true` to suppress SMSCountry OTP delivery (login OTPs will not reach users) |
-> | `glific.status.reconcile.enabled` | `GLIFIC_STATUS_RECONCILE_ENABLED` | No | Default `false`. Turns on the daily-report delivery-status reconciliation — see the note below |
-> | `glific.status.reconcile.interval-ms` | `GLIFIC_STATUS_RECONCILE_INTERVAL_MS` | No | Default `1800000` (30 min) between passes |
-> | `glific.status.reconcile.initial-delay-ms` | `GLIFIC_STATUS_RECONCILE_INITIAL_DELAY_MS` | No | Default `600000` (10 min) after startup |
-> | `glific.status.reconcile.window-hours` | `GLIFIC_STATUS_RECONCILE_WINDOW_HOURS` | No | Default `6`. Rolling look-back, **not** a fixed hour — the daily-report cron is per-tenant configurable, so no single hour suits every tenant. Keep it tight: a wide window costs pages of unrelated traffic |
-> | `glific.status.reconcile.page-size` | `GLIFIC_STATUS_RECONCILE_PAGE_SIZE` | No | Default `250` messages per Glific page |
-> | `glific.status.reconcile.max-pages` | `GLIFIC_STATUS_RECONCILE_MAX_PAGES` | No | Default `40`. Hard stop per status so a pathological window cannot consume the whole Glific throttle budget. Hitting it logs a `WARN` — truncated results would silently under-report delivery |
-> | `glific.status.reconcile.date-column` | `GLIFIC_STATUS_RECONCILE_DATE_COLUMN` | No | Default `inserted_at`, the column Glific's `dateRange` filters on. `updated_at` moves on every status change and would let a message drift out of its send window |
-> | `glific.status.reconcile.template-ids` | `GLIFIC_STATUS_RECONCILE_TEMPLATE_IDS` | No | Blank = derive from the `glific.template.daily-report-*` ids. `MessageFilter` has no `templateId`, so daily reports are separated from nudges/OTPs **client-side** against this list |
-> | `glific.status.reconcile.account-level-error-codes` | `GLIFIC_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES` | No | Default `9999` ("low balance"). Codes that are properties of the Gupshup **account**, not of a recipient — reported on their own `ACCOUNT-LEVEL FAILURE` line instead of counted as N officer failures |
 
 > **Delivery-status reconciliation.** `result=SENT` only means Glific _accepted_ our API call; Gupshup
 > and Meta act afterwards and report delivery status back to Glific alone. A report sent to a number
@@ -418,7 +419,6 @@ All Glific and storage properties can be overridden via environment variables.
 > `receiverId=0`, which Glific rejects as `Receiver does not exist`. Opt-in is therefore suppressed
 > only when _every_ purpose above is muted — which a lone `NOTIFICATIONS_WHATSAPP_DRY_RUN=true` still
 > does, since each purpose flag defaults to it.
-> | `escalation.report.dir` | — | No | Local PDF output directory (default: `/tmp/escalation-reports/`) |
 
 ---
 
