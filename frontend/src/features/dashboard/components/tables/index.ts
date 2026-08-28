@@ -1,7 +1,0 @@
-export { PerformanceTable } from './performance-table'
-export { AllStatesTable } from './all-states-table'
-export { AllDistrictsTable } from './all-districts-table'
-export { PumpOperatorsPerformanceTable } from './pump-operators-performance-table'
-export { AllBlocksTable } from './all-blocks-table'
-export { PhotoEvidenceComplianceTable } from './photo-evidence-compliance-table'
-export { AllGramPanchayatsTable } from './all-gram-panchayats-table'

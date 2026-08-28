@@ -1,8 +1,0 @@
-export { OverviewPage } from './components/overview/overview-page'
-export { SystemRulesPage } from './components/system-rules/system-rules-page'
-export { StatesUTsPage } from './components/states-uts/states-uts-page'
-export { AddStateUTPage } from './components/states-uts/add-state-ut-page'
-export { ViewStateUTPage } from './components/states-uts/view-state-ut-page'
-export { EditStateUTPage } from './components/states-uts/edit-state-ut-page'
-export { ApiCredentialsPage } from './components/api-credentials/api-credentials-page'
-export { IngestionMonitorPage } from './components/ingestion-monitor/ingestion-monitor-page'
