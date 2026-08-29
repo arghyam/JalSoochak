@@ -4,16 +4,21 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
+import org.arghyam.jalsoochak.message.exception.PermanentMailException;
+import org.arghyam.jalsoochak.message.exception.TransientMailException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 
 /**
  * {@link EmailSender} implementation that delivers transactional emails via
@@ -31,6 +36,18 @@ import java.util.Map;
 public class SendGridMailSender implements EmailSender {
 
     private static final String MAIL_SEND_PATH = "/v3/mail/send";
+
+    private static final int TOO_MANY_REQUESTS = 429;
+
+    /**
+     * Hard ceiling on a single send. {@code block()} parks the Kafka listener thread, and that
+     * thread is the only one draining {@code common-topic} — without a bound, one hung TLS
+     * connection stalls every notification behind it and eventually breaches
+     * {@code max.poll.interval.ms}, evicting the consumer from its group.
+     *
+     * <p>Kept comfortably under that 600s budget with room for the retry ladder on top.
+     */
+    private Duration sendTimeout = Duration.ofSeconds(20);
 
     private final MailProperties mailProperties;
     private final WebClient webClient;
@@ -80,18 +97,63 @@ public class SendGridMailSender implements EmailSender {
                     .bodyValue(payload)
                     .retrieve()
                     .toBodilessEntity()
+                    .timeout(sendTimeout)
                     .block();
 
             log.info("[SendGridMailSender] sent template={}", request.template());
         } catch (WebClientResponseException e) {
+            int status = e.getStatusCode().value();
+            String detail = "SendGrid returned HTTP " + status + ": " + e.getResponseBodyAsString();
             log.error("[SendGridMailSender] failure template={}: HTTP {} {}",
-                    request.template(), e.getStatusCode().value(), e.getResponseBodyAsString(), e);
-            throw new RuntimeException(
-                    "SendGrid returned HTTP " + e.getStatusCode().value() + ": " + e.getResponseBodyAsString(), e);
+                    request.template(), status, e.getResponseBodyAsString(), e);
+            // 429 and 5xx are the provider asking us to come back later — nothing was accepted.
+            // Every other 4xx (bad key, malformed payload, refused address) fails identically on replay.
+            if (status == TOO_MANY_REQUESTS || e.getStatusCode().is5xxServerError()) {
+                throw new TransientMailException(detail, e);
+            }
+            throw new PermanentMailException(detail, e);
+        } catch (WebClientRequestException e) {
+            // Transient only when the connection never opened — DNS failure, connection refused. A
+            // reset or a broken pipe part-way through is a different case: the request body may
+            // already have been written and accepted, so retrying could deliver a second copy. Same
+            // reasoning as the timeout branch below, applied at the transport layer.
+            if (ConnectionFailures.neverReachedProvider(e)) {
+                log.error("[SendGridMailSender] failure template={}: never connected to SendGrid: {}",
+                        request.template(), e.getMessage(), e);
+                throw new TransientMailException(
+                        "SendGridMailSender could not reach SendGrid for " + request.template(), e);
+            }
+            log.error("[SendGridMailSender] failure template={}: connection broke mid-request, treating as"
+                            + " non-retryable to avoid a duplicate send: {}",
+                    request.template(), e.getMessage(), e);
+            throw new PermanentMailException(
+                    "SendGridMailSender lost the connection mid-request for " + request.template(), e);
         } catch (RuntimeException e) {
+            if (isTimeout(e)) {
+                // Ambiguous: SendGrid may have accepted the payload before we gave up at sendTimeout.
+                // Retrying could deliver a second copy, so this is permanent by choice, not by nature.
+                log.error("[SendGridMailSender] failure template={}: timed out after {}s, treating as"
+                                + " non-retryable to avoid a duplicate send",
+                        request.template(), sendTimeout.toSeconds(), e);
+                throw new PermanentMailException(
+                        "SendGrid send timed out after " + sendTimeout.toSeconds() + "s for " + request.template(), e);
+            }
             log.error("[SendGridMailSender] failure template={}: {}", request.template(), e.getMessage(), e);
-            throw new RuntimeException("SendGridMailSender failure for " + request.template(), e);
+            throw new PermanentMailException("SendGridMailSender failure for " + request.template(), e);
         }
+    }
+
+    /**
+     * Reactor wraps the checked {@link TimeoutException} raised by {@code timeout()} before it
+     * surfaces from {@code block()}, so the cause chain is what identifies it.
+     */
+    private static boolean isTimeout(Throwable t) {
+        for (Throwable c = t; c != null && c != c.getCause(); c = c.getCause()) {
+            if (c instanceof TimeoutException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String resolveTemplateId(MailTemplate template) {

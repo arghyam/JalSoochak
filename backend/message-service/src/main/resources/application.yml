@@ -27,15 +27,47 @@ spring:
 
   kafka:
     bootstrap-servers: localhost:9092
+    listener:
+      # Consumer threads draining common-topic. Effective only up to the topic's partition count —
+      # Kafka hands out whole partitions, so on a 1-partition topic the extra threads idle and this
+      # value changes nothing. Nothing here declares a partition count, so a broker-auto-created
+      # common-topic has exactly one: run `kafka-topics --describe --topic common-topic` and, if
+      # needed, `kafka-topics --alter --topic common-topic --partitions 3`.
+      #
+      # Why it matters: at 1 thread a daily-report run (one event per officer, each a PDF render +
+      # MinIO upload + Glific calls throttled 500ms apart) occupies the only consumer for minutes,
+      # and login OTPs queued behind it can expire before they are ever sent.
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
     consumer:
       group-id: message-service-group
       auto-offset-reset: earliest
       enable-auto-commit: false
-      max-poll-records: 50
+      # ── Poll budget ────────────────────────────────────────────────────────────
+      # These settings only reach the broker because KafkaConfig.consumerFactory seeds itself from
+      # KafkaProperties. Declaring that bean backs off Boot's auto-configuration, and before it read
+      # this block the running consumer used Kafka's client defaults instead — 500 records per poll
+      # against a 5-minute max.poll.interval.ms, not what is written here.
+      #
+      # The constraint: max.poll.interval.ms is measured between poll() calls, so it must cover the
+      # WHOLE batch, not one record. Exceed it and the consumer is evicted mid-batch without
+      # committing, the partition is reassigned, and every record it already handled is redelivered —
+      # meaning every notification in the batch is sent a second time.
+      #
+      #   max-poll-records × worst-case-per-record + longest-retry-backoff < max.poll.interval.ms
+      #
+      # Worst case per record on common-topic is ~120s: SMTP can spend 90s across its three timeouts
+      # below, and an escalation or daily report makes up to three Glific calls at a 30s cap each on
+      # top of a PDF render and a MinIO upload. The longest single back-off rung is 60s.
+      #
+      #   5 × 120s + 60s = 660s  <  900s   ✓ (240s headroom)
+      #
+      # Raising max-poll-records means redoing this arithmetic. It buys nothing here: these handlers
+      # take seconds each, so throughput is bound by the work, not by how many records a poll returns.
+      max-poll-records: ${KAFKA_MAX_POLL_RECORDS:5}
       properties:
         session.timeout.ms: 30000
         heartbeat.interval.ms: 10000
-        max.poll.interval.ms: 600000
+        max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:900000}
         fetch.max.wait.ms: 500
 
   # SMTP mail config — required when notification.mail.provider=smtp
@@ -94,6 +126,14 @@ notification:
   # provider: smscountry → requires SMSCOUNTRY_* env vars (default)
   sms:
     provider: ${SMS_PROVIDER:smscountry}
+    # How long an otp-topic listener thread waits for one send to resolve before giving up on it.
+    # The handler blocks for this long on purpose: firing and forgetting would commit the offset
+    # against an outcome nobody knows yet, and a restart in that window loses the OTP silently.
+    #
+    # Sits just above the adapter's own 20s cap plus its 500ms connection retry, so normally the
+    # adapter times out first and the failure arrives already classified. Healthy sends take a few
+    # hundred milliseconds — raise kafka.topic.otp.concurrency for throughput, not this.
+    send-timeout: ${SMS_SEND_TIMEOUT:25s}
 
   # ── Transactional account emails (invite, reinvite, password-reset) ────────
   # Switch providers by changing 'provider'. No code changes required.

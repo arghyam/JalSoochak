@@ -2,10 +2,13 @@ package org.arghyam.jalsoochak.message.channel;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
+import org.arghyam.jalsoochak.message.exception.PermanentMailException;
+import org.arghyam.jalsoochak.message.exception.TransientMailException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -14,6 +17,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
 import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
@@ -139,27 +143,87 @@ class SendGridMailSenderTest {
     // ─────────────────────── Failure handling ──────────────────────────────────
 
     @Test
-    void send_throwsRuntimeException_whenSendGridReturns4xx() {
+    void send_throwsPermanent_whenSendGridReturns4xx() {
         wireMockServer.stubFor(post(urlEqualTo(MAIL_SEND_PATH))
                 .willReturn(aResponse().withStatus(400)
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"errors\":[{\"message\":\"invalid\"}]}")));
 
-        assertThatThrownBy(() -> sender.send(new MailRequest("to@example.com", MailTemplate.PASSWORD_RESET,
-                Map.of("reset_link", "https://link", "expiry_minutes", 30))))
-                .isInstanceOf(RuntimeException.class)
+        assertThatThrownBy(() -> sender.send(passwordReset()))
+                .isInstanceOf(PermanentMailException.class)
                 .hasMessageContaining("SendGrid returned HTTP 400");
     }
 
     @Test
-    void send_throwsRuntimeException_whenSendGridReturns5xx() {
+    void send_throwsPermanent_whenApiKeyIsRejected() {
+        wireMockServer.stubFor(post(urlEqualTo(MAIL_SEND_PATH))
+                .willReturn(aResponse().withStatus(401).withBody("{\"errors\":[{\"message\":\"unauthorized\"}]}")));
+
+        assertThatThrownBy(() -> sender.send(passwordReset()))
+                .isInstanceOf(PermanentMailException.class);
+    }
+
+    @Test
+    void send_throwsTransient_whenSendGridReturns5xx() {
         wireMockServer.stubFor(post(urlEqualTo(MAIL_SEND_PATH))
                 .willReturn(aResponse().withStatus(500).withBody("Internal Server Error")));
 
-        assertThatThrownBy(() -> sender.send(new MailRequest("to@example.com", MailTemplate.PASSWORD_RESET,
-                Map.of("reset_link", "https://link", "expiry_minutes", 30))))
-                .isInstanceOf(RuntimeException.class)
+        assertThatThrownBy(() -> sender.send(passwordReset()))
+                .isInstanceOf(TransientMailException.class)
                 .hasMessageContaining("SendGrid returned HTTP 500");
+    }
+
+    @Test
+    void send_throwsTransient_whenRateLimited() {
+        // 429 is the one 4xx that means "come back later" rather than "this will never work".
+        wireMockServer.stubFor(post(urlEqualTo(MAIL_SEND_PATH))
+                .willReturn(aResponse().withStatus(429).withBody("{\"errors\":[{\"message\":\"rate limit\"}]}")));
+
+        assertThatThrownBy(() -> sender.send(passwordReset()))
+                .isInstanceOf(TransientMailException.class)
+                .hasMessageContaining("SendGrid returned HTTP 429");
+    }
+
+    @Test
+    void send_throwsTransient_whenSendGridIsUnreachable() {
+        // Point the sender at a port nothing is listening on: the connection is refused, so no byte
+        // of the request was ever transmitted and a replay is safe.
+        ReflectionTestUtils.setField(sender, "apiUrl", "http://localhost:1");
+
+        assertThatThrownBy(() -> sender.send(passwordReset()))
+                .isInstanceOf(TransientMailException.class);
+    }
+
+    @Test
+    void send_throwsPermanent_whenTheConnectionDropsMidRequest() {
+        // A reset after the connection opened is ambiguous: SendGrid may already have read and
+        // accepted the body. Retrying could send a second password-reset email, so this is
+        // deliberately permanent — the same call made for a timeout.
+        wireMockServer.stubFor(post(urlEqualTo(MAIL_SEND_PATH))
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+
+        assertThatThrownBy(() -> sender.send(passwordReset()))
+                .isInstanceOf(PermanentMailException.class);
+    }
+
+    @Test
+    void send_throwsPermanent_whenSendGridStallsPastTheTimeout() {
+        // A hung provider must not park the Kafka listener thread indefinitely. The outcome is
+        // ambiguous — SendGrid may have accepted the payload — so it is deliberately permanent.
+        ReflectionTestUtils.setField(sender, "sendTimeout", Duration.ofMillis(150));
+        wireMockServer.stubFor(post(urlEqualTo(MAIL_SEND_PATH))
+                .willReturn(aResponse().withStatus(202).withFixedDelay(3_000)));
+
+        assertThatThrownBy(() -> sender.send(passwordReset()))
+                .isInstanceOf(PermanentMailException.class)
+                .hasMessageContaining("timed out");
+    }
+
+    @Test
+    void send_appliesADefaultTimeout_soAHungProviderCannotStallTheListenerForever() {
+        assertThat((Duration) ReflectionTestUtils.getField(sender, "sendTimeout"))
+                .isNotNull()
+                .isLessThanOrEqualTo(Duration.ofSeconds(30));
     }
 
     // ─────────────────────── Helpers ───────────────────────────────────────────
@@ -167,6 +231,11 @@ class SendGridMailSenderTest {
     private void stubOk() {
         wireMockServer.stubFor(post(urlEqualTo(MAIL_SEND_PATH))
                 .willReturn(aResponse().withStatus(202)));
+    }
+
+    private static MailRequest passwordReset() {
+        return new MailRequest("to@example.com", MailTemplate.PASSWORD_RESET,
+                Map.of("reset_link", "https://link", "expiry_minutes", 30));
     }
 
     private JsonNode captureRequestBody() throws Exception {

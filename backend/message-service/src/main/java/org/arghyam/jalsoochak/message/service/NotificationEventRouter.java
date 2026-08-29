@@ -10,6 +10,11 @@ import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
+import org.arghyam.jalsoochak.message.exception.TransientMailException;
+import org.arghyam.jalsoochak.message.kafka.KafkaConfig;
+import org.arghyam.jalsoochak.message.metrics.NotificationMetrics;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,10 +25,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -76,27 +81,41 @@ public class NotificationEventRouter {
     private static final String WELCOME_DLT_TOPIC = "welcome-message-dlt";
 
     /**
-     * Dead-letter topic for {@code SEND_INVITE_EMAIL}, {@code SEND_REINVITE_EMAIL},
-     * and {@code SEND_PASSWORD_RESET_EMAIL} per-recipient failures.
+     * Failure notices for {@code SEND_INVITE_EMAIL}, {@code SEND_REINVITE_EMAIL},
+     * and {@code SEND_PASSWORD_RESET_EMAIL}.
      *
-     * <p>Messages are published here — and the handler returns without rethrowing —
-     * for all failure modes: malformed event payload, missing required fields
-     * ({@code to}, {@code inviteLink}, {@code resetLink}), or an SMTP-level error.
+     * <p><strong>This is a failure log, not a replay queue.</strong> The distinction is not
+     * pedantry — a record here cannot be replayed by any consumer, and reading it as a retry
+     * queue would mean building one that silently produces nothing.
      *
-     * <p>Email delivery is <em>not</em> idempotent: rethrowing on failure would
-     * trigger Kafka's retry/back-off policy and could cause duplicate emails to be
-     * sent to the same recipient. Routing to this DLT instead lets the Kafka
-     * container move on while preserving the failed record for ops investigation
-     * and controlled replay.
+     * <p>The reason is that the payload deliberately omits the one field a replay would need. An
+     * invite or password-reset link is a single-use bearer credential: whoever holds the URL can
+     * take the account. {@code KafkaProducer.SENSITIVE_KEYS} already keeps those links out of the
+     * log file for exactly that reason, and copying one onto a long-retention Kafka topic that
+     * nothing consumes would undo it. The link is also very likely expired by the time anyone
+     * reads this — invites run in hours, resets in minutes.
      *
-     * <p>This service intentionally does <em>not</em> consume this topic.
-     * Re-consuming from the same service that produces here would create an
-     * unbounded retry loop. Instead, configure external monitoring/alerting
-     * (e.g. a Kafka consumer lag alert or a separate ops consumer) on
-     * {@code account-email-dlt} to detect and replay failed records.
-     * Each dead-lettered record carries a {@code retryId} (UUID) field for
-     * idempotent downstream reprocessing, and an {@code originalEventType} field
-     * so the replaying consumer can re-route to the correct handler.
+     * <p>Recovery is therefore to <em>re-issue, not replay</em>: an operator triggers a fresh
+     * invite or reset in user-service, which mints a new token and publishes a new event. The
+     * fields here exist to identify who needs that — {@code to}, {@code originalEventType},
+     * {@code recipientRole} — and {@code failureId} is a deterministic key for deduplicating
+     * repeat failures for the same recipient, not a replay token.
+     *
+     * <p>Published — and the handler returns without rethrowing — for the failure modes a retry
+     * cannot fix: malformed event payload, missing required fields ({@code to},
+     * {@code inviteLink}, {@code resetLink}), and any
+     * {@link org.arghyam.jalsoochak.message.exception.PermanentMailException} from the adapter
+     * (4xx, bad credentials, or an ambiguous timeout where retrying risks a duplicate).
+     *
+     * <p>A {@link TransientMailException} — 429, 5xx, connection failure — takes the opposite
+     * path: the handler rethrows, the container applies its back-off ladder, and an exhausted
+     * record lands on {@code common-topic.DLT} instead. That one <em>is</em> replayable: the
+     * container's recoverer copies the original event whole, link included, and nothing reached
+     * the recipient in those cases so a replay cannot duplicate an email.
+     *
+     * <p>This service intentionally does not consume this topic — re-consuming from the same
+     * service that produces here would create an unbounded retry loop. Alerting is what makes it
+     * useful; see {@code NotificationDeadLettered} in {@code backend/logger/prometheus/alerts.yml}.
      */
     private static final String ACCOUNT_EMAIL_DLT_TOPIC = "account-email-dlt";
 
@@ -112,9 +131,41 @@ public class NotificationEventRouter {
     private final AccountEmailService accountEmailService;
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
+    private final MeterRegistry meterRegistry;
+    private final NotificationMetrics notificationMetrics;
 
     @Value("${escalation.report.dir:/tmp/escalation-reports/}")
     private String reportDir;
+
+    /**
+     * Ceiling on how long an OTP listener thread waits for one SMS send to resolve.
+     *
+     * <p>Deliberately a little above {@code SmsCountryService.SEND_TIMEOUT} (20s) plus its single
+     * 500ms connection-failure retry, so in normal operation the adapter's own timeout fires first
+     * and the failure arrives classified. This is the backstop for an adapter that hangs without
+     * honouring its own budget — a bound is required either way, because an unbounded wait parks the
+     * thread until {@code max.poll.interval.ms} evicts the consumer from its group.
+     *
+     * <p>Healthy sends resolve in a few hundred milliseconds, so this is not a throughput setting.
+     * Throughput on {@code otp-topic} comes from {@code kafka.topic.otp.concurrency} and the topic's
+     * partition count.
+     */
+    private static final Duration DEFAULT_SMS_SEND_TIMEOUT = Duration.ofSeconds(25);
+
+    @Value("${notification.sms.send-timeout:25s}")
+    private Duration smsSendTimeout;
+
+    /**
+     * Guards against a misconfigured or unset value. A zero or negative duration would make
+     * {@code blockOptional} time out instantly and fail every OTP — a silent outage from a typo, and
+     * the exact failure mode this whole change exists to remove. Also covers unit tests, which
+     * construct this class directly and leave {@code @Value} fields null.
+     */
+    private Duration smsSendTimeout() {
+        return smsSendTimeout == null || smsSendTimeout.isZero() || smsSendTimeout.isNegative()
+                ? DEFAULT_SMS_SEND_TIMEOUT
+                : smsSendTimeout;
+    }
 
     @Value("${app.base-url:http://localhost:8085}")
     private String baseUrl;
@@ -483,20 +534,39 @@ public class NotificationEventRouter {
         // phone is PII — included so downstream can reprocess, but must not surface in INFO logs
         payload.put("phone", phone);
         log.debug("[Router/WELCOME] Publishing to DLT for schema={}", tenantSchema);
-        kafkaProducer.publishJson(WELCOME_DLT_TOPIC, payload);
+        boolean published;
+        try {
+            published = kafkaProducer.publishJson(WELCOME_DLT_TOPIC, payload);
+        } catch (Exception e) {
+            log.error("[Router/WELCOME_DLT] Failed to publish to DLT for schema={}: {}", tenantSchema, e.getMessage());
+            published = false;
+        }
+        if (published) {
+            countDeadLetter("deadlettered", WELCOME_DLT_TOPIC, "SEND_WELCOME_MESSAGE");
+        } else {
+            // Do not rethrow — a DLT publish failure must not send the original handler back around
+            // the retry ladder and re-send the welcome message. The record is lost, which is what
+            // the "dropped" counter is for.
+            log.error("[Router/WELCOME_DLT] DLT record was not acknowledged by the broker for schema={};"
+                    + " the failed welcome message is now unrecorded", tenantSchema);
+            countDeadLetter("dropped", WELCOME_DLT_TOPIC, "SEND_WELCOME_MESSAGE");
+        }
     }
 
     private void handleSendLoginOtp(JsonNode root) {
+        final String eventType = "SEND_LOGIN_OTP";
         String otp = root.path("OTP").asText("");
         String deliveryChannel = root.path("deliveryChannel").asText("").trim().toUpperCase(Locale.ROOT);
 
         if (otp.isBlank()) {
             log.warn("[Router/SEND_LOGIN_OTP] OTP is missing, skipping");
+            countSend("UNKNOWN", eventType, NotificationMetrics.SKIPPED);
             return;
         }
 
         if (deliveryChannel.isBlank()) {
             log.error("[Router/SEND_LOGIN_OTP] deliveryChannel is missing or blank, skipping");
+            countSend("UNKNOWN", eventType, NotificationMetrics.SKIPPED);
             return;
         }
 
@@ -506,6 +576,7 @@ public class NotificationEventRouter {
 
             if (phone.isBlank()) {
                 log.warn("[Router/SEND_LOGIN_OTP/SMS] officerPhoneNumber is missing, skipping");
+                countSend(NotificationMetrics.CHANNEL_SMS, eventType, NotificationMetrics.SKIPPED);
                 return;
             }
 
@@ -515,76 +586,127 @@ public class NotificationEventRouter {
                 expiryMinutes = 5;
             }
 
-            // Use reactive flow to avoid blocking the Kafka listener thread
-            smsSender.sendOtp(phone, otp, expiryMinutes)
-                    .doOnNext(sent -> {
-                        if (sent) {
-                            log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
-                            log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
-                        } else {
-                            // Non-retryable failure (4xx API rejection) — log as warning, do not throw
-                            log.warn("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery rejected by provider (non-retryable)");
-                            log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → REJECTED", phone);
-                        }
-                    })
-                    .doOnError(e -> {
-                        // Retryable failure (5xx, network issue) — log error; exception will propagate to Kafka container
-                        log.error("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed (retryable): {}", e.getMessage());
-                        log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → ERROR: {}", phone, e.getMessage());
-                    })
-                    .onErrorResume(e -> {
-                        // Swallow retryable errors to prevent Kafka retries of the entire event
-                        // (OTP sends are time-sensitive; a delayed retry would deliver an expired OTP)
-                        log.warn("[Router/SEND_LOGIN_OTP/SMS] Suppressing retryable error to prevent Kafka retry");
-                        return Mono.empty();
-                    })
-                    .subscribe();
-        } else if ("WHATSAPP".equals(deliveryChannel)) {
-            String phone = root.path("officerPhoneNumber").asText("").strip();
-            JsonNode glificIdNode = root.path("glific_id");
-            long contactId = glificIdNode.asLong(0);
-
-            if (contactId > 0) {
-                // glific_id was provided and valid
-            } else if (!phone.isBlank()) {
-                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id not provided, opting in via phone");
-                contactId = glificWhatsAppService.optIn(phone);
-                if (contactId <= 0) {
-                    log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] optIn returned invalid contactId {}, skipping", contactId);
-                    return;
-                }
-            } else {
-                log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor officerPhoneNumber provided, skipping");
+            // Wait for the outcome rather than firing and forgetting. The previous version called
+            // .subscribe() and returned, so the listener thread finished the record while the HTTP
+            // call was still in flight: the offset committed against an outcome nobody knew yet, and
+            // a restart or scale-down inside that window lost the OTP with no counter, no log line
+            // and no dead-letter record. Blocking here costs nothing that matters — a Kafka listener
+            // thread is a dedicated worker, not an event loop, and otp-topic has its own threads —
+            // and it is what makes the counters below a truthful record of what happened.
+            Boolean accepted;
+            try {
+                accepted = smsSender.sendOtp(phone, otp, expiryMinutes)
+                        .blockOptional(smsSendTimeout())
+                        .orElse(null);
+            } catch (RuntimeException e) {
+                // Terminal, and now load-bearing rather than belt-and-braces: with the send blocking,
+                // this is the only thing standing between a failed OTP and route()'s outer catch,
+                // which would hand the container a retry. A Kafka-level retry is wrong for an OTP —
+                // the ladder's last rung lands ~130s out, past the 60s resend cooldown, and
+                // requestOtp revokes the previous code when the user resends, so a late retry
+                // delivers a dead code that burns one of their three verification attempts. It would
+                // also hold the partition for the duration, delaying other users' OTPs.
+                //
+                // Covers both the adapter's error signal (5xx, network) and the block() timeout. The
+                // adapter has already spent its one connection-failure retry by this point, so this
+                // counter is the only trace the failure leaves behind.
+                countSend(NotificationMetrics.CHANNEL_SMS, eventType, NotificationMetrics.FAILED);
+                log.error("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery failed ({}); giving up,"
+                        + " the user can request a new one", e.getClass().getName());
+                log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → ERROR", phone, e);
                 return;
             }
 
-            boolean sent = whatsAppChannel.sendLoginOtp(contactId, otp);
-            if (!sent) {
-                throw new IllegalStateException("[Router/SEND_LOGIN_OTP/WHATSAPP] WhatsApp login OTP delivery failed");
+            if (Boolean.TRUE.equals(accepted)) {
+                countSend(NotificationMetrics.CHANNEL_SMS, eventType, NotificationMetrics.SENT);
+                log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
+                log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
+            } else if (accepted == null) {
+                // An empty completion is not one of the three states SmsSender documents, so the
+                // outcome is unknown — a failure, not the rejection that `false` means.
+                countSend(NotificationMetrics.CHANNEL_SMS, eventType, NotificationMetrics.FAILED);
+                log.error("[Router/SEND_LOGIN_OTP/SMS] SMS OTP send completed without an outcome;"
+                        + " giving up, the user can request a new one");
+                log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → NO OUTCOME", phone);
+            } else {
+                // Non-retryable failure (4xx API rejection) — log as warning, do not throw
+                countSend(NotificationMetrics.CHANNEL_SMS, eventType, NotificationMetrics.REJECTED);
+                log.warn("[Router/SEND_LOGIN_OTP/SMS] SMS OTP delivery rejected by provider (non-retryable)");
+                log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → REJECTED", phone);
             }
-            log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] → SENT contactId={}", contactId);
+        } else if ("WHATSAPP".equals(deliveryChannel)) {
+            // Terminal, exactly like the SMS branch above: nothing in here may propagate to the
+            // container. On otp-topic the back-off is FixedBackOff(0, 0) so a throw would be
+            // harmless, but SEND_LOGIN_OTP is still accepted on common-topic during the migration,
+            // and there a throw buys the ~130s exponential ladder — whose last rung lands past the
+            // 60s resend cooldown, after requestOtp has revoked this code. The user would be handed
+            // a dead OTP and lose one of their three verification attempts, and the partition would
+            // be held for the duration, delaying other users' logins.
+            try {
+                String phone = root.path("officerPhoneNumber").asText("").strip();
+                JsonNode glificIdNode = root.path("glific_id");
+                long contactId = glificIdNode.asLong(0);
+
+                if (contactId > 0) {
+                    // glific_id was provided and valid
+                } else if (!phone.isBlank()) {
+                    log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] glific_id not provided, opting in via phone");
+                    contactId = glificWhatsAppService.optIn(phone);
+                    if (contactId <= 0) {
+                        log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] optIn returned invalid contactId {}, skipping", contactId);
+                        countSend(NotificationMetrics.CHANNEL_WHATSAPP, eventType, NotificationMetrics.REJECTED);
+                        return;
+                    }
+                } else {
+                    log.warn("[Router/SEND_LOGIN_OTP/WHATSAPP] Neither glific_id nor officerPhoneNumber provided, skipping");
+                    countSend(NotificationMetrics.CHANNEL_WHATSAPP, eventType, NotificationMetrics.SKIPPED);
+                    return;
+                }
+
+                boolean sent = whatsAppChannel.sendLoginOtp(contactId, otp);
+                if (!sent) {
+                    countSend(NotificationMetrics.CHANNEL_WHATSAPP, eventType, NotificationMetrics.FAILED);
+                    log.error("[Router/SEND_LOGIN_OTP/WHATSAPP] WhatsApp login OTP delivery failed for"
+                            + " contactId={}; giving up, the user can request a new one", contactId);
+                    return;
+                }
+                countSend(NotificationMetrics.CHANNEL_WHATSAPP, eventType, NotificationMetrics.SENT);
+                log.info("[Router/SEND_LOGIN_OTP/WHATSAPP] → SENT contactId={}", contactId);
+            } catch (Exception e) {
+                // Same reasoning as the SMS branch: nothing retries this, so the counter is the only
+                // durable record that a user asked for an OTP and did not get one.
+                countSend(NotificationMetrics.CHANNEL_WHATSAPP, eventType, NotificationMetrics.FAILED);
+                log.error("[Router/SEND_LOGIN_OTP/WHATSAPP] WhatsApp login OTP delivery failed ({});"
+                        + " giving up, the user can request a new one", e.getClass().getName());
+                log.debug("[Router/SEND_LOGIN_OTP/WHATSAPP] delivery failure detail", e);
+            }
         } else {
             log.error("[Router/SEND_LOGIN_OTP] Unsupported deliveryChannel '{}', must be 'SMS' or 'WHATSAPP', skipping", deliveryChannel);
+            countSend("UNKNOWN", eventType, NotificationMetrics.SKIPPED);
         }
     }
 
     private void handleInviteEmail(JsonNode root) {
+        final String eventType = "SEND_INVITE_EMAIL";
         InviteEmailEvent event;
         try {
             event = objectMapper.treeToValue(root, InviteEmailEvent.class);
         } catch (Exception e) {
-            log.error("[Router/INVITE_EMAIL] Malformed event, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_INVITE_EMAIL", null, "malformed_event: " + e.getMessage());
+            log.error("[Router/INVITE_EMAIL] Malformed event, recording failure: {}", e.getMessage());
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, null, null, "malformed_event: " + e.getMessage());
             return;
         }
         if (event.getTo() == null || event.getTo().isBlank()) {
-            log.warn("[Router/INVITE_EMAIL] Missing 'to' field, routing to DLT");
-            publishEmailDlt("SEND_INVITE_EMAIL", null, "missing_to");
+            log.warn("[Router/INVITE_EMAIL] Missing 'to' field, recording failure");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, null, event.getRole(), "missing_to");
             return;
         }
         if (event.getInviteLink() == null || event.getInviteLink().isBlank()) {
-            log.warn("[Router/INVITE_EMAIL] Missing 'inviteLink' field, routing to DLT");
-            publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "missing_invite_link");
+            log.warn("[Router/INVITE_EMAIL] Missing 'inviteLink' field, recording failure");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, event.getTo(), event.getRole(), "missing_invite_link");
             return;
         }
         try {
@@ -598,88 +720,190 @@ public class NotificationEventRouter {
                         event.getTo(), event.getName(), event.getRole(),
                         event.getInviteLink(), event.getExpiryHours());
             }
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SENT);
             log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={}", event.getRole());
+        } catch (TransientMailException e) {
+            // Counted per attempt on purpose: the container is about to retry, and the rate of these
+            // is what distinguishes a provider outage from one bad address.
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.FAILED);
+            log.error("[Router/INVITE_EMAIL] Transient email failure, rethrowing for container retry: {}",
+                    e.getMessage());
+            throw e;
         } catch (Exception e) {
-            log.error("[Router/INVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "email_delivery_error");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.REJECTED);
+            log.error("[Router/INVITE_EMAIL] Permanent email delivery failure, recording failure: {}", e.getMessage());
+            publishEmailDlt(eventType, event.getTo(), event.getRole(), "email_delivery_error");
         }
     }
 
     private void handleReinviteEmail(JsonNode root) {
+        final String eventType = "SEND_REINVITE_EMAIL";
         InviteEmailEvent event;
         try {
             event = objectMapper.treeToValue(root, InviteEmailEvent.class);
         } catch (Exception e) {
-            log.error("[Router/REINVITE_EMAIL] Malformed event, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_REINVITE_EMAIL", null, "malformed_event: " + e.getMessage());
+            log.error("[Router/REINVITE_EMAIL] Malformed event, recording failure: {}", e.getMessage());
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, null, null, "malformed_event: " + e.getMessage());
             return;
         }
         if (event.getTo() == null || event.getTo().isBlank()) {
-            log.warn("[Router/REINVITE_EMAIL] Missing 'to' field, routing to DLT");
-            publishEmailDlt("SEND_REINVITE_EMAIL", null, "missing_to");
+            log.warn("[Router/REINVITE_EMAIL] Missing 'to' field, recording failure");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, null, event.getRole(), "missing_to");
             return;
         }
         if (event.getInviteLink() == null || event.getInviteLink().isBlank()) {
-            log.warn("[Router/REINVITE_EMAIL] Missing 'inviteLink' field, routing to DLT");
-            publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "missing_invite_link");
+            log.warn("[Router/REINVITE_EMAIL] Missing 'inviteLink' field, recording failure");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, event.getTo(), event.getRole(), "missing_invite_link");
             return;
         }
         try {
             accountEmailService.sendReinviteEmail(event.getTo(), event.getName(), event.getInviteLink(), event.getExpiryHours());
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SENT);
             log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={}", event.getRole());
+        } catch (TransientMailException e) {
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.FAILED);
+            log.error("[Router/REINVITE_EMAIL] Transient email failure, rethrowing for container retry: {}",
+                    e.getMessage());
+            throw e;
         } catch (Exception e) {
-            log.error("[Router/REINVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "email_delivery_error");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.REJECTED);
+            log.error("[Router/REINVITE_EMAIL] Permanent email delivery failure, recording failure: {}", e.getMessage());
+            publishEmailDlt(eventType, event.getTo(), event.getRole(), "email_delivery_error");
         }
     }
 
     private void handlePasswordResetEmail(JsonNode root) {
+        final String eventType = "SEND_PASSWORD_RESET_EMAIL";
         ResetPasswordEmailEvent event;
         try {
             event = objectMapper.treeToValue(root, ResetPasswordEmailEvent.class);
         } catch (Exception e) {
-            log.error("[Router/PASSWORD_RESET_EMAIL] Malformed event, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", null, "malformed_event: " + e.getMessage());
+            log.error("[Router/PASSWORD_RESET_EMAIL] Malformed event, recording failure: {}", e.getMessage());
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, null, null, "malformed_event: " + e.getMessage());
             return;
         }
         if (event.getTo() == null || event.getTo().isBlank()) {
-            log.warn("[Router/PASSWORD_RESET_EMAIL] Missing 'to' field, routing to DLT");
-            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", null, "missing_to");
+            log.warn("[Router/PASSWORD_RESET_EMAIL] Missing 'to' field, recording failure");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, null, null, "missing_to");
             return;
         }
         if (event.getResetLink() == null || event.getResetLink().isBlank()) {
-            log.warn("[Router/PASSWORD_RESET_EMAIL] Missing 'resetLink' field, routing to DLT");
-            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "missing_reset_link");
+            log.warn("[Router/PASSWORD_RESET_EMAIL] Missing 'resetLink' field, recording failure");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SKIPPED);
+            publishEmailDlt(eventType, event.getTo(), null, "missing_reset_link");
             return;
         }
         try {
             accountEmailService.sendPasswordResetEmail(event.getTo(), event.getResetLink(), event.getExpiryMinutes());
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.SENT);
             log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched");
+        } catch (TransientMailException e) {
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.FAILED);
+            log.error("[Router/PASSWORD_RESET_EMAIL] Transient email failure, rethrowing for container retry: {}",
+                    e.getMessage());
+            throw e;
         } catch (Exception e) {
-            log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
-            publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
+            countSend(NotificationMetrics.CHANNEL_EMAIL, eventType, NotificationMetrics.REJECTED);
+            log.error("[Router/PASSWORD_RESET_EMAIL] Permanent email delivery failure, recording failure: {}",
+                    e.getMessage());
+            publishEmailDlt(eventType, event.getTo(), null, "email_delivery_error");
         }
     }
 
-    private void publishEmailDlt(String originalEventType, String to, String errorReason) {
+    /**
+     * Records that an account email could not be delivered and will not be retried.
+     *
+     * <p>See {@link #ACCOUNT_EMAIL_DLT_TOPIC} for why this writes a failure notice rather than a
+     * replayable copy of the event: the invite/reset link is a single-use credential and is
+     * deliberately not carried here.
+     *
+     * @param recipientRole the role the invite was for, or {@code null} for a password reset.
+     *                      Present so an operator can re-issue the right thing without first
+     *                      having to find the user.
+     */
+    private void publishEmailDlt(String originalEventType, String to, String recipientRole, String errorReason) {
+        // Deterministic in the recipient and the flow, so repeated failures for the same person
+        // collapse to one key downstream. A dedupe key for the failure record — not a replay token;
+        // nothing can be replayed from here.
         String seed = "ACCOUNT_EMAIL_FAILED:" + originalEventType + ":"
                 + (to != null ? to : "unknown:" + Instant.now().toEpochMilli());
-        String retryId = UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8)).toString();
+        String failureId = UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8)).toString();
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("retryId", retryId);
+        payload.put("failureId", failureId);
         payload.put("eventType", "ACCOUNT_EMAIL_FAILED");
         payload.put("originalEventType", originalEventType);
         payload.put("failedAt", Instant.now().toString());
         payload.put("errorReason", errorReason);
-        // to is PII — included for reprocessing, must not surface in INFO logs
+        payload.put("recipientRole", recipientRole != null ? recipientRole : "unknown");
+        // Recovery is re-issue, not replay: an operator re-triggers the invite or reset in
+        // user-service, which mints a fresh link. That needs the recipient, hence 'to'.
+        // It is PII and must not surface above DEBUG.
         payload.put("to", to != null ? to : "unknown");
-        log.debug("[Router/EMAIL_DLT] Publishing to DLT originalEventType={}", originalEventType);
+        // Deliberately absent: inviteLink / resetLink. Single-use bearer credentials, and expired
+        // by the time anyone reads this anyway.
+        log.debug("[Router/EMAIL_DLT] Publishing failure notice originalEventType={}", originalEventType);
+        boolean published;
         try {
-            kafkaProducer.publishJson(ACCOUNT_EMAIL_DLT_TOPIC, payload);
+            published = kafkaProducer.publishJson(ACCOUNT_EMAIL_DLT_TOPIC, payload);
         } catch (Exception e) {
-            log.error("[Router/EMAIL_DLT] Failed to publish to DLT originalEventType={}: {}", originalEventType, e.getMessage());
-            // Do not rethrow — DLT publish failure must not trigger Kafka retries on the original handler.
+            // Serialization failure — the payload is a bug, not a delivery problem. Do not rethrow:
+            // sending the original handler back around the retry ladder would re-send the email.
+            log.error("[Router/EMAIL_DLT] Failed to publish failure notice originalEventType={}: {}",
+                    originalEventType, e.getMessage());
+            published = false;
         }
+        if (published) {
+            countDeadLetter("deadlettered", ACCOUNT_EMAIL_DLT_TOPIC, originalEventType);
+        } else {
+            // The failure notice itself did not land, so nothing anywhere records this email.
+            // "dropped" is a page for exactly this.
+            log.error("[Router/EMAIL_DLT] Failure notice was not acknowledged by the broker"
+                    + " originalEventType={}; the failed email is now unrecorded", originalEventType);
+            countDeadLetter("dropped", ACCOUNT_EMAIL_DLT_TOPIC, originalEventType);
+        }
+    }
+
+    /**
+     * Records the terminal outcome of one send attempt.
+     *
+     * <p>Separate from {@link #countDeadLetter} and deliberately so: that counter answers "was a
+     * record parked or lost", this one answers "did the recipient's message go out". The OTP
+     * channels are why it exists — they have no retry and no dead-letter topic, so before this a
+     * failed login OTP left no trace outside a log line, and no alert could see it.
+     *
+     * <p>Never allowed to break a send: an instrumentation fault must not turn a delivered
+     * notification into a failed one, nor a permanent failure into a retry.
+     */
+    private void countSend(String channel, String eventType, String outcome) {
+        try {
+            notificationMetrics.record(channel, eventType, outcome);
+        } catch (Exception e) {
+            log.warn("[Router] Failed to record send metric channel={} eventType={} outcome={}: {}",
+                    channel, eventType, outcome, e.getMessage());
+        }
+    }
+
+    /**
+     * Records a dead-letter outcome so it is visible outside the log file.
+     *
+     * <p>Nothing consumes {@code account-email-dlt} or {@code welcome-message-dlt} — replay is a
+     * deliberate ops action, not an automatic one — which means a dead-lettered notification and a
+     * successfully delivered one look identical from the outside: silence. This counter is what makes
+     * the difference alertable. Shares {@link KafkaConfig#DEADLETTER_COUNTER} with the container-level
+     * paths so one Grafana rule covers every way a notification can be lost.
+     */
+    private void countDeadLetter(String outcome, String topic, String originalEventType) {
+        Counter.builder(KafkaConfig.DEADLETTER_COUNTER)
+                .tag("outcome", outcome)
+                .tag("topic", topic)
+                .tag("event_type", originalEventType == null ? "unknown" : originalEventType)
+                .register(meterRegistry)
+                .increment();
     }
 
     /**

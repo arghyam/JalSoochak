@@ -4,8 +4,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
+import org.arghyam.jalsoochak.message.exception.PermanentMailException;
+import org.arghyam.jalsoochak.message.exception.TransientMailException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.MailException;
+import org.springframework.mail.MailSendException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
@@ -58,9 +61,27 @@ public class SmtpMailSender implements EmailSender {
         try {
             javaMailSender.send(message);
             log.info("[SmtpMailSender] sent template={}", request.template());
+        } catch (MailSendException e) {
+            // MailSendException covers the whole SMTP conversation, not just its opening: a read
+            // timeout waiting for the final 250 after DATA lands here too, and by then the server
+            // may well have accepted the message. Only a connection that never opened is provably
+            // safe to replay; everything else is ambiguous and goes to the DLT rather than risking
+            // a second password-reset email.
+            if (ConnectionFailures.neverReachedProvider(e)) {
+                log.error("[SmtpMailSender] failure template={}: never connected to the SMTP host: {}",
+                        request.template(), e.getMessage(), e);
+                throw new TransientMailException("SmtpMailSender transport failure for " + request.template(), e);
+            }
+            log.error("[SmtpMailSender] failure template={}: send failed after the connection opened,"
+                            + " treating as non-retryable to avoid a duplicate send: {}",
+                    request.template(), e.getMessage(), e);
+            throw new PermanentMailException(
+                    "SmtpMailSender send failed mid-conversation for " + request.template(), e);
         } catch (MailException e) {
+            // MailAuthenticationException, MailParseException, MailPreparationException — bad
+            // credentials or a message we built wrong. Identical on every replay.
             log.error("[SmtpMailSender] failure template={}: {}", request.template(), e.getMessage(), e);
-            throw new RuntimeException("SmtpMailSender failure for " + request.template(), e);
+            throw new PermanentMailException("SmtpMailSender failure for " + request.template(), e);
         }
     }
 

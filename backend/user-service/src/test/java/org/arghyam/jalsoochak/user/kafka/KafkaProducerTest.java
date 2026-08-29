@@ -112,4 +112,55 @@ class KafkaProducerTest {
             assertThat(producer.publishJson("topic", "payload")).isFalse();
         }
     }
+
+    @Nested
+    @DisplayName("redactSensitive")
+    class RedactSensitive {
+
+        /**
+         * The OTP is a live login credential and the phone number is PII. Both used to be written
+         * verbatim to INFO on every login request, so this is the regression that matters most.
+         */
+        @Test
+        @DisplayName("masks the OTP and phone number on a login event")
+        void masksLoginOtpEvent() {
+            String json = "{\"eventType\":\"SEND_LOGIN_OTP\",\"officerPhoneNumber\":\"919876543210\","
+                    + "\"OTP\":\"483920\",\"expiryMinutes\":10,\"deliveryChannel\":\"SMS\"}";
+
+            String redacted = KafkaProducer.redactSensitive(json);
+
+            assertThat(redacted).doesNotContain("483920").doesNotContain("919876543210");
+            // Non-sensitive fields survive, so a DEBUG dump still shows the event's shape.
+            assertThat(redacted).contains("SEND_LOGIN_OTP").contains("\"expiryMinutes\":10").contains("SMS");
+        }
+
+        @Test
+        @DisplayName("masks single-use links, which are bearer credentials")
+        void masksInviteAndResetLinks() {
+            String json = "{\"eventType\":\"SEND_PASSWORD_RESET_EMAIL\",\"to\":\"user@example.com\","
+                    + "\"resetLink\":\"https://app/reset?token=SECRET\",\"expiryMinutes\":30}";
+
+            String redacted = KafkaProducer.redactSensitive(json);
+
+            assertThat(redacted).doesNotContain("SECRET").doesNotContain("user@example.com");
+            assertThat(redacted).contains("SEND_PASSWORD_RESET_EMAIL");
+        }
+
+        @Test
+        @DisplayName("handles an escaped quote inside a masked value without leaking the tail")
+        void masksValuesContainingEscapedQuotes() {
+            String json = "{\"OTP\":\"12\\\"34\",\"eventType\":\"X\"}";
+
+            String redacted = KafkaProducer.redactSensitive(json);
+
+            assertThat(redacted).doesNotContain("1234").doesNotContain("34\"");
+            assertThat(redacted).contains("\"eventType\":\"X\"");
+        }
+
+        @Test
+        @DisplayName("returns null for null rather than throwing on the publish path")
+        void returnsNullForNull() {
+            assertThat(KafkaProducer.redactSensitive(null)).isNull();
+        }
+    }
 }

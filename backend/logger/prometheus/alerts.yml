@@ -1,0 +1,115 @@
+groups:
+  # Every dead-letter path in message-service increments jalsoochak_deadletter_total.
+  # These rules exist because nothing consumes the dead-letter topics: replay is a deliberate ops
+  # action, so without an alert a lost notification and a delivered one look identical from outside.
+  - name: notification-delivery
+    rules:
+      # outcome="dropped" means the record is gone — the dead-letter publish itself failed and the
+      # record was discarded to avoid an endless redelivery loop. Nothing can recover it.
+      - alert: NotificationDropped
+        expr: increase(jalsoochak_deadletter_total{outcome="dropped"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "message-service dropped a notification outright"
+          description: >-
+            {{ $value }} notification(s) discarded on topic {{ $labels.topic }} in the last 15m.
+            The dead-letter publish failed, so these are unrecoverable. Check whether
+            {{ $labels.topic }}.DLT exists on the broker — auto.create.topics.enable=false is the
+            usual cause. The affected topic/partition/offset is logged at ERROR by message-service.
+
+      # outcome="deadlettered" is recoverable, but only if a human looks.
+      - alert: NotificationDeadLettered
+        expr: increase(jalsoochak_deadletter_total{outcome="deadlettered"}[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "message-service dead-lettered notifications"
+          description: >-
+            {{ $value }} notification(s) dead-lettered on {{ $labels.topic }} in the last hour
+            (event_type={{ $labels.event_type }}). How to recover depends on the topic.
+            common-topic.DLT and welcome-message-dlt hold enough to replay.
+            account-email-dlt does NOT: invite and password-reset links are single-use credentials
+            and are deliberately not stored, so those records are failure notices only — recover by
+            re-issuing the invite or reset from user-service, which mints a fresh link. The 'to'
+            and 'recipientRole' fields identify who needs it.
+
+      # A sustained rate suggests a provider outage rather than isolated bad records.
+      - alert: NotificationDeadLetterRateHigh
+        expr: sum(rate(jalsoochak_deadletter_total[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "message-service is dead-lettering notifications continuously"
+          description: >-
+            Sustained dead-letter rate over 10m. Likely a provider outage (SendGrid, SMSCountry,
+            Glific) or a broker problem rather than individual malformed events.
+
+  # Per-send outcomes from NotificationMetrics. These cover what the dead-letter rules above
+  # structurally cannot: login OTPs never reach a recoverer. otp-topic runs FixedBackOff(0, 0) and
+  # the SMS handler swallows its own errors by design — retrying an OTP hands the user a code that
+  # requestOtp has already revoked — so an OTP failure increments no dead-letter counter and fires
+  # none of the rules above. jalsoochak_notification_send_total is the only signal there is.
+  - name: notification-send-outcomes
+    rules:
+      # OTP has no retry and no second chance: one failure is one user who cannot log in.
+      # Threshold, not > 0, because a single wrong number should not page anyone.
+      - alert: OtpDeliveryFailing
+        expr: >-
+          sum by (channel) (
+            increase(jalsoochak_notification_send_total{channel=~"SMS|WHATSAPP",
+                                                        outcome=~"failed|rejected"}[15m])
+          ) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "login OTPs are failing on {{ $labels.channel }}"
+          description: >-
+            {{ $value }} OTP send(s) failed or were rejected on {{ $labels.channel }} in the last
+            15m. These are not retried and not dead-lettered — every one is a user locked out until
+            they request another code. Check the provider first (SMSCountry credentials and DLT
+            template registration; Glific auth token), then NOTIFICATIONS_SMS_DRY_RUN /
+            NOTIFICATIONS_WHATSAPP_DRY_RUN, which silence delivery without failing.
+
+      # Catches a provider that is up but refusing everything — a rotated API key, an expired DLT
+      # template, a suspended sender ID. Absolute counts stay low overnight, so compare against
+      # the channel's own volume instead.
+      - alert: NotificationSendFailureRatioHigh
+        expr: >-
+          sum by (channel) (
+            rate(jalsoochak_notification_send_total{outcome=~"failed|rejected"}[15m])
+          )
+          /
+          sum by (channel) (
+            rate(jalsoochak_notification_send_total[15m])
+          ) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "over 20% of {{ $labels.channel }} notifications are failing"
+          description: >-
+            {{ $value | humanizePercentage }} of send attempts on {{ $labels.channel }} failed over
+            15m. A high ratio at low volume usually means a credential or template problem rather
+            than an outage — check the provider config before the provider's status page.
+
+      # outcome="skipped" means the event reached us unusable: a missing 'to', a blank phone, an
+      # unrecognised deliveryChannel. The bug is upstream in the producer, not in delivery.
+      - alert: NotificationEventsSkipped
+        expr: >-
+          sum by (event_type) (
+            increase(jalsoochak_notification_send_total{outcome="skipped"}[1h])
+          ) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "message-service is receiving unusable {{ $labels.event_type }} events"
+          description: >-
+            {{ $value }} {{ $labels.event_type }} event(s) were skipped in the last hour for missing
+            or invalid required fields. Nothing was sent and nothing will retry. Fix the producing
+            service — message-service cannot recover these.
