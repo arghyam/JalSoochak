@@ -590,13 +590,13 @@ public class GlificImageWorkflowService {
         }
     }
 
-    private void ensureSelectedChannelExists(Integer tenantId, String contactId) {
+    private void ensureSelectedChannelExists(Integer tenantId, Long schemeId) {
         String message = "Selected channel is no longer available. Please make sure you have a channel selected.";
         if (tenantId == null) {
             throw new IllegalStateException(message);
         }
 
-        String selectedChannel = userChannelPreferenceRepository.findChannelValue(tenantId, contactId)
+        String selectedChannel = userChannelPreferenceRepository.findChannelValue(tenantId, schemeId)
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
                 .orElseThrow(() -> new IllegalStateException(message));
