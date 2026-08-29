@@ -728,7 +728,7 @@ public class GlificWhatsAppService {
      *
      * @param contactId    Glific contact ID obtained from {@link #optIn}
      * @param operatorName operator name; passed as {@code defaultResults} key {@code "name"}
-     * @param date         today's date string; passed as {@code defaultResults} key {@code "state"}
+     * @param date         today's date string; passed as {@code defaultResults} key {@code "date"}
      * @throws IllegalStateException if {@code glific.flow.nudge-id} is blank
      * @throws RuntimeException      if Glific returns GraphQL errors or {@code success=false}
      */
@@ -742,7 +742,8 @@ public class GlificWhatsAppService {
         String defaultResults;
         try {
             defaultResults = objectMapper.writeValueAsString(
-                    Map.of("name", operatorName, "date", date));
+                    Map.of("name", operatorName != null ? operatorName : "",
+                           "date", date != null ? date : ""));
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize flow defaultResults", e);
         }
@@ -839,7 +840,7 @@ public class GlificWhatsAppService {
      *
      * @param name  operator name (null-safe)
      * @param state context value (e.g., tenant state or date) (null-safe)
-     * @return JSON string representation of defaultResults with keys "name" and "state"
+     * @return JSON string for the welcome flow's defaultResults with keys "name" and "state"
      * @throws RuntimeException if JSON serialization fails
      */
     private String serializeDefaultResults(String name, String state) {
