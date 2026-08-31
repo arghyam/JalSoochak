@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -27,6 +29,12 @@ public class GlificContactSyncService {
 
     private final RestTemplate restTemplate;
     private final Executor glificSyncExecutor;
+
+    // Optional data-driven catalog (V36). Injected when the bean/table exist; when null or without a
+    // matching row, resolution falls back to the hardcoded GLIFIC_LANGUAGE_IDS map below. Kept as a
+    // non-constructor field so existing constructor callers/tests are unaffected.
+    @Autowired(required = false)
+    private LanguageCatalogRepository languageCatalogRepository;
 
     @Value("${glific.sync.enabled:false}")
     private boolean glificSyncEnabled;
@@ -263,7 +271,8 @@ public class GlificContactSyncService {
         return normalized.isBlank() ? null : normalized;
     }
 
-    private Integer resolveGlificLanguageId(String language) {
+    // Package-private for unit testing of the resolution/fallback logic.
+    Integer resolveGlificLanguageId(String language) {
         if (language == null || language.isBlank()) {
             return null;
         }
@@ -273,6 +282,12 @@ public class GlificContactSyncService {
         }
         if (normalized.matches("^\\d+$")) {
             return Integer.parseInt(normalized);
+        }
+        if (languageCatalogRepository != null) {
+            Integer fromCatalog = languageCatalogRepository.findLanguageIdByAlias(normalized).orElse(null);
+            if (fromCatalog != null) {
+                return fromCatalog;
+            }
         }
         return GLIFIC_LANGUAGE_IDS.get(normalized);
     }
