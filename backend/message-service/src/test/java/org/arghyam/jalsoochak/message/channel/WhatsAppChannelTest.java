@@ -8,6 +8,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.mockito.InOrder;
 
+import java.time.LocalDate;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
@@ -169,6 +171,133 @@ class WhatsAppChannelTest {
         assertThatThrownBy(() -> whatsAppChannel.onboardOperator("919876543210", 2))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Flow error");
+    }
+
+    // ─────────────────────────── sendDailyReport ───────────────────────────────
+
+    /**
+     * Acceptance carries Glific's message id forward. That id is the only join key between a report we
+     * sent and the delivery status Gupshup and Meta later report back to Glific — without it the whole
+     * reconciliation is impossible, so losing it must fail a test rather than pass silently.
+     */
+    @Test
+    void sendDailyReport_returnsGlificsMessageIdOnAcceptance() {
+        GlificSendResult glificResult =
+                new GlificSendResult("241952654", "880557", DailyReportDeliveryMode.LINK);
+        when(glificWhatsAppService.sendDailyReportHsm(42L, "https://minio/r.pdf", "SECTION_OFFICER",
+                LocalDate.of(2026, 8, 27), "Binod")).thenReturn(glificResult);
+
+        DailyReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+
+        assertThat(outcome.accepted()).isTrue();
+        assertThat(outcome.result().messageId()).isEqualTo("241952654");
+        assertThat(outcome.result().templateId()).isEqualTo("880557");
+        assertThat(outcome.result().mode()).isEqualTo(DailyReportDeliveryMode.LINK);
+    }
+
+    @Test
+    void sendDailyReport_normalisesABlankRoleBeforeSending() {
+        when(glificWhatsAppService.sendDailyReportHsm(anyLong(), anyString(), eq("UNKNOWN"), any(), any()))
+                .thenReturn(new GlificSendResult("1", "880557", DailyReportDeliveryMode.LINK));
+
+        DailyReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+                42L, "https://minio/r.pdf", "  ", LocalDate.of(2026, 8, 27), "Binod");
+
+        assertThat(outcome.accepted()).isTrue();
+        verify(glificWhatsAppService).sendDailyReportHsm(42L, "https://minio/r.pdf", "UNKNOWN",
+                LocalDate.of(2026, 8, 27), "Binod");
+    }
+
+    /** A dry-run is accepted with no message id — never a placeholder that could be mistaken for real. */
+    @Test
+    void sendDailyReport_acceptsASuppressedSendWithoutAMessageId() {
+        when(glificWhatsAppService.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(GlificSendResult.suppressed(DailyReportDeliveryMode.LINK));
+
+        DailyReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+
+        assertThat(outcome.accepted()).isTrue();
+        assertThat(outcome.result().hasMessageId()).isFalse();
+        assertThat(outcome.result().messageIdForLog()).isEqualTo("none");
+    }
+
+    @Test
+    void sendDailyReport_doesNotThrow_whenGlificFails() {
+        when(glificWhatsAppService.sendDailyReportHsm(anyLong(), anyString(), anyString(), any(), any()))
+                .thenThrow(new RuntimeException("Glific unreachable"));
+
+        DailyReportSendOutcome outcome = whatsAppChannel.sendDailyReport(
+                42L, "https://minio/r.pdf", "SECTION_OFFICER", LocalDate.of(2026, 8, 27), "Binod");
+
+        assertThat(outcome.accepted()).isFalse();
+        assertThat(outcome.failure().message()).contains("Glific unreachable");
+    }
+
+    // ───────────────────── failure-stage classification ────────────────────────
+
+    /**
+     * The 20 Aug 2026 incident: Meta could not fetch the MinIO PDF and {@code createMessageMedia}
+     * rejected the send. That needs a different fix from a rejected message, and used to be
+     * indistinguishable in the logs.
+     */
+    @Test
+    void stageOf_tagsAMediaRegistrationFailure() {
+        assertThat(WhatsAppChannel.stageOf(new GlificMutationException("createMessageMedia", "media",
+                "(#131053) Media upload error"))).isEqualTo(GlificSendStage.MEDIA_REGISTER);
+    }
+
+    /**
+     * A send Glific accepted but returned no id for. It subclasses {@link GlificMutationException}, so
+     * it would otherwise be swept into {@link GlificSendStage#SEND} and retried — sending the officer a
+     * second copy of a report Glific already holds.
+     */
+    @Test
+    void stageOf_tagsAnAcceptedSendThatReturnedNoMessageId() {
+        assertThat(WhatsAppChannel.stageOf(new GlificMissingMessageIdException("sendHsmMessage")))
+                .isEqualTo(GlificSendStage.SEND_NO_MESSAGE_ID);
+    }
+
+    @Test
+    void stageOf_tagsARejectedSend() {
+        assertThat(WhatsAppChannel.stageOf(new GlificMutationException("sendHsmMessage", "receiver",
+                "Receiver does not exist"))).isEqualTo(GlificSendStage.SEND);
+        assertThat(WhatsAppChannel.stageOf(new GlificMutationException("createAndSendMessage", null,
+                "boom"))).isEqualTo(GlificSendStage.SEND);
+    }
+
+    /**
+     * A block timeout is an IllegalStateException, so it has to be matched before the configuration
+     * branch. It is the one failure a retry makes worse — Glific may already have sent the message.
+     */
+    @Test
+    void stageOf_tagsABlockTimeoutBeforeTreatingItAsConfiguration() {
+        assertThat(WhatsAppChannel.stageOf(
+                new IllegalStateException("Timeout on blocking read for 30000 MILLISECONDS")))
+                .isEqualTo(GlificSendStage.TIMEOUT);
+    }
+
+    @Test
+    void stageOf_findsATimeoutNestedInACause() {
+        RuntimeException wrapped = new RuntimeException("send failed",
+                new IllegalStateException("Timeout on blocking read for 30000 MILLISECONDS"));
+
+        assertThat(WhatsAppChannel.stageOf(wrapped)).isEqualTo(GlificSendStage.TIMEOUT);
+    }
+
+    @Test
+    void stageOf_tagsOurOwnConfigurationAndInputErrors() {
+        assertThat(WhatsAppChannel.stageOf(new IllegalArgumentException("requires a resolved contact id")))
+                .isEqualTo(GlificSendStage.CONFIG);
+        assertThat(WhatsAppChannel.stageOf(new IllegalStateException("does not start with the prefix")))
+                .isEqualTo(GlificSendStage.CONFIG);
+    }
+
+    @Test
+    void stageOf_fallsBackToSendForAnythingElse() {
+        assertThat(WhatsAppChannel.stageOf(new RuntimeException("who knows")))
+                .isEqualTo(GlificSendStage.SEND);
     }
 
     // ─────────────────────────── channelType ───────────────────────────────────

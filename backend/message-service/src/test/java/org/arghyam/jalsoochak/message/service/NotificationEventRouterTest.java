@@ -23,6 +23,10 @@ import java.time.LocalDate;
 import java.sql.ResultSet;
 import java.util.List;
 
+import org.arghyam.jalsoochak.message.channel.DailyReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.DailyReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.GlificSendResult;
+import org.arghyam.jalsoochak.message.channel.GlificSendStage;
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
@@ -1153,7 +1157,7 @@ class NotificationEventRouterTest {
                 .thenReturn("daily_report_x.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
-                .thenReturn(true);
+                .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
@@ -1236,7 +1240,8 @@ class NotificationEventRouterTest {
         when(dailyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), anyList()))
                 .thenReturn("sdo.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/sdo.pdf");
-        when(whatsAppChannel.sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER", LocalDate.of(2026, 7, 7), "SDO Kumar")).thenReturn(true);
+        when(whatsAppChannel.sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER", LocalDate.of(2026, 7, 7), "SDO Kumar"))
+                .thenReturn(acceptedSend());
 
         router.route(sdoJson);
 
@@ -1318,7 +1323,7 @@ class NotificationEventRouterTest {
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
         when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
         when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
-                .thenReturn(true);
+                .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
@@ -1425,7 +1430,8 @@ class NotificationEventRouterTest {
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
                 .thenReturn("f.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod")).thenReturn(true);
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
+                .thenReturn(acceptedSend());
 
         router.route(json);
 
@@ -1470,7 +1476,8 @@ class NotificationEventRouterTest {
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
                 .thenReturn("f.pdf");
         when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod")).thenReturn(true);
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
+                .thenReturn(acceptedSend());
 
         router.route(json);
 
@@ -1479,5 +1486,287 @@ class NotificationEventRouterTest {
         assertThat(cap.getValue()).isEmpty();
         verify(jdbcTemplate, never()).query(argThat(sql -> sql != null && sql.contains("PUMP_OPERATOR")),
                 any(RowMapper.class), eq(7));
+    }
+
+
+    // ───────────────── delivery-status join keys on the SENT line ─────────────────
+
+    /**
+     * {@code result=SENT} means Glific ACCEPTED the send, not that WhatsApp delivered it. The
+     * {@code glificMsgId} on this line is the only join key that lets the delivery status Gupshup and
+     * Meta later report back to Glific be matched to this officer — losing it breaks reconciliation
+     * silently, so it is asserted rather than assumed.
+     */
+    @Test
+    void handleDailyReport_sentLineCarriesTheGlificJoinKeys() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(acceptedSend());
+
+        String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
+
+        assertThat(sent)
+                .contains("glificMsgId=241952654")
+                .contains("glificContactId=12345")
+                .contains("mode=LINK")
+                .contains("templateId=880557")
+                .contains("stage=GLIFIC_ACCEPTED");
+    }
+
+    /**
+     * The counting grep for the adjacent run
+     * {@code result=… role=… tenant=… officer=…}. Every new field must therefore be appended after
+     * {@code officer=}, never inserted between them, or a year of documented one-liners breaks.
+     */
+    @Test
+    void handleDailyReport_sentLinePreservesTheFieldAdjacencyTheCountingRecipesRelyOn() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(acceptedSend());
+
+        String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
+
+        assertThat(sent).containsPattern("result=SENT role=SECTION_OFFICER tenant=1 officer=500");
+    }
+
+    /**
+     * The 20 Aug 2026 incident collapsed every cause into one FAILED_DELIVERY token. The stage says
+     * which half of the handoff broke, and Glific's own error key comes with it.
+     */
+    @Test
+    void handleDailyReport_failedDeliveryLineCarriesTheStageAndGlificErrorKey() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
+
+        String failed = captureRouterLogExpectingRethrow(DAILY_REPORT_JSON, "result=FAILED_DELIVERY");
+
+        assertThat(failed)
+                .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
+                .contains("stage=MEDIA_REGISTER")
+                .contains("glificErrorKey=media");
+    }
+
+    /**
+     * A {@code CONFIG} failure never reached Glific: the template id, contact id or MinIO URL prefix is
+     * wrong on our side. It is a definite rejection — so it keeps {@code result=FAILED_DELIVERY} — but
+     * one no retry can repair, so redriving it only stalls the partition until someone changes
+     * configuration. Terminal, not rethrown.
+     */
+    @Test
+    void handleDailyReport_aConfigFailureIsCountedAsFailedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.CONFIG, null, "daily report LINK template id is not configured"));
+
+        // captureRouterLogs fails the test if the router rethrows — which is the property under test.
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).filteredOn(l -> l.contains("result=FAILED_DELIVERY")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("stage=CONFIG"));
+        assertThat(lines)
+                .anyMatch(l -> l.contains("stage=CONFIG") && l.contains("(non-retryable)"))
+                .noneMatch(l -> l.contains("result=DELIVERY_UNCONFIRMED"));
+    }
+
+    /**
+     * A dry-run is accepted but nothing was sent, so it gets its own result token. Sharing
+     * {@code result=SENT} with a real send meant a fully muted deployment counted as one that delivered
+     * reports — and the line carried a {@code stage=GLIFIC_ACCEPTED} that never happened.
+     */
+    @Test
+    void handleDailyReport_suppressedSendIsNotCountedAsSent() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.accepted(
+                        GlificSendResult.suppressed(DailyReportDeliveryMode.LINK)));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).noneMatch(l -> l.contains("result=SENT"));
+        assertThat(lines).filteredOn(l -> l.contains("result=SUPPRESSED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=SUPPRESSED role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("mode=LINK")
+                        .doesNotContain("stage=GLIFIC_ACCEPTED")
+                        .doesNotContain("glificMsgId="));
+    }
+
+    /**
+     * A {@code block()} timeout is the one failure a retry makes worse: Glific may already have created
+     * and sent the message, so re-driving the event delivers the officer a second copy of the same
+     * report. It is recorded for reconciliation and swallowed, not rethrown for the Kafka container.
+     */
+    @Test
+    void handleDailyReport_aTimeoutIsRecordedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.TIMEOUT, null, "Timeout on blocking read for 30000 MILLISECONDS"));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        // One terminal line, and it is the unconfirmed one. Also emitting result=FAILED_DELIVERY counted
+        // the same send twice and put a send that may well have arrived into the definite-failure total.
+        assertThat(lines).noneMatch(l -> l.contains("result=FAILED_DELIVERY"));
+        assertThat(lines).filteredOn(l -> l.contains("result=DELIVERY_UNCONFIRMED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=DELIVERY_UNCONFIRMED role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("stage=TIMEOUT")
+                        .contains("(non-retryable)"));
+    }
+
+    /**
+     * The same ambiguity, reached the other way: Glific reported no errors but returned no
+     * {@code message.id}, so it holds a message we can never match a status to. A retry is a guaranteed
+     * duplicate, which is why this stage joins TIMEOUT rather than being rethrown.
+     */
+    @Test
+    void handleDailyReport_aSendWithNoMessageIdIsRecordedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(GlificSendStage.SEND_NO_MESSAGE_ID, null,
+                        "Glific accepted sendHsmMessage but returned no message.id"));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines)
+                .anyMatch(l -> l.contains("result=DELIVERY_UNCONFIRMED")
+                        && l.contains("stage=SEND_NO_MESSAGE_ID"))
+                .noneMatch(l -> l.contains("result=FAILED_DELIVERY"));
+    }
+
+    /** Every other failure stage still rethrows, so the Kafka container can apply its retry policy. */
+    @Test
+    void handleDailyReport_aRejectedSendStillRethrowsForRetry() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
+
+        assertThatThrownBy(() -> router.route(DAILY_REPORT_JSON))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
+    }
+
+    /**
+     * Routes the event with a log appender attached and returns the first line containing
+     * {@code needle}. Fails on a router exception — see {@link #captureRouterLogs(String)}.
+     */
+    private String captureRouterLog(String json, String needle) {
+        return firstLineContaining(captureRouterLogs(json), needle);
+    }
+
+    /** {@link #captureRouterLog} for the stages that rethrow for retry by design. */
+    private String captureRouterLogExpectingRethrow(String json, String needle) {
+        return firstLineContaining(captureRouterLogsExpectingRethrow(json), needle);
+    }
+
+    private static String firstLineContaining(List<String> lines, String needle) {
+        return lines.stream()
+                .filter(m -> m.contains(needle))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no log line containing '" + needle + "'; lines were "
+                        + lines));
+    }
+
+    /**
+     * Every line the router logs while routing one event. Needed wherever the assertion is about which
+     * result token was <em>not</em> emitted — a suppressed send must produce no {@code result=SENT}
+     * line at all, which no single-line lookup can show.
+     *
+     * <p>Fails the test if the router throws. Swallowing it here made every non-retryable path
+     * un-assertable: a stage that was supposed to be terminal could start rethrowing — stalling the
+     * Kafka partition on an event no retry can repair — and these tests would still pass, because the
+     * log lines they check are written before the throw. Tests that <em>want</em> the throw say so with
+     * {@link #captureRouterLogsExpectingRethrow}.</p>
+     */
+    private List<String> captureRouterLogs(String json) {
+        return captureRouterLogs(json, false);
+    }
+
+    /**
+     * Same capture, for the failure stages that rethrow so the Kafka container can retry
+     * ({@code MEDIA_REGISTER}, {@code SEND}). Explicit, so the throw is an asserted property of those
+     * tests rather than something silently tolerated in all of them.
+     */
+    private List<String> captureRouterLogsExpectingRethrow(String json) {
+        return captureRouterLogs(json, true);
+    }
+
+    private List<String> captureRouterLogs(String json, boolean expectRethrow) {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(NotificationEventRouter.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        RuntimeException thrown = null;
+        try {
+            router.route(json);
+        } catch (RuntimeException e) {
+            thrown = e;
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        List<String> lines = appender.list.stream()
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .toList();
+        if (thrown != null && !expectRethrow) {
+            throw new AssertionError("router rethrew, so this event would be retried; use"
+                    + " captureRouterLogsExpectingRethrow if that is intended. Lines were " + lines, thrown);
+        }
+        if (thrown == null && expectRethrow) {
+            throw new AssertionError("router did not rethrow, so the Kafka container never retries this"
+                    + " event. Lines were " + lines);
+        }
+        return lines;
+    }
+
+    /**
+     * A successful Glific acceptance, carrying the message id the router now logs. Glific returns
+     * {@code message { id }} on every send and the router puts it on the {@code result=SENT} line —
+     * it is the join key the delivery-status reconciliation matches back to this officer.
+     */
+    private static DailyReportSendOutcome acceptedSend() {
+        return DailyReportSendOutcome.accepted(
+                new GlificSendResult("241952654", "880557", DailyReportDeliveryMode.LINK));
     }
 }

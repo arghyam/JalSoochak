@@ -165,20 +165,77 @@ public class WhatsAppChannel implements NotificationChannel {
      *                        officer sees in WhatsApp, and template variable {{2}} in link mode
      * @param officerName     the officer's name; template variable {{1}} in link mode, unused for the
      *                        document. Not logged — see the privacy rule in CLAUDE.md
-     * @return {@code true} if the message was accepted by Glific
+     * @return an accepted outcome carrying Glific's message id, template id and mode, or a failed
+     *         outcome naming the {@link GlificSendStage} it broke at. <strong>Acceptance is not
+     *         delivery</strong> — it means the GraphQL mutation returned no errors; Gupshup and Meta
+     *         act after this call returns and report back only to Glific
      */
-    public boolean sendDailyReport(long contactId, String documentUrl, String officerUserType,
-                                   LocalDate reportDate, String officerName) {
+    public DailyReportSendOutcome sendDailyReport(long contactId, String documentUrl, String officerUserType,
+                                                  LocalDate reportDate, String officerName) {
         String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
         try {
             // Send with the same token that is logged, so the template picked matches the counted role.
-            glificWhatsAppService.sendDailyReportHsm(contactId, documentUrl, role, reportDate, officerName);
-            log.info("[WHATSAPP] Daily report HSM sent role={}", role);
+            GlificSendResult result = glificWhatsAppService.sendDailyReportHsm(
+                    contactId, documentUrl, role, reportDate, officerName);
+            log.info("[WHATSAPP] Daily report HSM sent role={} glificMsgId={}", role, result.messageIdForLog());
             log.debug("[WHATSAPP] Daily report HSM sent role={} contactId={}", role, contactId);
-            return true;
+            return DailyReportSendOutcome.accepted(result);
         } catch (Exception ex) {
-            log.error("[WHATSAPP] Failed daily report delivery role={}: {}", role, ex.getMessage(), ex);
-            return false;
+            GlificSendStage stage = stageOf(ex);
+            String errorKey = (ex instanceof GlificMutationException gme) ? gme.getErrorKey() : null;
+            log.error("[WHATSAPP] Failed daily report delivery role={} stage={}: {}",
+                    role, stage, ex.getMessage(), ex);
+            return DailyReportSendOutcome.failed(stage, errorKey, ex.getMessage());
         }
+    }
+
+    /**
+     * Classifies a send failure so the router's terminal line — {@code result=FAILED_DELIVERY}, or
+     * {@code result=DELIVERY_UNCONFIRMED} for the stages after which Glific may already hold the
+     * message — says which half of the handoff broke.
+     *
+     * <p>Order matters. A {@code block()} timeout surfaces as an {@link IllegalStateException}, so it
+     * must be recognised <em>before</em> the generic configuration branch — it is the one failure a
+     * retry makes worse, because Glific may already have sent the message.</p>
+     */
+    static GlificSendStage stageOf(Throwable ex) {
+        if (isBlockTimeout(ex)) {
+            return GlificSendStage.TIMEOUT;
+        }
+        // A subclass of GlificMutationException, so it must be matched before the branch below.
+        if (ex instanceof GlificMissingMessageIdException) {
+            return GlificSendStage.SEND_NO_MESSAGE_ID;
+        }
+        if (ex instanceof GlificMutationException gme) {
+            // createMessageMedia is the DOCUMENT-mode media step — the 20 Aug (#131053) failure —
+            // and needs a completely different fix from a rejected send.
+            return "createMessageMedia".equals(gme.getMutationKey())
+                    ? GlificSendStage.MEDIA_REGISTER
+                    : GlificSendStage.SEND;
+        }
+        // Thrown by requireContactId, the LINK-mode linkSuffix prefix check, a blank template id and
+        // the PublicUrlValidator guard — all of them our own configuration or inputs, none retryable.
+        if (ex instanceof IllegalArgumentException || ex instanceof IllegalStateException) {
+            return GlificSendStage.CONFIG;
+        }
+        return GlificSendStage.SEND;
+    }
+
+    /**
+     * Reactor's {@code Mono.block(Duration)} reports expiry as an {@link IllegalStateException} whose
+     * message begins "Timeout on blocking read". There is no dedicated exception type to match on, so
+     * the message is the only signal available.
+     */
+    private static boolean isBlockTimeout(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            String msg = t.getMessage();
+            if (msg != null && msg.contains("Timeout on blocking read")) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
     }
 }

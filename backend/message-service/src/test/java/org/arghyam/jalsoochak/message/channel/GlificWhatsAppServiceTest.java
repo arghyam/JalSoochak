@@ -1267,4 +1267,172 @@ class GlificWhatsAppServiceTest {
                 .hasMessageContaining("DOCUMENT or LINK")
                 .hasMessageContaining("pdf");
     }
+
+    /**
+     * The Glific message id that {@code sendHsmMessage} / {@code createAndSendMessage} return used to be
+     * parsed and discarded. It is the only join key between a report we sent and the delivery status
+     * Gupshup and Meta later report back to Glific, so these tests pin it down.
+     */
+    @Nested
+    class MessageIdCapture {
+
+        private static final String PUBLIC_BASE = "https://jalsoochak.jjmbrain.in/minio";
+        private static final String PUBLIC_URL =
+                PUBLIC_BASE + "/escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf";
+
+        @BeforeEach
+        void publicBaseUrl() {
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE);
+        }
+
+        @Test
+        void linkMode_returnsTheMessageIdTemplateIdAndMode() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"sendHsmMessage":{"message":{"id":241952654,"body":"b","isHSM":true},"errors":[]}}
+                    """));
+
+            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            assertThat(result.messageId()).isEqualTo("241952654");
+            assertThat(result.templateId()).isEqualTo("880557");
+            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.LINK);
+            assertThat(result.hasMessageId()).isTrue();
+        }
+
+        @Test
+        void documentMode_returnsTheMessageIdTemplateIdAndMode() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":{"id":77,"url":"u"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":{"id":241952700,"body":"b","isHsm":true},"errors":[]}}
+                    """));
+
+            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            assertThat(result.messageId()).isEqualTo("241952700");
+            assertThat(result.templateId()).isEqualTo("880600");
+            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
+        }
+
+        /**
+         * A send with no id must not come back as a result at all. Returning one reported the report as
+         * accepted while it carried no join key — counted as delivered and simultaneously invisible to
+         * reconciliation, which is the one combination that cannot be noticed later.
+         */
+        @Test
+        void aSendThatReturnsNoIdIsRefused() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"sendHsmMessage":{"message":{},"errors":[]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMissingMessageIdException.class)
+                    .hasMessageContaining("returned no message.id")
+                    .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
+                            .isEqualTo("sendHsmMessage"));
+        }
+
+        /** The document path shares {@code extractMessageId}, so it must refuse a blank id too. */
+        @Test
+        void documentMode_refusesASendThatReturnsABlankId() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":{"id":77,"url":"u"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":{"id":"  "},"errors":[]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMissingMessageIdException.class)
+                    .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
+                            .isEqualTo("createAndSendMessage"));
+        }
+
+        /** A dry-run reports the mode but never a message id — a fake one would poison reconciliation. */
+        @Test
+        void aDryRunReportsTheModeButNoMessageId() {
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+
+            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            assertThat(result.hasMessageId()).isFalse();
+            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.LINK);
+            verifyNoInteractions(client);
+        }
+
+        /**
+         * A suppressed send must not start throwing on a delivery-mode typo it never used to read —
+         * that would be a new failure on a path that is switched off.
+         */
+        @Test
+        void aDryRunToleratesAnUnparseableDeliveryMode() {
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "pdf");
+
+            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            assertThat(result.mode()).isNull();
+            assertThat(result.modeForLog()).isEqualTo("-");
+        }
+
+        /** Glific's error key is carried on the exception so the caller can tag the failure stage. */
+        @Test
+        void aRejectedSendCarriesTheMutationKeyAndErrorKey() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"sendHsmMessage":{"message":null,"errors":[{"key":"receiver","message":"Receiver does not exist"}]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMutationException.class)
+                    .hasMessageContaining("Glific GraphQL error in sendHsmMessage")
+                    .satisfies(e -> {
+                        GlificMutationException gme = (GlificMutationException) e;
+                        assertThat(gme.getMutationKey()).isEqualTo("sendHsmMessage");
+                        assertThat(gme.getErrorKey()).isEqualTo("receiver");
+                    });
+        }
+
+        /** The 20 Aug incident's shape: the media step is what failed, and the stage must say so. */
+        @Test
+        void aMediaRegistrationFailureIsTaggedWithItsOwnMutationKey() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":null,"errors":[{"key":"media","message":"(#131053) Media upload error"}]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMutationException.class)
+                    .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
+                            .isEqualTo("createMessageMedia"));
+        }
+    }
 }
