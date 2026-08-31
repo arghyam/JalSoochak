@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 
 /**
  * Data-driven language catalog backing {@code common_schema.language_master} /
- * {@code language_alias} (see migration V36). Resolves a language name/alias to its numeric
+ * {@code language_alias} (see migration V38). Resolves a language name/alias to its numeric
  * language id and to its locale code.
  *
  * <p>This is the single source of truth that replaces the hardcoded Java maps in
