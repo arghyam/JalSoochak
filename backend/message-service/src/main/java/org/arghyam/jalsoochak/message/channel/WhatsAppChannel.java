@@ -190,7 +190,9 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
-     * Classifies a send failure so {@code result=FAILED_DELIVERY} says which half of the handoff broke.
+     * Classifies a send failure so the router's terminal line — {@code result=FAILED_DELIVERY}, or
+     * {@code result=DELIVERY_UNCONFIRMED} for the stages after which Glific may already hold the
+     * message — says which half of the handoff broke.
      *
      * <p>Order matters. A {@code block()} timeout surfaces as an {@link IllegalStateException}, so it
      * must be recognised <em>before</em> the generic configuration branch — it is the one failure a

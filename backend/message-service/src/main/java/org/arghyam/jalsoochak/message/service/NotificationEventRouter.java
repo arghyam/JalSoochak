@@ -996,28 +996,51 @@ public class NotificationEventRouter {
     /**
      * Logs a rejected send and decides whether the event may be retried.
      *
-     * <p>Rethrows for the stages a retry can actually repair. It does <em>not</em> rethrow for a stage
-     * after which Glific may already hold the message ({@link #isAmbiguousDelivery}): re-driving the
-     * event would send the officer a second copy of the same report, which is worse than the missing
-     * confirmation it was trying to fix. Those are recorded for reconciliation instead.</p>
+     * <p>Emits <strong>exactly one</strong> terminal {@code result=} line per failed send, because the
+     * log-counting recipes add those tokens up: an ambiguous send that logged both
+     * {@code FAILED_DELIVERY} and {@code DELIVERY_UNCONFIRMED} was counted twice, and inflated the
+     * definite-failure total with sends that may well have arrived.</p>
+     *
+     * <p>Three outcomes, only one of which is retried:</p>
+     * <ul>
+     *   <li>{@link #isAmbiguousDelivery} ({@code TIMEOUT}, {@code SEND_NO_MESSAGE_ID}) — Glific may
+     *       already hold the message, so re-driving the event would send the officer a second copy of
+     *       the same report, which is worse than the missing confirmation it was trying to fix.
+     *       Recorded as {@code DELIVERY_UNCONFIRMED} for reconciliation.</li>
+     *   <li>{@link GlificSendStage#CONFIG} — a definite rejection that never reached Glific, and one no
+     *       retry can repair: the template id, contact id or MinIO URL prefix is wrong on our side.
+     *       Retrying only stalls the partition until the configuration changes, so it is terminal.</li>
+     *   <li>Everything else ({@code MEDIA_REGISTER}, {@code SEND}) — a definite rejection a retry can
+     *       plausibly repair, so it rethrows for the Kafka container's retry policy.</li>
+     * </ul>
      */
     private void reportFailedDelivery(DailyReportLogCtx ctx, DailyReportSendOutcome.Failure failure,
                                       LocalDate reportDate, String loggableUrl) {
-        // stage= and glificErrorKey= are appended *after* officer=
+        // stage= and glificErrorKey= are appended *after* officer= on every branch below.
+        if (isAmbiguousDelivery(failure.stage())) {
+            log.warn("[Router/DAILY_REPORT] corr={} result=DELIVERY_UNCONFIRMED role={} tenant={} officer={}"
+                            + " stage={} glificErrorKey={} reportDate={} (non-retryable) — Glific may already"
+                            + " have sent this report, so the event is not retried. Settle it against"
+                            + " Glific's own delivery status for this officer; see"
+                            + " GlificDeliveryReconciliationService ({})",
+                    ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                    failure.stage(), failure.errorKeyForLog(), reportDate, loggableUrl);
+            return;
+        }
         log.error("[Router/DAILY_REPORT] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
                         + " stage={} glificErrorKey={}",
                 ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                 failure.stage(), failure.errorKeyForLog());
-        if (!isAmbiguousDelivery(failure.stage())) {
-            throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + ctx.corr()
-                    + " WhatsApp daily report delivery failed at stage=" + failure.stage());
+        if (failure.stage() == GlificSendStage.CONFIG) {
+            log.error("[Router/DAILY_REPORT] corr={} stage=CONFIG reportDate={} (non-retryable) — the send"
+                            + " never reached Glific because our own template id, contact id or MinIO URL"
+                            + " prefix is wrong. A retry cannot repair that, so the event is not redriven:"
+                            + " fix the configuration, then replay this officer's report ({})",
+                    ctx.corr(), reportDate, loggableUrl);
+            return;
         }
-        log.warn("[Router/DAILY_REPORT] corr={} result=DELIVERY_UNCONFIRMED role={} tenant={} officer={}"
-                        + " stage={} reportDate={} (non-retryable) — Glific may already have sent this"
-                        + " report, so the event is not retried. Settle it against Glific's own delivery"
-                        + " status for this officer; see GlificDeliveryReconciliationService ({})",
-                ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
-                failure.stage(), reportDate, loggableUrl);
+        throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + ctx.corr()
+                + " WhatsApp daily report delivery failed at stage=" + failure.stage());
     }
 
     /**

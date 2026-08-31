@@ -614,6 +614,24 @@ class NudgeRepositoryIntegrationTest {
         assertThat(ids).isEmpty();
     }
 
+    /**
+     * A soft-deleted SDO holding a live, active mapping. {@code status} stays 1 on both the user and the
+     * mapping row, so every other predicate passes — only the SDO's own {@code deleted_at} excludes it.
+     * A deleted officer has no report to receive and therefore no per-officer breakdown to build.
+     */
+    @Test
+    void findSubordinateSectionOfficerIds_excludesSectionOfficers_whenTheSdoIsSoftDeleted() {
+        int sdo = insertSoftDeletedUser("SDO Five", "919000000070", districtOfficerTypeId);
+        insertSchemeMapping(sdo, schemeId, 1);
+
+        int so = insertUser("SO UnderDeletedSdo", "919000000071", sectionOfficerTypeId);
+        insertSchemeMapping(so, schemeId, 1);
+
+        List<Long> ids = nudgeRepository.findSubordinateSectionOfficerIds("tenant_test", sdo);
+
+        assertThat(ids).isEmpty();
+    }
+
     @Test
     void findSubordinateSectionOfficerIds_rejectsInvalidSchemaName() {
         assertThatThrownBy(() ->

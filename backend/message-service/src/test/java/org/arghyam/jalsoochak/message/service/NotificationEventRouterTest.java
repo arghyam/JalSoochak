@@ -1552,12 +1552,41 @@ class NotificationEventRouterTest {
                 .thenReturn(DailyReportSendOutcome.failed(
                         GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
 
-        String failed = captureRouterLog(DAILY_REPORT_JSON, "result=FAILED_DELIVERY");
+        String failed = captureRouterLogExpectingRethrow(DAILY_REPORT_JSON, "result=FAILED_DELIVERY");
 
         assertThat(failed)
                 .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
                 .contains("stage=MEDIA_REGISTER")
                 .contains("glificErrorKey=media");
+    }
+
+    /**
+     * A {@code CONFIG} failure never reached Glific: the template id, contact id or MinIO URL prefix is
+     * wrong on our side. It is a definite rejection — so it keeps {@code result=FAILED_DELIVERY} — but
+     * one no retry can repair, so redriving it only stalls the partition until someone changes
+     * configuration. Terminal, not rethrown.
+     */
+    @Test
+    void handleDailyReport_aConfigFailureIsCountedAsFailedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.CONFIG, null, "daily report LINK template id is not configured"));
+
+        // captureRouterLogs fails the test if the router rethrows — which is the property under test.
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).filteredOn(l -> l.contains("result=FAILED_DELIVERY")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("stage=CONFIG"));
+        assertThat(lines)
+                .anyMatch(l -> l.contains("stage=CONFIG") && l.contains("(non-retryable)"))
+                .noneMatch(l -> l.contains("result=DELIVERY_UNCONFIRMED"));
     }
 
     /**
@@ -1605,7 +1634,9 @@ class NotificationEventRouterTest {
 
         List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
 
-        assertThat(lines).anyMatch(l -> l.contains("result=FAILED_DELIVERY") && l.contains("stage=TIMEOUT"));
+        // One terminal line, and it is the unconfirmed one. Also emitting result=FAILED_DELIVERY counted
+        // the same send twice and put a send that may well have arrived into the definite-failure total.
+        assertThat(lines).noneMatch(l -> l.contains("result=FAILED_DELIVERY"));
         assertThat(lines).filteredOn(l -> l.contains("result=DELIVERY_UNCONFIRMED")).singleElement()
                 .satisfies(line -> assertThat(line)
                         .containsPattern("result=DELIVERY_UNCONFIRMED role=SECTION_OFFICER tenant=1 officer=500")
@@ -1631,8 +1662,10 @@ class NotificationEventRouterTest {
 
         List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
 
-        assertThat(lines).anyMatch(l -> l.contains("result=DELIVERY_UNCONFIRMED")
-                && l.contains("stage=SEND_NO_MESSAGE_ID"));
+        assertThat(lines)
+                .anyMatch(l -> l.contains("result=DELIVERY_UNCONFIRMED")
+                        && l.contains("stage=SEND_NO_MESSAGE_ID"))
+                .noneMatch(l -> l.contains("result=FAILED_DELIVERY"));
     }
 
     /** Every other failure stage still rethrows, so the Kafka container can apply its retry policy. */
@@ -1654,10 +1687,18 @@ class NotificationEventRouterTest {
 
     /**
      * Routes the event with a log appender attached and returns the first line containing
-     * {@code needle}. Tolerates the router rethrowing, which the failure paths do by design.
+     * {@code needle}. Fails on a router exception — see {@link #captureRouterLogs(String)}.
      */
     private String captureRouterLog(String json, String needle) {
-        List<String> lines = captureRouterLogs(json);
+        return firstLineContaining(captureRouterLogs(json), needle);
+    }
+
+    /** {@link #captureRouterLog} for the stages that rethrow for retry by design. */
+    private String captureRouterLogExpectingRethrow(String json, String needle) {
+        return firstLineContaining(captureRouterLogsExpectingRethrow(json), needle);
+    }
+
+    private static String firstLineContaining(List<String> lines, String needle) {
         return lines.stream()
                 .filter(m -> m.contains(needle))
                 .findFirst()
@@ -1669,25 +1710,54 @@ class NotificationEventRouterTest {
      * Every line the router logs while routing one event. Needed wherever the assertion is about which
      * result token was <em>not</em> emitted — a suppressed send must produce no {@code result=SENT}
      * line at all, which no single-line lookup can show.
+     *
+     * <p>Fails the test if the router throws. Swallowing it here made every non-retryable path
+     * un-assertable: a stage that was supposed to be terminal could start rethrowing — stalling the
+     * Kafka partition on an event no retry can repair — and these tests would still pass, because the
+     * log lines they check are written before the throw. Tests that <em>want</em> the throw say so with
+     * {@link #captureRouterLogsExpectingRethrow}.</p>
      */
     private List<String> captureRouterLogs(String json) {
+        return captureRouterLogs(json, false);
+    }
+
+    /**
+     * Same capture, for the failure stages that rethrow so the Kafka container can retry
+     * ({@code MEDIA_REGISTER}, {@code SEND}). Explicit, so the throw is an asserted property of those
+     * tests rather than something silently tolerated in all of them.
+     */
+    private List<String> captureRouterLogsExpectingRethrow(String json) {
+        return captureRouterLogs(json, true);
+    }
+
+    private List<String> captureRouterLogs(String json, boolean expectRethrow) {
         ch.qos.logback.classic.Logger logger =
                 (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(NotificationEventRouter.class);
         ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
                 new ch.qos.logback.core.read.ListAppender<>();
         appender.start();
         logger.addAppender(appender);
+        RuntimeException thrown = null;
         try {
             router.route(json);
-        } catch (RuntimeException expected) {
-            // Delivery failures rethrow so the Kafka container retries; the log lines are what matter here.
+        } catch (RuntimeException e) {
+            thrown = e;
         } finally {
             logger.detachAppender(appender);
             appender.stop();
         }
-        return appender.list.stream()
+        List<String> lines = appender.list.stream()
                 .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
                 .toList();
+        if (thrown != null && !expectRethrow) {
+            throw new AssertionError("router rethrew, so this event would be retried; use"
+                    + " captureRouterLogsExpectingRethrow if that is intended. Lines were " + lines, thrown);
+        }
+        if (thrown == null && expectRethrow) {
+            throw new AssertionError("router did not rethrow, so the Kafka container never retries this"
+                    + " event. Lines were " + lines);
+        }
+        return lines;
     }
 
     /**

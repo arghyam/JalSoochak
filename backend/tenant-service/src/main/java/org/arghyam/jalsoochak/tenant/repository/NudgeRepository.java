@@ -309,10 +309,12 @@ public class NudgeRepository {
      * per-officer Summary breakdown. Returns ids only — no PII (message-service resolves each
      * officer's name/mobile at render time; analytics computes their KPIs).</p>
      *
-     * <p>Soft-deleted rows are excluded on all three: the SDO's own mapping, the Section Officer's
-     * mapping, and the Section Officer's user row. The SDO side matters as much as the SO side — a
-     * scheme the SDO no longer oversees must not pull that scheme's Section Officers into the
-     * breakdown.</p>
+     * <p>Soft-deleted rows are excluded on all four: the SDO's own mapping and user row, and the Section
+     * Officer's mapping and user row. The SDO side matters as much as the SO side — a scheme the SDO no
+     * longer oversees must not pull that scheme's Section Officers into the breakdown, and a deleted SDO
+     * has no breakdown to build. The SDO's user row is checked here rather than left to the caller so
+     * the method is safe for any caller, not only the scheduler that happens to resolve live officers
+     * first.</p>
      */
     @SuppressWarnings("java:S2077")
     public List<Long> findSubordinateSectionOfficerIds(String schema, long sdoUserId) {
@@ -320,6 +322,7 @@ public class NudgeRepository {
         String sql = String.format("""
                 SELECT DISTINCT so_u.id AS user_id
                 FROM %1$s.user_scheme_mapping_table sdo_usm
+                JOIN %1$s.user_table sdo_u ON sdo_u.id = sdo_usm.user_id
                 JOIN %1$s.user_scheme_mapping_table so_usm
                     ON so_usm.scheme_id = sdo_usm.scheme_id
                 JOIN %1$s.user_table so_u ON so_u.id = so_usm.user_id
@@ -327,6 +330,7 @@ public class NudgeRepository {
                 WHERE sdo_usm.user_id = ?
                   AND sdo_usm.status = 1
                   AND sdo_usm.deleted_at IS NULL
+                  AND sdo_u.deleted_at IS NULL
                   AND so_usm.status = 1
                   AND so_usm.deleted_at IS NULL
                   AND so_u.status = 1
