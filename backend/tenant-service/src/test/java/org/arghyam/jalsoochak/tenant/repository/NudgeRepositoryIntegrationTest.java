@@ -165,6 +165,20 @@ class NudgeRepositoryIntegrationTest {
     }
 
     @Test
+    void streamUsersWithNoUploadToday_excludesSoftDeletedUsersAndMappings() {
+        // Soft-deleted operator holding a live mapping.
+        int deletedUser = insertSoftDeletedUser("Op Removed", "914500000010", operatorTypeId);
+        insertSchemeMapping(deletedUser, schemeId, 1);
+        // Live operator whose only mapping was soft-deleted — status still reads 1 on that row.
+        int deletedMapUser = insertUser("Op Unmapped", "914500000011", operatorTypeId);
+        insertSoftDeletedSchemeMapping(deletedMapUser, schemeId);
+
+        List<Map<String, Object>> result = collectNoUploadToday("tenant_test");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     void streamUsersWithNoUploadToday_includesOperator_whenReadingFromYesterdayOnly() {
         int opId = insertUser("Op Yesterday", "915555555555", operatorTypeId);
         insertSchemeMapping(opId, schemeId, 1);
@@ -251,6 +265,19 @@ class NudgeRepositoryIntegrationTest {
     }
 
     @Test
+    void streamUsersWithMissedDays_excludesSoftDeletedUsersAndMappings() {
+        // Both would otherwise escalate as "never uploaded" — the worst case to get wrong.
+        int deletedUser = insertSoftDeletedUser("Op Removed Missed", "914500000012", operatorTypeId);
+        insertSchemeMapping(deletedUser, schemeId, 1);
+        int deletedMapUser = insertUser("Op Unmapped Missed", "914500000013", operatorTypeId);
+        insertSoftDeletedSchemeMapping(deletedMapUser, schemeId);
+
+        List<Map<String, Object>> result = collectMissedDays("tenant_test", 3);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     void streamUsersWithMissedDays_includesSchemeName() {
         jdbcTemplate.update("UPDATE tenant_test.scheme_master_table SET state_scheme_id = 'MY-SCHEME' WHERE id = ?", schemeId);
         int opId = insertUser("Op Scheme", "917070707070", operatorTypeId);
@@ -300,6 +327,28 @@ class NudgeRepositoryIntegrationTest {
     void findOfficerByUserType_returnsNull_whenOfficerHasInactiveMapping() {
         int officerId = insertUser("DO Inactive", "910101010101", districtOfficerTypeId);
         insertSchemeMapping(officerId, schemeId, 0); // inactive mapping
+
+        Map<String, Object> result = nudgeRepository.findOfficerByUserType(
+                "tenant_test", schemeId, "DISTRICT_OFFICER");
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void findOfficerByUserType_returnsNull_whenOfficerIsSoftDeleted() {
+        int officerId = insertSoftDeletedUser("DO Removed", "910101010102", districtOfficerTypeId);
+        insertSchemeMapping(officerId, schemeId, 1); // live mapping, soft-deleted officer
+
+        Map<String, Object> result = nudgeRepository.findOfficerByUserType(
+                "tenant_test", schemeId, "DISTRICT_OFFICER");
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void findOfficerByUserType_returnsNull_whenOfficerMappingIsSoftDeleted() {
+        int officerId = insertUser("DO Unmapped", "910101010103", districtOfficerTypeId);
+        insertSoftDeletedSchemeMapping(officerId, schemeId); // status still 1 on that row
 
         Map<String, Object> result = nudgeRepository.findOfficerByUserType(
                 "tenant_test", schemeId, "DISTRICT_OFFICER");
@@ -376,6 +425,40 @@ class NudgeRepositoryIntegrationTest {
     }
 
     @Test
+    void findAllOfficersByUserType_excludesSoftDeletedUsersAndMappings() {
+        int deletedUser = insertSoftDeletedUser("SO Removed", "919000000013", sectionOfficerTypeId);
+        insertSchemeMapping(deletedUser, schemeId, 1);
+        int deletedMapUser = insertUser("SO Unmapped", "919000000014", sectionOfficerTypeId);
+        insertSoftDeletedSchemeMapping(deletedMapUser, schemeId);
+
+        java.util.Map<Object, java.util.Map<String, Object>> result =
+                nudgeRepository.findAllOfficersByUserType("tenant_test", "SECTION_OFFICER");
+
+        assertThat(result).isEmpty();
+    }
+
+    /**
+     * {@code DISTINCT ON (usm.scheme_id) … ORDER BY usm.scheme_id, u.id} picks the lowest user id per
+     * scheme. The soft-delete filter has to run before that pick, not after — otherwise a removed
+     * officer with a low id silently shadows the live officer who should be escalated to.
+     */
+    @Test
+    void findAllOfficersByUserType_picksLiveOfficer_whenLowerIdOfficerIsSoftDeleted() {
+        int removed = insertSoftDeletedUser("SO Removed Low", "919000000015", sectionOfficerTypeId);
+        insertSchemeMapping(removed, schemeId, 1);
+        int live = insertUser("SO Live High", "919000000016", sectionOfficerTypeId);
+        insertSchemeMapping(live, schemeId, 1);
+        assertThat(removed).isLessThan(live); // the removed officer sorts first
+
+        java.util.Map<Object, java.util.Map<String, Object>> result =
+                nudgeRepository.findAllOfficersByUserType("tenant_test", "SECTION_OFFICER");
+
+        assertThat(result).hasSize(1);
+        java.util.Map<String, Object> chosen = result.get(schemeId);
+        assertThat(((Number) chosen.get("user_id")).intValue()).isEqualTo(live);
+    }
+
+    @Test
     void findAllOfficersByUserType_returnsEmptyMap_whenNoOfficersExist() {
         java.util.Map<Object, java.util.Map<String, Object>> result =
                 nudgeRepository.findAllOfficersByUserType("tenant_test", "DISTRICT_OFFICER");
@@ -421,6 +504,37 @@ class NudgeRepositoryIntegrationTest {
         assertThat(ids).isEmpty();
     }
 
+    @Test
+    void findDistinctOfficerUserIdsByUserType_excludesSoftDeletedUsersAndMappings() {
+        // Soft-deleted officer holding a live, active mapping.
+        int deletedUser = insertSoftDeletedUser("SO DeletedUser", "919000000023", sectionOfficerTypeId);
+        insertSchemeMapping(deletedUser, schemeId, 1);
+        // Live officer whose only mapping is soft-deleted. status is still 1 on that row — the
+        // status predicate alone would let this officer through.
+        int deletedMapUser = insertUser("SO DeletedMap", "919000000024", sectionOfficerTypeId);
+        insertSoftDeletedSchemeMapping(deletedMapUser, schemeId);
+
+        java.util.List<Long> ids =
+                nudgeRepository.findDistinctOfficerUserIdsByUserType("tenant_test", "SECTION_OFFICER");
+
+        assertThat(ids).isEmpty();
+    }
+
+    @Test
+    void findDistinctOfficerUserIdsByUserType_includesOfficer_whenOnlySomeMappingsAreSoftDeleted() {
+        int schemeD = insertScheme("S-D");
+        int so = insertUser("SO Partial", "919000000025", sectionOfficerTypeId);
+        insertSoftDeletedSchemeMapping(so, schemeId); // scheme removed from the officer
+        insertSchemeMapping(so, schemeD, 1);          // still oversees this one
+
+        java.util.List<Long> ids =
+                nudgeRepository.findDistinctOfficerUserIdsByUserType("tenant_test", "SECTION_OFFICER");
+
+        assertThat(ids).containsExactly((long) so);
+
+        jdbcTemplate.update("DELETE FROM tenant_test.scheme_master_table WHERE id = ?", schemeD);
+    }
+
     // ───────────────────── findSubordinateSectionOfficerIds ─────────────────────
 
     @Test
@@ -463,6 +577,37 @@ class NudgeRepositoryIntegrationTest {
         insertSchemeMapping(inactiveUser, schemeId, 1);   // active mapping, inactive user
         int inactiveMap = insertUser("SO InactiveMap2", "919000000042", sectionOfficerTypeId);
         insertSchemeMapping(inactiveMap, schemeId, 0);    // inactive mapping
+
+        List<Long> ids = nudgeRepository.findSubordinateSectionOfficerIds("tenant_test", sdo);
+
+        assertThat(ids).isEmpty();
+    }
+
+    @Test
+    void findSubordinateSectionOfficerIds_excludesSoftDeletedSectionOfficersAndMappings() {
+        int sdo = insertUser("SDO Three", "919000000050", districtOfficerTypeId);
+        insertSchemeMapping(sdo, schemeId, 1);
+
+        // Soft-deleted Section Officer, live mapping.
+        int deletedUser = insertSoftDeletedUser("SO DeletedUser2", "919000000051", sectionOfficerTypeId);
+        insertSchemeMapping(deletedUser, schemeId, 1);
+        // Live Section Officer whose mapping to the SDO's scheme was soft-deleted.
+        int deletedMap = insertUser("SO DeletedMap2", "919000000052", sectionOfficerTypeId);
+        insertSoftDeletedSchemeMapping(deletedMap, schemeId);
+
+        List<Long> ids = nudgeRepository.findSubordinateSectionOfficerIds("tenant_test", sdo);
+
+        assertThat(ids).isEmpty();
+    }
+
+    @Test
+    void findSubordinateSectionOfficerIds_excludesSectionOfficers_whenTheSdosOwnMappingIsSoftDeleted() {
+        // The SDO no longer oversees the scheme — its Section Officers are someone else's now.
+        int sdo = insertUser("SDO Four", "919000000060", districtOfficerTypeId);
+        insertSoftDeletedSchemeMapping(sdo, schemeId);
+
+        int so = insertUser("SO StillLive", "919000000061", sectionOfficerTypeId);
+        insertSchemeMapping(so, schemeId, 1);
 
         List<Long> ids = nudgeRepository.findSubordinateSectionOfficerIds("tenant_test", sdo);
 
@@ -632,6 +777,30 @@ class NudgeRepositoryIntegrationTest {
                 "INSERT INTO tenant_test.user_table (title, phone_number, user_type, language_id, email, status) " +
                 "VALUES (?, ?, ?, 0, ?, 0) RETURNING id",
                 Integer.class, name, phone, userTypeId, phone + "@test.com");
+    }
+
+    /**
+     * A soft-deleted user: {@code deleted_at} is set while {@code status} stays 1. That combination
+     * is deliberate — it is what the operational tables actually look like, since soft-delete never
+     * clears the status column.
+     */
+    private int insertSoftDeletedUser(String name, String phone, int userTypeId) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO tenant_test.user_table " +
+                "(title, phone_number, user_type, language_id, email, status, deleted_at) " +
+                "VALUES (?, ?, ?, 0, ?, 1, NOW()) RETURNING id",
+                Integer.class, name, phone, userTypeId, phone + "@test.com");
+    }
+
+    /**
+     * A soft-deleted scheme mapping, mirroring {@code UserUploadRepository#markUserSchemeMappingsDeleted}:
+     * {@code deleted_at} is stamped and {@code status} is left at 1, so the row still reads as active.
+     */
+    private void insertSoftDeletedSchemeMapping(int userId, int schemeId) {
+        jdbcTemplate.update(
+                "INSERT INTO tenant_test.user_scheme_mapping_table (user_id, scheme_id, status, deleted_at) " +
+                "VALUES (?, ?, 1, NOW())",
+                userId, schemeId);
     }
 
     private int insertScheme(String stateSchemeId) {

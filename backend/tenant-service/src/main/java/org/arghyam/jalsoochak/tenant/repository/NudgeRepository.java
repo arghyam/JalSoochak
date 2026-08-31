@@ -24,6 +24,14 @@ import java.util.function.Consumer;
  * {@code ^tenant_[a-z0-9][a-z0-9_]{0,29}$} ensures only valid tenant schema names
  * reach the query, preventing access to shared/internal schemas. All runtime data values
  * (dates, IDs, counts) are bound as {@code ?} parameters and never concatenated into SQL.</p>
+ *
+ * <p><b>Soft deletes:</b> every query here filters {@code deleted_at IS NULL} on both
+ * {@code user_table} and {@code user_scheme_mapping_table}, in addition to {@code status = 1}.
+ * The status predicate alone is not sufficient: a scheme mapping is soft-deleted by stamping
+ * {@code deleted_at} <em>without</em> clearing {@code status}
+ * (see {@code UserUploadRepository#markUserSchemeMappingsDeleted}), so a removed mapping still
+ * reads as active. Without the {@code deleted_at} guard these queries keep nudging, escalating
+ * and reporting on people for schemes they no longer hold.</p>
  */
 @Repository
 @RequiredArgsConstructor
@@ -56,7 +64,9 @@ public class NudgeRepository {
                     AND fr.created_by = u.id
                     AND fr.reading_date = ?
                 WHERE usm.status = 1
+                  AND usm.deleted_at IS NULL
                   AND u.status = 1
+                  AND u.deleted_at IS NULL
                   AND UPPER(ut.c_name) = 'PUMP_OPERATOR'
                   AND fr.id IS NULL
                 """, schema, schema, schema);
@@ -140,7 +150,9 @@ public class NudgeRepository {
                         ON fr.scheme_id = usm.scheme_id AND fr.created_by = u.id
                     LEFT JOIN %s.scheme_master_table sm ON sm.id = usm.scheme_id
                     WHERE usm.status = 1
+                      AND usm.deleted_at IS NULL
                       AND u.status = 1
+                      AND u.deleted_at IS NULL
                       AND UPPER(ut.c_name) = 'PUMP_OPERATOR'
                     GROUP BY u.id, u.title, u.phone_number, u.language_id, u.whatsapp_connection_id,
                              usm.scheme_id, sm.state_scheme_id
@@ -193,7 +205,12 @@ public class NudgeRepository {
                 FROM %s.user_scheme_mapping_table usm
                 JOIN %s.user_table u ON u.id = usm.user_id
                 JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type
-                WHERE usm.scheme_id = ? AND UPPER(ut.c_name) = UPPER(?) AND usm.status = 1 AND u.status = 1
+                WHERE usm.scheme_id = ?
+                  AND UPPER(ut.c_name) = UPPER(?)
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND u.status = 1
+                  AND u.deleted_at IS NULL
                 ORDER BY u.id
                 LIMIT 1
                 """, schema, schema);
@@ -232,7 +249,11 @@ public class NudgeRepository {
                 FROM %s.user_scheme_mapping_table usm
                 JOIN %s.user_table u ON u.id = usm.user_id
                 JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type
-                WHERE UPPER(ut.c_name) = UPPER(?) AND usm.status = 1 AND u.status = 1
+                WHERE UPPER(ut.c_name) = UPPER(?)
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND u.status = 1
+                  AND u.deleted_at IS NULL
                 ORDER BY usm.scheme_id, u.id
                 """, schema, schema);
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, userTypeName);
@@ -257,6 +278,9 @@ public class NudgeRepository {
      * <p>Used by the Daily Water Service Situation Report scheduler to decide which officers to
      * request a report for. Returns ids only — no PII is read here (message-service resolves the
      * officer's contact when it delivers the report).</p>
+     *
+     * <p>Soft-deleted users and mappings are excluded — see the class Javadoc for why
+     * {@code status = 1} alone does not cover this.</p>
      */
     @SuppressWarnings("java:S2077")
     public List<Long> findDistinctOfficerUserIdsByUserType(String schema, String userTypeName) {
@@ -266,7 +290,11 @@ public class NudgeRepository {
                 FROM %s.user_scheme_mapping_table usm
                 JOIN %s.user_table u ON u.id = usm.user_id
                 JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type
-                WHERE UPPER(ut.c_name) = UPPER(?) AND usm.status = 1 AND u.status = 1
+                WHERE UPPER(ut.c_name) = UPPER(?)
+                  AND usm.status = 1
+                  AND usm.deleted_at IS NULL
+                  AND u.status = 1
+                  AND u.deleted_at IS NULL
                 """, schema, schema);
         return jdbcTemplate.queryForList(sql, Long.class, userTypeName);
     }
@@ -280,6 +308,11 @@ public class NudgeRepository {
      * <p>Used by the Daily Water Service Situation Report scheduler to build the SDO report's
      * per-officer Summary breakdown. Returns ids only — no PII (message-service resolves each
      * officer's name/mobile at render time; analytics computes their KPIs).</p>
+     *
+     * <p>Soft-deleted rows are excluded on all three: the SDO's own mapping, the Section Officer's
+     * mapping, and the Section Officer's user row. The SDO side matters as much as the SO side — a
+     * scheme the SDO no longer oversees must not pull that scheme's Section Officers into the
+     * breakdown.</p>
      */
     @SuppressWarnings("java:S2077")
     public List<Long> findSubordinateSectionOfficerIds(String schema, long sdoUserId) {
@@ -293,8 +326,11 @@ public class NudgeRepository {
                 JOIN common_schema.user_type_master_table so_ut ON so_ut.id = so_u.user_type
                 WHERE sdo_usm.user_id = ?
                   AND sdo_usm.status = 1
+                  AND sdo_usm.deleted_at IS NULL
                   AND so_usm.status = 1
+                  AND so_usm.deleted_at IS NULL
                   AND so_u.status = 1
+                  AND so_u.deleted_at IS NULL
                   AND UPPER(so_ut.c_name) = 'SECTION_OFFICER'
                 """, schema);
         return jdbcTemplate.queryForList(sql, Long.class, sdoUserId);
