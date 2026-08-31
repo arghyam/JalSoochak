@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: V36 - Language catalog single source of truth
+-- Migration: V38 - Language catalog single source of truth
 -- ============================================================
 -- The language catalog (name/alias -> numeric language_id, and name -> locale
 -- code) was previously duplicated as hardcoded Java maps in
