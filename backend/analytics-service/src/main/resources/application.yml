@@ -162,7 +162,8 @@ analytics:
     national-dashboard:
       lookback-days: ${ANALYTICS_NATIONAL_DASHBOARD_LOOKBACK_DAYS:30}
     scheme-status:
-      inactive-after-days: ${ANALYTICS_SCHEME_STATUS_INACTIVE_AFTER_DAYS:30}
+      # Age after which a scheme with no confirmed meter reading is reported as "critical" by
+      # GET /analytics/critical-schemes. Computed live per request; stores nothing.
       critical-after-days: ${ANALYTICS_SCHEME_STATUS_CRITICAL_AFTER_DAYS:30}
 
     dim-date-backfill:
