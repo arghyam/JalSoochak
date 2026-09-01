@@ -49,6 +49,7 @@ from jjm_division_ee_mapping_ingest import (  # noqa: E402
     DIV_AMBIGUOUS,
     DIV_MATCHED,
     DIV_NOT_FOUND,
+    REMOVAL_SKIPPED,
     DeptNode,
     DivisionDb,
     MappingWriter,
@@ -610,7 +611,22 @@ class TestMapping:
         assert len(plan.officers) == 2
         assert all(p.target_scheme_ids == {scheme} for p in plan.officers)
 
-    def test_existing_mappings_are_kept_by_default(self, db, tmp_path, roles):
+    def test_additive_keeps_a_mapping_outside_the_sub_division(self, db, tmp_path, roles):
+        division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
+        sub = seed_dept(db, "Kathiatoli", SUB_DIVISION_LEVEL, parent_id=division)
+        wanted = seed_scheme(db, "S1", sub)
+        elsewhere = seed_scheme(db, "S2", seed_dept(db, "Other", SUB_DIVISION_LEVEL))
+        user = seed_user(db, "A", "919000000001", roles[SDO_ROLE])
+        seed_mapping(db, user, elsewhere)
+
+        plan = plan_for(db, tmp_path, "SDV-052,Kathiatoli,USR-1,A,9000000001",
+                        replace=False)
+
+        assert officer(plan).to_insert == {wanted}
+        assert officer(plan).to_remove == {elsewhere}
+        assert plan.deactivate_row_ids == []     # additive: nothing is retired
+
+    def test_is_authoritative_by_default(self, db, tmp_path, roles, writers):
         division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
         sub = seed_dept(db, "Kathiatoli", SUB_DIVISION_LEVEL, parent_id=division)
         wanted = seed_scheme(db, "S1", sub)
@@ -619,24 +635,10 @@ class TestMapping:
         seed_mapping(db, user, elsewhere)
 
         plan = plan_for(db, tmp_path, "SDV-052,Kathiatoli,USR-1,A,9000000001")
-
-        assert officer(plan).to_insert == {wanted}
-        assert officer(plan).to_remove == {elsewhere}
-        assert plan.remove_pairs == []          # additive: nothing is removed
-
-    def test_replace_makes_the_csv_authoritative(self, db, tmp_path, roles, writers):
-        division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
-        sub = seed_dept(db, "Kathiatoli", SUB_DIVISION_LEVEL, parent_id=division)
-        wanted = seed_scheme(db, "S1", sub)
-        elsewhere = seed_scheme(db, "S2", seed_dept(db, "Other", SUB_DIVISION_LEVEL))
-        user = seed_user(db, "A", "919000000001", roles[SDO_ROLE])
-        seed_mapping(db, user, elsewhere)
-
-        plan = plan_for(db, tmp_path, "SDV-052,Kathiatoli,USR-1,A,9000000001", replace=True)
         stats = execute_tenant(plan, *writers, create_roles=False)
 
         assert stats["scheme_mappings_inserted"] == 1
-        assert stats["scheme_mappings_soft_deleted"] == 1
+        assert stats["scheme_mappings_retired"] == 1
         assert db.load_user_scheme_mappings([user]) == {user: {wanted}}
 
     def test_schemes_below_the_sub_division_are_included(self, db, tmp_path):
@@ -829,7 +831,8 @@ class TestAnalysisWorkbook:
         book = pd.read_excel(out, sheet_name=None)
         assert set(book) == {
             "run_info", "summary", "subdivision_detail", "mapping_detail", "sdo_detail",
-            "role_summary", "analytics_summary", "conflicts", "csv_issues",
+            "removal_detail", "duplicate_detail", "role_summary", "analytics_summary",
+            "conflicts", "csv_issues",
         }
 
         summary = dict(zip(book["summary"]["metric"], book["summary"]["value"]))
@@ -859,3 +862,101 @@ class TestAnalysisWorkbook:
 
         text = pd.read_excel(masked, sheet_name="sdo_detail").to_string()
         assert "9000000001" not in text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reconciliation, scoped to SUB_DIVISIONAL_OFFICER
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSdoReconciliation:
+    """The engine's rules are tested in the division suite; what matters here is
+    that this file claims SUB_DIVISIONAL_OFFICER and nothing else."""
+
+    def test_a_legacy_sdo_absent_from_the_csv_loses_every_mapping(
+            self, db, tmp_path, roles, writers):
+        division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
+        sub = seed_dept(db, "Kathiatoli", SUB_DIVISION_LEVEL, parent_id=division)
+        wanted = seed_scheme(db, "S1", sub)
+        elsewhere = seed_scheme(db, "S2", seed_dept(db, "Other", SUB_DIVISION_LEVEL))
+        legacy = seed_user(db, "Legacy SDO", "919000000009", roles[SDO_ROLE])
+        seed_mapping(db, legacy, elsewhere)
+
+        plan = plan_for(db, tmp_path, "SDV-052,Kathiatoli,USR-1,A,9000000001")
+        assert plan.reconciliation.stripped_user_ids == {legacy}
+
+        execute_tenant(plan, *writers, create_roles=False)
+
+        assert db.load_user_scheme_mappings([legacy]) == {}
+        assert db.load_user_scheme_mappings(
+            [officer(plan).decision.existing_id]) == {
+            officer(plan).decision.existing_id: {wanted}}
+
+    def test_a_section_officer_on_the_same_scheme_is_never_touched(
+            self, db, tmp_path, roles, writers):
+        division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
+        sub = seed_dept(db, "Kathiatoli", SUB_DIVISION_LEVEL, parent_id=division)
+        scheme = seed_scheme(db, "S1", sub)
+        so = seed_user(db, "A Section Officer", "919000000008", roles["SECTION_OFFICER"])
+        seed_mapping(db, so, scheme)
+
+        plan = plan_for(db, tmp_path, "SDV-052,Kathiatoli,USR-1,A,9000000001")
+        execute_tenant(plan, *writers, create_roles=False)
+
+        assert db.load_user_scheme_mappings([so]) == {so: {scheme}}
+
+    def test_an_sdo_whose_sub_division_was_ambiguous_is_stripped_and_labelled(
+            self, db, tmp_path, roles, writers):
+        """The hazard the docstring warns about, pinned down: an unresolvable
+        sub-division costs its officer the coverage they had."""
+        division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
+        seed_dept(db, "Tezpur", SUB_DIVISION_LEVEL, parent_id=division)
+        seed_dept(db, "Tezpur", SUB_DIVISION_LEVEL, parent_id=division)   # the tie
+        held = seed_scheme(db, "S1", seed_dept(db, "Other", SUB_DIVISION_LEVEL))
+        user = seed_user(db, "Ambiguous", "919000000001", roles[SDO_ROLE])
+        seed_mapping(db, user, held)
+
+        plan = plan_for(db, tmp_path, "SDV-020,Tezpur,USR-1,Ambiguous,9000000001")
+
+        assert not officer(plan).will_write
+        assert [r.reason for r in plan.reconciliation.coverage_removals] == [REMOVAL_SKIPPED]
+        execute_tenant(plan, *writers, create_roles=False)
+        assert db.load_user_scheme_mappings([user]) == {}
+
+    def test_a_retired_mapping_is_revived_rather_than_duplicated(
+            self, db, tmp_path, roles, writers):
+        division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
+        sub = seed_dept(db, "Kathiatoli", SUB_DIVISION_LEVEL, parent_id=division)
+        scheme = seed_scheme(db, "S1", sub)
+        line = "SDV-052,Kathiatoli,USR-1,A,9000000001"
+
+        execute_tenant(plan_for(db, tmp_path, line), *writers, create_roles=False)
+        user = officer(plan_for(db, tmp_path, line)).decision.existing_id
+        # A run that never mentions them retires it ...
+        execute_tenant(plan_for(db, tmp_path, "SDV-052,Kathiatoli,USR-2,B,9000000002"),
+                       *writers, create_roles=False)
+        assert db.load_user_scheme_mappings([user]) == {}
+
+        stats = execute_tenant(plan_for(db, tmp_path, line), *writers, create_roles=False)
+
+        assert stats["scheme_mappings_revived"] == 1
+        assert stats["scheme_mappings_inserted"] == 0
+        with db.conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.user_scheme_mapping_table "
+                        f"WHERE user_id = %s AND scheme_id = %s", (user, scheme))
+            assert cur.fetchone()[0] == 1
+
+    def test_rerunning_the_same_csv_is_a_no_op(self, db, tmp_path, roles, writers):
+        division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
+        sub = seed_dept(db, "Kathiatoli", SUB_DIVISION_LEVEL, parent_id=division)
+        seed_scheme(db, "S1", sub)
+        seed_scheme(db, "S2", sub)
+        line = "SDV-052,Kathiatoli,USR-1,A,9000000001"
+
+        first = execute_tenant(plan_for(db, tmp_path, line), *writers, create_roles=False)
+        assert first["scheme_mappings_inserted"] == 2
+
+        second = execute_tenant(plan_for(db, tmp_path, line), *writers, create_roles=False)
+
+        assert (second["scheme_mappings_inserted"], second["scheme_mappings_retired"],
+                second["scheme_mappings_revived"]) == (0, 0, 0)
+        assert second["scheme_mappings_already_correct"] == 2

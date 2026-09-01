@@ -18,7 +18,7 @@ What it touches
 tenant DB (shared_db), schema tenant_<code>:
   user_table                        insert / update (title, user_type, state_user_id)
   department_location_master_table  update (state_dept_id) — OPT-IN, see below
-  user_scheme_mapping_table         insert (and soft-delete with --replace)
+  user_scheme_mapping_table         insert, revive, and retire (unless --additive)
 
 analytics DB, schema analytics_schema:
   dim_user_table                    upsert (every SDO this run wrote)
@@ -107,11 +107,50 @@ with the real one for a UNIQUE c_name.
 
 Scheme mapping semantics
 ------------------------
-Additive by default: the sub-division's schemes the SDO is not mapped to yet are
-inserted, and every mapping they already hold is left alone. --replace makes the
-CSV authoritative instead — mappings outside the union of their sub-divisions'
-schemes are soft-deleted (deleted_at/deleted_by, mirroring UserUploadRepository),
-so the SDO ends up covering exactly what the CSV says.
+The CSV is the whole truth about SUB_DIVISIONAL_OFFICER, tenant-wide, so by
+default:
+
+    every live SUB_DIVISIONAL_OFFICER mapping in the tenant is made to match
+    exactly what this file states — nothing more and nothing less
+
+Three consequences worth being sure about before running it:
+
+  * an SDO the file has dropped keeps no schemes at all. Absence from the latest
+    dataset is read as a statement about the person, not about the schemes they
+    happen to hold, so even a scheme outside every sub-division this CSV names
+    is taken off them;
+  * an SDO the file names but this run could not process — an unreadable phone
+    number, a duplicate one, or sub-divisions that all failed to resolve — is
+    treated the same way and stripped too, because a run that cannot place them
+    cannot vouch for their coverage either. They are reported apart from the
+    genuinely absent, under SKIPPED_HOLDER_STRIPPED, so an operator can tell a
+    dropped officer from a broken row at a glance. Note what this means for an
+    AMBIGUOUS sub-division: it costs its officer that coverage, so read the
+    conflicts sheet before executing;
+  * a mapping held by a pump operator, jal sahayak, EE or section officer is
+    never touched. user_scheme_mapping_table is shared by every role, and this
+    file speaks only for sub-divisional officers.
+
+The removal_detail sheet lists every row that goes, with the reason and whether
+it costs anybody coverage; the conflicts sheet names each stripped user once.
+Read both before executing.
+
+Removal is a soft delete: the row stays, deleted_at/deleted_by record who
+dropped it and when — mirroring UserUploadRepository — and status drops to 0.
+Every service read path already demands `deleted_at IS NULL AND status = 1`
+together, so a retired row that kept status 1 was failing only one of the two
+guards it should.
+
+Nothing is ever duplicated. A pair the CSV asks for again revives the row a
+previous run retired rather than stacking a second one on it, and a pair that
+already carried several live rows — nothing in the schema forbids it, there is
+no uniqueness on (user_id, scheme_id) — is collapsed onto its earliest row and
+reported in duplicate_detail. Running the same CSV twice is therefore a no-op
+the second time.
+
+--additive turns the removal off entirely: missing mappings are still inserted,
+retired ones the CSV wants are still revived and duplicates are still collapsed,
+but nothing is ever taken away.
 
 Migrations
 ----------
@@ -142,17 +181,17 @@ Usage
       --csv "scripts/jjm master data ingestion/subdiv-sdo-mapping/subdivision-sdo-mapping.csv" \
       --actor-id 21357 --out "scripts/jjm master data ingestion/subdiv-sdo-mapping/jjm_subdivision_sdo_analysis.xlsx"
 
-  # apply (additive)
+  # apply, adding only (nothing is ever retired)
   python3 "scripts/jjm master data ingestion/subdiv-sdo-mapping/jjm_subdivision_sdo_mapping_ingest.py" \
       --csv "scripts/jjm master data ingestion/subdiv-sdo-mapping/subdivision-sdo-mapping.csv" \
-      --actor-id 21357 --out jjm_subdivision_sdo_analysis.xlsx --execute
+      --actor-id 21357 --out jjm_subdivision_sdo_analysis.xlsx --additive --execute
 
-  # once V36/V37 are applied: reconcile both public ids, and make the CSV
-  # authoritative for what each SDO covers
+  # apply in full: the CSV becomes the whole truth about SUB_DIVISIONAL_OFFICER,
+  # and once V36/V37 are applied both public ids are reconciled too
   python3 "scripts/jjm master data ingestion/subdiv-sdo-mapping/jjm_subdivision_sdo_mapping_ingest.py" \
       --csv "scripts/jjm master data ingestion/subdiv-sdo-mapping/subdivision-sdo-mapping.csv" \
       --actor-id 21357 --out jjm_subdivision_sdo_analysis.xlsx \
-      --with-state-dept-id --with-state-user-id --replace --execute
+      --with-state-dept-id --with-state-user-id --execute
 """
 
 from __future__ import annotations
@@ -192,6 +231,11 @@ try:
         DIV_AMBIGUOUS,
         DIV_NOT_FOUND,
         FIELD_STATE_USER_ID,
+        REMOVAL_ABSENT,
+        REMOVAL_DUPLICATE,
+        REMOVAL_OUTSIDE_TARGET,
+        REMOVAL_REASSIGNED,
+        REMOVAL_SKIPPED,
         AnalyticsWriter,
         DeptNode,
         DivisionDb,
@@ -203,11 +247,15 @@ try:
         NodeKind,
         PiiCrypto,
         UserWriter,
+        build_duplicate_frame,
         build_engineer_plans,
+        build_reconciliation,
+        build_removal_frame,
         build_role_plans,
         clean,
         execute_analytics,
         execute_tenant,
+        legacy_holder_conflicts,
         normalise_phone,
         resolve_divisions,
         safe_mask,
@@ -448,7 +496,7 @@ def build_plan(
     db: DivisionDb,
     update_roles: bool = True,
     create_users_without_schemes: bool = False,
-    replace: bool = False,
+    replace: bool = True,
 ) -> SdoIngestPlan:
     LOG.info("Classifying %d CSV rows …", len(rows))
     subdivisions, nodes = resolve_divisions(rows, db)
@@ -466,6 +514,11 @@ def build_plan(
     user_types = db.load_user_types()
     role_plans = build_role_plans([p.decision for p in officers if p.will_write], user_types)
 
+    # Every row of this file is an SDO, so the CSV claims authority over exactly
+    # that role: a pump operator or section officer mapped to one of these
+    # schemes is somebody else's statement and is never read, let alone retired.
+    reconciliation = build_reconciliation(officers, db, (SDO_ROLE,), prune=replace)
+
     return SdoIngestPlan(
         engineers=officers,
         divisions=subdivisions,
@@ -475,6 +528,9 @@ def build_plan(
         replace=replace,
         with_state_dept_id=db.with_state_dept_id,
         with_state_user_id=db.with_state_user_id,
+        roles=(SDO_ROLE,),
+        reconciliation=reconciliation,
+        holder_names=db.load_user_names(reconciliation.affected_user_ids),
         nodes=nodes,
     )
 
@@ -535,6 +591,7 @@ def build_summary_frame(plan: SdoIngestPlan) -> pd.DataFrame:
     writable = plan.writable
     subdivisions = list(plan.subdivisions.values())
     resolved = [d for d in subdivisions if d.resolved]
+    counts = plan.reconciliation.removals_by_reason()
 
     records = [
         {"metric": "CSV rows", "value": sum(len(p.csv_rows) for p in officers)},
@@ -557,11 +614,29 @@ def build_summary_frame(plan: SdoIngestPlan) -> pd.DataFrame:
                        if p.decision.category == CAT_EXISTING and not p.decision.changes])},
         {"metric": "  SDOs skipped",
          "value": len([p for p in officers if not p.will_write])},
-        {"metric": "scheme mappings to insert", "value": sum(len(p.to_insert) for p in writable)},
-        {"metric": "scheme mappings to soft-delete (--replace)",
-         "value": sum(len(p.to_remove) for p in writable) if plan.replace else 0},
-        {"metric": "scheme mappings already correct",
-         "value": sum(len(p.target_scheme_ids & p.existing_scheme_ids) for p in writable)},
+        {"metric": "scheme mappings to insert",
+         "value": len(plan.reconciliation.to_insert)
+         + sum(len(p.target_scheme_ids) for p in writable
+               if p.decision.category == CAT_NEW)},
+        {"metric": "scheme mappings to revive (a retired row reused)",
+         "value": len(plan.reconciliation.to_resurrect)},
+        {"metric": "scheme mappings already correct", "value": plan.reconciliation.unchanged},
+        {"metric": "mappings to retire (coverage lost)",
+         "value": len(plan.reconciliation.coverage_removals)},
+        {"metric": "  because the CSV moved the scheme to another SDO",
+         "value": counts.get(REMOVAL_REASSIGNED, 0)},
+        {"metric": "  because the CSV no longer gives the SDO the scheme",
+         "value": counts.get(REMOVAL_OUTSIDE_TARGET, 0)},
+        {"metric": "  because the holder is not in the latest dataset",
+         "value": counts.get(REMOVAL_ABSENT, 0)},
+        {"metric": "  because the holder is named but could not be processed",
+         "value": counts.get(REMOVAL_SKIPPED, 0)},
+        {"metric": "SDOs losing every mapping they hold",
+         "value": len(plan.reconciliation.stripped_user_ids)},
+        {"metric": "duplicate rows to collapse (no coverage lost)",
+         "value": counts.get(REMOVAL_DUPLICATE, 0)},
+        {"metric": "  pairs that held more than one live row",
+         "value": len(plan.reconciliation.duplicates)},
         {"metric": "state_dept_id backfills",
          "value": len([d for d in resolved if d.state_dept_id_change is not None])},
         {"metric": "state_user_id backfills",
@@ -606,9 +681,19 @@ def build_subdivision_frame(plan: SdoIngestPlan) -> pd.DataFrame:
 
 def build_mapping_frame(plan: SdoIngestPlan, include_pii: bool) -> pd.DataFrame:
     show = (lambda p: p) if include_pii else safe_mask
+    inserts = plan.reconciliation.inserts_by_user()
+    revivals = plan.reconciliation.revivals_by_user()
+    removals = plan.reconciliation.removals_by_user()
     records = []
     for p in plan.writable:
         decision = p.decision
+        # A user this run onboards holds no rows yet, so their whole target is
+        # an insert and the reconciler — which only saw existing users — has
+        # nothing to say about them.
+        fresh = (p.target_scheme_ids if decision.category == CAT_NEW
+                 else inserts.get(decision.existing_id, set()))
+        revived = revivals.get(decision.existing_id, set())
+        retired = removals.get(decision.existing_id, set())
         records.append({
             "csv_rows": _fmt_rows(p.csv_rows),
             "sdo": decision.row.name,
@@ -620,11 +705,13 @@ def build_mapping_frame(plan: SdoIngestPlan, include_pii: bool) -> pd.DataFrame:
             ),
             "schemes_in_subdivisions": len(p.target_scheme_ids),
             "already_mapped": len(p.target_scheme_ids & p.existing_scheme_ids),
-            "mappings_to_insert": len(p.to_insert),
-            "mappings_to_soft_delete": len(p.to_remove) if plan.replace else 0,
+            "mappings_to_insert": len(fresh),
+            "mappings_to_revive": len(revived),
+            "mappings_to_retire": len(retired),
             "mappings_outside_subdivisions_kept": 0 if plan.replace else len(p.to_remove),
-            "scheme_ids_to_insert": _fmt_ids(p.to_insert),
-            "scheme_ids_to_soft_delete": _fmt_ids(p.to_remove) if plan.replace else "",
+            "scheme_ids_to_insert": _fmt_ids(fresh),
+            "scheme_ids_to_revive": _fmt_ids(revived),
+            "scheme_ids_to_retire": _fmt_ids(retired),
         })
     return pd.DataFrame.from_records(records) if records else pd.DataFrame(
         columns=["csv_rows", "sdo", "schemes_in_subdivisions", "mappings_to_insert"]
@@ -692,13 +779,9 @@ def build_analytics_frame(plan: SdoIngestPlan) -> pd.DataFrame:
     return pd.DataFrame.from_records([
         {"metric": "dim_user_table rows upserted", "value": len(touched)},
         {"metric": "dim_user_scheme_mapping_table users replaced",
-         "value": len([p for p in writable if p.to_insert or (plan.replace and p.to_remove)])},
-        {"metric": "dim_user_scheme_mapping_table rows after replace",
-         "value": sum(
-             len(p.target_scheme_ids if plan.replace
-                 else p.existing_scheme_ids | p.target_scheme_ids)
-             for p in writable if p.to_insert or (plan.replace and p.to_remove)
-         )},
+         "value": len(plan.affected_user_ids)},
+        {"metric": "  of them only because a legacy mapping was retired",
+         "value": len(plan.reconciliation.stripped_user_ids)},
     ])
 
 
@@ -791,9 +874,11 @@ def build_conflict_frame(plan: SdoIngestPlan, include_pii: bool) -> pd.DataFrame
                 "csv_rows": _fmt_rows(p.csv_rows),
                 "subject": subject,
                 "detail": f"{len(p.to_remove)} existing mapping(s) are not under any "
-                          f"sub-division the CSV gives this SDO; they are kept "
-                          f"(pass --replace to soft-delete them)",
+                          f"sub-division the CSV gives this SDO; --additive is set, "
+                          f"so they are kept",
             })
+
+    records.extend(legacy_holder_conflicts(plan))
 
     for problem in unusable_roles(plan):
         records.append({
@@ -827,6 +912,9 @@ def write_analysis_workbook(plan: SdoIngestPlan, path: str,
             writer, sheet_name="mapping_detail", index=False)
         build_officer_frame(plan, include_pii).to_excel(
             writer, sheet_name="sdo_detail", index=False)
+        build_removal_frame(plan).to_excel(writer, sheet_name="removal_detail", index=False)
+        build_duplicate_frame(plan).to_excel(
+            writer, sheet_name="duplicate_detail", index=False)
         build_role_frame(plan).to_excel(writer, sheet_name="role_summary", index=False)
         build_analytics_frame(plan).to_excel(writer, sheet_name="analytics_summary", index=False)
         build_conflict_frame(plan, include_pii).to_excel(
@@ -868,10 +956,15 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                         help="analytics DB DSN (default: $ANALYTICS_DSN)")
     parser.add_argument("--execute", action="store_true",
                         help="apply the plan; without this the run is read-only")
+    parser.add_argument("--additive", action="store_true",
+                        help="never retire anything: insert the missing mappings, revive the "
+                             f"retired ones the CSV asks for again, collapse duplicate rows, "
+                             f"and leave every other existing mapping alone. By default the "
+                             f"CSV is authoritative for {SDO_ROLE} — a mapping of that role "
+                             f"the CSV does not state is retired, including one held by an "
+                             f"SDO the file does not carry at all")
     parser.add_argument("--replace", action="store_true",
-                        help="make the CSV authoritative for what each SDO covers: "
-                             "soft-delete every mapping of theirs that is not under one of "
-                             "their sub-divisions. Additive (nothing removed) by default")
+                        help=argparse.SUPPRESS)   # pre-authoritative spelling; now the default
     parser.add_argument("--skip-analytics", action="store_true",
                         help="do not touch the analytics warehouse")
     parser.add_argument("--no-role-updates", action="store_true",
@@ -914,6 +1007,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _fail("--analytics-dsn (or $ANALYTICS_DSN) is required unless --skip-analytics")
     if args.limit is not None and args.limit < 1:
         return _fail("--limit must be a positive number of rows")
+    if args.limit is not None and args.execute and not args.additive:
+        # A truncated file is a truncated statement of who covers what: every
+        # SDO past the cut reads as absent from the dataset, and absence now
+        # retires mappings rather than merely failing to add them.
+        return _fail(
+            "--limit cannot be combined with --execute unless --additive is also set: "
+            "the run is authoritative, so cutting the CSV short would retire the "
+            "mappings of every SDO past the cut. Rehearse with --limit and no --execute."
+        )
+    if args.replace:
+        LOG.warning(
+            "--replace is the default now and does nothing; pass --additive for the "
+            "old default of never removing anything."
+        )
 
     try:
         pii = PiiCrypto(os.environ.get("PII_ENCRYPTION_KEY", ""), os.environ.get("PII_HMAC_KEY", ""))
@@ -965,7 +1072,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             rows, csv_issues, db,
             update_roles=not args.no_role_updates,
             create_users_without_schemes=args.create_users_without_schemes,
-            replace=args.replace,
+            replace=not args.additive,
         )
 
         context = {
@@ -977,8 +1084,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             "actor_id": args.actor_id,
             "sub_division_level": args.sub_division_level,
             "mode": "EXECUTE" if args.execute else "ANALYZE (read-only)",
-            "mapping_mode": "REPLACE (mappings outside the sub-division are soft-deleted)"
-            if args.replace else "ADDITIVE (existing mappings are never removed)",
+            "mapping_mode": "ADDITIVE (nothing is ever retired)" if args.additive else
+            f"AUTHORITATIVE (a {SDO_ROLE} mapping the CSV does not state is retired, "
+            f"including one held by an SDO the CSV never names)",
             "analytics": "skipped" if args.skip_analytics else "included",
             "phones_in_report": "full" if args.include_pii else "masked",
             "role": f"{SDO_ROLE} for every row; never created by this tool",

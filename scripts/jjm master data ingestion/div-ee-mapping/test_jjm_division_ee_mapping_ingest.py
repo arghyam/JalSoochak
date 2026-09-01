@@ -35,18 +35,29 @@ from jjm_division_ee_mapping_ingest import (  # noqa: E402
     DIV_AMBIGUOUS,
     DIV_MATCHED,
     DIV_NOT_FOUND,
+    MAPPING_STATUS_ACTIVE,
+    MAPPING_STATUS_INACTIVE,
+    REMOVAL_ABSENT,
+    REMOVAL_DUPLICATE,
+    REMOVAL_OUTSIDE_TARGET,
+    REMOVAL_REASSIGNED,
+    REMOVAL_SKIPPED,
     SKIP_NO_DIVISION,
     DeptNode,
     DivisionDb,
+    MappingRowState,
     MappingWriter,
     PiiCrypto,
     UserWriter,
     build_children_index,
+    build_conflict_frame,
     build_engineer_plans,
     build_plan,
+    build_removal_frame,
     collapse_engineers,
     execute_tenant,
     load_csv,
+    reconcile_mappings,
     resolve_divisions,
     subtree_ids,
     title_core,
@@ -909,10 +920,27 @@ class TestExecuteTenant:
         assert (user_type, state_user_id, password, status) == (
             roles["EXECUTIVE_ENGINEER"], "USR-1", "CSV_ONBOARDED", 1)
 
-    def test_is_additive_by_default(self, db, writers, roles, tmp_path):
+    def test_additive_keeps_a_mapping_the_csv_no_longer_states(self, db, writers,
+                                                               roles, tmp_path):
         _, alpha = _division_with_schemes(db, "Alpha Division", 1)
         _, beta = _division_with_schemes(db, "Beta Division", 1)
         user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        seed_mapping(db, user, beta[0])
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        plan = build_plan(rows, issues, db, replace=False)
+        user_writer, mapping_writer = writers
+
+        stats = execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
+
+        assert stats["scheme_mappings_retired"] == 0
+        assert live_mappings(db, user) == {alpha[0], beta[0]}
+
+    def test_is_authoritative_by_default(self, db, writers, roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 2)
+        _, beta = _division_with_schemes(db, "Beta Division", 1)
+        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        seed_mapping(db, user, alpha[0])
         seed_mapping(db, user, beta[0])
         rows, issues = rows_of(
             tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
@@ -921,24 +949,8 @@ class TestExecuteTenant:
 
         stats = execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
 
-        assert stats["scheme_mappings_soft_deleted"] == 0
-        assert live_mappings(db, user) == {alpha[0], beta[0]}
-
-    def test_replace_makes_the_csv_authoritative(self, db, writers, roles, tmp_path):
-        _, alpha = _division_with_schemes(db, "Alpha Division", 2)
-        _, beta = _division_with_schemes(db, "Beta Division", 1)
-        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
-        seed_mapping(db, user, alpha[0])
-        seed_mapping(db, user, beta[0])
-        rows, issues = rows_of(
-            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
-        plan = build_plan(rows, issues, db, replace=True)
-        user_writer, mapping_writer = writers
-
-        stats = execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
-
         assert stats["scheme_mappings_inserted"] == 1        # alpha[1]
-        assert stats["scheme_mappings_soft_deleted"] == 1    # beta[0]
+        assert stats["scheme_mappings_retired"] == 1         # beta[0]
         assert live_mappings(db, user) == set(alpha)
 
     def test_rerunning_changes_nothing(self, db, writers, roles, tmp_path):
@@ -1016,3 +1028,447 @@ class TestExecuteTenant:
         assert stats["scheme_mappings_inserted"] == 2
         assert stats["state_dept_ids_backfilled"] == 0
         assert live_mappings(legacy_db, plan.engineers[0].decision.existing_id) == schemes
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mapping reconciliation — pure logic, no database
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _row(row_id: int, user_id: int, scheme_id: int,
+         status: int = MAPPING_STATUS_ACTIVE, live: bool = True) -> MappingRowState:
+    return MappingRowState(row_id, user_id, scheme_id, status, live)
+
+
+def _ledger(*rows: MappingRowState) -> dict:
+    out: dict = {}
+    for row in rows:
+        out.setdefault(row.pair, []).append(row)
+    for group in out.values():
+        group.sort(key=lambda r: r.id)
+    return out
+
+
+def _reasons(result) -> dict:
+    return {(r.user_id, r.scheme_id, r.row_id): r.reason for r in result.removals}
+
+
+class TestReconcileWantedPairs:
+    """Rule 1: a pair the CSV states ends with exactly one live, active row."""
+
+    def test_inserts_a_pair_with_no_row_at_all(self):
+        result = reconcile_mappings({7: {5}}, {}, strip_users=set())
+
+        assert result.to_insert == [(7, 5)]
+        assert result.to_resurrect == []
+        assert result.removals == []
+
+    def test_leaves_an_already_correct_pair_completely_alone(self):
+        result = reconcile_mappings({7: {5}}, _ledger(_row(1, 7, 5)), strip_users=set())
+
+        assert result.to_insert == []
+        assert result.to_resurrect == []
+        assert result.removals == []
+        assert result.unchanged == 1
+
+    def test_resurrects_a_soft_deleted_row_instead_of_inserting(self):
+        """Requirement 2: the earlier row is revived, not duplicated."""
+        ledger = _ledger(_row(9, 7, 5, status=MAPPING_STATUS_INACTIVE, live=False))
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert result.to_resurrect == [9]
+        assert result.to_insert == []
+
+    def test_resurrects_a_live_row_that_was_only_marked_inactive(self):
+        ledger = _ledger(_row(9, 7, 5, status=MAPPING_STATUS_INACTIVE, live=True))
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert result.to_resurrect == [9]
+        assert result.to_insert == []
+
+    def test_revives_the_earliest_row_when_several_are_retired(self):
+        ledger = _ledger(
+            _row(4, 7, 5, status=MAPPING_STATUS_INACTIVE, live=False),
+            _row(8, 7, 5, status=MAPPING_STATUS_INACTIVE, live=False),
+        )
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert result.to_resurrect == [4]
+
+    def test_a_retired_duplicate_alongside_a_live_row_is_left_retired(self):
+        ledger = _ledger(
+            _row(4, 7, 5, status=MAPPING_STATUS_INACTIVE, live=False),
+            _row(8, 7, 5),
+        )
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert result.to_resurrect == []
+        assert result.removals == []
+        assert result.unchanged == 1
+
+
+class TestReconcileDuplicates:
+    """Rule 3: pre-existing duplicates collapse to one and cost no coverage."""
+
+    def test_collapses_two_live_rows_for_one_pair(self):
+        ledger = _ledger(_row(4, 7, 5), _row(8, 7, 5))
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert result.to_deactivate == [8]        # the earliest row survives
+        assert result.duplicates[0].kept_row_id == 4
+        assert result.duplicates[0].collapsed_row_ids == [8]
+
+    def test_a_collapse_is_not_counted_as_lost_coverage(self):
+        ledger = _ledger(_row(4, 7, 5), _row(8, 7, 5))
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert result.coverage_removals == []
+        assert [r.reason for r in result.duplicate_removals] == [REMOVAL_DUPLICATE]
+
+    def test_collapses_onto_a_revived_row_rather_than_keeping_a_live_one(self):
+        """The earliest row wins even when it is the retired one, so the pair
+        keeps the created_at it has always had."""
+        ledger = _ledger(
+            _row(4, 7, 5, status=MAPPING_STATUS_INACTIVE, live=False),
+            _row(8, 7, 5, status=MAPPING_STATUS_INACTIVE, live=True),
+            _row(9, 7, 5, status=MAPPING_STATUS_INACTIVE, live=True),
+        )
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert result.to_resurrect == [4]
+        assert sorted(result.to_deactivate) == [8, 9]
+
+    def test_reports_duplicates_on_a_pair_being_retired_outright(self):
+        ledger = _ledger(_row(4, 7, 5), _row(8, 7, 5))
+
+        result = reconcile_mappings({}, ledger, strip_users={7})
+
+        assert sorted(result.to_deactivate) == [4, 8]
+        assert result.duplicates[0].kept_row_id is None
+        assert result.duplicates[0].collapsed_row_ids == [4, 8]
+
+
+class TestReconcileRemovals:
+    """Rule 2: a live row the CSV contradicts is retired."""
+
+    def test_retires_a_written_officers_mapping_the_csv_dropped(self):
+        ledger = _ledger(_row(1, 7, 5), _row(2, 7, 6))
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert _reasons(result) == {(7, 6, 2): REMOVAL_OUTSIDE_TARGET}
+
+    def test_calls_it_a_reassignment_when_another_officer_now_covers_it(self):
+        ledger = _ledger(_row(1, 7, 6))
+
+        result = reconcile_mappings({7: {5}, 8: {6}}, ledger, strip_users=set())
+
+        assert _reasons(result) == {(7, 6, 1): REMOVAL_REASSIGNED}
+
+    def test_strips_a_user_absent_from_the_csv(self):
+        """Requirement 5: a legacy holder the latest dataset never names."""
+        ledger = _ledger(_row(1, 99, 5))
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users={99})
+
+        assert _reasons(result) == {(99, 5, 1): REMOVAL_ABSENT}
+
+    def test_strips_a_skipped_officer_but_labels_them_separately(self):
+        ledger = _ledger(_row(1, 99, 5))
+
+        result = reconcile_mappings(
+            {7: {5}}, ledger, strip_users={99},
+            skip_reasons={99: "no division on any of this engineer's rows resolved"},
+        )
+
+        assert _reasons(result) == {(99, 5, 1): REMOVAL_SKIPPED}
+        assert "no division" in result.removals[0].detail
+
+    def test_never_touches_a_user_outside_both_sets(self):
+        """A pump operator's mapping is another role's business entirely."""
+        ledger = _ledger(_row(1, 55, 5))
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users=set())
+
+        assert result.removals == []
+
+    def test_strips_every_live_row_of_an_absent_user(self):
+        ledger = _ledger(_row(1, 99, 5), _row(2, 99, 6), _row(3, 99, 7))
+
+        result = reconcile_mappings({}, ledger, strip_users={99})
+
+        assert sorted(result.to_deactivate) == [1, 2, 3]
+
+    def test_a_retired_row_of_an_absent_user_is_not_retired_again(self):
+        ledger = _ledger(_row(1, 99, 5, status=MAPPING_STATUS_INACTIVE, live=False))
+
+        result = reconcile_mappings({}, ledger, strip_users={99})
+
+        assert result.removals == []
+
+
+class TestReconcileIsIdempotent:
+    """Requirement 4: a second run of the same CSV must change nothing."""
+
+    def test_the_post_state_of_a_run_reconciles_to_a_no_op(self):
+        first = reconcile_mappings({7: {5, 6}}, {}, strip_users=set())
+        assert sorted(first.to_insert) == [(7, 5), (7, 6)]
+
+        # The rows those inserts would create, as the next run would read them.
+        settled = _ledger(_row(1, 7, 5), _row(2, 7, 6))
+        second = reconcile_mappings({7: {5, 6}}, settled, strip_users=set())
+
+        assert second.to_insert == []
+        assert second.to_resurrect == []
+        assert second.removals == []
+        assert second.unchanged == 2
+
+    def test_a_reversal_reuses_the_row_it_retired(self):
+        """Drop a scheme, then put it back: no new row is ever created."""
+        ledger = _ledger(_row(1, 7, 5))
+        dropped = reconcile_mappings({7: set()}, ledger, strip_users=set())
+        assert dropped.to_deactivate == [1]
+
+        retired = _ledger(_row(1, 7, 5, status=MAPPING_STATUS_INACTIVE, live=False))
+        restored = reconcile_mappings({7: {5}}, retired, strip_users=set())
+
+        assert restored.to_resurrect == [1]
+        assert restored.to_insert == []
+
+    def test_affected_users_cover_inserts_and_removals_alike(self):
+        ledger = _ledger(_row(1, 99, 5), _row(2, 7, 6))
+
+        result = reconcile_mappings({7: {5}}, ledger, strip_users={99})
+
+        assert result.affected_user_ids == {7, 99}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reconciliation against a real database
+# ─────────────────────────────────────────────────────────────────────────────
+
+def seed_mapping_row(db: DivisionDb, user_id: int, scheme_id: int,
+                     status: int = MAPPING_STATUS_ACTIVE, deleted: bool = False) -> int:
+    """A mapping row in any state, so the retired and duplicate cases are real."""
+    with db.conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {db.schema}.user_scheme_mapping_table "
+            f"(user_id, scheme_id, status, created_by, updated_by, deleted_at, deleted_by) "
+            f"VALUES (%s, %s, %s, %s, %s, {'NOW()' if deleted else 'NULL'}, "
+            f"{ACTOR_ID if deleted else 'NULL'}) RETURNING id",
+            (user_id, scheme_id, status, ACTOR_ID, ACTOR_ID),
+        )
+        return cur.fetchone()[0]
+
+
+def mapping_rows(db: DivisionDb, user_id: int) -> list[tuple]:
+    """(id, scheme_id, status, live) for every physical row, oldest first."""
+    with db.conn.cursor() as cur:
+        cur.execute(
+            f"SELECT id, scheme_id, status, deleted_at IS NULL "
+            f"FROM {db.schema}.user_scheme_mapping_table "
+            f"WHERE user_id = %s ORDER BY id", (user_id,)
+        )
+        return cur.fetchall()
+
+
+class TestRetiredRowsAreAlsoDeactivated:
+    """Requirement 1: status drops to 0 alongside deleted_at."""
+
+    def test_deactivate_rows_sets_status_zero(self, db, writers, roles):
+        _, schemes = _division_with_schemes(db, "Alpha Division", 1)
+        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        row_id = seed_mapping_row(db, user, schemes[0])
+        _, mapping_writer = writers
+
+        assert mapping_writer.deactivate_rows([row_id]) == 1
+
+        assert mapping_rows(db, user) == [(row_id, schemes[0], MAPPING_STATUS_INACTIVE, False)]
+
+    def test_pair_based_soft_delete_sets_status_zero_too(self, db, writers, roles):
+        _, schemes = _division_with_schemes(db, "Alpha Division", 1)
+        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        row_id = seed_mapping_row(db, user, schemes[0])
+        _, mapping_writer = writers
+
+        assert mapping_writer.soft_delete_mappings([(user, schemes[0])]) == 1
+
+        assert mapping_rows(db, user) == [(row_id, schemes[0], MAPPING_STATUS_INACTIVE, False)]
+
+    def test_a_full_run_leaves_no_retired_row_still_active(self, db, writers, roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        _, beta = _division_with_schemes(db, "Beta Division", 1)
+        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        seed_mapping(db, user, beta[0])
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        plan = build_plan(rows, issues, db)
+        user_writer, mapping_writer = writers
+
+        execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
+
+        retired = [r for r in mapping_rows(db, user) if not r[3]]
+        assert retired and all(r[2] == MAPPING_STATUS_INACTIVE for r in retired)
+
+
+class TestReviveRatherThanDuplicate:
+    """Requirement 2: the earlier row comes back; no second row is created."""
+
+    def test_a_retired_mapping_the_csv_wants_again_is_revived(self, db, writers,
+                                                              roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        row_id = seed_mapping_row(db, user, alpha[0],
+                                  status=MAPPING_STATUS_INACTIVE, deleted=True)
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        plan = build_plan(rows, issues, db)
+        user_writer, mapping_writer = writers
+
+        stats = execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
+
+        assert stats["scheme_mappings_revived"] == 1
+        assert stats["scheme_mappings_inserted"] == 0
+        assert mapping_rows(db, user) == [(row_id, alpha[0], MAPPING_STATUS_ACTIVE, True)]
+
+    def test_reviving_clears_the_deleted_by_of_whoever_retired_it(self, db, writers, roles):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        row_id = seed_mapping_row(db, user, alpha[0],
+                                  status=MAPPING_STATUS_INACTIVE, deleted=True)
+        _, mapping_writer = writers
+
+        mapping_writer.resurrect_rows([row_id])
+
+        with db.conn.cursor() as cur:
+            cur.execute(
+                f"SELECT deleted_at, deleted_by, status FROM "
+                f"{db.schema}.user_scheme_mapping_table WHERE id = %s", (row_id,))
+            assert cur.fetchone() == (None, None, MAPPING_STATUS_ACTIVE)
+
+
+class TestNoDuplicatesOnRerun:
+    """Requirement 4: running the same CSV twice changes nothing the second time."""
+
+    def test_second_run_writes_nothing(self, db, writers, roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 2)
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        user_writer, mapping_writer = writers
+
+        first = execute_tenant(build_plan(rows, issues, db), user_writer,
+                               mapping_writer, create_roles=True)
+        assert first["scheme_mappings_inserted"] == 2
+
+        second = execute_tenant(build_plan(rows, issues, db), user_writer,
+                                mapping_writer, create_roles=True)
+
+        assert second["scheme_mappings_inserted"] == 0
+        assert second["scheme_mappings_revived"] == 0
+        assert second["scheme_mappings_retired"] == 0
+        assert second["scheme_mappings_already_correct"] == 2
+
+    def test_a_pre_existing_duplicate_pair_is_collapsed_to_one_live_row(
+            self, db, writers, roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        first = seed_mapping_row(db, user, alpha[0])
+        second = seed_mapping_row(db, user, alpha[0])       # what an old run left
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        plan = build_plan(rows, issues, db)
+        user_writer, mapping_writer = writers
+
+        stats = execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
+
+        assert stats["duplicate_rows_collapsed"] == 1
+        assert stats["mappings_removed_costing_coverage"] == 0
+        assert mapping_rows(db, user) == [
+            (first, alpha[0], MAPPING_STATUS_ACTIVE, True),
+            (second, alpha[0], MAPPING_STATUS_INACTIVE, False),
+        ]
+
+    def test_duplicates_are_collapsed_even_in_additive_mode(self, db, writers,
+                                                            roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        user = seed_user(db, "A", "919000000001", roles["EXECUTIVE_ENGINEER"])
+        first = seed_mapping_row(db, user, alpha[0])
+        seed_mapping_row(db, user, alpha[0])
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        plan = build_plan(rows, issues, db, replace=False)
+        user_writer, mapping_writer = writers
+
+        execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
+
+        assert live_mappings(db, user) == {alpha[0]}
+        assert [r for r in mapping_rows(db, user) if r[3]] == [
+            (first, alpha[0], MAPPING_STATUS_ACTIVE, True)]
+
+
+class TestLegacyHoldersAreStripped:
+    """Requirement 5: a user absent from the latest dataset keeps no schemes."""
+
+    def test_an_engineer_absent_from_the_csv_loses_every_mapping(self, db, writers,
+                                                                 roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        legacy = seed_user(db, "Legacy", "919000000009", roles["EXECUTIVE_ENGINEER"])
+        seed_mapping(db, legacy, alpha[0])
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        plan = build_plan(rows, issues, db)
+        user_writer, mapping_writer = writers
+
+        execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
+
+        assert live_mappings(db, legacy) == set()
+        assert plan.reconciliation.stripped_user_ids == {legacy}
+
+    def test_a_holder_of_another_role_is_never_touched(self, db, writers, roles, tmp_path):
+        """user_scheme_mapping_table is shared; this file speaks for one role."""
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        operator = seed_user(db, "Operator", "919000000009", roles["SECTION_OFFICER"])
+        seed_mapping(db, operator, alpha[0])
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        plan = build_plan(rows, issues, db)
+        user_writer, mapping_writer = writers
+
+        execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
+
+        assert live_mappings(db, operator) == {alpha[0]}
+
+    def test_additive_spares_a_legacy_holder(self, db, writers, roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        legacy = seed_user(db, "Legacy", "919000000009", roles["EXECUTIVE_ENGINEER"])
+        seed_mapping(db, legacy, alpha[0])
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+        plan = build_plan(rows, issues, db, replace=False)
+        user_writer, mapping_writer = writers
+
+        execute_tenant(plan, user_writer, mapping_writer, create_roles=True)
+
+        assert live_mappings(db, legacy) == {alpha[0]}
+
+    def test_the_stripped_holder_is_named_in_the_report(self, db, roles, tmp_path):
+        _, alpha = _division_with_schemes(db, "Alpha Division", 1)
+        legacy = seed_user(db, "Legacy Person", "919000000009", roles["EXECUTIVE_ENGINEER"])
+        seed_mapping(db, legacy, alpha[0])
+        rows, issues = rows_of(
+            tmp_path, "DIV-1,Alpha Division,USR-1,A,9000000001,executive-engineer")
+
+        plan = build_plan(rows, issues, db)
+
+        assert plan.holder_names[legacy] == "Legacy Person"
+        kinds = build_conflict_frame(plan, include_pii=False)["kind"].tolist()
+        assert "LEGACY_HOLDER_STRIPPED" in kinds
+        removals = build_removal_frame(plan)
+        assert removals["reason"].tolist() == [REMOVAL_ABSENT]
+        assert removals["holder"].tolist() == ["Legacy Person"]
