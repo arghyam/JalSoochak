@@ -23,8 +23,9 @@
 -- Deliverable:  tenant_as.tmp_dim_scheme_status  -- hand-off table for STEP 2
 -- =====================================================================================
 
--- >>> EDIT ME: this script is written for ONE tenant at a time. Replace tenant_as below
--- >>> (5 occurrences) with the schema you are repairing, and use the matching analytics
+-- >>> EDIT ME: this script is written for ONE tenant at a time. Find-and-replace EVERY
+-- >>> occurrence of tenant_as in this file with the schema you are repairing — miss one and
+-- >>> the statement still runs, silently against the wrong schema. Use the matching analytics
 -- >>> tenant_id as :tenant in STEP 2. Run the pair once per tenant.
 
 

@@ -12,9 +12,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.arghyam.jalsoochak.scheme.config.SchemeSecurityEvaluator;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
-import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
@@ -58,6 +56,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -147,14 +146,13 @@ public class SchemeServiceImpl implements SchemeService {
             String stateSchemeId,
             String schemeName,
             String name,
-            String workStatus,
-            String operatingStatus,
-            String status
+            List<String> workStatus,
+            List<String> operatingStatus
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
-        Integer workStatusCode = parseWorkStatus(workStatus);
-        Integer operatingStatusCode = parseOperatingStatus(operatingStatus);
+        List<Integer> workStatusCodes = parseWorkStatuses(workStatus);
+        List<Integer> operatingStatusCodes = parseOperatingStatuses(operatingStatus);
 
         int size = clampLimit(limit);
         int p = Math.max(0, page);
@@ -165,15 +163,14 @@ public class SchemeServiceImpl implements SchemeService {
                 stateSchemeId,
                 schemeName,
                 name,
-                workStatusCode,
-                operatingStatusCode,
-                status,
+                workStatusCodes,
+                operatingStatusCodes,
                 sortBy,
                 sortDir,
                 offset,
                 size
         );
-        long total = schemeDbRepository.countSchemes(schemaName, stateSchemeId, schemeName, name, workStatusCode, operatingStatusCode, status);
+        long total = schemeDbRepository.countSchemes(schemaName, stateSchemeId, schemeName, name, workStatusCodes, operatingStatusCodes);
         return PageResponseDTO.of(rows, total, p, size);
     }
 
@@ -185,16 +182,15 @@ public class SchemeServiceImpl implements SchemeService {
             String sortBy,
             String sortDir,
             String name,
-            String workStatus,
-            String operatingStatus,
-            String status,
+            List<String> workStatus,
+            List<String> operatingStatus,
             String villageLgdCode,
             String subDivisionName
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
-        Integer workStatusCode = parseWorkStatus(workStatus);
-        Integer operatingStatusCode = parseOperatingStatus(operatingStatus);
+        List<Integer> workStatusCodes = parseWorkStatuses(workStatus);
+        List<Integer> operatingStatusCodes = parseOperatingStatuses(operatingStatus);
 
         int size = clampLimit(limit);
         int p = Math.max(0, page);
@@ -203,9 +199,8 @@ public class SchemeServiceImpl implements SchemeService {
         List<SchemeMappingDTO> rows = schemeDbRepository.listSchemeMappings(
                 schemaName,
                 name,
-                workStatusCode,
-                operatingStatusCode,
-                status,
+                workStatusCodes,
+                operatingStatusCodes,
                 villageLgdCode,
                 subDivisionName,
                 sortBy,
@@ -213,7 +208,7 @@ public class SchemeServiceImpl implements SchemeService {
                 offset,
                 size
         );
-        long total = schemeDbRepository.countSchemeMappings(schemaName, name, workStatusCode, operatingStatusCode, status, villageLgdCode, subDivisionName);
+        long total = schemeDbRepository.countSchemeMappings(schemaName, name, workStatusCodes, operatingStatusCodes, villageLgdCode, subDivisionName);
         return PageResponseDTO.of(rows, total, p, size);
     }
 
@@ -263,31 +258,11 @@ public class SchemeServiceImpl implements SchemeService {
     }
 
     @Override
-    public SchemeCountsDTO getSchemeCounts(String tenantCode) {
-        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-
-        SchemeDbRepository.SchemeCounts counts = schemeDbRepository.countActiveInactiveSchemes(schemaName);
-        return SchemeCountsDTO.builder()
-                .activeSchemes(counts.activeSchemes())
-                .inactiveSchemes(counts.inactiveSchemes())
-                .build();
-    }
-
-    @Override
     public SchemeStatusCountsDTO getSchemeStatusCounts(String tenantCode) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
-        long total = schemeDbRepository.countSchemesTotal(schemaName);
-        SchemeDbRepository.SchemeCounts activeInactive = schemeDbRepository.countActiveInactiveSchemes(schemaName);
-
         return SchemeStatusCountsDTO.builder()
-                .totalSchemes(total)
-                .activeSchemes(activeInactive.activeSchemes())
-                .inactiveSchemes(activeInactive.inactiveSchemes())
-                .statusCounts(List.of(
-                        CodeCountDTO.builder().status("ACTIVE").count(activeInactive.activeSchemes()).build(),
-                        CodeCountDTO.builder().status("INACTIVE").count(activeInactive.inactiveSchemes()).build()
-                ))
+                .totalSchemes(schemeDbRepository.countSchemesTotal(schemaName))
                 .workStatusCounts(schemeDbRepository.countSchemesByWorkStatus(schemaName))
                 .operatingStatusCounts(schemeDbRepository.countSchemesByOperatingStatus(schemaName))
                 .build();
@@ -1408,6 +1383,34 @@ public class SchemeServiceImpl implements SchemeService {
             return 1;
         }
         return Math.min(limit, 100);
+    }
+
+    private List<Integer> parseWorkStatuses(List<String> values) {
+        return parseStatusCodes(values, this::parseWorkStatus);
+    }
+
+    private List<Integer> parseOperatingStatuses(List<String> values) {
+        return parseStatusCodes(values, this::parseOperatingStatus);
+    }
+
+    /**
+     * Resolves a multi-valued status filter — {@code ?workStatus=Ongoing&workStatus=2} or the
+     * comma-separated {@code ?workStatus=Ongoing,2}, both of which Spring binds to this list. Blanks
+     * are dropped and duplicates collapsed, so the result is bounded by the status enum's size; any
+     * unrecognised value fails the whole request rather than being silently ignored.
+     */
+    private List<Integer> parseStatusCodes(List<String> values, Function<String, Integer> parser) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        Set<Integer> codes = new LinkedHashSet<>();
+        for (String value : values) {
+            Integer code = parser.apply(value);
+            if (code != null) {
+                codes.add(code);
+            }
+        }
+        return List.copyOf(codes);
     }
 
     private Integer parseWorkStatus(String value) {

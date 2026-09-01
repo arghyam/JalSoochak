@@ -71,10 +71,10 @@ class SchemeDbRepositoryTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(4L);
 
         List<SchemeDTO> rows = repository.listSchemes(
-                "tenant_ka", "SS-1", "Scheme", "name", 1, 2, "active",
+                "tenant_ka", "SS-1", "Scheme", "name", List.of(1), List.of(2),
                 "scheme_name", "asc", 0, 10
         );
-        long total = repository.countSchemes("tenant_ka", "SS-1", "Scheme", "name", 1, 2, "active");
+        long total = repository.countSchemes("tenant_ka", "SS-1", "Scheme", "name", List.of(1), List.of(2));
 
         assertThat(rows).hasSize(1);
         assertThat(rows.getFirst().getSchemeName()).isEqualTo("Scheme One");
@@ -104,9 +104,9 @@ class SchemeDbRepositoryTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(2L);
 
         List<SchemeMappingDTO> rows = repository.listSchemeMappings(
-                "tenant_ka", "scheme", 1, 2, "inactive", "V", "North", "sub_division_name", "desc", 0, 10
+                "tenant_ka", "scheme", List.of(1), List.of(2), "V", "North", "sub_division_name", "desc", 0, 10
         );
-        long total = repository.countSchemeMappings("tenant_ka", "scheme", 1, 2, "inactive", "V", "North");
+        long total = repository.countSchemeMappings("tenant_ka", "scheme", List.of(1), List.of(2), "V", "North");
 
         assertThat(rows).hasSize(1);
         assertThat(rows.getFirst().subDivisionName()).isEqualTo("North");
@@ -119,9 +119,9 @@ class SchemeDbRepositoryTest {
                 .thenReturn(null, null);
 
         List<SchemeMappingDTO> rows = repository.listSchemeMappings(
-                "tenant_ka", null, null, null, null, null, "North", "id", "desc", 0, 10
+                "tenant_ka", null, null, null, null, "North", "id", "desc", 0, 10
         );
-        long total = repository.countSchemeMappings("tenant_ka", null, null, null, null, null, "North");
+        long total = repository.countSchemeMappings("tenant_ka", null, null, null, null, "North");
 
         assertThat(rows).isEmpty();
         assertThat(total).isZero();
@@ -265,7 +265,7 @@ class SchemeDbRepositoryTest {
         stubColumnExists(true);
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(2L);
 
-        long total = repository.countSchemes("tenant_as", null, null, null, null, null, null);
+        long total = repository.countSchemes("tenant_as", null, null, null, List.of(), List.of());
 
         assertThat(total).isEqualTo(2L);
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
@@ -275,20 +275,53 @@ class SchemeDbRepositoryTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void countActiveInactiveSchemes_excludesAutoProvisionedFromBothFiltersWhenColumnPresent() {
-        stubColumnExists(true);
-        when(jdbcTemplate.queryForObject(anyString(), any(RowMapper.class)))
-                .thenReturn(new SchemeDbRepository.SchemeCounts(1L, 2L));
+    void countSchemes_rendersOneInClausePerStatusFilter() {
+        stubColumnExists(false);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(2L);
 
-        repository.countActiveInactiveSchemes("tenant_as");
+        repository.countSchemes("tenant_as", null, null, null, List.of(1, 2, 4), List.of(0, 2));
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), any(RowMapper.class));
-        // Both the active and inactive FILTERs must exclude placeholders, otherwise the two counts
-        // would be computed over different populations.
-        String sql = sqlCaptor.getValue();
-        int occurrences = sql.split("is_auto_provisioned = FALSE", -1).length - 1;
-        assertThat(occurrences).isEqualTo(2);
+        ArgumentCaptor<Object[]> argsCaptor = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), eq(Long.class), argsCaptor.capture());
+        assertThat(sqlCaptor.getValue())
+                .contains("work_status IN (?, ?, ?)")
+                .contains("operating_status IN (?, ?)");
+        assertThat(argsCaptor.getValue()).containsExactly(1, 2, 4, 0, 2);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemes_omitsStatusFiltersWhenCodeListsAreEmpty() {
+        stubColumnExists(false);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(2L);
+
+        repository.countSchemes("tenant_as", null, null, null, List.of(), null);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), eq(Long.class), any(Object[].class));
+        assertThat(sqlCaptor.getValue())
+                .doesNotContain("work_status IN")
+                .doesNotContain("operating_status IN");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemeMappings_rendersQualifiedInClausesPerStatusFilter() {
+        // Department tables absent, so the count takes the two-join branch.
+        when(jdbcTemplate.queryForObject(eq("SELECT to_regclass(?)"), eq(String.class), anyString()))
+                .thenReturn(null, null);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), any(Object[].class))).thenReturn(4L);
+
+        repository.countSchemeMappings("tenant_as", null, List.of(2), List.of(1, 2), null, null);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> argsCaptor = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), eq(Long.class), argsCaptor.capture());
+        assertThat(sqlCaptor.getValue())
+                .contains("sm.work_status IN (?)")
+                .contains("sm.operating_status IN (?, ?)");
+        assertThat(argsCaptor.getValue()).containsExactly(2, 1, 2);
     }
 
     @Test
@@ -301,7 +334,7 @@ class SchemeDbRepositoryTest {
                         ? List.of(1)   // is_auto_provisioned column present
                         : List.of());
 
-        repository.listSchemes("tenant_as", null, null, null, null, null, null, null, null, 0, 10);
+        repository.listSchemes("tenant_as", null, null, null, null, null, null, null, 0, 10);
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate, atLeastOnce()).query(sqlCaptor.capture(), any(RowMapper.class), any(Object[].class));

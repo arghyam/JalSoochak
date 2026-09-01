@@ -331,9 +331,8 @@ public class SchemeDbRepository {
             String stateSchemeId,
             String schemeName,
             String name,
-            Integer workStatus,
-            Integer operatingStatus,
-            String status,
+            List<Integer> workStatuses,
+            List<Integer> operatingStatuses,
             String sortBy,
             String sortDir,
             int offset,
@@ -341,7 +340,7 @@ public class SchemeDbRepository {
     ) {
         validateSchemaName(schemaName);
 
-        SqlAndArgs where = buildSchemeWhere(stateSchemeId, schemeName, name, workStatus, operatingStatus, status);
+        SqlAndArgs where = buildSchemeWhere(stateSchemeId, schemeName, name, workStatuses, operatingStatuses);
         String orderBy = schemeOrderBy(sortBy, sortDir);
 
         String sql = String.format("""
@@ -381,12 +380,11 @@ public class SchemeDbRepository {
             String stateSchemeId,
             String schemeName,
             String name,
-            Integer workStatus,
-            Integer operatingStatus,
-            String status
+            List<Integer> workStatuses,
+            List<Integer> operatingStatuses
     ) {
         validateSchemaName(schemaName);
-        SqlAndArgs where = buildSchemeWhere(stateSchemeId, schemeName, name, workStatus, operatingStatus, status);
+        SqlAndArgs where = buildSchemeWhere(stateSchemeId, schemeName, name, workStatuses, operatingStatuses);
         String sql = String.format("""
                 SELECT COUNT(1)
                 FROM %s.scheme_master_table
@@ -473,9 +471,8 @@ public class SchemeDbRepository {
     public List<SchemeMappingDTO> listSchemeMappings(
             String schemaName,
             String name,
-            Integer workStatus,
-            Integer operatingStatus,
-            String status,
+            List<Integer> workStatuses,
+            List<Integer> operatingStatuses,
             String villageLgdCode,
             String subDivisionName,
             String sortBy,
@@ -498,22 +495,8 @@ public class SchemeDbRepository {
             args.add(pat);
             args.add(pat);
         }
-        if (workStatus != null) {
-            clauses.add("sm.work_status = ?");
-            args.add(workStatus);
-        }
-        if (operatingStatus != null) {
-            clauses.add("sm.operating_status = ?");
-            args.add(operatingStatus);
-        }
-        if (status != null && !status.isBlank()) {
-            String s = status.trim().toLowerCase(Locale.ROOT);
-            if ("active".equals(s)) {
-                clauses.add("sm.operating_status = 1");
-            } else if ("inactive".equals(s)) {
-                clauses.add("sm.operating_status <> 1");
-            }
-        }
+        addStatusFilter("sm.work_status", workStatuses, clauses, args);
+        addStatusFilter("sm.operating_status", operatingStatuses, clauses, args);
         if (villageLgdCode != null && !villageLgdCode.isBlank()) {
             clauses.add("lgd.lgd_code ILIKE ?");
             args.add("%" + villageLgdCode.trim() + "%");
@@ -585,9 +568,8 @@ public class SchemeDbRepository {
     public long countSchemeMappings(
             String schemaName,
             String name,
-            Integer workStatus,
-            Integer operatingStatus,
-            String status,
+            List<Integer> workStatuses,
+            List<Integer> operatingStatuses,
             String villageLgdCode,
             String subDivisionName
     ) {
@@ -606,22 +588,8 @@ public class SchemeDbRepository {
             args.add(pat);
             args.add(pat);
         }
-        if (workStatus != null) {
-            clauses.add("sm.work_status = ?");
-            args.add(workStatus);
-        }
-        if (operatingStatus != null) {
-            clauses.add("sm.operating_status = ?");
-            args.add(operatingStatus);
-        }
-        if (status != null && !status.isBlank()) {
-            String s = status.trim().toLowerCase(Locale.ROOT);
-            if ("active".equals(s)) {
-                clauses.add("sm.operating_status = 1");
-            } else if ("inactive".equals(s)) {
-                clauses.add("sm.operating_status <> 1");
-            }
-        }
+        addStatusFilter("sm.work_status", workStatuses, clauses, args);
+        addStatusFilter("sm.operating_status", operatingStatuses, clauses, args);
         if (villageLgdCode != null && !villageLgdCode.isBlank()) {
             clauses.add("lgd.lgd_code ILIKE ?");
             args.add("%" + villageLgdCode.trim() + "%");
@@ -661,22 +629,6 @@ public class SchemeDbRepository {
 
         Long total = jdbcTemplate.queryForObject(sql, Long.class, args.toArray());
         return total == null ? 0 : total;
-    }
-
-    public record SchemeCounts(long activeSchemes, long inactiveSchemes) {}
-
-    public SchemeCounts countActiveInactiveSchemes(String schemaName) {
-        validateSchemaName(schemaName);
-        String exclusion = autoProvisionedExclusion(schemaName);
-        String sql = String.format("""
-                SELECT
-                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status = 1%s) AS active,
-                  COUNT(1) FILTER (WHERE deleted_at IS NULL AND operating_status <> 1%s) AS inactive
-                FROM %s.scheme_master_table
-                """, exclusion, exclusion, schemaName);
-
-        return jdbcTemplate.queryForObject(sql, (rs, rowNum) ->
-                new SchemeCounts(rs.getLong("active"), rs.getLong("inactive")));
     }
 
     public long countSchemesTotal(String schemaName) {
@@ -1550,13 +1502,25 @@ public class SchemeDbRepository {
 
     private record SqlAndArgs(String sql, List<Object> args) {}
 
+    /**
+     * Appends {@code column IN (?, …)} for a non-empty list of status codes. Callers pass codes the
+     * status enums have already validated and de-duplicated, so the placeholder count is bounded by
+     * the enum's cardinality.
+     */
+    private static void addStatusFilter(String column, List<Integer> codes, List<String> clauses, List<Object> args) {
+        if (codes == null || codes.isEmpty()) {
+            return;
+        }
+        clauses.add(column + " IN (" + "?, ".repeat(codes.size() - 1) + "?)");
+        args.addAll(codes);
+    }
+
     private SqlAndArgs buildSchemeWhere(
             String stateSchemeId,
             String schemeName,
             String name,
-            Integer workStatus,
-            Integer operatingStatus,
-            String status
+            List<Integer> workStatuses,
+            List<Integer> operatingStatuses
     ) {
         List<String> clauses = new ArrayList<>();
         List<Object> args = new ArrayList<>();
@@ -1575,22 +1539,8 @@ public class SchemeDbRepository {
             args.add(pat);
             args.add(pat);
         }
-        if (workStatus != null) {
-            clauses.add("work_status = ?");
-            args.add(workStatus);
-        }
-        if (operatingStatus != null) {
-            clauses.add("operating_status = ?");
-            args.add(operatingStatus);
-        }
-        if (status != null && !status.isBlank()) {
-            String s = status.trim().toLowerCase(Locale.ROOT);
-            if ("active".equals(s)) {
-                clauses.add("operating_status = 1");
-            } else if ("inactive".equals(s)) {
-                clauses.add("operating_status <> 1");
-            }
-        }
+        addStatusFilter("work_status", workStatuses, clauses, args);
+        addStatusFilter("operating_status", operatingStatuses, clauses, args);
 
         if (clauses.isEmpty()) {
             return new SqlAndArgs("", List.of());

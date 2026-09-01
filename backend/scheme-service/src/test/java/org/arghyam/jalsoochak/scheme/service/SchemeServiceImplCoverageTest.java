@@ -223,8 +223,7 @@ class SchemeServiceImplCoverageTest {
                 null,
                 null,
                 null,
-                "invalid",
-                null,
+                List.of("Ongoing", "invalid"),
                 null
         ))
                 .isInstanceOf(ResponseStatusException.class)
@@ -241,8 +240,7 @@ class SchemeServiceImplCoverageTest {
                 "desc",
                 null,
                 null,
-                "invalid",
-                null,
+                List.of("invalid"),
                 null,
                 null
         ))
@@ -368,15 +366,15 @@ class SchemeServiceImplCoverageTest {
                 "SS",
                 "Scheme",
                 "query",
-                2,
-                2,
-                "ACTIVE",
+                List.of(2, 1),
+                List.of(2),
                 "scheme_name",
                 "asc",
                 0,
                 100
         )).thenReturn(List.of(dto));
-        when(schemeDbRepository.countSchemes("tenant_ka", "SS", "Scheme", "query", 2, 2, "ACTIVE")).thenReturn(1L);
+        when(schemeDbRepository.countSchemes("tenant_ka", "SS", "Scheme", "query", List.of(2, 1), List.of(2)))
+                .thenReturn(1L);
 
         PageResponseDTO<SchemeDTO> page = schemeService.listSchemes(
                 "ka",
@@ -387,9 +385,9 @@ class SchemeServiceImplCoverageTest {
                 "SS",
                 "Scheme",
                 "query",
-                "completed",
-                "2",
-                "ACTIVE"
+                // duplicates collapse and blanks drop, preserving first-seen order
+                List.of("completed", "Ongoing", " ", "2"),
+                List.of("2")
         );
 
         assertThat(page.getContent()).containsExactly(dto);
@@ -411,9 +409,8 @@ class SchemeServiceImplCoverageTest {
         when(schemeDbRepository.listSchemeMappings(
                 "tenant_ka",
                 "Scheme",
-                1,
-                0,
-                "INACTIVE",
+                List.of(1),
+                List.of(0),
                 "VLG",
                 "North",
                 "id",
@@ -424,9 +421,8 @@ class SchemeServiceImplCoverageTest {
         when(schemeDbRepository.countSchemeMappings(
                 "tenant_ka",
                 "Scheme",
-                1,
-                0,
-                "INACTIVE",
+                List.of(1),
+                List.of(0),
                 "VLG",
                 "North"
         )).thenReturn(1L);
@@ -438,9 +434,8 @@ class SchemeServiceImplCoverageTest {
                 "id",
                 "desc",
                 "Scheme",
-                "1",
-                "non-operative",
-                "INACTIVE",
+                List.of("1"),
+                List.of("non-operative"),
                 "VLG",
                 "North"
         );
