@@ -69,9 +69,9 @@ Infrastructure: PostgreSQL (shared_db) + Apache Kafka
 - `4` = `Handed Over`
 
 `operating_status`
+- `0` = `Non-Operative`
 - `1` = `Operative`
-- `2` = `Non-Operative`
-- `3` = `Partially Operative`
+- `2` = `Partially Operative`
 
 ---
 

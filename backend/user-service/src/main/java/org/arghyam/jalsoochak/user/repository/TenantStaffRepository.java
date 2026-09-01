@@ -48,9 +48,9 @@ public class TenantStaffRepository {
             4, "Handed Over"
     );
     private static final Map<Integer, String> OPERATING_STATUS_LABELS = Map.of(
+            0, "Non-Operative",
             1, "Operative",
-            2, "Non-Operative",
-            3, "Partially Operative"
+            2, "Partially Operative"
     );
 
     private RowMapper<TenantStaffResponseDTO> staffRowMapper() {
