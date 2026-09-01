@@ -122,6 +122,28 @@ class AnalyticsJpaRepositoriesIntegrationTest {
         assertThat(score).isEqualByComparingTo("0.5");
     }
 
+    @Test
+    void insertDailySchemePerformanceScores_scoresNonOperativeSchemes() {
+        // Scheme 2 is Non-Operative (operating_status = 0). Strip its D1 water so it supplies nothing
+        // and scores 0.0 — exactly the failing scheme the retired `operating_status > 0` filter kept
+        // out of the table, and so out of the AVG behind /tenant_performance_score.
+        jdbcTemplate.update(
+                "DELETE FROM analytics_schema.fact_water_quantity_table WHERE scheme_id = 2 AND date = ?", D1);
+
+        int inserted = schedulerRepository.insertDailySchemePerformanceScores(D1);
+
+        // Schemes 1 and 3 already hold a D1 performance row, so scheme 2 is the only eligible one.
+        assertThat(inserted).isEqualTo(1);
+
+        java.math.BigDecimal score = jdbcTemplate.queryForObject("""
+                SELECT performance_score
+                FROM analytics_schema.fact_scheme_performance_table
+                WHERE tenant_id = 1 AND scheme_id = 2 AND last_water_supply_date = ?
+                """, java.math.BigDecimal.class, D1);
+
+        assertThat(score).isEqualByComparingTo("0.0");
+    }
+
     private void seedDimensions() {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_tenant_table
