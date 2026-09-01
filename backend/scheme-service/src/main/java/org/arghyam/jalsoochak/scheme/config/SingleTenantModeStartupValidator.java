@@ -1,11 +1,12 @@
 package org.arghyam.jalsoochak.scheme.config;
 
+import java.sql.SQLException;
 import java.util.List;
+import java.util.Set;
 
 import org.arghyam.jalsoochak.scheme.config.properties.AppProperties;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
@@ -37,6 +38,19 @@ public class SingleTenantModeStartupValidator {
 
     /** Maximum number of state codes named in a log or failure message. */
     private static final int MAX_LISTED_STATE_CODES = 10;
+
+    /**
+     * PostgreSQL SQLStates that mean the tenant table itself is absent: {@code 42P01}
+     * (undefined_table) and {@code 3F000} (invalid_schema_name). Only these two justify starting
+     * with the invariant unverified — no table means no tenants.
+     *
+     * <p>Every other SQLState leaves the table possibly full of ACTIVE tenants that simply were not
+     * read, so it must fail startup. That includes {@code 42703} (undefined_column) and
+     * {@code 42501} (insufficient_privilege), which are in the same SQLState class 42 and therefore
+     * also arrive as {@code BadSqlGrammarException}: catching that exception type alone would let a
+     * renamed column or a revoked SELECT grant boot the deployment unchecked.
+     */
+    private static final Set<String> MISSING_TENANT_TABLE_SQL_STATES = Set.of("42P01", "3F000");
 
     private final AppProperties appProperties;
     private final SchemeDbRepository schemeDbRepository;
@@ -72,22 +86,38 @@ public class SingleTenantModeStartupValidator {
             }
 
             log.info("Single Tenant Mode verified: {} ACTIVE tenant(s) in common_schema.", active.size());
-        } catch (BadSqlGrammarException e) {
-            // common_schema.tenant_master_table is not there. Flyway is disabled in every service
-            // (spring.flyway.enabled=false), so a fresh environment can legitimately boot before
-            // the migrations in backend/database/ have been applied. With no table there are no
-            // tenants, so the invariant cannot be violated.
+        } catch (DataAccessException e) {
+            if (!isMissingTenantTable(e)) {
+                // The database is reachable but the query failed (bad column, missing privileges,
+                // connectivity). Single Tenant Mode must not come up with the invariant unverified.
+                throw new IllegalStateException(
+                        "app.single-tenant-mode is true (SINGLE_TENANT_MODE=true) but the ACTIVE tenant"
+                        + " count could not be read from common_schema.tenant_master_table, so the"
+                        + " single-tenant invariant cannot be verified. Fix database connectivity or"
+                        + " set SINGLE_TENANT_MODE=false to run in Multi Tenant Mode.", e);
+            }
+            // common_schema.tenant_master_table is not there at all. Flyway is disabled in every
+            // service (spring.flyway.enabled=false), so a fresh environment can legitimately boot
+            // before the migrations in backend/database/ have been applied. With no table there are
+            // no tenants, so the invariant cannot be violated.
             log.warn("Single Tenant Mode could not be verified: common_schema.tenant_master_table"
                     + " is not present. Apply the migrations in backend/database/ and restart.", e);
-        } catch (DataAccessException e) {
-            // The database is reachable but the query failed (permissions, connectivity). Single
-            // Tenant Mode must not come up with the invariant unverified.
-            throw new IllegalStateException(
-                    "app.single-tenant-mode is true (SINGLE_TENANT_MODE=true) but the ACTIVE tenant"
-                    + " count could not be read from common_schema.tenant_master_table, so the"
-                    + " single-tenant invariant cannot be verified. Fix database connectivity or"
-                    + " set SINGLE_TENANT_MODE=false to run in Multi Tenant Mode.", e);
         }
+    }
+
+    /**
+     * Whether {@code e} reports that {@code common_schema.tenant_master_table} does not exist, as
+     * opposed to any other failure to read it. Anything without a recognised SQLState — including a
+     * {@code null} one — counts as "not missing" so that the unverified case fails startup.
+     */
+    private static boolean isMissingTenantTable(DataAccessException e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sqlException) {
+                String sqlState = sqlException.getSQLState();
+                return sqlState != null && MISSING_TENANT_TABLE_SQL_STATES.contains(sqlState);
+            }
+        }
+        return false;
     }
 
     private static String buildFailureMessage(List<String> activeStateCodes) {
