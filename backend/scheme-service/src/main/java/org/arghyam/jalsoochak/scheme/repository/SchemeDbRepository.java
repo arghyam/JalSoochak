@@ -1088,6 +1088,53 @@ public class SchemeDbRepository {
         return schemas;
     }
 
+    /**
+     * Finds the state codes of tenants in ACTIVE (3) status, excluding the system tenant (id 0)
+     * and soft-deleted rows. Used by the Single Tenant Mode startup check, which must refuse to
+     * boot when more than one tenant is ACTIVE — otherwise the SUPER_STATE_ADMIN role expansion
+     * in {@code JwtAuthConverter} would grant SUPER_USER + STATE_ADMIN across every tenant.
+     *
+     * <p>Deliberately narrower than {@link #findAllActiveTenantSchemas()}, which despite its name
+     * matches every status except REGISTERED (7). State codes rather than a bare count so the
+     * startup failure can name the offending tenants.
+     *
+     * @return the ACTIVE tenants' state codes, ordered by state code
+     */
+    public List<String> findActiveTenantStateCodes() {
+        // 3 = ACTIVE. Status codes are not modelled as an enum in scheme-service; see
+        // TenantStatusEnum in tenant-service for the canonical list.
+        return findTenantStateCodesByStatus(3);
+    }
+
+    /**
+     * Finds the state codes of tenants in DEGRADED (5) status, excluding the system tenant (id 0)
+     * and soft-deleted rows. DEGRADED tenants are fully loginable, so the Single Tenant Mode
+     * startup check logs them for visibility even though they do not count toward the enforced
+     * ACTIVE limit.
+     *
+     * @return the DEGRADED tenants' state codes, ordered by state code
+     */
+    public List<String> findDegradedTenantStateCodes() {
+        // 5 = DEGRADED.
+        return findTenantStateCodesByStatus(5);
+    }
+
+    /**
+     * Finds the state codes of non-system, non-deleted tenants in exactly the given status.
+     *
+     * @param status the tenant status code to match
+     * @return the matching tenants' state codes, ordered by state code
+     */
+    private List<String> findTenantStateCodesByStatus(int status) {
+        String sql = """
+                SELECT state_code
+                FROM common_schema.tenant_master_table
+                WHERE id != 0 AND deleted_at IS NULL AND status = ?
+                ORDER BY state_code
+                """;
+        return jdbcTemplate.query(sql, (rs, n) -> rs.getString(1), status);
+    }
+
     public void ensureIsActiveColumnExists(String schemaName) {
         validateSchemaName(schemaName);
         String alterSql = String.format("""

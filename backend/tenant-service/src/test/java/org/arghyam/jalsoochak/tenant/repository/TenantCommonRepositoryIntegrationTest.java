@@ -80,6 +80,10 @@ class TenantCommonRepositoryIntegrationTest {
         jdbcTemplate.update("DELETE FROM common_schema.tenant_admin_user_master_table");
         // Keep the system tenant (id=0); remove only real tenants
         jdbcTemplate.update("DELETE FROM common_schema.tenant_master_table WHERE id != 0");
+        // Restore the system tenant to its seeded state (status INACTIVE, not soft-deleted) so a
+        // test that mutates it to prove an `id != 0` predicate cannot leak into the next one.
+        jdbcTemplate.update("UPDATE common_schema.tenant_master_table "
+                + "SET status = 0, deleted_at = NULL WHERE id = 0");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────
@@ -906,6 +910,93 @@ class TenantCommonRepositoryIntegrationTest {
             insertTenant("AC", "Active State", TenantStatusEnum.ACTIVE);
 
             assertThat(repository.countOnboardedTenants()).isEqualTo(1);
+        }
+    }
+
+    // ── findActiveTenantStateCodes / findDegradedTenantStateCodes ────────────────
+
+    @Nested
+    @DisplayName("findActiveTenantStateCodes")
+    class FindActiveTenantStateCodes {
+
+        @Test
+        @DisplayName("returns empty when no tenant is ACTIVE")
+        void findActiveTenantStateCodes_returnsEmpty_whenNoneActive() {
+            assertThat(repository.findActiveTenantStateCodes()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("returns every ACTIVE tenant, ordered by state code")
+        void findActiveTenantStateCodes_returnsAllActiveOrdered() {
+            insertTenant("UP", "Uttar Pradesh", TenantStatusEnum.ACTIVE);
+            insertTenant("MP", "Madhya Pradesh", TenantStatusEnum.ACTIVE);
+            insertTenant("RJ", "Rajasthan", TenantStatusEnum.ACTIVE);
+
+            assertThat(repository.findActiveTenantStateCodes()).containsExactly("MP", "RJ", "UP");
+        }
+
+        @Test
+        @DisplayName("excludes the system tenant (id=0)")
+        void findActiveTenantStateCodes_excludesSystemTenant() {
+            // The system tenant is seeded with status INACTIVE; force it ACTIVE to prove the
+            // id != 0 predicate is what excludes it, not its status.
+            jdbcTemplate.update("UPDATE common_schema.tenant_master_table SET status = ? WHERE id = 0",
+                    TenantStatusEnum.ACTIVE.getCode());
+
+            assertThat(repository.findActiveTenantStateCodes()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("excludes soft-deleted tenants")
+        void findActiveTenantStateCodes_excludesSoftDeleted() {
+            TenantResponseDTO deleted = insertTenant("DL", "Deleted State", TenantStatusEnum.ACTIVE);
+            insertTenant("KL", "Kept State", TenantStatusEnum.ACTIVE);
+            jdbcTemplate.update(
+                    "UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?",
+                    deleted.getId());
+
+            assertThat(repository.findActiveTenantStateCodes()).containsExactly("KL");
+        }
+
+        @Test
+        @DisplayName("excludes every status other than ACTIVE")
+        void findActiveTenantStateCodes_excludesNonActiveStatuses() {
+            insertTenant("IN", "Inactive", TenantStatusEnum.INACTIVE);
+            insertTenant("ON", "Onboarded", TenantStatusEnum.ONBOARDED);
+            insertTenant("CO", "Configured", TenantStatusEnum.CONFIGURED);
+            insertTenant("SU", "Suspended", TenantStatusEnum.SUSPENDED);
+            insertTenant("DG", "Degraded", TenantStatusEnum.DEGRADED);
+            insertTenant("AR", "Archived", TenantStatusEnum.ARCHIVED);
+            insertTenant("RG", "Registered", TenantStatusEnum.REGISTERED);
+            insertTenant("AC", "Active", TenantStatusEnum.ACTIVE);
+
+            assertThat(repository.findActiveTenantStateCodes()).containsExactly("AC");
+        }
+    }
+
+    @Nested
+    @DisplayName("findDegradedTenantStateCodes")
+    class FindDegradedTenantStateCodes {
+
+        @Test
+        @DisplayName("returns only DEGRADED tenants, excluding ACTIVE ones")
+        void findDegradedTenantStateCodes_returnsOnlyDegraded() {
+            insertTenant("AC", "Active", TenantStatusEnum.ACTIVE);
+            insertTenant("D2", "Degraded Two", TenantStatusEnum.DEGRADED);
+            insertTenant("D1", "Degraded One", TenantStatusEnum.DEGRADED);
+
+            assertThat(repository.findDegradedTenantStateCodes()).containsExactly("D1", "D2");
+        }
+
+        @Test
+        @DisplayName("excludes soft-deleted DEGRADED tenants")
+        void findDegradedTenantStateCodes_excludesSoftDeleted() {
+            TenantResponseDTO deleted = insertTenant("DD", "Deleted Degraded", TenantStatusEnum.DEGRADED);
+            jdbcTemplate.update(
+                    "UPDATE common_schema.tenant_master_table SET deleted_at = NOW() WHERE id = ?",
+                    deleted.getId());
+
+            assertThat(repository.findDegradedTenantStateCodes()).isEmpty();
         }
     }
 
