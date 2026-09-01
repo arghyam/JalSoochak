@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.scheme.repository;
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
-import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.arghyam.jalsoochak.scheme.enums.SchemeOperatingStatus;
@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.HashSet;
@@ -27,6 +28,7 @@ import java.util.Set;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 @Repository
@@ -642,8 +644,10 @@ public class SchemeDbRepository {
         return total == null ? 0 : total;
     }
 
-    public List<CodeCountDTO> countSchemesByWorkStatus(String schemaName) {
+    public List<SchemeStatusCountDTO> countSchemesByWorkStatus(String schemaName) {
         validateSchemaName(schemaName);
+        // ORDER BY leaves NULL last under Postgres' default ASC ordering, so a scheme with no status
+        // recorded sorts after the real codes — matching how analytics-service orders the same list.
         String sql = String.format("""
                 SELECT work_status AS code, COUNT(1) AS cnt
                 FROM %s.scheme_master_table
@@ -651,13 +655,10 @@ public class SchemeDbRepository {
                 GROUP BY work_status
                 ORDER BY work_status
                 """, schemaName, autoProvisionedExclusion(schemaName));
-        return jdbcTemplate.query(sql, (rs, rowNum) -> CodeCountDTO.builder()
-                .status(SchemeWorkStatus.labelOf((Integer) rs.getObject("code")))
-                .count(rs.getLong("cnt"))
-                .build());
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toStatusCount(rs, SchemeWorkStatus::labelOf));
     }
 
-    public List<CodeCountDTO> countSchemesByOperatingStatus(String schemaName) {
+    public List<SchemeStatusCountDTO> countSchemesByOperatingStatus(String schemaName) {
         validateSchemaName(schemaName);
         String sql = String.format("""
                 SELECT operating_status AS code, COUNT(1) AS cnt
@@ -666,10 +667,17 @@ public class SchemeDbRepository {
                 GROUP BY operating_status
                 ORDER BY operating_status
                 """, schemaName, autoProvisionedExclusion(schemaName));
-        return jdbcTemplate.query(sql, (rs, rowNum) -> CodeCountDTO.builder()
-                .status(SchemeOperatingStatus.labelOf((Integer) rs.getObject("code")))
+        return jdbcTemplate.query(sql, (rs, rowNum) -> toStatusCount(rs, SchemeOperatingStatus::labelOf));
+    }
+
+    private static SchemeStatusCountDTO toStatusCount(ResultSet rs, Function<Integer, String> label)
+            throws SQLException {
+        Integer code = (Integer) rs.getObject("code");
+        return SchemeStatusCountDTO.builder()
+                .code(code)
+                .label(label.apply(code))
                 .count(rs.getLong("cnt"))
-                .build());
+                .build();
     }
 
     public boolean existsSchemeById(String schemaName, Integer schemeId) {

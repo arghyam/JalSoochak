@@ -15,7 +15,7 @@ import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
@@ -258,10 +258,10 @@ public class SchemeServiceImpl implements SchemeService {
     }
 
     @Override
-    public SchemeStatusCountsDTO getSchemeStatusCounts(String tenantCode) {
+    public SchemeStatusBreakdownDTO getSchemeStatusCounts(String tenantCode) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
-        return SchemeStatusCountsDTO.builder()
+        return SchemeStatusBreakdownDTO.builder()
                 .totalSchemes(schemeDbRepository.countSchemesTotal(schemaName))
                 .workStatusCounts(schemeDbRepository.countSchemesByWorkStatus(schemaName))
                 .operatingStatusCounts(schemeDbRepository.countSchemesByOperatingStatus(schemaName))

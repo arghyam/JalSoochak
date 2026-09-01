@@ -2,7 +2,7 @@ package org.arghyam.jalsoochak.scheme.controller;
 
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
@@ -67,7 +67,7 @@ class SchemeControllerTest {
     @Test
     void listSchemeMappings_andCounts_delegateToService() {
         PageResponseDTO<SchemeMappingDTO> mappings = PageResponseDTO.of(List.of(), 0, 0, 20);
-        SchemeStatusCountsDTO byStatus = SchemeStatusCountsDTO.builder().totalSchemes(6).build();
+        SchemeStatusBreakdownDTO byStatus = SchemeStatusBreakdownDTO.builder().totalSchemes(6).build();
 
         when(schemeService.listSchemeMappings("ka", 0, 20, "id", "desc", "name",
                 List.of("1"), List.of("2"), "123", "sub"))

@@ -9,7 +9,7 @@ import org.arghyam.jalsoochak.scheme.config.RequiresTenantAccess;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
@@ -126,7 +126,7 @@ public class SchemeController {
 
     @RequiresTenantAccess
     @GetMapping("/schemes/counts/by-status")
-    public ResponseEntity<SchemeStatusCountsDTO> getSchemeStatusCounts(
+    public ResponseEntity<SchemeStatusBreakdownDTO> getSchemeStatusCounts(
             @RequestParam String tenantCode
     ) {
         log.info("GET /api/schemes/counts/by-status called");

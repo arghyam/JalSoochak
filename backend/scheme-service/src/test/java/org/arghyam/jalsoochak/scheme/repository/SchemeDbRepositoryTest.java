@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.scheme.repository;
 
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -366,6 +367,58 @@ class SchemeDbRepositoryTest {
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowMapper.class));
         assertThat(sqlCaptor.getValue()).contains("is_auto_provisioned = FALSE");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemesByWorkStatus_mapsCodeAndResolvedLabel() throws Exception {
+        stubColumnExists(false);
+        stubStatusCountRow(4, 7L);
+
+        SchemeStatusCountDTO row = repository.countSchemesByWorkStatus("tenant_as").getFirst();
+
+        assertThat(row.code()).isEqualTo(4);
+        assertThat(row.label()).isEqualTo("Handed Over");
+        assertThat(row.count()).isEqualTo(7L);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemesByOperatingStatus_mapsCodeAndResolvedLabel() throws Exception {
+        stubColumnExists(false);
+        stubStatusCountRow(2, 3L);
+
+        SchemeStatusCountDTO row = repository.countSchemesByOperatingStatus("tenant_as").getFirst();
+
+        assertThat(row.code()).isEqualTo(2);
+        assertThat(row.label()).isEqualTo("Partially Operative");
+        assertThat(row.count()).isEqualTo(3L);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void countSchemesByStatus_reportsUnrecordedStatusAsNullCodeWithUnknownLabel() throws Exception {
+        stubColumnExists(false);
+        stubStatusCountRow(null, 2L);
+
+        SchemeStatusCountDTO row = repository.countSchemesByWorkStatus("tenant_as").getFirst();
+
+        // A scheme with no work_status must still be counted, and must not borrow another code's label.
+        assertThat(row.code()).isNull();
+        assertThat(row.label()).isEqualTo("Unknown");
+        assertThat(row.count()).isEqualTo(2L);
+    }
+
+    /** Feeds the two status-breakdown row mappers a single (code, cnt) row. */
+    @SuppressWarnings("unchecked")
+    private void stubStatusCountRow(Integer code, long count) {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenAnswer(invocation -> {
+            RowMapper<SchemeStatusCountDTO> mapper = invocation.getArgument(1);
+            ResultSet rs = org.mockito.Mockito.mock(ResultSet.class);
+            when(rs.getObject("code")).thenReturn(code);
+            when(rs.getLong("cnt")).thenReturn(count);
+            return List.of(mapper.mapRow(rs, 0));
+        });
     }
 
     // Makes SchemeDbRepository.columnExists("...","scheme_master_table","is_auto_provisioned") resolve
