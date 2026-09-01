@@ -6,6 +6,8 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
+import org.arghyam.jalsoochak.scheme.enums.SchemeOperatingStatus;
+import org.arghyam.jalsoochak.scheme.enums.SchemeWorkStatus;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,17 +37,6 @@ public class SchemeDbRepository {
     private static final Pattern SAFE_SCHEMA = Pattern.compile("^[a-z_][a-z0-9_]*$");
     private final ConcurrentHashMap<String, Boolean> deptTablesExistCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Boolean> columnExistsCache = new ConcurrentHashMap<>();
-    private static final Map<Integer, String> WORK_STATUS_LABELS = Map.of(
-            1, "Ongoing",
-            2, "Completed",
-            3, "Not Started",
-            4, "Handed Over"
-    );
-    private static final Map<Integer, String> OPERATING_STATUS_LABELS = Map.of(
-            1, "Operative",
-            0, "Non-Operative",
-            2, "Partially Operative"
-    );
 
     public record SchemeSnapshot(
             Integer id,
@@ -97,8 +88,8 @@ public class SchemeDbRepository {
                 .latitude((Double) rs.getObject("latitude"))
                 .longitude((Double) rs.getObject("longitude"))
                 .channel(rs.getInt("channel"))
-                .workStatus(workStatusLabel((Integer) rs.getObject("work_status")))
-                .operatingStatus(operatingStatusLabel((Integer) rs.getObject("operating_status")))
+                .workStatus(SchemeWorkStatus.labelOf((Integer) rs.getObject("work_status")))
+                .operatingStatus(SchemeOperatingStatus.labelOf((Integer) rs.getObject("operating_status")))
                 .build());
     }
 
@@ -181,8 +172,8 @@ public class SchemeDbRepository {
                 .latitude((Double) rs.getObject("latitude"))
                 .longitude((Double) rs.getObject("longitude"))
                 .channel(rs.getInt("channel"))
-                .workStatus(workStatusLabel((Integer) rs.getObject("work_status")))
-                .operatingStatus(operatingStatusLabel((Integer) rs.getObject("operating_status")))
+                .workStatus(SchemeWorkStatus.labelOf((Integer) rs.getObject("work_status")))
+                .operatingStatus(SchemeOperatingStatus.labelOf((Integer) rs.getObject("operating_status")))
                 .build()));
     }
 
@@ -380,8 +371,8 @@ public class SchemeDbRepository {
                 .latitude((Double) rs.getObject("latitude"))
                 .longitude((Double) rs.getObject("longitude"))
                 .channel((Integer) rs.getObject("channel"))
-                .workStatus(workStatusLabel((Integer) rs.getObject("work_status")))
-                .operatingStatus(operatingStatusLabel((Integer) rs.getObject("operating_status")))
+                .workStatus(SchemeWorkStatus.labelOf((Integer) rs.getObject("work_status")))
+                .operatingStatus(SchemeOperatingStatus.labelOf((Integer) rs.getObject("operating_status")))
                 .build(), args.toArray());
     }
 
@@ -709,7 +700,7 @@ public class SchemeDbRepository {
                 ORDER BY work_status
                 """, schemaName, autoProvisionedExclusion(schemaName));
         return jdbcTemplate.query(sql, (rs, rowNum) -> CodeCountDTO.builder()
-                .status(workStatusLabel((Integer) rs.getObject("code")))
+                .status(SchemeWorkStatus.labelOf((Integer) rs.getObject("code")))
                 .count(rs.getLong("cnt"))
                 .build());
     }
@@ -724,7 +715,7 @@ public class SchemeDbRepository {
                 ORDER BY operating_status
                 """, schemaName, autoProvisionedExclusion(schemaName));
         return jdbcTemplate.query(sql, (rs, rowNum) -> CodeCountDTO.builder()
-                .status(operatingStatusLabel((Integer) rs.getObject("code")))
+                .status(SchemeOperatingStatus.labelOf((Integer) rs.getObject("code")))
                 .count(rs.getLong("cnt"))
                 .build());
     }
@@ -763,8 +754,8 @@ public class SchemeDbRepository {
                     .latitude((Double) rs.getObject("latitude"))
                     .longitude((Double) rs.getObject("longitude"))
                     .channel((Integer) rs.getObject("channel"))
-                    .workStatus(workStatusLabel((Integer) rs.getObject("work_status")))
-                    .operatingStatus(operatingStatusLabel((Integer) rs.getObject("operating_status")))
+                    .workStatus(SchemeWorkStatus.labelOf((Integer) rs.getObject("work_status")))
+                    .operatingStatus(SchemeOperatingStatus.labelOf((Integer) rs.getObject("operating_status")))
                     .build(), schemeId);
         } catch (EmptyResultDataAccessException ex) {
             return null;
@@ -807,20 +798,6 @@ public class SchemeDbRepository {
         } catch (EmptyResultDataAccessException ex) {
             return null;
         }
-    }
-
-    private String workStatusLabel(Integer code) {
-        if (code == null) {
-            return "Unknown";
-        }
-        return WORK_STATUS_LABELS.getOrDefault(code, "Unknown");
-    }
-
-    private String operatingStatusLabel(Integer code) {
-        if (code == null) {
-            return "Unknown";
-        }
-        return OPERATING_STATUS_LABELS.getOrDefault(code, "Unknown");
     }
 
     /**

@@ -24,6 +24,8 @@ import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
+import org.arghyam.jalsoochak.scheme.enums.SchemeOperatingStatus;
+import org.arghyam.jalsoochak.scheme.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
 import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
@@ -59,10 +61,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 @Service
 @Slf4j
@@ -119,26 +123,6 @@ public class SchemeServiceImpl implements SchemeService {
             "state_scheme_id",
             "village_lgd_code",
             "sub_division_name"
-    );
-
-    private static final Map<String, Integer> WORK_STATUS_MAP = Map.of(
-            "1", 1,
-            "ongoing", 1,
-            "2", 2,
-            "completed", 2,
-            "3", 3,
-            "not started", 3,
-            "4", 4,
-            "handed over", 4
-    );
-
-    private static final Map<String, Integer> OPERATING_STATUS_MAP = Map.of(
-            "1", 1,
-            "operative", 1,
-            "0", 0,
-            "non-operative", 0,
-            "2", 2,
-            "partially operative", 2
     );
 
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("csv", "xlsx");
@@ -851,9 +835,13 @@ public class SchemeServiceImpl implements SchemeService {
                 parseInteger(values.get("house_hold_count"), rowNumber, "house_hold_count", errors);
                 parseDouble(values.get("latitude"), rowNumber, "latitude", errors);
                 parseDouble(values.get("longitude"), rowNumber, "longitude", errors);
-                parseEnum(values.get("work_status"), rowNumber, "work_status", WORK_STATUS_MAP, "Ongoing, Completed, Not Started, Handed Over or 1/2/3/4", errors);
+                parseEnum(values.get("work_status"), rowNumber, "work_status",
+                        v -> SchemeWorkStatus.fromInput(v).map(SchemeWorkStatus::getCode),
+                        SchemeWorkStatus.acceptedInputs(), errors);
                 if (!normalize(values.get("operating_status")).isBlank()) {
-                    parseEnum(values.get("operating_status"), rowNumber, "operating_status", OPERATING_STATUS_MAP, "Operative, Non-Operative, Partially Operative or 0/1/2", errors);
+                    parseEnum(values.get("operating_status"), rowNumber, "operating_status",
+                            v -> SchemeOperatingStatus.fromInput(v).map(SchemeOperatingStatus::getCode),
+                            SchemeOperatingStatus.acceptedInputs(), errors);
                 }
 
                 if (errors.size() == before && !stateSchemeId.isBlank()) {
@@ -926,9 +914,13 @@ public class SchemeServiceImpl implements SchemeService {
                 Double latitude = latRaw.isBlank() ? null : Double.parseDouble(latRaw);
                 Double longitude = lonRaw.isBlank() ? null : Double.parseDouble(lonRaw);
                 Integer channel = null;
-                Integer workStatus = WORK_STATUS_MAP.get(normalize(values.get("work_status")).toLowerCase());
-                String operatingRaw = normalize(values.get("operating_status")).toLowerCase();
-                Integer operatingStatus = operatingRaw.isBlank() ? 1 : OPERATING_STATUS_MAP.get(operatingRaw);
+                Integer workStatus = SchemeWorkStatus.fromInput(values.get("work_status"))
+                        .map(SchemeWorkStatus::getCode)
+                        .orElse(null);
+                String operatingRaw = normalize(values.get("operating_status"));
+                Integer operatingStatus = operatingRaw.isBlank()
+                        ? SchemeOperatingStatus.OPERATIVE.getCode()
+                        : SchemeOperatingStatus.fromInput(operatingRaw).map(SchemeOperatingStatus::getCode).orElse(null);
 
                 chunk.add(new SchemeCreateRecord(
                         UUID.randomUUID().toString(),
@@ -1419,45 +1411,34 @@ public class SchemeServiceImpl implements SchemeService {
     }
 
     private Integer parseWorkStatus(String value) {
-        String v = value == null ? "" : value.trim();
-        if (v.isBlank()) {
+        if (normalize(value).isBlank()) {
             return null;
         }
-        String k = v.toLowerCase(Locale.ROOT);
-        Integer byName = WORK_STATUS_MAP.get(k);
-        if (byName != null) {
-            return byName;
-        }
-        try {
-            int n = Integer.parseInt(v);
-            if (n >= 1 && n <= 4) {
-                return n;
-            }
-        } catch (NumberFormatException ignored) {
-        }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Invalid workStatus. Expected one of: Ongoing, Completed, Not Started, Handed Over or 1/2/3/4");
+        return SchemeWorkStatus.fromInput(value)
+                .or(() -> parseCode(value).flatMap(SchemeWorkStatus::fromCode))
+                .map(SchemeWorkStatus::getCode)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Invalid workStatus. Expected one of: " + SchemeWorkStatus.acceptedInputs()));
     }
 
     private Integer parseOperatingStatus(String value) {
-        String v = value == null ? "" : value.trim();
-        if (v.isBlank()) {
+        if (normalize(value).isBlank()) {
             return null;
         }
-        String k = v.toLowerCase(Locale.ROOT);
-        Integer byName = OPERATING_STATUS_MAP.get(k);
-        if (byName != null) {
-            return byName;
-        }
+        return SchemeOperatingStatus.fromInput(value)
+                .or(() -> parseCode(value).flatMap(SchemeOperatingStatus::fromCode))
+                .map(SchemeOperatingStatus::getCode)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Invalid operatingStatus. Expected one of: " + SchemeOperatingStatus.acceptedInputs()));
+    }
+
+    /** Non-canonical numeric spellings the filters have always tolerated, e.g. {@code "01"}. */
+    private Optional<Integer> parseCode(String value) {
         try {
-            int n = Integer.parseInt(v);
-            if (n >= 0 && n <= 2) {
-                return n;
-            }
+            return Optional.of(Integer.valueOf(normalize(value)));
         } catch (NumberFormatException ignored) {
+            return Optional.empty();
         }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Invalid operatingStatus. Expected one of: Operative, Non-Operative, Partially Operative or 0/1/2");
     }
 
     private void requireField(Map<String, String> values, int rowNumber, String field, List<SchemeUploadErrorDTO> errors) {
@@ -1496,20 +1477,19 @@ public class SchemeServiceImpl implements SchemeService {
             String value,
             int rowNumber,
             String field,
-            Map<String, Integer> mapping,
+            Function<String, Optional<Integer>> resolver,
             String expected,
             List<SchemeUploadErrorDTO> errors
     ) {
-        String normalized = normalize(value).toLowerCase();
-        if (normalized.isBlank()) {
+        if (normalize(value).isBlank()) {
             return null;
         }
 
-        Integer mappedValue = mapping.get(normalized);
-        if (mappedValue == null) {
+        Optional<Integer> mappedValue = resolver.apply(value);
+        if (mappedValue.isEmpty()) {
             errors.add(error(rowNumber, field, "Invalid " + field + ". Expected: " + expected));
         }
-        return mappedValue;
+        return mappedValue.orElse(null);
     }
 
     private SchemeUploadErrorDTO error(int rowNumber, String field, String message) {
