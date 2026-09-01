@@ -556,7 +556,7 @@ public class AnalyticsSchemeReportingController {
 
     @GetMapping("/schemes/dashboard")
     @Operation(
-            summary = "Get active/inactive scheme count and top-N schemes by reporting rate for a parent LGD or parent department",
+            summary = "Get scheme counts by work status and operating status, plus top-N schemes by reporting rate, for a parent LGD or parent department",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",

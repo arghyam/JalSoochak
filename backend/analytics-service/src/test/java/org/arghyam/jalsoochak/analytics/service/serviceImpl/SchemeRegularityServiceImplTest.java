@@ -593,7 +593,7 @@ class SchemeRegularityServiceImplTest {
     @Test
     void getSchemeStatusAndTopReportingByLgd_mapsParentLevelImmediateParentLevelAndLadders() throws Exception {
         mockRedisValueOps();
-        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v4";
+        String key = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v5";
         when(valueOperations.get(key)).thenReturn(null);
         when(objectMapper.writeValueAsString(any())).thenReturn("{json}");
 
@@ -647,6 +647,37 @@ class SchemeRegularityServiceImplTest {
                 .containsEntry("level_1", 2001)
                 .containsEntry("level_2", 2002)
                 .containsEntry("level_6", null);
+    }
+
+    /**
+     * The v4 payload shape carried activeSchemeCount/inactiveSchemeCount and a per-scheme
+     * statusCode/status pair, all of which this release replaced. Jackson would deserialize such a
+     * payload into the new DTO with every status field left null, so the key had to move to v5:
+     * anything still sitting at the v4 key must never be read again.
+     */
+    @Test
+    void getSchemeStatusAndTopReportingByLgd_ignoresPayloadLeftAtTheRetiredV4Key() {
+        mockRedisValueOps();
+        String retiredKey = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v4";
+        String currentKey = ":schemes:dashboard:tenant:12:parent_lgd:101:page:1:limit:5:start:2026-01-01:end:2026-01-03:sort_by:reportingRate:sort_dir:desc:v5";
+        when(valueOperations.get(currentKey)).thenReturn(null);
+
+        when(schemeRegularityRepository.getSchemeStatusCountByLgd(12, 101))
+                .thenReturn(new SchemeRegularityRepository.SchemeStatusBreakdown(
+                        2, List.of(codeCount(1, 2)), List.of(codeCount(2, 2))));
+        when(schemeRegularityRepository.getTopSchemeSubmissionMetricsByLgd(12, 101, START, END, 5, 0, "reportingRate", "desc"))
+                .thenReturn(List.of());
+
+        SchemeStatusAndTopReportingResponse response =
+                service.getSchemeStatusAndTopReportingByLgd(12, 101, START, END, 1, 5, "reportingRate", "desc");
+
+        verify(valueOperations, never()).get(retiredKey);
+        assertThat(response.getWorkStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(1, "Ongoing", 2));
+        assertThat(response.getOperatingStatusCounts())
+                .extracting(SchemeStatusCountDTO::getCode, SchemeStatusCountDTO::getLabel, SchemeStatusCountDTO::getCount)
+                .containsExactly(tuple(2, "Partially Operative", 2));
     }
 
     @Test

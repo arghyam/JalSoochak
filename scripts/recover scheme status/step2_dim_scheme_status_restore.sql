@@ -23,10 +23,12 @@
 -- are SCHEME-level attributes, so they are written to every one of the scheme's rows.
 -- =====================================================================================
 
-\if :{?tenant}
-\else
-  \set tenant 1
-\endif
+-- >>> EDIT ME: :tenant is the analytics tenant_id matching the tenant schema STEP 1 exported.
+-- >>> There is no default — DBeaver prompts for it on the first statement that uses it
+-- >>> (SQL Editor > Preferences > SQL Processing > Parameters > "Enable parameters in queries"
+-- >>> must be on), or bind it under SQL Editor > Query Parameter Bindings. Confirm the value
+-- >>> you enter is the tenant you mean: every PART B/C/D statement is scoped by it, and a
+-- >>> wrong id silently writes another tenant's dim rows.
 
 
 -- ################################################################################
@@ -58,6 +60,27 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM analytics_schema.tmp_stg_scheme_status) = 0 THEN
         RAISE EXCEPTION 'tmp_stg_scheme_status is empty - the STEP 1 export was not imported.';
+    END IF;
+
+    -- STEP 1's B2 reports out-of-range codes but cannot stop you importing them. PART C would
+    -- write whatever is staged straight onto dim_scheme_table, so refuse here instead. NULL is
+    -- legitimate and deliberately allowed: PART C COALESCEs it to the value already held.
+    IF EXISTS (SELECT 1 FROM analytics_schema.tmp_stg_scheme_status
+               WHERE work_status IS NOT NULL AND work_status NOT BETWEEN 1 AND 4) THEN
+        RAISE EXCEPTION 'tmp_stg_scheme_status holds work_status outside 1..4 - fix the export before running PART C. Offenders: %',
+            (SELECT string_agg(format('scheme_id=%s work_status=%s', scheme_id, work_status), ', ')
+             FROM (SELECT scheme_id, work_status FROM analytics_schema.tmp_stg_scheme_status
+                   WHERE work_status IS NOT NULL AND work_status NOT BETWEEN 1 AND 4
+                   ORDER BY scheme_id LIMIT 10) s);
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM analytics_schema.tmp_stg_scheme_status
+               WHERE operating_status IS NOT NULL AND operating_status NOT BETWEEN 0 AND 2) THEN
+        RAISE EXCEPTION 'tmp_stg_scheme_status holds operating_status outside 0..2 - fix the export before running PART C. Offenders: %',
+            (SELECT string_agg(format('scheme_id=%s operating_status=%s', scheme_id, operating_status), ', ')
+             FROM (SELECT scheme_id, operating_status FROM analytics_schema.tmp_stg_scheme_status
+                   WHERE operating_status IS NOT NULL AND operating_status NOT BETWEEN 0 AND 2
+                   ORDER BY scheme_id LIMIT 10) s);
     END IF;
 END $$;
 
@@ -152,9 +175,11 @@ GROUP BY operating_status
 ORDER BY operating_status;
 
 -- D2. analytics must now agree with the tenant DB for every scheme it shares.
---     Both columns must return 0.
-SELECT count(*) FILTER (WHERE d.work_status      IS DISTINCT FROM r.work_status)      AS work_status_still_differs,
-       count(*) FILTER (WHERE d.operating_status IS DISTINCT FROM r.operating_status) AS operating_status_still_differs
+--     Both columns must return 0. COALESCE mirrors PART C: where the tenant value is NULL the
+--     repair deliberately kept what analytics already held, so a bare IS DISTINCT FROM would
+--     count those rows as failures and make this gate unpassable.
+SELECT count(*) FILTER (WHERE d.work_status      IS DISTINCT FROM COALESCE(r.work_status,      d.work_status))      AS work_status_still_differs,
+       count(*) FILTER (WHERE d.operating_status IS DISTINCT FROM COALESCE(r.operating_status, d.operating_status)) AS operating_status_still_differs
 FROM analytics_schema.dim_scheme_table d
 JOIN analytics_schema.tmp_stg_scheme_status r ON r.scheme_id = d.scheme_id
 WHERE d.tenant_id = :tenant;

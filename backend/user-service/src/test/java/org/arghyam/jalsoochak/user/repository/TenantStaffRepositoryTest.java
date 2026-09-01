@@ -351,7 +351,7 @@ class TenantStaffRepositoryTest {
             int n = ++probeCount;
             long userId = insertUserReturningId(
                     "Status Probe " + n,
-                    String.format("91XXXXXXX%03d", n),
+                    String.format("91XXXXXXXXX%d", n),
                     "probe" + n + "@example.com",
                     3, 1);
             mapUserToScheme(userId, insertScheme("Probe Scheme " + n, workStatus, operatingStatus));

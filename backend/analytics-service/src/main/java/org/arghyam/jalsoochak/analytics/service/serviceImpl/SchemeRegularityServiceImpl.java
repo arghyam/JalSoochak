@@ -2594,6 +2594,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTopSchemeCount(limit);
         int offset = (pageNumber - 1) * limit;
 
+        // v5: v4 payloads carry the retired active/inactive counts and per-scheme statusCode/status.
         String cacheKey = SCHEME_STATUS_TOP_REPORTING_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
@@ -2603,7 +2604,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":end:" + endDate
                 + ":sort_by:" + Objects.toString(sortBy, "reportingRate")
                 + ":sort_dir:" + Objects.toString(sortDir, "desc")
-                + ":v4";
+                + ":v5";
         SchemeStatusAndTopReportingResponse cached =
                 readFromCache(cacheKey, SchemeStatusAndTopReportingResponse.class);
         if (cached != null) {
