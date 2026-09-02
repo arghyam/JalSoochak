@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
@@ -13,6 +12,7 @@ import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
+import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -38,7 +38,9 @@ class MultiFormatReadingControllerTest {
 
     private static final ObjectMapper OBJECT_MAPPER =
             JsonMapper.builder().addModule(new JavaTimeModule()).build();
-    private static final Validator VALIDATOR = Validation.buildDefaultValidatorFactory().getValidator();
+    // The reading-url constraint takes its policy through the constructor, so it needs the same
+    // factory wiring the container provides — see ReadingUrlTestValidation.
+    private static final Validator VALIDATOR = ReadingUrlTestValidation.validator();
 
     private static final String CANONICAL_BODY = """
             {
@@ -64,7 +66,9 @@ class MultiFormatReadingControllerTest {
                 new NullReturningMapper()));
         MultiFormatReadingController controller =
                 new MultiFormatReadingController(registry, apiKeyService, webhook, VALIDATOR);
-        return MockMvcBuilders.standaloneSetup(controller).build();
+        return MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
+                .build();
     }
 
     @Test
