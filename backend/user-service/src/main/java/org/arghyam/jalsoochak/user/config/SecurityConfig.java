@@ -73,6 +73,10 @@ public class SecurityConfig {
                                     "/api/v1/auth/reset-password",
                                     "/api/v1/auth/staff/otp",
                                     "/api/v1/auth/staff/otp/verify",
+                                    // NOTE: /api/v1/pumpoperator/** is deliberately NOT listed here. It returns
+                                    // operator PII: the three village-dashboard reads are opened below, GET only,
+                                    // and every other route needs a token and is scoped per caller by
+                                    // PumpOperatorAccessGuard.
                                     // Public (no-auth) endpoints
                                     "/api/v1/public/**",
                                     // Upload endpoint is authorized via UploadAuthService (JWT validation + role check),
