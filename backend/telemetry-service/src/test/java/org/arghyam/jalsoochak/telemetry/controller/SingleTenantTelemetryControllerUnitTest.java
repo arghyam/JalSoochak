@@ -816,7 +816,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
-        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null) {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse updateConfirmedReading(String correlationId,
                                                                 String phoneNumber,
@@ -865,7 +865,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void resetLatestReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
-        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null) {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
                 throw new IllegalStateException("boom");
@@ -959,7 +959,7 @@ class SingleTenantTelemetryControllerUnitTest {
         private Integer lastResetTenantId;
 
         private StubBfmReadingService(boolean throwError) {
-            super(null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null);
             this.throwError = throwError;
         }
 

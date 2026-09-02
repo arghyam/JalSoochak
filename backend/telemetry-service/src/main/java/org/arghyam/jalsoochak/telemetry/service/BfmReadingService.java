@@ -48,6 +48,10 @@ public class BfmReadingService {
     private final FlowVisionReadingsRetryService flowVisionReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
     private final RolloverResolutionService rolloverResolutionService;
+    // Per-tenant OCR provider selection. Nullable so unit tests that construct BfmReadingService with only
+    // the collaborators they exercise (passing null here) fall back to the built-in FlowVision path.
+    private final OcrProviderResolver ocrProviderResolver;
+    private final OcrProviderRegistry ocrProviderRegistry;
 
     /**
      * Trailing-history window (days) fetched for the rollover consumption band. A few extra days over
@@ -107,7 +111,9 @@ public class BfmReadingService {
             }
 
             try {
-                ocrResult = extractReading(request.getReadingUrl(), flowVisionRetryMode);
+                OcrProviderSettings ocrSettings =
+                        ocrProviderResolver == null ? null : ocrProviderResolver.resolve(tenantId);
+                ocrResult = extractReading(request.getReadingUrl(), ocrSettings, flowVisionRetryMode);
                 log.info("readings_glific flowvision_result operatorId={} schemeId={} imageUrlHash={} result={}",
                         operatorInRequest.id(),
                         request.getSchemeId(),
@@ -556,14 +562,24 @@ public class BfmReadingService {
                 isMeterReplaced));
     }
 
-    private FlowVisionResult extractReading(String readingUrl, FlowVisionRetryMode flowVisionRetryMode) {
+    /**
+     * Runs OCR for {@code readingUrl}. When {@code settings} is {@code null} the tenant has no per-tenant
+     * OCR override and the built-in FlowVision path is used unchanged; otherwise the resolved provider is
+     * dispatched via {@link OcrProviderRegistry}. Honours the resilient (retry/circuit-breaker) path.
+     */
+    private FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings, FlowVisionRetryMode flowVisionRetryMode) {
         if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT && flowVisionReadingsRetryService != null) {
-            return flowVisionReadingsRetryService.extractReading(readingUrl);
+            return settings == null
+                    ? flowVisionReadingsRetryService.extractReading(readingUrl)
+                    : flowVisionReadingsRetryService.extractReading(readingUrl, settings);
         }
         if (flowVisionRetryMode == FlowVisionRetryMode.RESILIENT) {
             log.warn("FlowVision readings retry service is not available; using direct OCR path");
         }
-        return flowVisionService.extractReading(readingUrl);
+        if (settings == null) {
+            return flowVisionService.extractReading(readingUrl);
+        }
+        return ocrProviderRegistry.get(settings.providerId()).extractReading(readingUrl, settings);
     }
 
     @Transactional
