@@ -107,6 +107,9 @@ public class SingleTenantTelemetryController {
         }
         log.info("PATCH /api/v1/telemetry/schemes/{}/yesterday-final-reading phone={}", schemeId, masked);
         try {
+            // Authenticated before anything else. The tenant comes from the API key — via the filter
+            // attribute, or resolved here as defence in depth — never from the X-Tenant-Code header
+            // the caller controls.
             Integer tenantId = requireAuthenticatedTenant(apiKey, authenticatedTenantId);
             UpdateYesterdayFinalReadingBySchemeResponse response = telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(
                     schemeId,
