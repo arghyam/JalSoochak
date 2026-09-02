@@ -405,14 +405,63 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     @Test
-    void resetLatestReadingIsPublicAndDoesNotRequireApiKey() {
+    void resetLatestReadingRejectsARequestWithNoApiKey() {
+        // Regression test for the reported finding: this route used to process an unauthenticated
+        // request and destroy the reading, returning 200 whether or not a key was supplied.
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
-                new StubBfmReadingService(false)
+                bfmReadingService
         );
 
         ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                null,
+                null,
+                ResetLatestReadingRequest.builder()
+                        .contactId("919999999999")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertFalse(response.getBody().isSuccess());
+        assertEquals(TelemetryErrorCode.INVALID_API_KEY, response.getBody().getData().getErrorCode());
+        assertFalse(bfmReadingService.resetWasCalled(), "the reset must not run for an unauthenticated caller");
+    }
+
+    @Test
+    void resetLatestReadingRejectsAnInvalidApiKey() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.empty()),
+                bfmReadingService
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_invalid_key",
+                null,
+                ResetLatestReadingRequest.builder()
+                        .contactId("919999999999")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertFalse(bfmReadingService.resetWasCalled());
+    }
+
+    @Test
+    void resetLatestReadingAcceptsAValidApiKeyAndScopesTheResetToItsTenant() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                bfmReadingService
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
                 null,
                 ResetLatestReadingRequest.builder()
                         .contactId("919999999999")
@@ -424,6 +473,79 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(true, response.getBody().isSuccess());
         assertEquals("Latest reading reset successfully", response.getBody().getData().getMessage());
         assertEquals("CONFIRMED", response.getBody().getData().getQualityStatus());
+        assertEquals(22, bfmReadingService.lastResetTenantId);
+    }
+
+    @Test
+    void resetLatestReadingTrustsTheTenantAlreadyResolvedByTheFilter() {
+        // The filter authenticates first and publishes the tenant; the handler must not re-reject a
+        // request the filter already accepted, and must not hash the key a second time.
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        StubTelemetryApiKeyService apiKeyService = new StubTelemetryApiKeyService(Optional.empty());
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                apiKeyService,
+                bfmReadingService
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
+                31,
+                ResetLatestReadingRequest.builder()
+                        .contactId("919999999999")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(31, bfmReadingService.lastResetTenantId);
+        assertEquals(0, apiKeyService.resolveCount, "the key was already resolved by the filter");
+    }
+
+    @Test
+    void resetLatestReadingAuditsTheDestroyedValueAndTheRefusals() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                bfmReadingService
+        );
+
+        SingleTenantTelemetryController unauthenticatedController = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.empty()),
+                new StubBfmReadingService(false)
+        );
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(SingleTenantTelemetryController.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            controller.resetLatestReading("js_valid_key", null,
+                    ResetLatestReadingRequest.builder().contactId("919999999999").build());
+            unauthenticatedController.resetLatestReading(null, null,
+                    ResetLatestReadingRequest.builder().contactId("919999999999").build());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        String accepted = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.startsWith("reading_reset") && m.contains("status=SUCCESS"))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(accepted, "an accepted reset must be audited");
+        assertTrue(accepted.contains("tenantId=22"));
+        assertTrue(accepted.contains("previousReading=1450"), "the audit line must record what was destroyed");
+        assertTrue(accepted.contains("phone=****9999"));
+        assertFalse(accepted.contains("919999999999"), "raw phone numbers must not reach INFO logs");
+
+        assertTrue(appender.list.stream()
+                        .map(ILoggingEvent::getFormattedMessage)
+                        .anyMatch(m -> m.startsWith("reading_reset") && m.contains("status=REJECTED")),
+                "a refused reset must be audited too, so probing is detectable");
     }
 
     @Test
@@ -725,6 +847,7 @@ class SingleTenantTelemetryControllerUnitTest {
         );
 
         ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
                 null,
                 ResetLatestReadingRequest.builder().build()
         );
@@ -737,7 +860,7 @@ class SingleTenantTelemetryControllerUnitTest {
     void resetLatestReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
         BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null) {
             @Override
-            public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+            public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
                 throw new IllegalStateException("boom");
             }
         };
@@ -748,6 +871,7 @@ class SingleTenantTelemetryControllerUnitTest {
         );
 
         ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
                 null,
                 ResetLatestReadingRequest.builder().contactId("919999999999").build()
         );
@@ -805,6 +929,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     private static final class StubTelemetryApiKeyService extends TelemetryApiKeyService {
         private final Optional<Integer> tenantId;
+        private int resolveCount;
 
         private StubTelemetryApiKeyService(Optional<Integer> tenantId) {
             super(null);
@@ -813,6 +938,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         @Override
         public Optional<Integer> resolveTenantIdFromRawApiKey(String rawApiKey) {
+            resolveCount++;
             return tenantId;
         }
     }
@@ -822,6 +948,8 @@ class SingleTenantTelemetryControllerUnitTest {
         private String lastCorrelationId;
         private String lastPhoneNumber;
         private Integer lastTenantId;
+        private boolean resetCalled;
+        private Integer lastResetTenantId;
 
         private StubBfmReadingService(boolean throwError) {
             super(null, null, null, null, null, null, null, null, null);
@@ -863,16 +991,27 @@ class SingleTenantTelemetryControllerUnitTest {
         }
 
         @Override
-        public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+        public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
+            this.resetCalled = true;
+            this.lastResetTenantId = tenantId;
             if (throwError) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad request");
             }
             return CreateReadingResponse.builder()
                     .success(true)
                     .message("Latest reading reset successfully")
-                    .correlationId(phoneNumber)
+                    // A real correlationId is a UUID, never the phone number: the audit assertions
+                    // check that no raw phone reaches an INFO line, and echoing it here would hide
+                    // exactly the leak they exist to catch.
+                    .correlationId("corr-reset-1")
+                    .meterReading(BigDecimal.ZERO)
+                    .lastConfirmedReading(new BigDecimal("1450"))
                     .qualityStatus("CONFIRMED")
                     .build();
+        }
+
+        private boolean resetWasCalled() {
+            return resetCalled;
         }
     }
 }

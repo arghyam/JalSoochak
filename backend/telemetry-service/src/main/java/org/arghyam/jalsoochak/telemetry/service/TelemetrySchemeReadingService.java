@@ -28,6 +28,21 @@ public class TelemetrySchemeReadingService {
                                                                                             String phoneNumber,
                                                                                             BigDecimal finalReading,
                                                                                             LocalDate date) {
+        return updateYesterdayFinalReadingBySchemeId(schemeId, phoneNumber, finalReading, date, null);
+    }
+
+    /**
+     * {@code authenticatedTenantId} is the tenant the caller proved with its API key, and it decides
+     * which schema the correction is applied to. The {@code X-Tenant-Code} header behind
+     * {@link TenantContext} remains the fallback for in-process callers with no authenticated tenant,
+     * but it must never win over the key: it is unauthenticated, so letting it decide would let a
+     * caller holding one tenant's key — or none at all — correct another tenant's readings.
+     */
+    public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
+                                                                                            String phoneNumber,
+                                                                                            BigDecimal finalReading,
+                                                                                            LocalDate date,
+                                                                                            Integer authenticatedTenantId) {
         String maskedPhone = maskPhone(phoneNumber);
         try {
             if (schemeId == null || schemeId < 1) {
@@ -40,7 +55,7 @@ public class TelemetrySchemeReadingService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reading must be greater than zero");
             }
 
-            String schemaName = requireTenantSchema();
+            String schemaName = requireTenantSchema(authenticatedTenantId);
             log.info("[update-yesterday-final-reading] start schemeId={} tenantSchema={} phone={}", schemeId, schemaName, maskedPhone);
 
             Long updaterUserId = telemetryTenantRepository.findUserIdByPhone(schemaName, phoneNumber)
@@ -155,7 +170,13 @@ public class TelemetrySchemeReadingService {
         }
     }
 
-    private String requireTenantSchema() {
+    private String requireTenantSchema(Integer authenticatedTenantId) {
+        if (authenticatedTenantId != null) {
+            return telemetryTenantRepository.findSchemaNameByTenantId(authenticatedTenantId)
+                    .filter(schema -> !schema.isBlank())
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.NOT_FOUND, "Tenant not found for API key"));
+        }
         String schemaName = TenantContext.getSchema();
         if (schemaName == null || schemaName.isBlank()) {
             throw new ResponseStatusException(
