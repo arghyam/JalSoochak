@@ -142,8 +142,10 @@ public class PublicPumpOperatorController {
             if (effectivePage < 0) {
                 throw new IllegalArgumentException("page must be >= 0");
             }
-            if (effectiveSize < 1 || effectiveSize > 500) {
-                throw new IllegalArgumentException("size must be between 1 and 500");
+            // The same ceiling the @Max-annotated endpoints on this controller enforce. It is spelled
+            // out here rather than annotated because this endpoint only paginates when asked to.
+            if (effectiveSize < 1 || effectiveSize > MAX_PAGE_SIZE) {
+                throw new IllegalArgumentException("size must be between 1 and " + MAX_PAGE_SIZE);
             }
         }
 

@@ -109,6 +109,8 @@ class ReadingUrlConstraintValidatorTest {
         @ValueSource(strings = {
                 "//169.254.169.254/latest/meta-data/",   // protocol-relative: carries its own authority
                 "//evil.example/x.jpg",
+                "/private/meter.jpg",                    // root-relative: resolves beside the base, not under it
+                "/",
                 "../../../etc/passwd",                   // climbs out of whatever base resolves it
                 "uploads/../../secret.jpg"
         })

@@ -32,7 +32,14 @@ public class MediaFetchRedirectStrategy extends DefaultRedirectStrategy {
         try {
             mediaUrlValidator.validateTarget(location);
         } catch (MediaUrlNotAllowedException e) {
-            throw new ProtocolException("Refusing to follow media redirect: " + e.getReason());
+            // The client wraps this in a ClientProtocolException, which RestTemplate then wraps in a
+            // ResourceAccessException — indistinguishable from a transient network fault unless the
+            // policy verdict survives as a cause. GlificMediaService reads the chain to decide that a
+            // refused redirect must not be retried.
+            ProtocolException refusal =
+                    new ProtocolException("Refusing to follow media redirect: " + e.getReason());
+            refusal.initCause(e);
+            throw refusal;
         }
         return location;
     }

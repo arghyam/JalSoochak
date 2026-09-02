@@ -64,7 +64,7 @@ public class MediaUrlValidator {
         try {
             uri = uriTemplateHandler.expand(mediaUrl.trim());
         } catch (RuntimeException e) {
-            throw reject("unparseable", null, "media url could not be parsed");
+            throw reject("unparseable", null, "media url could not be parsed", e);
         }
         validateTarget(uri);
         return uri;
@@ -110,7 +110,7 @@ public class MediaUrlValidator {
         try {
             resolved = hostResolver.resolve(host);
         } catch (UnknownHostException e) {
-            throw reject("unresolvable host", host, "media host could not be resolved");
+            throw reject("unresolvable host", host, "media host could not be resolved", e);
         }
         if (resolved == null || resolved.length == 0) {
             throw reject("unresolvable host", host, "media host resolved to nothing");
@@ -138,11 +138,16 @@ public class MediaUrlValidator {
     }
 
     private MediaUrlNotAllowedException reject(String reason, String host, String logMessage) {
+        return reject(reason, host, logMessage, null);
+    }
+
+    private MediaUrlNotAllowedException reject(String reason, String host, String logMessage, Throwable cause) {
         // The host is safe to log — the credentials on a pre-signed media URL live in the query
         // string — and it is what an operator needs to tune the allowlist or triage a probe.
         log.warn("media_url_rejected reason=\"{}\" host={} detail=\"{}\"",
                 reason, sanitizeForLog(host), logMessage);
-        return new MediaUrlNotAllowedException(reason);
+        // The cause rides along for the stack trace; the caller-facing message is unchanged by it.
+        return new MediaUrlNotAllowedException(reason, cause);
     }
 
     private static String hostOf(URI uri) {

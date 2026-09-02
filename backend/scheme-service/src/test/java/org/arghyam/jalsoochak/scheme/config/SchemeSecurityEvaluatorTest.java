@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -153,6 +154,10 @@ class SchemeSecurityEvaluatorTest {
     @Test
     void canAccessTenantId_superUser_skipsTheLookup() {
         assertThat(evaluator.canAccessTenantId(9, token(Map.of("sub", "n"), "ROLE_SUPER_USER"))).isTrue();
+
+        // The name of the test is the assertion: a national token must short-circuit before the
+        // tenant lookup, so an unreachable database cannot turn into a 403 for a super user.
+        verifyNoInteractions(schemeDbRepository);
     }
 
     /** Unknown ids are 403, not 404, so callers cannot probe for valid tenant ids. */

@@ -65,11 +65,11 @@ public class ReadingUrlConstraintValidator implements ConstraintValidator<ValidR
      * resolved downstream against a fixed base, so refusing them would break a live shape while
      * closing nothing.
      *
-     * <p>The two relative forms that <em>can</em> leave that base are still refused: a
-     * protocol-relative reference carries its own authority, and a traversal segment climbs out of
-     * the base path.
+     * <p>The relative forms that <em>can</em> leave that base are still refused: any leading slash —
+     * {@code //host/x} carries its own authority and {@code /x} resolves against the base's root
+     * rather than under it — and a traversal segment, which climbs out of the base path.
      */
     private boolean isSafeRelativeReference(String candidate) {
-        return !candidate.startsWith("//") && !candidate.contains("..");
+        return !candidate.startsWith("/") && !candidate.contains("..");
     }
 }

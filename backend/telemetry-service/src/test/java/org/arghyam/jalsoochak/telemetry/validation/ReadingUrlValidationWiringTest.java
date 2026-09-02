@@ -4,6 +4,9 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.arghyam.jalsoochak.telemetry.config.MediaFetchRestTemplateConfig;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
+import org.arghyam.jalsoochak.telemetry.security.HostResolver;
+import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
+import org.arghyam.jalsoochak.telemetry.security.SsrfAddressPolicy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -12,6 +15,7 @@ import org.springframework.boot.autoconfigure.validation.ValidationAutoConfigura
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.math.BigDecimal;
+import java.net.InetAddress;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,10 +29,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("ValidReadingUrl — wired through Bean Validation")
 class ReadingUrlValidationWiringTest {
 
+    private static final String APPROVED_HOST = "adc-ecos.enlightcloud.com";
+
+    /**
+     * The one name these assertions use is pinned to a fixed public address, so what is under test is
+     * the wiring and the policy rather than whether public DNS answered. Address literals still
+     * resolve to themselves, which is what the metadata-endpoint case turns on. DNS rebinding is
+     * covered by the resolver's own tests.
+     */
+    private static HostResolver pinnedResolver() {
+        return host -> APPROVED_HOST.equalsIgnoreCase(host)
+                ? new InetAddress[]{InetAddress.getByAddress(APPROVED_HOST, new byte[]{8, 8, 8, 8})}
+                : InetAddress.getAllByName(host);
+    }
+
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(
                     PropertyPlaceholderAutoConfiguration.class, ValidationAutoConfiguration.class))
-            .withUserConfiguration(MediaFetchRestTemplateConfig.class);
+            .withUserConfiguration(MediaFetchRestTemplateConfig.class)
+            .withAllowBeanDefinitionOverriding(true)
+            .withBean("mediaUrlValidator", MediaUrlValidator.class,
+                    () -> new MediaUrlValidator(true, false, Set.of(),
+                            new SsrfAddressPolicy(false), pinnedResolver()));
 
     private static AssamReadingRequest submissionWith(String readingUrl) {
         return AssamReadingRequest.builder()
@@ -55,8 +77,8 @@ class ReadingUrlValidationWiringTest {
         contextRunner.run(context -> {
             Validator validator = context.getBean(Validator.class);
 
-            assertThat(validator.validate(submissionWith("https://adc-ecos.enlightcloud.com/a.jpg"))).isEmpty();
-            assertThat(validator.validate(submissionWith("http://adc-ecos.enlightcloud.com/a.jpg"))).isEmpty();
+            assertThat(validator.validate(submissionWith("https://" + APPROVED_HOST + "/a.jpg"))).isEmpty();
+            assertThat(validator.validate(submissionWith("http://" + APPROVED_HOST + "/a.jpg"))).isEmpty();
         });
     }
 

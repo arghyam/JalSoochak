@@ -14,7 +14,15 @@ public class MediaUrlNotAllowedException extends IllegalStateException {
     private final String reason;
 
     public MediaUrlNotAllowedException(String reason) {
-        super(OPERATOR_FACING_MESSAGE);
+        this(reason, null);
+    }
+
+    /**
+     * @param cause the parse or resolution failure the verdict was drawn from, kept for the stack
+     *              trace only — it is never rendered into the operator-facing message.
+     */
+    public MediaUrlNotAllowedException(String reason, Throwable cause) {
+        super(OPERATOR_FACING_MESSAGE, cause);
         this.reason = reason;
     }
 

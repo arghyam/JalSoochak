@@ -32,17 +32,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * When the meter image reaches object storage.
+ * When the meter image is fetched and when it reaches object storage.
  *
- * <p>The upload used to happen the moment the image was downloaded, before the submitter had been
- * resolved — so every rejected submission still wrote an object, under a key built from the
- * caller-supplied contact id, onto a bucket that is anonymously readable. Storing only once the
- * submission is known to belong to a mapped operator removes that write without changing anything a
- * legitimate operator sees.
+ * <p>Both used to happen the moment the webhook arrived, before the submitter had been resolved — so
+ * every rejected submission still made this service dial a caller-supplied URL, and still wrote an
+ * object, under a key built from the caller-supplied contact id, onto a bucket that is anonymously
+ * readable. Doing neither until the submission is known to belong to a mapped operator removes both
+ * without changing anything a legitimate operator sees.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("GlificImageWorkflowService — when the image is stored")
+@DisplayName("GlificImageWorkflowService — when the image is fetched and stored")
 class GlificImageWorkflowServiceStorageOrderTest {
 
     private static final String CONTACT_ID = "919876543210";
@@ -89,7 +89,7 @@ class GlificImageWorkflowServiceStorageOrderTest {
     }
 
     @Test
-    void storesNothingWhenTheSubmitterIsNotAKnownOperator() throws Exception {
+    void fetchesAndStoresNothingWhenTheSubmitterIsNotAKnownOperator() throws Exception {
         imageDownloads();
         when(operatorContextService.resolveOperatorWithSchema(CONTACT_ID))
                 .thenThrow(new IllegalStateException("Operator not found"));
@@ -97,11 +97,12 @@ class GlificImageWorkflowServiceStorageOrderTest {
         CreateReadingResponse response = service.processImage(submission());
 
         assertThat(response.isSuccess()).isFalse();
+        verify(glificMediaService, never()).downloadImage(any(), any());
         verify(glificMediaService, never()).uploadImage(anyString(), any());
     }
 
     @Test
-    void storesNothingWhenTheOperatorIsMappedToNoScheme() throws Exception {
+    void fetchesAndStoresNothingWhenTheOperatorIsMappedToNoScheme() throws Exception {
         imageDownloads();
         when(operatorContextService.resolveOperatorWithSchema(CONTACT_ID)).thenReturn(mappedOperator());
         when(operatorContextService.resolveOperatorLanguage(any(), any())).thenReturn("en");
@@ -113,11 +114,12 @@ class GlificImageWorkflowServiceStorageOrderTest {
         CreateReadingResponse response = service.processImage(submission());
 
         assertThat(response.isSuccess()).isFalse();
+        verify(glificMediaService, never()).downloadImage(any(), any());
         verify(glificMediaService, never()).uploadImage(anyString(), any());
     }
 
     @Test
-    void storesTheImageAndRecordsItsUrlForAMappedOperator() throws Exception {
+    void fetchesStoresAndRecordsTheImageUrlForAMappedOperator() throws Exception {
         imageDownloads();
         when(operatorContextService.resolveOperatorWithSchema(CONTACT_ID)).thenReturn(mappedOperator());
         when(operatorContextService.resolveOperatorLanguage(any(), any())).thenReturn("en");
@@ -133,6 +135,7 @@ class GlificImageWorkflowServiceStorageOrderTest {
         CreateReadingResponse response = service.processImage(submission());
 
         assertThat(response.isSuccess()).isTrue();
+        verify(glificMediaService).downloadImage(null, "https://media.glific.example/meter.jpg");
         verify(glificMediaService).uploadImage(CONTACT_ID, IMAGE);
 
         ArgumentCaptor<CreateReadingRequest> captor = ArgumentCaptor.forClass(CreateReadingRequest.class);

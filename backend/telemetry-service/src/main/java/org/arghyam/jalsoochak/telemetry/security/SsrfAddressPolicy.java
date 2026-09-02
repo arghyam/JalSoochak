@@ -62,6 +62,9 @@ public class SsrfAddressPolicy {
         if (first == 198 && (second == 18 || second == 19)) {
             return true;                                          // 198.18.0.0/15 benchmarking
         }
+        if (first == 192 && second == 88 && third == 99) {
+            return true;                                          // 192.88.99.0/24 6to4 relay anycast
+        }
         if (first == 198 && second == 51 && third == 100) {
             return true;                                          // 198.51.100.0/24 documentation
         }
@@ -76,8 +79,9 @@ public class SsrfAddressPolicy {
             return true;                                          // fc00::/7 unique local
         }
         // The JVM normally hands back an Inet4Address for ::ffff:a.b.c.d, but a raw 16-byte form can
-        // still reach here. Judge the embedded IPv4 address on the IPv4 rules rather than letting the
-        // wrapper carry it past them.
+        // still reach here, and 6to4 and Teredo carry an IPv4 destination in an address the JVM has
+        // no reason to unwrap at all. Judge the embedded IPv4 address on the IPv4 rules rather than
+        // letting the wrapper carry it past them.
         byte[] embeddedIpv4 = embeddedIpv4(octets);
         if (embeddedIpv4 != null) {
             try {
@@ -91,10 +95,23 @@ public class SsrfAddressPolicy {
 
     /**
      * Returns the IPv4 address embedded in an IPv4-mapped ({@code ::ffff:a.b.c.d}), IPv4-compatible
-     * ({@code ::a.b.c.d}) or NAT64 ({@code 64:ff9b::a.b.c.d}) address, or {@code null} when the
-     * address carries none.
+     * ({@code ::a.b.c.d}), NAT64 ({@code 64:ff9b::a.b.c.d}), 6to4 ({@code 2002:a.b.c.d::/48}) or
+     * Teredo ({@code 2001:0::/32}) address, or {@code null} when the address carries none.
      */
     private static byte[] embeddedIpv4(byte[] octets) {
+        // 6to4 puts the IPv4 endpoint straight after the 2002::/16 prefix, so 2002:7f00:1:: is
+        // 127.0.0.1 in an IPv6 costume and would otherwise pass every check above.
+        boolean sixToFour = (octets[0] & 0xFF) == 0x20 && (octets[1] & 0xFF) == 0x02;
+        if (sixToFour) {
+            return new byte[]{octets[2], octets[3], octets[4], octets[5]};
+        }
+        // Teredo carries the client's IPv4 in the last four octets, stored bit-flipped.
+        boolean teredo = (octets[0] & 0xFF) == 0x20 && (octets[1] & 0xFF) == 0x01
+                && (octets[2] & 0xFF) == 0x00 && (octets[3] & 0xFF) == 0x00;
+        if (teredo) {
+            return new byte[]{
+                    (byte) ~octets[12], (byte) ~octets[13], (byte) ~octets[14], (byte) ~octets[15]};
+        }
         boolean nat64 = (octets[0] & 0xFF) == 0x00 && (octets[1] & 0xFF) == 0x64
                 && (octets[2] & 0xFF) == 0xFF && (octets[3] & 0xFF) == 0x9B;
         if (nat64) {

@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.security.MediaUrlNotAllowedException;
 import org.arghyam.jalsoochak.telemetry.security.MediaUrlValidator;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +38,9 @@ public class GlificMediaService {
      */
     private static final Pattern MEDIA_ID_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
 
+    /** Far deeper than any wrapping the HTTP client and {@code RestTemplate} apply; a cycle guard only. */
+    private static final int MAX_CAUSE_CHAIN_DEPTH = 16;
+
     private final MinioService minioService;
     private final RestTemplate restTemplate;
     private final RestTemplate mediaFetchRestTemplate;
@@ -71,6 +75,13 @@ public class GlificMediaService {
         this.mediaDownloadRetryInitialBackoffMs = Math.max(0L, mediaDownloadRetryInitialBackoffMs);
         this.mediaDownloadRetryMaxBackoffMs = Math.max(0L, mediaDownloadRetryMaxBackoffMs);
         this.mediaDownloadRetryMaxTotalBackoffMs = Math.max(0L, mediaDownloadRetryMaxTotalBackoffMs);
+        // Unlike the retry knobs this one is not clamped: clamping a non-positive ceiling has no safe
+        // value to clamp to, and letting it through would mean an unbounded read of a caller-chosen
+        // response. Refusing to start is the only outcome that keeps the ceiling a ceiling.
+        if (mediaDownloadMaxBytes <= 0) {
+            throw new IllegalArgumentException(
+                    "media-download.max-bytes must be greater than 0 but was " + mediaDownloadMaxBytes);
+        }
         this.mediaDownloadMaxBytes = mediaDownloadMaxBytes;
         this.glificApiToken = glificApiToken;
     }
@@ -142,7 +153,7 @@ public class GlificMediaService {
      * heap instead.
      */
     private ResponseEntity<byte[]> readBoundedResponse(ClientHttpResponse response) throws IOException {
-        if (mediaDownloadMaxBytes > 0 && response.getHeaders().getContentLength() > mediaDownloadMaxBytes) {
+        if (response.getHeaders().getContentLength() > mediaDownloadMaxBytes) {
             throw new MediaTooLargeException("Media exceeds the configured size limit");
         }
         byte[] body = readAtMost(response.getBody());
@@ -158,7 +169,7 @@ public class GlificMediaService {
         int read;
         while ((read = body.read(chunk)) != -1) {
             total += read;
-            if (mediaDownloadMaxBytes > 0 && total > mediaDownloadMaxBytes) {
+            if (total > mediaDownloadMaxBytes) {
                 throw new MediaTooLargeException("Media exceeds the configured size limit");
             }
             buffer.write(chunk, 0, read);
@@ -235,6 +246,12 @@ public class GlificMediaService {
     }
 
     private boolean isRetriableException(RestClientException exception) {
+        // Checked before the ResourceAccessException case, which this arrives wrapped in: a redirect
+        // the URL policy refused is a verdict about where the URL points, not a transient fault, so
+        // repeating the request only repeats the refusal.
+        if (isPolicyRefusal(exception)) {
+            return false;
+        }
         if (exception instanceof ResourceAccessException) {
             return true;
         }
@@ -243,6 +260,22 @@ public class GlificMediaService {
             return statusCode == 429 || statusCode >= 500;
         }
         return true;
+    }
+
+    /**
+     * Whether the media URL policy is the reason the request failed. The verdict travels as the cause
+     * of whatever the HTTP client and {@code RestTemplate} wrapped it in, so the chain is walked
+     * rather than the top-level type inspected. The depth bound only guards a malformed cycle.
+     */
+    private static boolean isPolicyRefusal(Throwable exception) {
+        Throwable current = exception;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_CHAIN_DEPTH; depth++) {
+            if (current instanceof MediaUrlNotAllowedException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private long computeBackoffMs(int attempt, long totalBackoffMs) {

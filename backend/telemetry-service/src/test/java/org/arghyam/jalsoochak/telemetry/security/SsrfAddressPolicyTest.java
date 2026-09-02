@@ -39,6 +39,7 @@ class SsrfAddressPolicyTest {
             "192.0.2.5",                  // TEST-NET-1
             "198.18.0.1",                 // benchmarking
             "198.51.100.7",               // TEST-NET-2
+            "192.88.99.1",                // 6to4 relay anycast
             "203.0.113.9",                // TEST-NET-3
             "224.0.0.1",                  // multicast
             "240.0.0.1",                  // reserved
@@ -50,7 +51,12 @@ class SsrfAddressPolicyTest {
             "fd12:3456:789a::1",
             "::ffff:127.0.0.1",           // IPv4-mapped loopback
             "::ffff:169.254.169.254",     // IPv4-mapped metadata endpoint
-            "64:ff9b::7f00:1"             // NAT64-wrapped loopback
+            "64:ff9b::7f00:1",            // NAT64-wrapped loopback
+            "2002:7f00:1::1",             // 6to4 of 127.0.0.1
+            "2002:a9fe:a9fe::1",          // 6to4 of the metadata endpoint
+            "2002:c0a8:1::1",             // 6to4 of 192.168.0.1
+            "2001::80ff:fffe",            // Teredo whose de-obfuscated client is 127.0.0.1
+            "2001::5601:a8fe"             // Teredo whose de-obfuscated client is 169.254.87.1
     })
     void treatsNonPublicAddressesAsInternal(String literal) throws UnknownHostException {
         assertThat(SsrfAddressPolicy.isInternalAddress(address(literal))).isTrue();
@@ -67,8 +73,11 @@ class SsrfAddressPolicyTest {
             "192.0.1.1",                  // just outside 192.0.0.0/24
             "198.20.0.1",                 // just outside the benchmarking block
             "203.0.114.9",                // just outside TEST-NET-3
+            "192.88.100.1",               // just outside the relay-anycast block
             "2606:4700:4700::1111",
-            "2001:4860:4860::8888"
+            "2001:4860:4860::8888",       // 2001::/16 but not the 2001:0::/32 Teredo prefix
+            "2002:808:808::1",            // 6to4 of 8.8.8.8 — a public endpoint stays public
+            "2001::f7f7:f7f7"             // Teredo whose de-obfuscated client is 8.8.8.8
     })
     void allowsOrdinaryPublicAddresses(String literal) throws UnknownHostException {
         assertThat(SsrfAddressPolicy.isInternalAddress(address(literal))).isFalse();

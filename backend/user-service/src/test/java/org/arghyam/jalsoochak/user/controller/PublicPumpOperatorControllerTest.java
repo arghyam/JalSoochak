@@ -242,11 +242,12 @@ class PublicPumpOperatorControllerTest {
         }
 
         @Test
-        @DisplayName("returns 400 when size exceeds 500")
+        @DisplayName("returns 400 when size exceeds the shared 100 maximum")
         void returns400ForLargeSize() throws Exception {
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme")
-                            .param("tenantCode", "mp").param("page", "0").param("size", "501"))
-                    .andExpect(status().isBadRequest());
+                            .param("tenantCode", "mp").param("page", "0").param("size", "101"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value("size must be between 1 and 100"));
         }
     }
 
@@ -398,6 +399,18 @@ class PublicPumpOperatorControllerTest {
             );
         }
 
+        /**
+         * The same endpoints plus {@code /pump-operators/by-scheme}, which shares the ceiling but
+         * checks it by hand — it only paginates when asked to, so the bounds cannot be annotated.
+         * Its rejection carries no {@code fieldErrors} entry, so it joins only the assertions on
+         * the maximum, which turn on the status.
+         */
+        static Stream<String> endpointsSharingTheMaximumPageSize() {
+            return Stream.concat(
+                    paginatedEndpoints(),
+                    Stream.of("/api/v1/pumpoperator/pump-operators/by-scheme"));
+        }
+
         @ParameterizedTest(name = "{0} rejects page=-1")
         @MethodSource("paginatedEndpoints")
         @DisplayName("returns 400 when page is negative")
@@ -437,7 +450,7 @@ class PublicPumpOperatorControllerTest {
         }
 
         @ParameterizedTest(name = "{0} rejects size=101")
-        @MethodSource("paginatedEndpoints")
+        @MethodSource("endpointsSharingTheMaximumPageSize")
         @DisplayName("returns 400 when size exceeds the 100 maximum")
         void returns400ForSizeAboveMax(String path) throws Exception {
             mockMvc.perform(get(path)
@@ -449,7 +462,7 @@ class PublicPumpOperatorControllerTest {
         }
 
         @ParameterizedTest(name = "{0} accepts size=100")
-        @MethodSource("paginatedEndpoints")
+        @MethodSource("endpointsSharingTheMaximumPageSize")
         @DisplayName("accepts the boundary values page=0 and size=100")
         void accepts200ForBoundaryValues(String path) throws Exception {
             mockMvc.perform(get(path)
