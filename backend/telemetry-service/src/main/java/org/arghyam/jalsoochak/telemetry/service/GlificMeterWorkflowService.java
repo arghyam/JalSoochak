@@ -1190,11 +1190,19 @@ public class GlificMeterWorkflowService {
                                 AnomalyConstants.STATUS_OPEN,
                                 null
                         );
+                        // THRESHOLD-DISCLOSURE: the reply says the value was too high but not what the
+                        // limit is. Echoing "Maximum allowed reading: N" let any caller read the tenant's
+                        // configured WATER_NORM and oversupply threshold straight off the API — two
+                        // submissions are enough to solve for both. The numbers stay in the anomaly
+                        // record, the Kafka event and the server log, which are all staff-side.
+                        log.warn("manual_reading_rejected tenantId={} schemeId={} operatorId={} submitted={} maxAllowed={}",
+                                tenantId, schemeId, operatorWithSchema.operator().id(),
+                                toPlain(effectiveConfirmedReading), toPlain(maxAllowedReading));
                         return CreateReadingResponse.builder()
                                 .success(false)
                                 .message(localizationService.localizeMessage(
-                                        "Reading rejected because it is above the allowed maximum. Submitted: " + toPlain(effectiveConfirmedReading)
-                                                + ". Maximum allowed reading: " + toPlain(maxAllowedReading) + ".",
+                                        "Reading rejected because it is above the allowed maximum for this scheme. Submitted: "
+                                                + toPlain(effectiveConfirmedReading) + ".",
                                         languageKey
                                 ))
                                 .qualityStatus("REJECTED")

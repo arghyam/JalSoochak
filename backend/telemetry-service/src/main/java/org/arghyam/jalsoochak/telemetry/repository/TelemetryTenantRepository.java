@@ -31,6 +31,8 @@ public class TelemetryTenantRepository {
     private final PiiEncryptionService piiEncryptionService;
     private static final String SCHEME_SELECTION_CORRELATION_PREFIX = "scheme-selection-";
     private static final int OPERATOR_LOOKUP_CACHE_SIZE = 10_000;
+    /** Mirrors {@code IngestionSource.NORMAL} — the column default, so it needs no tracking UPDATE. */
+    private static final int NORMAL_INGESTION_SOURCE = 0;
     private final Map<String, String> phoneToSchemaCache = Collections.synchronizedMap(
             new LinkedHashMap<>(256, 0.75f, true) {
                 @Override
@@ -724,6 +726,37 @@ public class TelemetryTenantRepository {
                                                String submittedStateSchemeId,
                                                String submittedCentreSchemeId,
                                                String submittedPhoneHash) {
+        return persistFlowReadingWithTracking(schemaName, existingReadingId, schemeId, operatorId, readingAt,
+                extractedReading, confirmedReading, correlationId, flowVisionCorrelationId, imageUrl,
+                meterChangeReason, ingestionSource, submittedStateSchemeId, submittedCentreSchemeId,
+                submittedPhoneHash, null);
+    }
+
+    /**
+     * READING-PROVENANCE: as above, plus {@code confirmedReadingSource} written inside the same
+     * transaction. An API-supplied value (no image, no AI extraction) is only distinguishable from an
+     * AI-extracted one by that marker, so the row must not be able to land without it — a post-insert
+     * UPDATE that failed on its own would leave the row looking AI-extracted. A {@code null} source
+     * leaves the column untouched, and a non-null one is a safe no-op on pre-V35 tenant schemas where
+     * the column does not exist (guarded by {@code columnExists}).
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public Long persistFlowReadingWithTracking(String schemaName,
+                                               Long existingReadingId,
+                                               Long schemeId,
+                                               Long operatorId,
+                                               LocalDateTime readingAt,
+                                               BigDecimal extractedReading,
+                                               BigDecimal confirmedReading,
+                                               String correlationId,
+                                               String flowVisionCorrelationId,
+                                               String imageUrl,
+                                               String meterChangeReason,
+                                               int ingestionSource,
+                                               String submittedStateSchemeId,
+                                               String submittedCentreSchemeId,
+                                               String submittedPhoneHash,
+                                               Integer confirmedReadingSource) {
         Long readingId;
         if (existingReadingId != null) {
             readingId = existingReadingId;
@@ -733,8 +766,19 @@ public class TelemetryTenantRepository {
             readingId = createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading,
                     confirmedReading, correlationId, flowVisionCorrelationId, imageUrl, meterChangeReason);
         }
-        applyIngestionTracking(schemaName, readingId, ingestionSource, submittedStateSchemeId,
-                submittedCentreSchemeId, submittedPhoneHash);
+        // A NORMAL ingestion source carries no submitted-id metadata and matches the column defaults, so
+        // the tracking UPDATE is skipped for rows that only need the provenance marker.
+        boolean hasIngestionTracking = ingestionSource != NORMAL_INGESTION_SOURCE
+                || submittedStateSchemeId != null
+                || submittedCentreSchemeId != null
+                || submittedPhoneHash != null;
+        if (hasIngestionTracking) {
+            applyIngestionTracking(schemaName, readingId, ingestionSource, submittedStateSchemeId,
+                    submittedCentreSchemeId, submittedPhoneHash);
+        }
+        if (confirmedReadingSource != null) {
+            applyConfirmedReadingSource(schemaName, readingId, confirmedReadingSource, null);
+        }
         return readingId;
     }
 

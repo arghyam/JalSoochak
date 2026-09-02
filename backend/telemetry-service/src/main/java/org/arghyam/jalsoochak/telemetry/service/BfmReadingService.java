@@ -357,7 +357,11 @@ public class BfmReadingService {
         // The resolved value seeds confirmed_reading and is the number surfaced to the operator for
         // confirmation; extracted_reading stays the model value (dedup/audit). When the resolver is not
         // applicable (empty result) effectiveConfirmedReading is left untouched — byte-identical to legacy.
-        int confirmedReadingSource = RolloverResolutionService.SOURCE_AS_EXTRACTED;
+        // READING-PROVENANCE: an API-supplied value is not "as extracted" — nothing extracted it. Seeded
+        // here, ahead of the rollover resolver, which cannot run on this path (it needs an OCR result).
+        int confirmedReadingSource = request.isExternallyAsserted()
+                ? RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED
+                : RolloverResolutionService.SOURCE_AS_EXTRACTED;
         String rolloverAuditJson = null;
         Optional<RolloverResolutionService.ResolvedReading> rollover =
                 resolveRolloverIfApplicable(schemaName, request, ocrResult, isMeterReplaced, latestSnapshotOpt);
@@ -374,10 +378,12 @@ public class BfmReadingService {
                 operatorInRequest.id(),
                 LocalDate.from(readingAt)
         );
-        if (lenientIngestion) {
+        if (lenientIngestion || request.isExternallyAsserted()) {
             // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
             // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
             // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
+            // READING-PROVENANCE: API-supplied values take the same transactional path — same inserts and
+            // updates as before, plus the EXTERNALLY_ASSERTED marker committed with the row.
             readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
                     schemaName,
                     placeholderIdOpt.orElse(null),
@@ -390,10 +396,11 @@ public class BfmReadingService {
                     flowVisionCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
-                    request.getIngestionSource(),
+                    request.getIngestionSource() != null ? request.getIngestionSource() : IngestionSource.NORMAL,
                     request.getSubmittedStateSchemeId(),
                     request.getSubmittedCentreSchemeId(),
-                    request.getSubmittedPhoneHash());
+                    request.getSubmittedPhoneHash(),
+                    request.isExternallyAsserted() ? confirmedReadingSource : null);
         } else if (placeholderIdOpt.isPresent()) {
             readingId = placeholderIdOpt.get();
             telemetryTenantRepository.updateFlowReadingFromIngestion(
@@ -426,7 +433,8 @@ public class BfmReadingService {
         // ROLLOVER-RESOLVE: tag provenance + best-effort audit only when the resolver actually overrode
         // the model value. createReading is not @Transactional, so this runs as a separate guarded
         // statement (audit failure only warns) — acceptable, provenance is audit-only. Every other row
-        // keeps the column's DEFAULT 0.
+        // keeps the column's DEFAULT 0. (API-supplied values never reach here: their marker is written
+        // inside the insert transaction above.)
         if (confirmedReadingSource == RolloverResolutionService.SOURCE_ROLLOVER_RESOLVED) {
             telemetryTenantRepository.applyConfirmedReadingSource(
                     schemaName, readingId, confirmedReadingSource, rolloverAuditJson);

@@ -399,6 +399,31 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
                     .queryForObject(ArgumentMatchers.contains("INSERT INTO"),
                             ArgumentMatchers.eq(Number.class), ArgumentMatchers.any(Object[].class));
         }
+
+        @Test
+        void writesTheConfirmedReadingSourceAlongsideTheInsert() {
+            // READING-PROVENANCE: the EXTERNALLY_ASSERTED marker is committed with the row, not after it.
+            onColumnExists(true);
+            onScalar("INSERT INTO", Number.class, 602L);
+
+            repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
+                    0, null, null, null, 3);
+
+            assertThat(allUpdateSql()).anySatisfy(sql -> assertThat(sql).contains("confirmed_reading_source"));
+        }
+
+        @Test
+        void skipsTheIngestionTrackingUpdateWhenThereIsNothingToTrack() {
+            onColumnExists(true);
+            onScalar("INSERT INTO", Number.class, 603L);
+
+            repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
+                    0, null, null, null, 3);
+
+            assertThat(allUpdateSql()).noneSatisfy(sql -> assertThat(sql).contains("ingestion_source"));
+        }
     }
 
     @Nested

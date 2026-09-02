@@ -179,6 +179,9 @@ public class GlificImageWorkflowService {
                     .operatorId(operatorId)
                     .readingUrl(request.getReadingUrl())
                     .readingValue(request.getConfirmedReading())
+                    // READING-PROVENANCE: records that this number came from the caller rather than from
+                    // FlowVision. Marker only — the submission is processed exactly as before.
+                    .externallyAsserted(request.getConfirmedReading() != null)
                     .meterChangeReason(null)
                     .readingTime(readingTime)
                     .ingestionSource(lenient ? ingestionSource : null)

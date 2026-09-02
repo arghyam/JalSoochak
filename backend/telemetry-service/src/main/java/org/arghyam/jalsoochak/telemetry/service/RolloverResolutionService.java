@@ -40,6 +40,15 @@ public class RolloverResolutionService {
     public static final int SOURCE_ROLLOVER_RESOLVED = 1;
     /** {@code confirmed_reading_source} value: confirmed value was set by an explicit manual override. */
     public static final int SOURCE_MANUAL = 2;
+    /**
+     * READING-PROVENANCE: {@code confirmed_reading_source} value for a value supplied by an integrating
+     * system through {@code confirmed_reading} — no meter photo was submitted and FlowVision never ran.
+     * Submitting a value instead of an image is a supported part of the server-to-server contract; this
+     * marker only records <em>how</em> the number arrived. {@code extracted_reading} on such a row holds
+     * the supplied number (the column is NOT NULL), so without this marker an API-supplied value is
+     * indistinguishable in the database from an AI-extracted one.
+     */
+    public static final int SOURCE_EXTERNALLY_ASSERTED = 3;
 
     // ── v1 tuning constants (documented; only the kill-switch is externalised) ──────────────────────
     /** Trailing daily-delta window size. */
