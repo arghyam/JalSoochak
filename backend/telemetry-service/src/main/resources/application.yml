@@ -67,6 +67,31 @@ telemetry:
       # from media-download.ssrf-guard below, shared with the Glific media fetch; this exists so the
       # higher-volume of the two paths can be turned off without disarming that one.
       enabled: ${TELEMETRY_READING_URL_VALIDATION_ENABLED:true}
+  webhook:
+    auth:
+      # Shared-secret authentication for the 26 Glific webhook endpoints on
+      # GlificWebhookController. These are exposed publicly by ingress, bypassing the api-gateway,
+      # so this filter is the only thing standing in front of them.
+      #
+      # ENFORCE (default) rejects with 401. AUDIT records the outcome but always serves — it is the
+      # kill switch: set TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT and restart to revert without a code
+      # deploy. OFF skips the check entirely.
+      #
+      # ENFORCE with no token-hashes fails startup deliberately: a deploy that forgets the secret
+      # crash-loops and leaves the previous container serving, rather than silently 401-ing every
+      # field submission. The default is ENFORCE so the endpoints cannot be shipped unprotected by
+      # omission. For local development, set TELEMETRY_WEBHOOK_AUTH_MODE=OFF.
+      #
+      # ORDER OF OPERATIONS when rolling this out: add the header to the Glific flow webhook nodes
+      # FIRST (harmless while unauthenticated — unknown headers are ignored), and only then set
+      # token-hashes and deploy. The reverse order rejects every field submission until the flows
+      # catch up. Watch the telemetry.webhook.auth{result="missing"} counter on /actuator/prometheus.
+      mode: ${TELEMETRY_WEBHOOK_AUTH_MODE:ENFORCE}
+      header-name: ${TELEMETRY_WEBHOOK_AUTH_HEADER:X-Webhook-Token}
+      # Comma-separated SHA-256 hex hashes of the accepted tokens — NOT the tokens themselves.
+      # Two entries make a rotation window: add the new hash, update Glific, drop the old one.
+      # Startup fails if this is empty while mode=ENFORCE, or if an entry is not 64-char lowercase hex.
+      token-hashes: ${TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES:}
 
 flowvision:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}

@@ -12,11 +12,20 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.UUID;
 
+/**
+ * Puts a request id in the MDC for the life of the request.
+ *
+ * <p>Ordered ahead of both authentication filters so a rejection from either is logged with its
+ * {@code requestId}. Was unordered before, which placed it last among filters.
+ */
 @Component
 @Order(RequestCorrelationFilter.ORDER)
 public class RequestCorrelationFilter extends OncePerRequestFilter {
 
-    /** Runs first so every downstream filter — the API-key gate included — logs with a request id. */
+    /**
+     * Runs first so every downstream filter — {@link TelemetryApiKeyAuthFilter} and
+     * {@link GlificWebhookAuthFilter} — logs with a request id.
+     */
     public static final int ORDER = 10;
 
     public static final String REQUEST_ID_HEADER = "X-Request-Id";

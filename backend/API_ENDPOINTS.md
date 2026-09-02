@@ -249,10 +249,20 @@ The tables below list every endpoint that changed across all services. If your f
 
 ---
 
-### Telemetry service — webhook base URL (affects all 23 Glific webhook endpoints)
+### Telemetry service — webhook base URL (affects all 26 Glific webhook endpoints)
 
-> ## Telemetry · Webhook (`telemetry-service` · port 8084)
+> ## Telemetry · Webhook (`telemetry-service` · port 8989)
 > These endpoints are called by **Glific** (WhatsApp bot platform), not by the frontend.
+>
+> **All 26 require the `X-Webhook-Token: <token>` header.** Ingress exposes them publicly, bypassing
+> the API gateway, so this shared secret is the only thing in front of them. Requests without a valid
+> token get `401 {"success":false,"message":"Unauthorized"}`. Configure via
+> `TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES` (comma-separated SHA-256 hex of the accepted tokens);
+> `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` is the kill switch, `OFF` is for local development.
+>
+> Note this is a **different credential** from the `X-Api-Key` used by the partner ingestion
+> endpoints (`/readings`, `/readings/formats/{format}`, `/schemes/{id}/yesterday-final-reading`),
+> which share the same `/api/v1/telemetry` prefix.
 
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
@@ -263,16 +273,19 @@ The tables below list every endpoint that changed across all services. If your f
 | POST | `/api/v1/telemetry/selected/language`             | Persist the selected language for a contact |
 | POST | `/api/v1/telemetry/channel/selection`             | Return the channel selection prompt/options for a contact |
 | POST | `/api/v1/telemetry/selected/channel`              | Persist the selected channel for a contact |
+| POST | `/api/v1/telemetry/schemes`                       | Return the schemes the contact's operator is mapped to |
+| POST | `/api/v1/telemetry/scheme/selected`               | Persist the selected scheme for a contact |
 | POST | `/api/v1/telemetry/item/selection`                | Return the item selection prompt/options for a contact |
 | POST | `/api/v1/telemetry/selected/item`                 | Persist the selected item for a contact |
+| POST | `/api/v1/telemetry/trigger-welcome-message`       | Build the onboarding message for a newly registered operator |
 | POST | `/api/v1/telemetry/meter-change`                  | Return meter-change reason prompts/options |
 | POST | `/api/v1/telemetry/issue-report`                  | Return issue-report prompt/options |
 | POST | `/api/v1/telemetry/issue-report/submit`           | Save the issue report details provided by the contact |
 | POST | `/api/v1/telemetry/issue-report/telemetry`        | Return telemetry-specific issue-report prompt/options |
 | POST | `/api/v1/telemetry/issue-report/telemetry/submit` | Save telemetry issue report details |
 | POST | `/api/v1/telemetry/meter/issue-report`            | Return telemetry issue-report reasons (JSON list) |
-| POST | `/api/v1/telemetry/meter/change`                  | Return meter-change reasons (JSON list) |
-| POST | `/api/v1/telemetry/meter/change/submit`           | Save the selected meter-change reason |
+| POST | `/api/v1/telemetry/meter/meter-change`            | Return meter-change reasons (JSON list) |
+| POST | `/api/v1/telemetry/meter/meter-change/submit`     | Save the selected meter-change reason |
 | POST | `/api/v1/telemetry/others`                        | Return the “other issue” prompt/options |
 | POST | `/api/v1/telemetry/others/submitted`              | Save “other issue” details |
 | POST | `/api/v1/telemetry/take-meter-reading`            | Return the take‑meter‑reading prompt/options |

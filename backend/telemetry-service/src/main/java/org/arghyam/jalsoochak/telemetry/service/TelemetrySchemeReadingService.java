@@ -24,6 +24,15 @@ public class TelemetrySchemeReadingService {
     private final TelemetryTenantRepository telemetryTenantRepository;
     private final TelemetryEventPublisher telemetryEventPublisher;
 
+    /**
+     * Falls back to the schema in {@link TenantContext}, i.e. the unauthenticated
+     * {@code X-Tenant-Code} header.
+     *
+     * <p>Production callers must use
+     * {@link #updateYesterdayFinalReadingBySchemeId(Long, String, BigDecimal, LocalDate, Integer)}
+     * and pass the id of the tenant behind an authenticated {@code X-Api-Key}. This overload exists
+     * for tests that set {@code TenantContext} directly.
+     */
     public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
                                                                                             String phoneNumber,
                                                                                             BigDecimal finalReading,
@@ -36,7 +45,8 @@ public class TelemetrySchemeReadingService {
      * which schema the correction is applied to. The {@code X-Tenant-Code} header behind
      * {@link TenantContext} remains the fallback for in-process callers with no authenticated tenant,
      * but it must never win over the key: it is unauthenticated, so letting it decide would let a
-     * caller holding one tenant's key — or none at all — correct another tenant's readings.
+     * caller holding one tenant's key — or none at all — correct another tenant's readings. Same
+     * precedence as {@code BfmReadingService.resolveSchemaForCorrelationUpdate}.
      */
     public UpdateYesterdayFinalReadingBySchemeResponse updateYesterdayFinalReadingBySchemeId(Long schemeId,
                                                                                             String phoneNumber,
@@ -170,6 +180,11 @@ public class TelemetrySchemeReadingService {
         }
     }
 
+    /**
+     * The schema behind an authenticated API key wins over {@link TenantContext}. That context is
+     * populated from {@code X-Tenant-Code}, which carries no credential — letting it take precedence
+     * would let a caller holding one tenant's key write into another tenant's schema.
+     */
     private String requireTenantSchema(Integer authenticatedTenantId) {
         if (authenticatedTenantId != null) {
             return telemetryTenantRepository.findSchemaNameByTenantId(authenticatedTenantId)
@@ -198,5 +213,8 @@ public class TelemetrySchemeReadingService {
         return "****" + digits.substring(digits.length() - 4);
     }
 
-    // No JWT authentication for this endpoint. We resolve the user by phone number and then enforce scheme mapping.
+    // No JWT here: the caller is authenticated by the per-tenant X-Api-Key at the controller, which
+    // also fixes the tenant schema. The phone lookup and scheme-mapping check below then constrain
+    // the write within that tenant — they are authorization, not authentication, and were never
+    // sufficient on their own.
 }

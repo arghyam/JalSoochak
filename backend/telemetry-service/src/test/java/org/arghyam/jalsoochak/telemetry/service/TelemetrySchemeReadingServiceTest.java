@@ -36,9 +36,10 @@ import static org.mockito.Mockito.when;
 /**
  * Back-office correction of a scheme's already-submitted final reading.
  *
- * <p>The endpoint has no JWT: authorisation is phone-number → user → scheme-mapping, so the reject
- * paths matter as much as the happy path. A correction also re-publishes the derived water quantity
- * for the corrected day and for the day after it, since both deltas move.</p>
+ * <p>The endpoint has no JWT: the caller is authenticated by the per-tenant {@code X-Api-Key} at the
+ * controller, and authorisation within that tenant is phone-number → user → scheme-mapping, so the
+ * reject paths matter as much as the happy path. A correction also re-publishes the derived water
+ * quantity for the corrected day and for the day after it, since both deltas move.</p>
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -80,6 +81,49 @@ class TelemetrySchemeReadingServiceTest {
     @AfterEach
     void clearTenant() {
         TenantContext.clear();
+    }
+
+    @Nested
+    @DisplayName("tenant resolution")
+    class TenantResolution {
+
+        private static final String OTHER_SCHEMA = "tenant_mp";
+
+        @Test
+        @DisplayName("the API key's tenant wins over the X-Tenant-Code header")
+        void apiKeyTenantWinsOverHeader() {
+            // The caller sets X-Tenant-Code to a tenant that is not theirs; the authenticated key
+            // resolves to tenant 42 / tenant_as. The write must land in the key's schema.
+            TenantContext.setSchema(OTHER_SCHEMA);
+            when(telemetryTenantRepository.findSchemaNameByTenantId(42)).thenReturn(Optional.of(SCHEMA));
+
+            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null, 42);
+
+            verify(telemetryTenantRepository).findUserIdByPhone(SCHEMA, PHONE);
+            verify(telemetryTenantRepository, never()).findUserIdByPhone(OTHER_SCHEMA, PHONE);
+        }
+
+        @Test
+        @DisplayName("rejects a tenant id that resolves to no schema")
+        void rejectsUnknownTenantId() {
+            when(telemetryTenantRepository.findSchemaNameByTenantId(99)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.updateYesterdayFinalReadingBySchemeId(
+                    SCHEME_ID, PHONE, new BigDecimal("600"), null, 99))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("Tenant not found");
+        }
+
+        @Test
+        @DisplayName("falls back to the header only when no tenant id is supplied")
+        void fallsBackToHeaderWhenNoTenantId() {
+            TenantContext.setSchema(SCHEMA);
+
+            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null, null);
+
+            verify(telemetryTenantRepository).findUserIdByPhone(SCHEMA, PHONE);
+            verify(telemetryTenantRepository, never()).findSchemaNameByTenantId(any());
+        }
     }
 
     @Nested
