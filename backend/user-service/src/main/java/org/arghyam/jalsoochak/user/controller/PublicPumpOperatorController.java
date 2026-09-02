@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.user.controller;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
@@ -20,6 +22,7 @@ import org.arghyam.jalsoochak.user.service.PersonSchemeService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,7 +36,10 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/pumpoperator")
 @RequiredArgsConstructor
+@Validated
 public class PublicPumpOperatorController {
+
+    private static final int MAX_PAGE_SIZE = 100;
 
     private final PublicPumpOperatorService publicPumpOperatorService;
     private final PersonSchemeService personSchemeService;
@@ -80,8 +86,8 @@ public class PublicPumpOperatorController {
     @GetMapping("/pump-operators/reading-compliance")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorReadingComplianceRowDTO>>> listReadingCompliance(
             @RequestParam String tenantCode,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size
     ) {
         PageResponseDTO<PumpOperatorReadingComplianceRowDTO> rows = publicPumpOperatorService.listReadingCompliance(tenantCode, page, size);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Reading compliance retrieved", rows));
@@ -94,8 +100,8 @@ public class PublicPumpOperatorController {
             @RequestParam(required = false) Long pumpOperatorId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size
     ) {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
             throw new IllegalArgumentException("startDate must be on or before endDate");
@@ -155,8 +161,8 @@ public class PublicPumpOperatorController {
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorReadingDetailDTO>>> listPumpOperatorReadings(
             @PathVariable long pumpOperatorId,
             @RequestParam String tenantCode,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
             @RequestParam(defaultValue = "readingAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(required = false) String schemeName
@@ -189,8 +195,8 @@ public class PublicPumpOperatorController {
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PersonSchemeDetailsDTO>>> listSchemesByPerson(
             @PathVariable long personId,
             @RequestParam String tenantCode,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
             @RequestParam(defaultValue = "schemeName") String sortBy,
             @RequestParam(defaultValue = "asc") String sortDir,
             @RequestParam(required = false) String schemeName
@@ -211,8 +217,8 @@ public class PublicPumpOperatorController {
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorSummaryWithMetricsDTO>>> listPumpOperatorsByPerson(
             @PathVariable long personId,
             @RequestParam String tenantCode,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
             @RequestParam(defaultValue = "id") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(required = false) String name,
@@ -258,8 +264,8 @@ public class PublicPumpOperatorController {
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<SchemeReadingSubmissionDTO>>> listSchemeReadings(
             @PathVariable long schemeId,
             @RequestParam String tenantCode,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size
     ) {
         PageResponseDTO<SchemeReadingSubmissionDTO> rows = personSchemeService.listSchemeReadings(
                 tenantCode,

@@ -17,6 +17,8 @@ import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -25,6 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -372,6 +375,88 @@ class PublicPumpOperatorControllerTest {
 
             mockMvc.perform(get("/api/v1/pumpoperator/schemes/5/reading-submissions")
                             .param("tenantCode", "mp"))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("Pagination boundary validation")
+    class PaginationValidation {
+
+        /**
+         * Every paginated endpoint on this controller. {@code schemeId} is always supplied by the
+         * tests so the by-scheme endpoint never fails argument resolution instead of validation.
+         */
+        static Stream<String> paginatedEndpoints() {
+            return Stream.of(
+                    "/api/v1/pumpoperator/pump-operators/reading-compliance",
+                    "/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance",
+                    "/api/v1/pumpoperator/pump-operators/1/readings",
+                    "/api/v1/pumpoperator/person/10/schemes",
+                    "/api/v1/pumpoperator/person/10/pump-operators",
+                    "/api/v1/pumpoperator/schemes/5/reading-submissions"
+            );
+        }
+
+        @ParameterizedTest(name = "{0} rejects page=-1")
+        @MethodSource("paginatedEndpoints")
+        @DisplayName("returns 400 when page is negative")
+        void returns400ForNegativePage(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("page", "-1"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("page"));
+        }
+
+        @ParameterizedTest(name = "{0} rejects size=0")
+        @MethodSource("paginatedEndpoints")
+        @DisplayName("returns 400 when size is zero")
+        void returns400ForZeroSize(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("size", "0"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("size"));
+        }
+
+        @ParameterizedTest(name = "{0} rejects size=-1")
+        @MethodSource("paginatedEndpoints")
+        @DisplayName("returns 400 when size is negative")
+        void returns400ForNegativeSize(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("size", "-1"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400));
+        }
+
+        @ParameterizedTest(name = "{0} rejects size=101")
+        @MethodSource("paginatedEndpoints")
+        @DisplayName("returns 400 when size exceeds the 100 maximum")
+        void returns400ForSizeAboveMax(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("size", "101"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400));
+        }
+
+        @ParameterizedTest(name = "{0} accepts size=100")
+        @MethodSource("paginatedEndpoints")
+        @DisplayName("accepts the boundary values page=0 and size=100")
+        void accepts200ForBoundaryValues(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("page", "0")
+                            .param("size", "100"))
                     .andExpect(status().isOk());
         }
     }

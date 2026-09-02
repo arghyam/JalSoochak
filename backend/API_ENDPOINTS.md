@@ -5,6 +5,18 @@ When accessed through the API gateway, prefix each path with the service slug (e
 
 ---
 
+## Pagination
+
+Paginated endpoints take `page` (zero-indexed, default `0`) and `size` (default `20`; named `limit`
+on `/api/v1/tenant/user/staff`). Both are validated at the controller: `page` must be `>= 0` and
+`size` must be between `1` and `100`. Out-of-range values are rejected with `400 Bad Request` and a
+`fieldErrors` entry naming the offending parameter — they are never silently clamped.
+
+Exception: `/api/v1/pumpoperator/pump-operators/by-scheme` allows a `size` up to `500` and only
+paginates when `page` or `size` is supplied.
+
+---
+
 ## Required Environment Variables
 
 Set the following environment variables before running the Telemetry services:
