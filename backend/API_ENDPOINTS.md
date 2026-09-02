@@ -113,7 +113,7 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/public/schemes/{schemeId}` | Get scheme by ID (public) |
+| GET | `/api/v1/public/schemes/{schemeId}?tenantCode={tenantCode}` | Get scheme by ID. Authenticated despite the `public` path — `tenantCode` must match the caller's own tenant. Optional `tenantId` is validated for consistency with `tenantCode` (400 on mismatch) |
 | GET | `/api/v1/scheme/schemes` | List all schemes |
 | GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings |
 | GET | `/api/v1/scheme/schemes/counts` | Scheme counts |
