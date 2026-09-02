@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.MDC;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -12,7 +13,11 @@ import java.io.IOException;
 import java.util.UUID;
 
 @Component
+@Order(RequestCorrelationFilter.ORDER)
 public class RequestCorrelationFilter extends OncePerRequestFilter {
+
+    /** Runs first so every downstream filter — the API-key gate included — logs with a request id. */
+    public static final int ORDER = 10;
 
     public static final String REQUEST_ID_HEADER = "X-Request-Id";
     public static final String REQUEST_ID_KEY = "requestId";
