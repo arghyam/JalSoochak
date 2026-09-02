@@ -2,7 +2,18 @@
 
 ## 9. API Specifications
 
-All APIs are RESTful, versioned under `/api/v1/`, and (except public endpoints) require a Keycloak-issued **`Authorization: Bearer <JWT>`** header. Clients reach services through the **API Gateway** by path prefix (`/user/**`, `/tenant/**`, `/scheme/**`, `/telemetry/**`, `/message/**`, `/analytics/**`, `/anomaly/**`); the gateway validates the JWT and forwards the request. Every service also publishes an interactive **Swagger UI** and OpenAPI document.
+All APIs are RESTful and versioned under `/api/v1/`. Clients reach services through the **API Gateway** by path prefix (`/user/**`, `/tenant/**`, `/scheme/**`, `/telemetry/**`, `/message/**`, `/analytics/**`, `/anomaly/**`); the gateway validates a Keycloak-issued **`Authorization: Bearer <JWT>`** and forwards the request. Every service also publishes an interactive **Swagger UI** and OpenAPI document.
+
+> **Two families of traffic do not go through the gateway and are not JWT-authenticated.** Ingress
+> routes them straight to telemetry-service, so the gateway's filter chain never sees them:
+>
+> * **Glific flow webhooks** under `/api/v1/telemetry/*` — authenticated by the `X-Webhook-Token`
+>   shared secret (§9.4).
+> * **Partner meter-reading ingestion** (`POST`/`PUT /api/v1/telemetry/readings`,
+>   `/readings/formats/{format}`, `PATCH /api/v1/telemetry/schemes/{id}/yesterday-final-reading`) —
+>   authenticated by the per-tenant `X-Api-Key`.
+>
+> Both prefixes are publicly reachable. Do not assume a path under `/api/v1/` is behind the gateway.
 
 ### 9.1 Authentication & User APIs
 
@@ -40,13 +51,45 @@ All APIs are RESTful, versioned under `/api/v1/`, and (except public endpoints) 
 
 ### 9.4 Field Submission APIs (Glific Flow Webhooks)
 
-The WhatsApp submission journey is a multi-step Glific flow; Glific calls a public webhook at each step, all under `/api/v1/telemetry` (secured by Glific signature, not JWT):
+The WhatsApp submission journey is a multi-step Glific flow; Glific calls a webhook at each step, all
+under `/api/v1/telemetry`. There are **26** such endpoints, every one a `POST`.
 
-* `POST /api/v1/telemetry/intro` — flow entry / contact resolution
+**Authentication.** Each request must carry the shared secret header:
+
+```
+X-Webhook-Token: <token>
+```
+
+`GlificWebhookAuthFilter` in telemetry-service compares the SHA-256 of the supplied token against
+`telemetry.webhook.auth.token-hashes` and returns
+`401 {"success":false,"message":"Unauthorized"}` when it does not match. The match is a closed
+allowlist of exactly these 26 routes — *not* a prefix rule on `/api/v1/telemetry/**`, because that
+prefix is shared with the `X-Api-Key` ingestion endpoints, which use a different credential.
+
+Set `TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT` to log outcomes without rejecting (the kill switch), or
+`OFF` for local development. `ENFORCE` is the default and refuses to start with no token configured.
+
+The endpoints:
+
+* `POST /api/v1/telemetry/intro`, `/closing` — flow entry / contact resolution, closing message
+* `POST /api/v1/telemetry/language/selection`, `/selected/language` — language prompt and choice
+* `POST /api/v1/telemetry/channel/selection`, `/selected/channel` — channel prompt and choice
+* `POST /api/v1/telemetry/schemes`, `/scheme/selected` — scheme list and choice
+* `POST /api/v1/telemetry/item/selection`, `/selected/item` — item prompt and choice
 * `POST /api/v1/telemetry/take-meter-reading` — receive meter photo → FlowVision AI
-* `POST /api/v1/telemetry/manual-reading` — operator enters / corrects the reading
-* `POST /api/v1/telemetry/meter-change`, `/issue-report` — meter replacement / outage reporting
-* `GET /api/v1/telemetry` — list meter readings for dashboards *(authenticated)*
+* `POST /api/v1/telemetry/readings/glific` — async image submission, returns a job ack
+* `POST /api/v1/telemetry/manual-reading`, `/location`, `/update-previous-reading` — enter, geotag or
+  correct a reading
+* `POST /api/v1/telemetry/meter-change`, `/meter/meter-change`, `/meter/meter-change/submit` — meter
+  replacement
+* `POST /api/v1/telemetry/issue-report`, `/issue-report/submit`, `/issue-report/telemetry`,
+  `/issue-report/telemetry/submit`, `/meter/issue-report` — outage and telemetry issue reporting
+* `POST /api/v1/telemetry/others`, `/others/submitted` — free-text fallback
+* `POST /api/v1/telemetry/trigger-welcome-message` — operator onboarding message
+
+> Adding a webhook to `GlificWebhookController` without registering it in `GlificWebhookRoutes` fails
+> the build (`GlificWebhookRouteCoverageTest`), because it would ship unauthenticated. A new endpoint
+> also needs the header added to its Glific flow node.
 
 ```json
 // Example reading event published after a successful submission
