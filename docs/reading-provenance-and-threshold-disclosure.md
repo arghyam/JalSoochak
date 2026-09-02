@@ -10,11 +10,13 @@ server-to-server contract for state IT systems that read their own meters (see
 `docs/pluggable-ingestion-testing-guide.md`). The bypass is accepted risk and is not restricted. The
 API-key authentication gap on the Glific webhook routes is owned by a separate change.
 
-**What this change does:** two things only.
+**What this change does:** three things only.
 
 1. Records **how** a confirmed value arrived, so an API-supplied number is identifiable in the
    database rather than indistinguishable from an AI-extracted one.
 2. Stops the manual-reading rejection message from disclosing the tenant's configured threshold.
+3. Stops unmatched exceptions from returning raw text — SQL, schema names, config keys and, in one
+   case, the caller's own phone number — to the user (§5).
 
 Nothing is restricted, no request that succeeded before fails now, and no API response changes for
 the ingestion endpoints.
@@ -103,18 +105,47 @@ If the marker is wanted on analytics events too, `MeterReadingEvent` would need 
 | `/manual-reading` has no API-key authentication | **Owned by the Glific authentication change**, handled separately. |
 | The tenant API key carries no capabilities | Not addressed — it only matters if value submission is to be restricted, which it is not. |
 
-## 5. One finding worth triaging separately
+## 5. Raw exception text in error replies
 
-`GlificLocalizationService.resolveUserFacingErrorMessage` maps a set of known exception messages to
-friendly text and, for anything unmatched, **returns the raw exception message to the caller**
-(`return localizeMessage(message.trim(), languageKey);`). The catch blocks that call it catch
-`Exception`, so an unmapped infrastructure failure — a `DataAccessException`, for example — puts its
-message into the API response and into the operator's WhatsApp reply. That can carry SQL text, schema
-names such as `tenant_as`, or driver internals.
+`GlificLocalizationService.resolveUserFacingErrorMessage` mapped a set of known exception messages to
+friendly text and, for anything unmatched, **returned the raw exception message to the caller**. Every
+caller catches `Exception`, so that path was reachable by far more than the business validations it
+was written for. Messages that could reach a WhatsApp operator or an API response included:
 
-Not changed here: many deliberate business messages (`"Scheme not found for the provided state or
-centre scheme id"`, `"Operator does not belong to the specified scheme"`) rely on that same
-pass-through, so tightening it needs a decision about which messages are contractually user-facing.
-The narrow fix, if wanted, is to fall back to the generic message when the exception text matches
-infrastructure patterns (`jdbc`, `SQL`, `org.postgresql`, `nested exception`, `tenant_`) rather than
-changing the default.
+| Leaked | Discloses |
+|---|---|
+| `bad SQL grammar [SELECT … FROM tenant_as.flow_reading_table …]; nested exception is org.postgresql.util.PSQLException` | SQL, table and schema names, database engine |
+| `Missing required column reading_date` | Schema internals |
+| `Tenant not found for schema tenant_as` | Tenant schema naming |
+| `PII_ENCRYPTION_KEY must decode to exactly 32 bytes` | Key configuration |
+| `AES-GCM decryption failed`, `HMAC-SHA256 failed` | Crypto internals |
+| `No operator found for contactId 919999900001` | **The submitted phone number, echoed back** — and confirms whether a number is registered |
+| `400 BAD_REQUEST "Operator does not belong…"` | HTTP status prefix shown to an operator |
+| `API key service not configured` | Deployment state |
+
+**Fix:** the method is now an **allowlist**. Only a message matched by an explicit rule is shown;
+everything else becomes the caller's own fallback, which is already context-specific — *"Manual
+reading could not be saved."*, *"Image could not be processed."*, *"Location could not be saved."*,
+*"Assam reading could not be processed."* — so the user still gets a message that fits what they were
+doing, with no internal detail. Adding a user-facing message now means adding a rule; the safe
+default is not to disclose.
+
+Every legitimate message that previously passed through unmapped has a rule, so nothing the operator
+relied on is lost. The rules added beyond the original set: scheme and meter-change-reason selection
+errors, generic reading validation, `contactId` / `phoneNumber` / `correlationId` identity errors,
+`issueReason is required`, all geolocation validation shapes, operator-not-found, scheme-not-found,
+`Operator does not belong to the specified scheme`, and the `METER_CHANGE_REASONS` /
+`SUPPLY_OUTAGE_REASONS` config errors (which named the config key).
+
+Order matters in two places, and both are commented in the code: `manualreading is required` must be
+tested before `reading is required` (the first string contains the second), and
+`scheme not found for the provided state or centre scheme id` before `scheme not found`.
+
+A suppressed message is logged server-side at INFO on `error_message_suppressed` with the exception
+type, so a missing rule is visible in ops and easy to add. The exception itself is still logged with
+its stack trace by the calling service, as before.
+
+Hindi replies are unaffected: mapped messages reuse the existing English strings that
+`localizeMessage` already translates, and a fallback such as *"Manual reading could not be saved."*
+has a Hindi translation too. Rules added here that have no Hindi entry return English, which is what
+those messages already did.

@@ -182,7 +182,31 @@ class GlificLocalizationServiceTest {
                     Arguments.of("Failed to download image from Glific",
                             "Image could not be processed. Please try again"),
                     Arguments.of("issueReason contains invalid characters",
-                            "Issue reason can only contain letters, numbers, and spaces.")
+                            "Issue reason can only contain letters, numbers, and spaces."),
+                    Arguments.of("issueReason is required",
+                            "Issue reason is required."),
+                    Arguments.of("contactId is required",
+                            "Contact could not be identified. Please restart the process."),
+                    Arguments.of("Invalid scheme selection: 9",
+                            "Invalid scheme selection. Please choose a valid option from the list."),
+                    Arguments.of("scheme selection is required",
+                            "Scheme selection is required. Please choose one of the listed options."),
+                    Arguments.of("Invalid meter change reason selection",
+                            "Invalid meter change reason. Please choose a valid option from the list."),
+                    Arguments.of("METER_CHANGE_REASONS config is not valid JSON",
+                            "Meter change reasons are not configured for this tenant."),
+                    Arguments.of("SUPPLY_OUTAGE_REASONS config has no reasons",
+                            "Submission reasons are not configured for this tenant."),
+                    Arguments.of("latitude must be between -90 and 90",
+                            "Location could not be saved. Please share a valid location."),
+                    Arguments.of("geolocation.type must be Point",
+                            "Location could not be saved. Please share a valid location."),
+                    Arguments.of("Operator tenant could not be resolved",
+                            "Operator could not be resolved for this contact."),
+                    Arguments.of("Scheme not found for the provided state or centre scheme id",
+                            "Scheme not found for the provided state or centre scheme id"),
+                    Arguments.of("State scheme not found",
+                            "Scheme not found.")
             );
         }
 
@@ -196,10 +220,95 @@ class GlificLocalizationServiceTest {
         }
 
         @Test
-        void passesAnUnrecognisedMessageThroughTrimmed() {
+        void replacesAnUnrecognisedMessageWithTheCallersFallback() {
+            // ERROR-DISCLOSURE: deny by default. Anything the allowlist does not recognise is replaced,
+            // never echoed — the caller's fallback is already context-specific ("Manual reading could
+            // not be saved.", "Image could not be processed.", …).
             assertThat(service.resolveUserFacingErrorMessage(
                     new IllegalStateException("  Something unusual happened  "), "Fallback.", "english"))
-                    .isEqualTo("Something unusual happened");
+                    .isEqualTo("Fallback.");
+        }
+
+        @ParameterizedTest(name = "withholds: {0}")
+        @MethodSource("internalDetailThatMustNotReachTheUser")
+        void neverDisclosesInternalDetail(String internal) {
+            String result = service.resolveUserFacingErrorMessage(
+                    new IllegalStateException(internal), "Fallback.", "english");
+
+            assertThat(result).isEqualTo("Fallback.");
+        }
+
+        static Stream<Arguments> internalDetailThatMustNotReachTheUser() {
+            return Stream.of(
+                    // Database / driver failures — every caller catches Exception, so these reached the
+                    // user verbatim, SQL and schema names included.
+                    Arguments.of("PreparedStatementCallback; bad SQL grammar [SELECT * FROM "
+                            + "tenant_as.flow_reading_table WHERE id = ?]; nested exception is "
+                            + "org.postgresql.util.PSQLException: ERROR: relation does not exist"),
+                    Arguments.of("Could not open JDBC Connection for transaction"),
+                    // Schema / column internals
+                    Arguments.of("Missing required column reading_date"),
+                    Arguments.of("Tenant not found for schema tenant_as"),
+                    Arguments.of("Failed to map operator record"),
+                    // Crypto and key configuration
+                    Arguments.of("PII_ENCRYPTION_KEY must decode to exactly 32 bytes (256 bits)"),
+                    Arguments.of("PII_HMAC_KEY must decode to exactly 32 bytes (256 bits)"),
+                    Arguments.of("AES-GCM decryption failed"),
+                    Arguments.of("HMAC-SHA256 failed"),
+                    Arguments.of("SHA-256 not available"),
+                    // Serialization internals
+                    Arguments.of("Failed to serialize Glific resume result payload"),
+                    // Deployment configuration
+                    Arguments.of("API key service not configured")
+            );
+        }
+
+        @Test
+        void doesNotEchoThePhoneNumberBackWhenTheContactIsUnknown() {
+            // "No operator found for contactId " + contactId returned the submitted phone number to the
+            // caller — a PII echo that also confirmed which numbers are registered.
+            String result = service.resolveUserFacingErrorMessage(
+                    new IllegalStateException("No operator found for contactId 919999900001"),
+                    "Fallback.", "english");
+
+            assertThat(result)
+                    .isEqualTo("Operator could not be resolved for this contact.")
+                    .doesNotContain("919999900001");
+        }
+
+        @Test
+        void stripsTheHttpStatusPrefixOfAResponseStatusException() {
+            // ResponseStatusException.getMessage() is '400 BAD_REQUEST "reason"'; the status prefix used
+            // to be shown to the operator alongside the reason.
+            String result = service.resolveUserFacingErrorMessage(
+                    new org.springframework.web.server.ResponseStatusException(
+                            org.springframework.http.HttpStatus.BAD_REQUEST,
+                            "Operator does not belong to the specified scheme"),
+                    "Fallback.", "english");
+
+            assertThat(result)
+                    .isEqualTo("Operator is not mapped to the selected scheme.")
+                    .doesNotContain("400");
+        }
+
+        @Test
+        void keepsManualReadingRulesAheadOfTheGenericReadingRules() {
+            // "manualreading is required" contains "reading is required": order in the allowlist decides
+            // which reply the operator gets.
+            assertThat(service.resolveUserFacingErrorMessage(
+                    new IllegalStateException("manualReading is required"), "Fallback.", "english"))
+                    .isEqualTo("manualReading is required.");
+            assertThat(service.resolveUserFacingErrorMessage(
+                    new IllegalStateException("reading is required"), "Fallback.", "english"))
+                    .isEqualTo("Reading is required.");
+        }
+
+        @Test
+        void stillLocalisesTheFallbackForAHindiOperator() {
+            assertThat(service.resolveUserFacingErrorMessage(
+                    new IllegalStateException("bad SQL grammar [SELECT 1]"),
+                    "Manual reading could not be saved.", HINDI))
+                    .isEqualTo("मैनुअल रीडिंग सेव नहीं हो सकी। कृपया दोबारा प्रयास करें।");
         }
 
         @Test
