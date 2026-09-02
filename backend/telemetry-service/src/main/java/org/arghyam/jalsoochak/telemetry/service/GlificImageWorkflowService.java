@@ -72,11 +72,6 @@ public class GlificImageWorkflowService {
             String mediaUrl = glificWebhookRequest.getMediaUrl();
             boolean isMeterReplaced = Boolean.TRUE.equals(glificWebhookRequest.getIsMeterReplaced());
 
-            byte[] imageBytes = glificMediaService.downloadImage(mediaId, mediaUrl);
-            log.debug("Downloaded image for contactId {} (bytes={})", contactId, imageBytes.length);
-
-            String imageStorageUrl = glificMediaService.uploadImage(contactId, imageBytes);
-
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
             Integer tenantId = operatorWithSchema.operator().tenantId();
             String languageKey = localizationService.normalizeLanguageKey(
@@ -96,6 +91,15 @@ public class GlificImageWorkflowService {
                             operatorWithSchema.operator().id()
                     ))
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+
+            // Fetched and stored only once the submission is known to belong to a mapped operator.
+            // Doing either earlier meant every rejected submission still made this service dial a
+            // caller-supplied URL, and still wrote an object — unreferenced by any row, under a
+            // caller-chosen key, on an anonymously readable bucket.
+            byte[] imageBytes = glificMediaService.downloadImage(mediaId, mediaUrl);
+            log.debug("Downloaded image for contactId {} (bytes={})", contactId, imageBytes.length);
+
+            String imageStorageUrl = glificMediaService.uploadImage(contactId, imageBytes);
 
             CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
                     .schemeId(schemeId)

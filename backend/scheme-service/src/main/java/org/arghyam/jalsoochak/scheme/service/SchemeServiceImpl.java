@@ -10,6 +10,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.arghyam.jalsoochak.scheme.config.SchemeSecurityEvaluator;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
 import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
@@ -42,7 +43,6 @@ import org.springframework.web.server.ResponseStatusException;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.InputStream;
-import java.io.OutputStreamWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -1372,21 +1372,11 @@ public class SchemeServiceImpl implements SchemeService {
         }
         var jwt = jwtAuth.getToken();
 
-        // Verify the caller's tenant_state_code maps to the requested schema.
-        // SUPER_USER tokens carry no tenant_state_code and are allowed through.
-        boolean isSuperUser = jwtAuth.getAuthorities().stream()
-                .anyMatch(a -> "ROLE_SUPER_USER".equals(a.getAuthority()));
-        if (!isSuperUser) {
-            String tenantStateCode = jwt.getClaimAsString("tenant_state_code");
-            if (tenantStateCode == null || tenantStateCode.isBlank()) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                        "Not authorized to operate on this tenant");
-            }
-            String expectedSchema = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantStateCode);
-            if (!schemaName.equals(expectedSchema)) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                        "Not authorized to operate on this tenant");
-            }
+        // Defence in depth behind the controller's @RequiresTenantAccess: service-layer callers
+        // that resolve a schema before looking the caller up get the same tenant check.
+        if (!SchemeSecurityEvaluator.isCallerScopedToSchema(jwtAuth, schemaName)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Not authorized to operate on this tenant");
         }
 
         String email = jwt.getClaimAsString("email");

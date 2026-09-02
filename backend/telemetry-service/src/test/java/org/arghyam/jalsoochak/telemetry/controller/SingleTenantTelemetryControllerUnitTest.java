@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
+import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -159,6 +160,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -183,6 +185,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -211,6 +214,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -240,6 +244,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -265,6 +270,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -293,6 +299,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 

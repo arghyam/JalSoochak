@@ -5,6 +5,26 @@ When accessed through the API gateway, prefix each path with the service slug (e
 
 ---
 
+## Pagination
+
+Paginated endpoints take `page` (zero-indexed, default `0`) and `size` (default `20`; named `limit`
+on `/api/v1/tenant/user/staff`).
+
+On the **user-service** endpoints — `/api/v1/pumpoperator/...` and `/api/v1/tenant/user/staff` —
+both are validated at the controller: `page` must be `>= 0` and `size` must be between `1` and
+`100`. Out-of-range values are rejected with `400 Bad Request` and a `fieldErrors` entry naming the
+offending parameter — they are never silently clamped.
+
+Exception: `/api/v1/pumpoperator/pump-operators/by-scheme` only paginates when `page` or `size` is
+supplied. When either is, the same bounds apply.
+
+Endpoints on the other services do not share this contract. Scheme-service's `/api/v1/schemes`
+family, for one, takes `page`/`limit` unvalidated at the controller and clamps them in the service
+layer (`page` to `>= 0`, `limit` to `1..100`), so an out-of-range value there returns `200` with the
+clamped page rather than `400`.
+
+---
+
 ## Required Environment Variables
 
 Set the following environment variables before running the Telemetry services:
@@ -113,7 +133,7 @@ Set the following environment variables before running the Telemetry services:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/public/schemes/{schemeId}` | Get scheme by ID (public) |
+| GET | `/api/v1/public/schemes/{schemeId}?tenantCode={tenantCode}` | Get scheme by ID. Authenticated despite the `public` path — `tenantCode` must match the caller's own tenant. Optional `tenantId` is validated for consistency with `tenantCode` (400 on mismatch) |
 | GET | `/api/v1/scheme/schemes` | List all schemes |
 | GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings |
 | GET | `/api/v1/scheme/schemes/counts` | Scheme counts |
