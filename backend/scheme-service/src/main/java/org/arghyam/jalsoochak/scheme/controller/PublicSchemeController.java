@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.scheme.controller;
 
 import lombok.RequiredArgsConstructor;
+import org.arghyam.jalsoochak.scheme.config.RequiresTenantAccess;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.arghyam.jalsoochak.scheme.util.TenantSchemaResolver;
@@ -20,6 +21,11 @@ public class PublicSchemeController {
 
     private final SchemeDbRepository schemeDbRepository;
 
+    // Despite the /public prefix this endpoint is authenticated — scheme-service's SecurityConfig
+    // has no permitAll for /api/v1/public/**, and the gateway only opens /user/api/v1/public/**.
+    // It is therefore guarded like every other tenant-scoped read. If it is ever made genuinely
+    // public, drop this annotation along with adding the permitAll entries.
+    @RequiresTenantAccess
     @GetMapping("/schemes/{schemeId}")
     public ResponseEntity<SchemeDTO> getSchemeDetails(
             @PathVariable int schemeId,
