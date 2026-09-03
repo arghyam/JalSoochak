@@ -23,9 +23,17 @@ public class BfmWaterQuantityCalculator implements WaterQuantityCalculator {
 
     @Override
     public long calculate(WaterQuantityContext context) {
-        long current = context.currentReading() != null ? context.currentReading() : 0L;
-        long previous = context.previousReading() != null ? context.previousReading() : 0L;
+        Integer current = context.currentReading();
+        Integer previous = context.previousReading();
+        // A null previous reading means no baseline exists yet, not "the meter was at zero". A
+        // cumulative index is a running total, so without something to subtract there is no derivable
+        // volume for the day — the honest answer is 0. Treating the absence as 0 instead would write
+        // the entire meter index as one day's supply, which is how first-ever and post-gap readings
+        // came to hold values in the millions.
+        if (current == null || previous == null) {
+            return 0L;
+        }
         // Subtract as long: the readings are Integer, so an int subtraction could wrap on extreme values.
-        return WaterVolumeUnits.cubicMetresToLitres(Math.max(0L, current - previous));
+        return WaterVolumeUnits.cubicMetresToLitres(Math.max(0L, (long) current - previous));
     }
 }

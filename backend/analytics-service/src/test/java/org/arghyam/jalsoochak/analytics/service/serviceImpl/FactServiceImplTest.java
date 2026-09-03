@@ -151,10 +151,6 @@ class FactServiceImplTest {
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
         when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
-        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
-        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
-                .thenReturn(Optional.empty());
 
         service.ingestMeterReading(event);
 
@@ -180,15 +176,10 @@ class FactServiceImplTest {
         event.setSubmissionStatus(1);
         event.setReadingType(0);
 
-        FactMeterReading previousDayReading = FactMeterReading.builder()
-                .confirmedReading(100)
-                .build();
-
+        stubReadingLookups(95, 100);
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
         when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
-        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
-                .thenReturn(Optional.of(previousDayReading));
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
 
@@ -201,21 +192,11 @@ class FactServiceImplTest {
 
     @Test
     void ingestMeterReading_storesTheDeltaInLitresNotCubicMetres() {
-        MeterReadingEvent event = new MeterReadingEvent();
-        event.setTenantId(1);
-        event.setSchemeId(11);
-        event.setUserId(21);
-        event.setConfirmedReading(150);
-        event.setReadingAt("2026-01-02T10:15:00");
-        event.setReadingDate("2026-01-02");
-        event.setSubmissionStatus(1);
-        event.setReadingType(0);
-
+        MeterReadingEvent event = readingEvent(150, "2026-01-02");
+        stubReadingLookups(150, 100);
         when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
         when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
                 .thenReturn(false);
-        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
-                .thenReturn(Optional.of(FactMeterReading.builder().confirmedReading(100).build()));
         when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
 
@@ -225,6 +206,91 @@ class FactServiceImplTest {
         ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
         verify(waterQuantityRepository).save(captor.capture());
         assertThat(captor.getValue().getWaterQuantity()).isEqualTo(50_000L);
+    }
+
+    @Test
+    void ingestMeterReading_whenNoPriorReadingExists_storesZeroNotTheWholeMeterIndex() {
+        MeterReadingEvent event = readingEvent(1_250_000, "2026-01-02");
+        // A first-ever reading: nothing before this date.
+        stubReadingLookups(1_250_000, null);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        // The old rule defaulted the baseline to 0 and stored 1,250,000 m3 as one day's supply.
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isZero();
+    }
+
+    @Test
+    void ingestMeterReading_afterAGapMeasuresAgainstTheLastActualReading() {
+        // R1=100 on Jan 1, nothing on Jan 2 or Jan 3, R2=175 on Jan 4. The catch-up day carries all
+        // three days of volume; it is not measured against a Jan 3 that has no reading.
+        MeterReadingEvent event = readingEvent(175, "2026-01-04");
+        stubReadingLookups(175, 100);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        // The baseline lookup is anchored on the reading date itself, not on readingDate.minusDays(1).
+        verify(meterReadingRepository).findLatestBefore(1, 11, LocalDate.of(2026, 1, 4));
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(75_000L);
+    }
+
+    @Test
+    void ingestMeterReading_takesTheCurrentReadingFromTheTableNotTheEvent() {
+        // The event is a correction re-published for a day that already holds a later reading. Live
+        // ingestion must agree with the history recompute, which reads "the latest row on the date".
+        MeterReadingEvent event = readingEvent(120, "2026-01-02");
+        stubReadingLookups(150, 100);
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(50_000L);
+    }
+
+    private static MeterReadingEvent readingEvent(Integer confirmedReading, String readingDate) {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setConfirmedReading(confirmedReading);
+        event.setReadingAt(readingDate + "T10:15:00");
+        event.setReadingDate(readingDate);
+        event.setSubmissionStatus(1);
+        event.setReadingType(0);
+        return event;
+    }
+
+    /**
+     * Stubs the two reading lookups the water-quantity derivation makes: the day's own reading, and
+     * the baseline strictly before it ({@code null} = the scheme has none).
+     */
+    private void stubReadingLookups(Integer currentReading, Integer previousReading) {
+        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
+                any(), any(), any()))
+                .thenReturn(Optional.of(FactMeterReading.builder().confirmedReading(currentReading).build()));
+        when(meterReadingRepository.findLatestBefore(any(), any(), any()))
+                .thenReturn(Optional.ofNullable(previousReading)
+                        .map(r -> FactMeterReading.builder().confirmedReading(r).build()));
     }
 
     @Test

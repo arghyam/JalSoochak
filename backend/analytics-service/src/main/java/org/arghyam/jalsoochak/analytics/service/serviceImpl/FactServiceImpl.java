@@ -304,15 +304,6 @@ public class FactServiceImpl implements FactService {
             return;
         }
 
-        Integer currentReading = event.getConfirmedReading() != null
-                ? event.getConfirmedReading()
-                : event.getExtractedReading();
-        if (currentReading == null) {
-            log.warn("Skipping water quantity update; current reading missing (tenantId={}, schemeId={}, date={})",
-                    event.getTenantId(), event.getSchemeId(), readingDate);
-            return;
-        }
-
         Optional<WaterQuantityCalculator> calculatorOpt = waterQuantityCalculatorRegistry.resolve(event.getChannel());
         if (calculatorOpt.isEmpty()) {
             log.warn("Skipping water quantity update; no calculator registered for channel={} (tenantId={}, schemeId={}, date={}). "
@@ -326,15 +317,33 @@ public class FactServiceImpl implements FactService {
             return;
         }
 
-        LocalDate previousDate = readingDate.minusDays(1);
-        Integer previousReading = meterReadingRepository
-                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(
+        // Read the day's reading back from the table rather than taking it off the event. The history
+        // recompute defines it as "the latest row on that date"; if live ingestion used the event's own
+        // reading instead, the two would disagree on any day carrying more than one reading and would
+        // flip each other's values. Going through the table makes the definitions identical by
+        // construction. The row saved moments ago is visible here — the query flushes first.
+        Integer currentReading = meterReadingRepository
+                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
                         event.getTenantId(),
                         event.getSchemeId(),
-                        previousDate
+                        readingDate
                 )
                 .map(FactMeterReading::getConfirmedReading)
-                .orElse(0);
+                .orElse(null);
+        if (currentReading == null) {
+            log.warn("Skipping water quantity update; no stored reading for the day (tenantId={}, schemeId={}, date={})",
+                    event.getTenantId(), event.getSchemeId(), readingDate);
+            return;
+        }
+
+        // Baseline is the latest reading strictly before this date, not the previous calendar day's.
+        // Left null when the scheme has none: the calculator decides what its channel can derive
+        // without one (BFM: nothing, so 0). Never defaulted to 0 here — that is what made every
+        // first-ever and post-gap reading store the whole cumulative meter index as a day's supply.
+        Integer previousReading = meterReadingRepository
+                .findLatestBefore(event.getTenantId(), event.getSchemeId(), readingDate)
+                .map(FactMeterReading::getConfirmedReading)
+                .orElse(null);
 
         WaterQuantityContext context = WaterQuantityContext.builder()
                 .tenantId(event.getTenantId())

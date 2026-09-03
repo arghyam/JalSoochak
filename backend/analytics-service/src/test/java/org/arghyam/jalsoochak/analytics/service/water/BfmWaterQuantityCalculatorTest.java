@@ -26,8 +26,17 @@ class BfmWaterQuantityCalculatorTest {
     }
 
     @Test
-    void calculate_whenPreviousReadingNull_treatsItAsZero() {
-        assertThat(calculator.calculate(ctx(120, null))).isEqualTo(120_000L);
+    void calculate_whenNoPreviousReadingExists_returnsZeroNotTheWholeMeterIndex() {
+        // A null previous reading means "no baseline yet", not "the meter was at zero". Returning
+        // 120,000 L here would be writing the entire cumulative index as one day's supply.
+        assertThat(calculator.calculate(ctx(120, null))).isZero();
+    }
+
+    @Test
+    void calculate_whenPreviousReadingIsZero_stillDerivesTheDelta() {
+        // Distinct from the null case: a stored 0 is an actual reading, so the delta is derivable.
+        // (The repository filters these out of the baseline lookup, so this is defensive.)
+        assertThat(calculator.calculate(ctx(120, 0))).isEqualTo(120_000L);
     }
 
     @Test
