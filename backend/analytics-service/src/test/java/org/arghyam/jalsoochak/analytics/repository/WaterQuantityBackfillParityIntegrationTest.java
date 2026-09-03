@@ -129,6 +129,10 @@ class WaterQuantityBackfillParityIntegrationTest {
         seedLegacyQuantityRow(SCHEME, D3, 0L);
         seedLegacyQuantityRow(SCHEME, D4, 25L);
         seedLegacyQuantityRow(GAP_SCHEME, D1, 500L);
+        // GAP_SCHEME/D2's reading is a genuine 0 (see seedReadings), not a missing reading — the cur
+        // LATERAL must return 0 here, not NULL, so the row recomputes rather than being left as an
+        // exception. Legacy value is irrelevant, as with the other seeded rows.
+        seedLegacyQuantityRow(GAP_SCHEME, D2, 5L);
         seedLegacyQuantityRow(GAP_SCHEME, D4, 70L);
 
         Map<Long, Long> recomputed = runRecompute();
@@ -138,6 +142,8 @@ class WaterQuantityBackfillParityIntegrationTest {
                 assertThat(newQty)
                         .as("row %d must match what live ingestion would derive", id)
                         .isEqualTo(liveValueFor(id)));
+        // Baseline is GAP_SCHEME's D1 reading (500); GREATEST(0, 0 - 500) * 1000 = 0, not NULL.
+        assertThat(recomputed.get(idOf(GAP_SCHEME, D2))).isZero();
     }
 
     @Test
@@ -179,6 +185,8 @@ class WaterQuantityBackfillParityIntegrationTest {
 
         Map<Long, Long> recomputed = runRecompute();
 
+        // D2's day reading is the 17:30 one (150); baseline is D1 (100) -> (150-100) * 1000.
+        assertThat(recomputed.get(latest)).isEqualTo(50_000L);
         assertThat(recomputed.get(stale)).isEqualTo(recomputed.get(latest));
         assertThat(isLatest(stale)).isFalse();
         assertThat(isLatest(latest)).isTrue();

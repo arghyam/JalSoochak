@@ -32,6 +32,7 @@ import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorReg
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
 import org.arghyam.jalsoochak.analytics.service.water.WaterVolumeUnits;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,7 +45,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.WeekFields;
@@ -93,6 +93,24 @@ public class FactServiceImpl implements FactService {
      */
     @Value("${analytics.water-quantity.implausible-daily-cubic-metres:100000}")
     private long implausibleDailyCubicMetres = 100_000L;
+
+    /**
+     * Rejects a threshold that would make {@link WaterVolumeUnits#cubicMetresToLitres} throw on every
+     * implausibility check: negative values, and values whose litre conversion overflows {@code long}.
+     * Caught here rather than left to surface from {@link #warnIfImplausible} — that method runs on the
+     * Kafka consumer thread, where an uncaught {@code ArithmeticException} would fail the offset commit
+     * and retry forever, stalling the partition.
+     */
+    @PostConstruct
+    void validateImplausibleDailyCubicMetres() {
+        if (implausibleDailyCubicMetres < 0
+                || implausibleDailyCubicMetres > Long.MAX_VALUE / WaterVolumeUnits.LITRES_PER_CUBIC_METRE) {
+            throw new IllegalStateException(
+                    "analytics.water-quantity.implausible-daily-cubic-metres must be between 0 and "
+                            + (Long.MAX_VALUE / WaterVolumeUnits.LITRES_PER_CUBIC_METRE)
+                            + ", got " + implausibleDailyCubicMetres);
+        }
+    }
 
     @Override
     @Transactional
@@ -404,10 +422,7 @@ public class FactServiceImpl implements FactService {
         log.warn("Implausible daily water quantity {} L (> {} L) stored as-is from {} path "
                         + "(tenantId={}, schemeId={}, date={}); check the underlying meter reading",
                 litres, thresholdLitres, source, tenantId, schemeId, date);
-        meterRegistry.counter("water_quantity.implausible",
-                        "source", source,
-                        "tenantId", String.valueOf(tenantId),
-                        "schemeId", String.valueOf(schemeId))
+        meterRegistry.counter("water_quantity.implausible", "source", source)
                 .increment();
     }
 

@@ -443,8 +443,8 @@ class FactServiceImplTest {
         verify(waterQuantityRepository).save(captor.capture());
         // Reported, never clamped: clamping would invent data and hide the bad reading.
         assertThat(captor.getValue().getWaterQuantity()).isEqualTo(5_000_000_000L);
-        assertThat(meterRegistry.counter("water_quantity.implausible",
-                "source", "correction", "tenantId", "1", "schemeId", "11").count()).isEqualTo(1.0);
+        assertThat(meterRegistry.counter("water_quantity.implausible", "source", "correction").count())
+                .isEqualTo(1.0);
     }
 
     @Test

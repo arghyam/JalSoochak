@@ -18,5 +18,13 @@
 --
 -- NOTE: INT -> BIGINT is not binary-coercible in Postgres, so this rewrites the table under an
 -- ACCESS EXCLUSIVE lock. Seconds at this row count; deploy in a low-traffic window.
+--
+-- lock_timeout is scoped to this migration transaction only (Flyway wraps each migration in one,
+-- so SET LOCAL reverts automatically at commit). Without it, a request queued behind a long-running
+-- query on this table would sit waiting indefinitely for the ACCESS EXCLUSIVE lock — and every
+-- later request, reads included, queues behind that one waiter in turn, turning a slow query into a
+-- full outage on the table. Failing fast surfaces that contention as a failed deploy instead.
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE analytics_schema.fact_water_quantity_table
     ALTER COLUMN water_quantity TYPE BIGINT;

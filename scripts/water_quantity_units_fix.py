@@ -180,16 +180,52 @@ def scalar(conn, sql: str, params=None):
 # phase 0 — backup
 # --------------------------------------------------------------------------------------
 
+def _backup_covers_window(conn, backup_table: str, live_table: str, date_column: str,
+                           start: dt.date, end: dt.date) -> bool:
+    """True iff every row currently in live_table's window has a matching id in backup_table.
+
+    Id-presence rather than MIN/MAX(date_column) on purpose: a resumed run may ask for a window
+    wider than, narrower than, or offset from the one the kept backup was originally taken over,
+    and comparing endpoints can't tell "backup is missing dates in the middle" from "there's
+    genuinely no data there". Checking that every live row's id is backed up catches both.
+    """
+    live_count = scalar(conn, f"SELECT COUNT(*) FROM {live_table} WHERE {date_column} BETWEEN %s AND %s",
+                        (start, end))
+    if not live_count:
+        return True
+    covered_count = scalar(conn, f"""
+        SELECT COUNT(*) FROM {live_table} t
+        WHERE t.{date_column} BETWEEN %s AND %s
+          AND EXISTS (SELECT 1 FROM {backup_table} b WHERE b.id = t.id)
+        """, (start, end))
+    return covered_count == live_count
+
+
 def backup(conn, suffix: str, start: dt.date, end: dt.date, overwrite: bool) -> None:
     water_backup = f"public.fact_water_quantity_backup_{suffix}"
     performance_backup = f"public.fact_scheme_performance_backup_{suffix}"
 
     # Resuming an interrupted run means re-running --execute with the same --backup-suffix, and
     # re-taking the backup then would capture the half-repaired table and destroy the only copy of
-    # the original values. An existing backup is therefore kept, not replaced.
-    if scalar(conn, "SELECT to_regclass(%s)", (water_backup,)) and not overwrite:
-        LOG.info("phase 0: %s already exists — kept as the rollback point, not re-taken",
-                 water_backup)
+    # the original values. An existing backup is therefore kept, not replaced — but only if it
+    # actually covers this run's window; a --backup-suffix reused across a wider or shifted window
+    # would otherwise silently leave the extra rows with no rollback point.
+    water_backup_exists = bool(scalar(conn, "SELECT to_regclass(%s)", (water_backup,)))
+    if water_backup_exists and not overwrite:
+        performance_backup_exists = bool(scalar(conn, "SELECT to_regclass(%s)", (performance_backup,)))
+        if not performance_backup_exists:
+            sys.exit(f"{water_backup} exists but {performance_backup} does not — backups for a "
+                     "suffix must be taken together. Use --overwrite-backup or a different "
+                     "--backup-suffix.")
+        if not (_backup_covers_window(conn, water_backup, WATER_TABLE, "date", start, end)
+                and _backup_covers_window(conn, performance_backup, PERFORMANCE_TABLE,
+                                          "last_water_supply_date", start, end)):
+            sys.exit(f"{water_backup} / {performance_backup} do not cover every row in "
+                     f"{start}..{end} — this --backup-suffix was taken over a different window. "
+                     "Use --overwrite-backup to retake it (only safe before any --execute has run "
+                     "against this suffix) or pick a fresh --backup-suffix.")
+        LOG.info("phase 0: %s already exists and covers %s..%s — kept as the rollback point, "
+                 "not re-taken", water_backup, start, end)
     else:
         with conn.cursor() as cur:
             cur.execute(f"DROP TABLE IF EXISTS {water_backup}")
@@ -221,6 +257,27 @@ def backup(conn, suffix: str, start: dt.date, end: dt.date, overwrite: bool) -> 
 # --------------------------------------------------------------------------------------
 # phase 1 — identify
 # --------------------------------------------------------------------------------------
+
+def ensure_backfill_index(conn) -> None:
+    """Composite index the recompute's cur/prev LATERAL lookups need to avoid a per-row scan.
+
+    Both lookups in recompute_water_quantity.sql filter by (tenant_id, scheme_id) and order by
+    (reading_date, reading_at, id) — the only existing index covers (tenant_id, scheme_id), so
+    without this one every row of fact_water_quantity_table drives an unindexed scan of its
+    scheme's whole reading history. It also matches the ORDER BY on
+    FactMeterReadingRepository's findTopBy...ReadingDateOrderByReadingAtDescIdDesc and
+    findLatestBefore, so it keeps paying for itself on the live ingestion path after the backfill.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_fact_meter_reading_tenant_scheme_date_lookup
+                ON analytics_schema.fact_meter_reading_table
+                (tenant_id, scheme_id, reading_date DESC, reading_at DESC, id DESC)
+            """)
+    conn.commit()
+    LOG.info("prep: idx_fact_meter_reading_tenant_scheme_date_lookup present on "
+             "fact_meter_reading_table")
+
 
 def identify(conn, start: dt.date, end: dt.date) -> dict:
     recompute_sql = load_recompute_sql()
@@ -459,7 +516,14 @@ def apply_performance(conn, start: dt.date, end: dt.date) -> int:
 # phase 4 — verify
 # --------------------------------------------------------------------------------------
 
-def verify(conn, start: dt.date, end: dt.date) -> None:
+def verify(conn, start: dt.date, end: dt.date) -> int:
+    """Reports on an applied (or partially applied) repair and returns the still-unrepaired count.
+
+    That count (at_old) is the caller's signal for a non-zero exit status: rows recomputable from a
+    reading but still holding their pre-repair value are a failure to finish the job. It is distinct
+    from report_exceptions's rows, which have no reading to recompute from and are intentionally
+    left untouched — informational, not a failure.
+    """
     if not scalar(conn, "SELECT to_regclass(%s)", (RECOMPUTE_TABLE,)):
         sys.exit(f"{RECOMPUTE_TABLE} does not exist — run --dry-run or --execute first.")
 
@@ -509,6 +573,8 @@ def verify(conn, start: dt.date, end: dt.date) -> None:
     LOG.info("verify: total supplied over %s..%s — %s L at old_qty, %s L at new_qty",
              start, end, supplied_before, supplied_after)
     LOG.info("verify: remember to flush the Redis dashboard keys; the cache TTL is 24h")
+
+    return at_old
 
 
 # --------------------------------------------------------------------------------------
@@ -615,11 +681,13 @@ def main() -> int:
         LOG.info("window: %s..%s, phase=%s", start, end, args.phase)
 
         if args.verify:
-            verify(conn, start, end)
-            return 0
+            at_old = verify(conn, start, end)
+            return 1 if at_old else 0
 
         backup(conn, suffix, start, end, args.overwrite_backup)
         conn.commit()
+
+        ensure_backfill_index(conn)
 
         stats = identify(conn, start, end)
         conn.commit()
@@ -638,9 +706,9 @@ def main() -> int:
         if args.phase in ("performance", "all"):
             apply_performance(conn, start, end)
 
-        verify(conn, start, end)
+        at_old = verify(conn, start, end)
         LOG.info("done. Backup suffix for --rollback: %s", suffix)
-        return 0
+        return 1 if at_old else 0
     except Exception:
         conn.rollback()
         raise
