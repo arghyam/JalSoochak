@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.scheme.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.scheme.config.RequiresTenantAccess;
 import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
@@ -26,8 +27,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.List;
-
 @RestController
 @RequestMapping("/api/v1/scheme")
 @RequiredArgsConstructor
@@ -36,6 +35,7 @@ public class SchemeController {
 
     private final SchemeService schemeService;
 
+    @RequiresTenantAccess
     @GetMapping("/schemes")
     public ResponseEntity<PageResponseDTO<SchemeDTO>> listSchemes(
             @RequestParam String tenantCode,
@@ -68,6 +68,7 @@ public class SchemeController {
         ));
     }
 
+    @RequiresTenantAccess
     @GetMapping("/schemes/yesterday-final-readings")
     public ResponseEntity<PageResponseDTO<SchemeYesterdayFinalReadingDTO>> listSchemesWithYesterdayFinalReading(
             @RequestParam String tenantCode,
@@ -86,6 +87,7 @@ public class SchemeController {
         return b;
     }
 
+    @RequiresTenantAccess
     @GetMapping("/schemes/mappings")
     public ResponseEntity<PageResponseDTO<SchemeMappingDTO>> listSchemeMappings(
             @RequestParam String tenantCode,
@@ -117,6 +119,7 @@ public class SchemeController {
         ));
     }
 
+    @RequiresTenantAccess
     @GetMapping("/schemes/counts")
     public ResponseEntity<SchemeCountsDTO> getSchemeCounts(
             @RequestParam String tenantCode
@@ -125,6 +128,7 @@ public class SchemeController {
         return ResponseEntity.ok(schemeService.getSchemeCounts(tenantCode));
     }
 
+    @RequiresTenantAccess
     @GetMapping("/schemes/counts/by-status")
     public ResponseEntity<SchemeStatusCountsDTO> getSchemeStatusCounts(
             @RequestParam String tenantCode
@@ -133,6 +137,7 @@ public class SchemeController {
         return ResponseEntity.ok(schemeService.getSchemeStatusCounts(tenantCode));
     }
 
+    @PreAuthorize("@schemeSecurity.canAccessTenantId(#tenantId, authentication)")
     @GetMapping("/schemes/{schemeId}/statuses")
     public ResponseEntity<SchemeStatusesResponseDTO> getSchemeStatuses(
             @PathVariable int schemeId,
@@ -142,7 +147,7 @@ public class SchemeController {
         return ResponseEntity.ok(schemeService.getSchemeStatuses(tenantId, schemeId));
     }
 
-    @PreAuthorize("hasRole('STATE_ADMIN')")
+    @PreAuthorize("hasRole('STATE_ADMIN') and @schemeSecurity.canAccessTenant(#tenantCode, authentication)")
     @PatchMapping("/schemes/{schemeId}/status")
     public ResponseEntity<Void> updateSchemeStatuses(
             @RequestParam String tenantCode,

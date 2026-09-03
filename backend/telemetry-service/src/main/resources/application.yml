@@ -61,6 +61,37 @@ glific:
 telemetry:
   lenient-ingestion:
     enabled: ${TELEMETRY_LENIENT_INGESTION_ENABLED:true}
+  reading-url:
+    validation:
+      # Kill switch for the `reading_url` check on POST /readings only. The rules themselves come
+      # from media-download.ssrf-guard below, shared with the Glific media fetch; this exists so the
+      # higher-volume of the two paths can be turned off without disarming that one.
+      enabled: ${TELEMETRY_READING_URL_VALIDATION_ENABLED:true}
+  webhook:
+    auth:
+      # Shared-secret authentication for the 26 Glific webhook endpoints on
+      # GlificWebhookController. These are exposed publicly by ingress, bypassing the api-gateway,
+      # so this filter is the only thing standing in front of them.
+      #
+      # ENFORCE (default) rejects with 401. AUDIT records the outcome but always serves — it is the
+      # kill switch: set TELEMETRY_WEBHOOK_AUTH_MODE=AUDIT and restart to revert without a code
+      # deploy. OFF skips the check entirely.
+      #
+      # ENFORCE with no token-hashes fails startup deliberately: a deploy that forgets the secret
+      # crash-loops and leaves the previous container serving, rather than silently 401-ing every
+      # field submission. The default is ENFORCE so the endpoints cannot be shipped unprotected by
+      # omission. For local development, set TELEMETRY_WEBHOOK_AUTH_MODE=OFF.
+      #
+      # ORDER OF OPERATIONS when rolling this out: add the header to the Glific flow webhook nodes
+      # FIRST (harmless while unauthenticated — unknown headers are ignored), and only then set
+      # token-hashes and deploy. The reverse order rejects every field submission until the flows
+      # catch up. Watch the telemetry.webhook.auth{result="missing"} counter on /actuator/prometheus.
+      mode: ${TELEMETRY_WEBHOOK_AUTH_MODE:ENFORCE}
+      header-name: ${TELEMETRY_WEBHOOK_AUTH_HEADER:X-Webhook-Token}
+      # Comma-separated SHA-256 hex hashes of the accepted tokens — NOT the tokens themselves.
+      # Two entries make a rotation window: add the new hash, update Glific, drop the old one.
+      # Startup fails if this is empty while mode=ENFORCE, or if an entry is not 64-char lowercase hex.
+      token-hashes: ${TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES:}
 
 flowvision:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
@@ -103,6 +134,28 @@ media-download:
   retry:
     max-attempts: ${MEDIA_DOWNLOAD_RETRY_MAX_ATTEMPTS:3}
     initial-backoff-ms: ${MEDIA_DOWNLOAD_RETRY_INITIAL_BACKOFF_MS:300}
+  # Ceiling on a single meter image. Comfortably above WhatsApp's own 16 MB media limit, so it only
+  # ever trips on a response that is not a meter image.
+  max-bytes: ${MEDIA_DOWNLOAD_MAX_BYTES:20971520}
+  http:
+    connect-timeout-ms: ${MEDIA_DOWNLOAD_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${MEDIA_DOWNLOAD_READ_TIMEOUT_MS:10000}
+  # One policy for both caller-supplied meter-image URLs: the `mediaUrl` this service fetches for
+  # readings/glific, and the `reading_url` submitted to POST /readings, which this service does not
+  # fetch but hands to FlowVision as `imageURL`. FlowVision, Glific and MinIO calls of our own go out
+  # on the shared client and are unaffected.
+  ssrf-guard:
+    # Master switch: disabling this disarms both paths.
+    enabled: ${MEDIA_DOWNLOAD_SSRF_GUARD_ENABLED:true}
+    # Empty means any public host. Populating it turns the guard from deny-internal into
+    # allow-listed — and it governs BOTH paths, so it must hold the union: Glific's media hosts
+    # (confirm from traffic) plus the observed reading_url senders
+    # adc-ecos.enlightcloud.com,nyc3.digitaloceanspaces.com,flowvision-test.s3.ap-south-1.amazonaws.com,filemanager.gupshup.io
+    allowed-hosts: ${MEDIA_DOWNLOAD_ALLOWED_HOSTS:}
+    require-https: ${MEDIA_DOWNLOAD_REQUIRE_HTTPS:false}
+    # Local development only — never enable in a deployed environment.
+    allow-internal-addresses: ${MEDIA_DOWNLOAD_ALLOW_INTERNAL_ADDRESSES:false}
+    max-redirects: ${MEDIA_DOWNLOAD_MAX_REDIRECTS:3}
 
 #keycloak:
 #  realm: ${KEYCLOAK_REALM:jalsoochak-realm}

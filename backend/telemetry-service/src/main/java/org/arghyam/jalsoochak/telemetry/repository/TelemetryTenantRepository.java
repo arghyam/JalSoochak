@@ -9,7 +9,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -31,6 +30,8 @@ public class TelemetryTenantRepository {
     private final PiiEncryptionService piiEncryptionService;
     private static final String SCHEME_SELECTION_CORRELATION_PREFIX = "scheme-selection-";
     private static final int OPERATOR_LOOKUP_CACHE_SIZE = 10_000;
+    /** Mirrors {@code IngestionSource.NORMAL} — the column default, so it needs no tracking UPDATE. */
+    private static final int NORMAL_INGESTION_SOURCE = 0;
     private final Map<String, String> phoneToSchemaCache = Collections.synchronizedMap(
             new LinkedHashMap<>(256, 0.75f, true) {
                 @Override
@@ -724,6 +725,37 @@ public class TelemetryTenantRepository {
                                                String submittedStateSchemeId,
                                                String submittedCentreSchemeId,
                                                String submittedPhoneHash) {
+        return persistFlowReadingWithTracking(schemaName, existingReadingId, schemeId, operatorId, readingAt,
+                extractedReading, confirmedReading, correlationId, flowVisionCorrelationId, imageUrl,
+                meterChangeReason, ingestionSource, submittedStateSchemeId, submittedCentreSchemeId,
+                submittedPhoneHash, null);
+    }
+
+    /**
+     * READING-PROVENANCE: as above, plus {@code confirmedReadingSource} written inside the same
+     * transaction. An API-supplied value (no image, no AI extraction) is only distinguishable from an
+     * AI-extracted one by that marker, so the row must not be able to land without it — a post-insert
+     * UPDATE that failed on its own would leave the row looking AI-extracted. A {@code null} source
+     * leaves the column untouched, and a non-null one is a safe no-op on pre-V35 tenant schemas where
+     * the column does not exist (guarded by {@code columnExists}).
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public Long persistFlowReadingWithTracking(String schemaName,
+                                               Long existingReadingId,
+                                               Long schemeId,
+                                               Long operatorId,
+                                               LocalDateTime readingAt,
+                                               BigDecimal extractedReading,
+                                               BigDecimal confirmedReading,
+                                               String correlationId,
+                                               String flowVisionCorrelationId,
+                                               String imageUrl,
+                                               String meterChangeReason,
+                                               int ingestionSource,
+                                               String submittedStateSchemeId,
+                                               String submittedCentreSchemeId,
+                                               String submittedPhoneHash,
+                                               Integer confirmedReadingSource) {
         Long readingId;
         if (existingReadingId != null) {
             readingId = existingReadingId;
@@ -733,8 +765,19 @@ public class TelemetryTenantRepository {
             readingId = createFlowReading(schemaName, schemeId, operatorId, readingAt, extractedReading,
                     confirmedReading, correlationId, flowVisionCorrelationId, imageUrl, meterChangeReason);
         }
-        applyIngestionTracking(schemaName, readingId, ingestionSource, submittedStateSchemeId,
-                submittedCentreSchemeId, submittedPhoneHash);
+        // A NORMAL ingestion source carries no submitted-id metadata and matches the column defaults, so
+        // the tracking UPDATE is skipped for rows that only need the provenance marker.
+        boolean hasIngestionTracking = ingestionSource != NORMAL_INGESTION_SOURCE
+                || submittedStateSchemeId != null
+                || submittedCentreSchemeId != null
+                || submittedPhoneHash != null;
+        if (hasIngestionTracking) {
+            applyIngestionTracking(schemaName, readingId, ingestionSource, submittedStateSchemeId,
+                    submittedCentreSchemeId, submittedPhoneHash);
+        }
+        if (confirmedReadingSource != null) {
+            applyConfirmedReadingSource(schemaName, readingId, confirmedReadingSource, null);
+        }
         return readingId;
     }
 
@@ -2105,94 +2148,6 @@ public class TelemetryTenantRepository {
                 WHERE id = ?
                 """, schemaName);
         jdbcTemplate.update(sql, latitude, longitude, updatedBy, readingId);
-    }
-
-    public void upsertAnalyticsWaterQuantity(Integer tenantId,
-                                             Long schemeId,
-                                             Long userId,
-                                             LocalDate date,
-                                             BigDecimal waterQuantity,
-                                             Integer submissionStatus) {
-        if (tenantId == null || schemeId == null || userId == null || date == null || waterQuantity == null) {
-            throw new IllegalArgumentException("tenantId, schemeId, userId, date, and waterQuantity are required");
-        }
-
-        int schemeIdInt = Math.toIntExact(schemeId);
-        int userIdInt = Math.toIntExact(userId);
-        int waterQuantityInt = Math.max(0, waterQuantity.setScale(0, RoundingMode.HALF_UP).intValue());
-
-        boolean hasSubmissionStatus = columnExists("analytics_schema", "fact_water_quantity_table", "submission_status");
-        boolean hasOutageReason = columnExists("analytics_schema", "fact_water_quantity_table", "outage_reason");
-        boolean hasNonSubmissionReason = columnExists("analytics_schema", "fact_water_quantity_table", "non_submission_reason");
-
-        List<Object> updateArgs = new ArrayList<>();
-        updateArgs.add(tenantId);
-        updateArgs.add(schemeIdInt);
-        updateArgs.add(date);
-        StringBuilder updateSql = new StringBuilder("""
-                UPDATE analytics_schema.fact_water_quantity_table
-                SET user_id = ?,
-                    water_quantity = ?,
-                    updated_at = NOW()
-                """);
-        updateArgs.add(userIdInt);
-        updateArgs.add(waterQuantityInt);
-        if (hasSubmissionStatus) {
-            updateSql.append(", submission_status = ?");
-            updateArgs.add(submissionStatus);
-        }
-        if (hasOutageReason) {
-            updateSql.append(", outage_reason = NULL");
-        }
-        if (hasNonSubmissionReason) {
-            updateSql.append(", non_submission_reason = NULL");
-        }
-        updateSql.insert(0, """
-                WITH latest AS (
-                    SELECT id
-                    FROM analytics_schema.fact_water_quantity_table
-                    WHERE tenant_id = ?
-                      AND scheme_id = ?
-                      AND "date" = ?
-                    ORDER BY updated_at DESC NULLS LAST, id DESC
-                    LIMIT 1
-                )
-                """);
-        updateSql.append("""
-
-                FROM latest
-                WHERE analytics_schema.fact_water_quantity_table.id = latest.id
-                """);
-
-        int updated = jdbcTemplate.update(updateSql.toString(), updateArgs.toArray());
-        if (updated > 0) {
-            return;
-        }
-
-        List<Object> insertArgs = new ArrayList<>();
-        StringBuilder columns = new StringBuilder("tenant_id, scheme_id, user_id, water_quantity, \"date\", created_at, updated_at");
-        StringBuilder values = new StringBuilder("?, ?, ?, ?, ?, NOW(), NOW()");
-        insertArgs.add(tenantId);
-        insertArgs.add(schemeIdInt);
-        insertArgs.add(userIdInt);
-        insertArgs.add(waterQuantityInt);
-        insertArgs.add(date);
-        if (hasSubmissionStatus) {
-            columns.append(", submission_status");
-            values.append(", ?");
-            insertArgs.add(submissionStatus);
-        }
-        if (hasOutageReason) {
-            columns.append(", outage_reason");
-            values.append(", NULL");
-        }
-        if (hasNonSubmissionReason) {
-            columns.append(", non_submission_reason");
-            values.append(", NULL");
-        }
-
-        String insertSql = "INSERT INTO analytics_schema.fact_water_quantity_table (" + columns + ") VALUES (" + values + ")";
-        jdbcTemplate.update(insertSql, insertArgs.toArray());
     }
 
     public Optional<Long> findLatestPlaceholderFlowReadingIdForDate(String schemaName,

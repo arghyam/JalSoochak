@@ -12,7 +12,8 @@ import java.time.LocalDate;
  * the same numeric field carries a different quantity per channel:
  * <ul>
  *   <li>{@link org.arghyam.jalsoochak.analytics.enums.ReadingChannel#BFM BFM}: the cumulative
- *       bulk-flow-meter index (litres); the day's quantity is the delta over the previous day.</li>
+ *       bulk-flow-meter index in cubic metres (m&sup3; = KL); the day's quantity is the delta over the
+ *       previous reading, converted to litres by the calculator.</li>
  *   <li>Future channels interpret the value differently (e.g. ELM: energy consumed in kWh;
  *       PDU: pump running duration in minutes) and additionally read per-scheme parameters
  *       (efficiency / head / discharge rate) keyed by {@link #tenantId()} / {@link #schemeId()}.</li>

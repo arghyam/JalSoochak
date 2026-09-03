@@ -16,6 +16,7 @@ import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
+import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.springframework.http.HttpStatus;
@@ -53,6 +54,12 @@ public class BfmReadingService {
      * the resolver's 14-delta window so 14 consecutive-day deltas survive diffing.
      */
     private static final int ROLLOVER_HISTORY_DAYS = 18;
+
+    /**
+     * Single answer for "no operator here": used both when the contact is unknown and when it belongs
+     * to another tenant, so the two cases stay indistinguishable to a caller probing phone numbers.
+     */
+    private static final String OPERATOR_LOOKUP_MISS = "No reading found for operator";
 
     public CreateReadingResponse createReading(CreateReadingRequest request,
                                                String schemaName,
@@ -357,7 +364,11 @@ public class BfmReadingService {
         // The resolved value seeds confirmed_reading and is the number surfaced to the operator for
         // confirmation; extracted_reading stays the model value (dedup/audit). When the resolver is not
         // applicable (empty result) effectiveConfirmedReading is left untouched — byte-identical to legacy.
-        int confirmedReadingSource = RolloverResolutionService.SOURCE_AS_EXTRACTED;
+        // READING-PROVENANCE: an API-supplied value is not "as extracted" — nothing extracted it. Seeded
+        // here, ahead of the rollover resolver, which cannot run on this path (it needs an OCR result).
+        int confirmedReadingSource = request.isExternallyAsserted()
+                ? RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED
+                : RolloverResolutionService.SOURCE_AS_EXTRACTED;
         String rolloverAuditJson = null;
         Optional<RolloverResolutionService.ResolvedReading> rollover =
                 resolveRolloverIfApplicable(schemaName, request, ocrResult, isMeterReplaced, latestSnapshotOpt);
@@ -374,10 +385,12 @@ public class BfmReadingService {
                 operatorInRequest.id(),
                 LocalDate.from(readingAt)
         );
-        if (lenientIngestion) {
+        if (lenientIngestion || request.isExternallyAsserted()) {
             // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
             // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
             // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
+            // READING-PROVENANCE: API-supplied values take the same transactional path — same inserts and
+            // updates as before, plus the EXTERNALLY_ASSERTED marker committed with the row.
             readingId = telemetryTenantRepository.persistFlowReadingWithTracking(
                     schemaName,
                     placeholderIdOpt.orElse(null),
@@ -390,10 +403,11 @@ public class BfmReadingService {
                     flowVisionCorrelationId,
                     request.getReadingUrl(),
                     request.getMeterChangeReason(),
-                    request.getIngestionSource(),
+                    request.getIngestionSource() != null ? request.getIngestionSource() : IngestionSource.NORMAL,
                     request.getSubmittedStateSchemeId(),
                     request.getSubmittedCentreSchemeId(),
-                    request.getSubmittedPhoneHash());
+                    request.getSubmittedPhoneHash(),
+                    request.isExternallyAsserted() ? confirmedReadingSource : null);
         } else if (placeholderIdOpt.isPresent()) {
             readingId = placeholderIdOpt.get();
             telemetryTenantRepository.updateFlowReadingFromIngestion(
@@ -426,7 +440,8 @@ public class BfmReadingService {
         // ROLLOVER-RESOLVE: tag provenance + best-effort audit only when the resolver actually overrode
         // the model value. createReading is not @Transactional, so this runs as a separate guarded
         // statement (audit failure only warns) — acceptable, provenance is audit-only. Every other row
-        // keeps the column's DEFAULT 0.
+        // keeps the column's DEFAULT 0. (API-supplied values never reach here: their marker is written
+        // inside the insert transaction above.)
         if (confirmedReadingSource == RolloverResolutionService.SOURCE_ROLLOVER_RESOLVED) {
             telemetryTenantRepository.applyConfirmedReadingSource(
                     schemaName, readingId, confirmedReadingSource, rolloverAuditJson);
@@ -594,13 +609,18 @@ public class BfmReadingService {
             );
         }
 
-        var operatorWithSchema = glificOperatorContextService.resolveOperatorWithSchema(phoneNumber);
+        // Same cross-tenant exposure as the reset path: the phone lookup spans every tenant schema, so
+        // an authenticated tenant has to bound which operator's reading this correction may overwrite.
+        // tenantId is null only for the in-process overloads that have no authenticated caller.
+        TelemetryOperatorWithSchema operatorWithSchema = tenantId != null
+                ? resolveOperatorInTenant(phoneNumber, tenantId)
+                : glificOperatorContextService.resolveOperatorWithSchema(phoneNumber);
         String schemaName = operatorWithSchema.schemaName();
         TelemetryOperator operator = operatorWithSchema.operator();
 
         TelemetryLatestFlowReadingRecord latestReading = telemetryTenantRepository
                 .findLatestFlowReadingByOperator(schemaName, operator.id())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No reading found for operator"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS));
 
         telemetryTenantRepository.updateConfirmedReading(
                 schemaName,
@@ -721,19 +741,38 @@ public class BfmReadingService {
         return ReadingChannel.fromChannelValue(channelValue).getCode();
     }
 
+    /**
+     * Zeroes the operator's latest confirmed reading, scoped to the tenant the caller authenticated as.
+     *
+     * <p>This is the most destructive route in the service: it overwrites the only copy of a confirmed
+     * reading, and it addresses it by phone number, which is guessable. Two things therefore bound it.
+     * {@code tenantId} is mandatory — a caller with no authenticated tenant gets a 401 rather than an
+     * unscoped search — and the operator the phone resolves to must belong to that tenant. The second
+     * check is not redundant: {@code resolveOperatorWithSchema} <em>prefers</em> the given tenant but
+     * falls back to a match in any other schema, so without it a valid tenant-A key would reach a
+     * tenant-B operator's reading.
+     *
+     * <p>A cross-tenant hit and an unknown contact answer identically (404, same reason) so the
+     * endpoint cannot be used to test whether a phone number is registered in some other tenant. The
+     * previous value is carried back on {@code lastConfirmedReading} so the caller and the audit log
+     * both retain what the reset destroyed.
+     */
     @Transactional
-    public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+    public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
         if (phoneNumber == null || phoneNumber.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "phoneNumber must be provided");
         }
+        if (tenantId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key");
+        }
 
-        var operatorWithSchema = glificOperatorContextService.resolveOperatorWithSchema(phoneNumber);
+        TelemetryOperatorWithSchema operatorWithSchema = resolveOperatorInTenant(phoneNumber, tenantId);
         String schemaName = operatorWithSchema.schemaName();
         TelemetryOperator operator = operatorWithSchema.operator();
 
         TelemetryLatestFlowReadingRecord latestReading = telemetryTenantRepository
                 .findLatestFlowReadingByOperator(schemaName, operator.id())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No reading found for operator"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS));
 
         telemetryTenantRepository.updateConfirmedReading(
                 schemaName,
@@ -764,8 +803,29 @@ public class BfmReadingService {
                 .message("Latest confirmed reading reset to 0")
                 .correlationId(latestReading.correlationId())
                 .meterReading(BigDecimal.ZERO)
+                .lastConfirmedReading(latestReading.confirmedReading())
                 .qualityStatus("CONFIRMED")
                 .build();
+    }
+
+    /**
+     * Resolves an operator by phone and refuses anything outside {@code tenantId}. Both a miss and a
+     * cross-tenant hit surface as the same 404, so neither confirms that the contact exists elsewhere.
+     */
+    private TelemetryOperatorWithSchema resolveOperatorInTenant(String phoneNumber, Integer tenantId) {
+        TelemetryOperatorWithSchema operatorWithSchema;
+        try {
+            operatorWithSchema = glificOperatorContextService.resolveOperatorWithSchema(phoneNumber, tenantId);
+        } catch (IllegalStateException notFound) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS);
+        }
+        Integer operatorTenantId = operatorWithSchema.operator().tenantId();
+        if (!tenantId.equals(operatorTenantId)) {
+            log.warn("cross_tenant_operator_access_denied callerTenantId={} operatorTenantId={}",
+                    tenantId, operatorTenantId);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS);
+        }
+        return operatorWithSchema;
     }
 
     private String messageOverride(String contactId, String fallbackMessage) {

@@ -16,6 +16,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -32,6 +33,7 @@ public class TelemetryValidationExceptionHandler {
     private static final String READINGS_PATH = "/api/v1/telemetry/readings";
     // Assam's integration hits both /readings and /readings/ (trailing slash), so treat both as the readings endpoint.
     private static final String READINGS_PATH_TRAILING_SLASH = READINGS_PATH + "/";
+    private static final String API_KEY_HEADER = "X-Api-Key";
 
     private final TelemetrySubmissionAuditService telemetrySubmissionAuditService;
     // REPORTED-METRIC: optional (may be null in unit tests); publishes pre-anomaly rejects for the
@@ -59,6 +61,45 @@ public class TelemetryValidationExceptionHandler {
         }
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", message));
+    }
+
+    /**
+     * {@code X-Api-Key} is declared {@code required = true} on {@code /readings/reset-latest}, so an
+     * absent header fails during argument resolution — before the controller body, and therefore
+     * before the in-method API-key check. Without this handler that surfaces as Spring's generic 400,
+     * which both misstates the failure (absent credentials are 401, not a malformed request) and
+     * breaks the {@link ReadingsApiResponse} shape every other response on the endpoint returns.
+     *
+     * <p>A missing key is reported distinctly from an unrecognised one. Which of the two occurred is
+     * decided entirely by what the caller sent, so saying which reveals nothing about server state —
+     * unlike the operator lookup behind the endpoint, where responses are deliberately uniform to
+     * avoid disclosing which phone numbers exist. The {@code errorCode} stays
+     * {@link TelemetryErrorCode#INVALID_API_KEY} for both because the remedy is the same; only the
+     * human-readable {@code message} differs.
+     */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<?> handleMissingRequestHeader(MissingRequestHeaderException ex, HttpServletRequest request) {
+        if (!API_KEY_HEADER.equalsIgnoreCase(ex.getHeaderName())) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", "Missing required header: " + sanitizeLogValue(ex.getHeaderName())));
+        }
+
+        log.info(
+                "reading_auth_rejected method={} api={} status=FAILED httpStatus=401 UNAUTHORIZED reason=\"missing {} header\"",
+                requestMethod(request),
+                requestPath(request),
+                API_KEY_HEADER
+        );
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
+                ReadingsApiResponse.builder()
+                        .success(false)
+                        .data(ReadingsDataResponse.builder()
+                                .message(API_KEY_HEADER + " header is required")
+                                .qualityStatus("REJECTED")
+                                .errorCode(TelemetryErrorCode.INVALID_API_KEY)
+                                .build())
+                        .build()
+        );
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import org.arghyam.jalsoochak.telemetry.validation.ValidReadingUrl;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -22,6 +23,7 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AssamReadingRequest {
 
+    @ValidReadingUrl
     @JsonProperty("reading_url")
     private String readingUrl;
 

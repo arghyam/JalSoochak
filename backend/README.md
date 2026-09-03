@@ -28,7 +28,7 @@ A production-ready multi-module Spring Boot microservices platform built with **
           │                    │
 ┌─────────┴────────┐ ┌────────┴─────────┐ ┌──────────────────┐
 │  Telemetry       │ │  Message Service │ │  Scheme Service  │
-│  Service  :8084  │ │     :8085        │ │     :8086        │
+│  Service  :8989  │ │     :8085        │ │     :8086        │
 └──────────────────┘ └──────────────────┘ └──────────────────┘
                                │
                     ┌──────────┴───────────┐
@@ -53,7 +53,7 @@ Infrastructure: PostgreSQL (shared_db) + Apache Kafka
 | `tenant-service`             | 8081   | Manages tenant information                       |
 | `user-service`               | 8082   | Manages user information                         |
 | `anomaly-service`            | 8083   | Detects and manages anomalies (leaks, pressure)  |
-| `telemetry-service`          | 8084   | Manages sensor and meter telemetry data          |
+| `telemetry-service`          | 8989   | Manages sensor and meter telemetry data          |
 | `message-service`            | 8085   | Manages notifications (Email, WhatsApp, Webhook) |
 | `scheme-service`             | 8086   | Manages water supply schemes                     |
 | `analytics-service`          | 8087   | Consumes events; populates analytics DW (`dw` schema) |
@@ -450,7 +450,7 @@ curl "http://localhost:8080/analytics/api/v1/analytics/tenants"
 ]
 ```
 
-### Telemetry Service (`:8084`)
+### Telemetry Service (`:8989`)
 
 | Method | Endpoint             | Description              |
 |--------|----------------------|--------------------------|
@@ -589,7 +589,7 @@ water-management-platform/
 │
 ├── user-service/                    # Port 8082
 ├── anomaly-service/                 # Port 8083
-├── telemetry-service/               # Port 8084
+├── telemetry-service/               # Port 8989
 ├── message-service/                 # Port 8085
 ├── scheme-service/                  # Port 8086
 │

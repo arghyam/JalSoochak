@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.user.controller;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,14 +39,16 @@ import java.util.List;
 @Validated
 public class TenantStaffController {
 
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final TenantStaffService tenantStaffService;
     private final WelcomeMessageService welcomeMessageService;
 
     @GetMapping("/staff")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<TenantStaffResponseDTO>>> listStaff(
             @RequestParam String tenantCode,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int limit,
             @RequestParam(defaultValue = "id") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(required = false) List<String> role,

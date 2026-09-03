@@ -147,6 +147,14 @@ analytics:
       # days (inclusive of the requested day). Not per-tenant configurable.
       single-day-lookback-days: ${ANALYTICS_DASHBOARD_REGULARITY_SINGLE_DAY_LOOKBACK_DAYS:30}
 
+  water-quantity:
+    # fact_water_quantity_table.water_quantity is stored in LITRES; meters read in cubic metres, so
+    # ingestion multiplies by 1000. A daily volume above this many m3 cannot be real for a single
+    # scheme (100,000 m3 = 100 MLD) and almost certainly means a misread or replaced meter. Such rows
+    # are logged at WARN and counted (water_quantity.implausible) but stored as derived — never
+    # clamped, which would fabricate a plausible number and hide the bad reading.
+    implausible-daily-cubic-metres: ${ANALYTICS_WATER_QUANTITY_IMPLAUSIBLE_DAILY_CUBIC_METRES:100000}
+
   scheduler:
     common:
       cron: ${ANALYTICS_SCHEDULER_CRON:0 0 0 * * *}

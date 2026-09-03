@@ -175,19 +175,14 @@
                             <goal>prepare-agent</goal>
                         </goals>
                     </execution>
+                    <!--
+                        No <includes>: the report must cover the whole service. A narrowed include list
+                        here also narrows the jacoco.xml that SonarCloud consumes, so any class left out
+                        is reported by Sonar as having no coverage at all rather than as untested.
+                    -->
                     <execution>
                         <id>report</id>
                         <phase>verify</phase>
-                        <configuration>
-                            <includes>
-                                <include>org/arghyam/jalsoochak/telemetry/service/FlowVisionService*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/service/PiiEncryptionService*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/service/BusinessServiceImpl*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/config/OpenApiConfig*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/config/TenantContext*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/config/TenantInterceptor*</include>
-                            </includes>
-                        </configuration>
                         <goals>
                             <goal>report</goal>
                         </goals>
@@ -199,14 +194,6 @@
                             <goal>check</goal>
                         </goals>
                         <configuration>
-                            <includes>
-                                <include>org/arghyam/jalsoochak/telemetry/service/FlowVisionService*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/service/PiiEncryptionService*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/service/BusinessServiceImpl*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/config/OpenApiConfig*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/config/TenantContext*</include>
-                                <include>org/arghyam/jalsoochak/telemetry/config/TenantInterceptor*</include>
-                            </includes>
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>
