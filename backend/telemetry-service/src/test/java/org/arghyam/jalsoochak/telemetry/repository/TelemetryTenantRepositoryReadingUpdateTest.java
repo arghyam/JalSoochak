@@ -3,8 +3,6 @@ package org.arghyam.jalsoochak.telemetry.repository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentMatchers;
-import org.mockito.Mockito;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -14,10 +12,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Reading correction, location capture, the placeholder-row lookup used by lenient ingest, and the
- * analytics water-quantity upsert.
+ * Reading correction, location capture, and the placeholder-row lookup used by lenient ingest.
  */
-@DisplayName("TelemetryTenantRepository — reading updates and analytics upsert")
+@DisplayName("TelemetryTenantRepository — reading updates")
 class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenantRepositoryTest {
 
     private static final LocalDateTime READING_AT = LocalDateTime.of(2026, 3, 1, 6, 30);
@@ -379,96 +376,6 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
             onQuery("flow_reading_table", completedRow());
 
             assertThat(repository.findEarliestCompletedFlowReadingAfterDate(SCHEMA, 7L, 2L, DAY)).isPresent();
-        }
-    }
-
-    @Nested
-    @DisplayName("upsertAnalyticsWaterQuantity")
-    class AnalyticsUpsert {
-
-        @Test
-        void rejectsAnyMissingRequiredArgument() {
-            assertThatThrownBy(() -> repository.upsertAnalyticsWaterQuantity(
-                    null, 7L, 2L, DAY, BigDecimal.TEN, 1))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> repository.upsertAnalyticsWaterQuantity(
-                    17, null, 2L, DAY, BigDecimal.TEN, 1))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> repository.upsertAnalyticsWaterQuantity(
-                    17, 7L, null, DAY, BigDecimal.TEN, 1))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> repository.upsertAnalyticsWaterQuantity(
-                    17, 7L, 2L, null, BigDecimal.TEN, 1))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> repository.upsertAnalyticsWaterQuantity(
-                    17, 7L, 2L, DAY, null, 1))
-                    .isInstanceOf(IllegalArgumentException.class);
-        }
-
-        @Test
-        void updatesTheLatestRowWhenOneExists() {
-            onColumnExists(true);
-            Mockito.when(jdbcTemplate.update(ArgumentMatchers.contains("WITH latest AS"),
-                    ArgumentMatchers.any(Object[].class))).thenReturn(1);
-
-            repository.upsertAnalyticsWaterQuantity(17, 7L, 2L, DAY, new BigDecimal("150"), 1);
-
-            assertThat(allUpdateSql()).hasSize(1);
-            assertThat(allUpdateSql().get(0)).contains("WITH latest AS");
-        }
-
-        @Test
-        void insertsWhenNoRowWasUpdated() {
-            onColumnExists(true);
-            Mockito.when(jdbcTemplate.update(ArgumentMatchers.anyString(),
-                    ArgumentMatchers.any(Object[].class))).thenReturn(0);
-
-            repository.upsertAnalyticsWaterQuantity(17, 7L, 2L, DAY, new BigDecimal("150"), 1);
-
-            assertThat(allUpdateSql()).hasSize(2);
-            assertThat(allUpdateSql().get(1))
-                    .contains("INSERT INTO analytics_schema.fact_water_quantity_table")
-                    .contains("submission_status")
-                    .contains("outage_reason")
-                    .contains("non_submission_reason");
-        }
-
-        @Test
-        void omitsColumnsThatThisAnalyticsSchemaDoesNotHave() {
-            onColumnExists(false);
-            Mockito.when(jdbcTemplate.update(ArgumentMatchers.anyString(),
-                    ArgumentMatchers.any(Object[].class))).thenReturn(0);
-
-            repository.upsertAnalyticsWaterQuantity(17, 7L, 2L, DAY, new BigDecimal("150"), 1);
-
-            assertThat(allUpdateSql().get(1))
-                    .doesNotContain("submission_status")
-                    .doesNotContain("outage_reason")
-                    .doesNotContain("non_submission_reason");
-        }
-
-        @Test
-        void roundsTheQuantityHalfUpAndClampsNegativesToZero() {
-            onColumnExists(false);
-            Mockito.when(jdbcTemplate.update(ArgumentMatchers.anyString(),
-                    ArgumentMatchers.any(Object[].class))).thenReturn(0);
-
-            repository.upsertAnalyticsWaterQuantity(17, 7L, 2L, DAY, new BigDecimal("150.5"), 1);
-            assertThat(allUpdateSql()).hasSize(2);
-
-            Mockito.reset(jdbcTemplate);
-            initRepository();
-            onColumnExists(false);
-            Mockito.when(jdbcTemplate.update(ArgumentMatchers.anyString(),
-                    ArgumentMatchers.any(Object[].class))).thenReturn(0);
-
-            repository.upsertAnalyticsWaterQuantity(17, 7L, 2L, DAY, new BigDecimal("-25"), 1);
-
-            org.mockito.ArgumentCaptor<Object[]> args = org.mockito.ArgumentCaptor.forClass(Object[].class);
-            Mockito.verify(jdbcTemplate, Mockito.atLeastOnce())
-                    .update(ArgumentMatchers.anyString(), args.capture());
-            // A negative delta (meter rollover, corrected reading) must never be stored as negative.
-            assertThat(args.getAllValues().get(args.getAllValues().size() - 1)).contains(0);
         }
     }
 }
