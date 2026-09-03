@@ -196,7 +196,35 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
         verify(waterQuantityRepository).save(captor.capture());
-        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(0);
+        assertThat(captor.getValue().getWaterQuantity()).isZero();
+    }
+
+    @Test
+    void ingestMeterReading_storesTheDeltaInLitresNotCubicMetres() {
+        MeterReadingEvent event = new MeterReadingEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setConfirmedReading(150);
+        event.setReadingAt("2026-01-02T10:15:00");
+        event.setReadingDate("2026-01-02");
+        event.setSubmissionStatus(1);
+        event.setReadingType(0);
+
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+        when(meterReadingRepository.findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(any(), any(), any()))
+                .thenReturn(Optional.of(FactMeterReading.builder().confirmedReading(100).build()));
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(any(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        service.ingestMeterReading(event);
+
+        // 50 m3 of supply is 50,000 L — the unit every consumer of this column already assumes.
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(50_000L);
     }
 
     @Test
@@ -260,7 +288,7 @@ class FactServiceImplTest {
                 .tenantId(1)
                 .schemeId(11)
                 .userId(10)
-                .waterQuantity(100)
+                .waterQuantity(100_000L)
                 .submissionStatus(0)
                 .date(LocalDate.of(2026, 1, 5))
                 .createdAt(LocalDateTime.now().minusDays(1))
@@ -278,8 +306,31 @@ class FactServiceImplTest {
         verify(waterQuantityRepository).save(captor.capture());
         assertThat(captor.getValue().getId()).isEqualTo(99L);
         assertThat(captor.getValue().getUserId()).isEqualTo(22);
-        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(200);
+        // The correction event carries the meter's native 200 m3; the column is litres.
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(200_000L);
         assertThat(captor.getValue().getSubmissionStatus()).isEqualTo(1);
+    }
+
+    @Test
+    void ingestWaterQuantity_convertsTheEventsCubicMetresToLitres() {
+        WaterQuantityEvent event = new WaterQuantityEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(22);
+        event.setWaterQuantity(37);
+        event.setSubmissionStatus(1);
+        event.setDate("2026-01-05");
+
+        when(dimDateRepository.findByFullDate(LocalDate.of(2026, 1, 5))).thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                1, 11, LocalDate.of(2026, 1, 5)))
+                .thenReturn(Optional.empty());
+
+        service.ingestWaterQuantity(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(37_000L);
     }
 
     @Test
@@ -301,7 +352,33 @@ class FactServiceImplTest {
 
         ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
         verify(waterQuantityRepository).save(captor.capture());
-        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(0);
+        assertThat(captor.getValue().getWaterQuantity()).isZero();
+    }
+
+    @Test
+    void ingestWaterQuantity_implausibleQuantityIsCountedButStoredUnclamped() {
+        WaterQuantityEvent event = new WaterQuantityEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(22);
+        // A whole cumulative meter index mistaken for a day's supply — far past the 100,000 m3 threshold.
+        event.setWaterQuantity(5_000_000);
+        event.setSubmissionStatus(1);
+        event.setDate("2026-01-05");
+
+        when(dimDateRepository.findByFullDate(LocalDate.of(2026, 1, 5))).thenReturn(Optional.empty());
+        when(waterQuantityRepository.findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
+                1, 11, LocalDate.of(2026, 1, 5)))
+                .thenReturn(Optional.empty());
+
+        service.ingestWaterQuantity(event);
+
+        ArgumentCaptor<FactWaterQuantity> captor = ArgumentCaptor.forClass(FactWaterQuantity.class);
+        verify(waterQuantityRepository).save(captor.capture());
+        // Reported, never clamped: clamping would invent data and hide the bad reading.
+        assertThat(captor.getValue().getWaterQuantity()).isEqualTo(5_000_000_000L);
+        assertThat(meterRegistry.counter("water_quantity.implausible",
+                "source", "correction", "tenantId", "1", "schemeId", "11").count()).isEqualTo(1.0);
     }
 
     @Test

@@ -15,8 +15,9 @@ class BfmWaterQuantityCalculatorTest {
     }
 
     @Test
-    void calculate_returnsDeltaOverPreviousReading() {
-        assertThat(calculator.calculate(ctx(150, 100))).isEqualTo(50);
+    void calculate_returnsDeltaOverPreviousReadingConvertedToLitres() {
+        // 50 m3 supplied -> 50,000 L stored.
+        assertThat(calculator.calculate(ctx(150, 100))).isEqualTo(50_000L);
     }
 
     @Test
@@ -26,12 +27,26 @@ class BfmWaterQuantityCalculatorTest {
 
     @Test
     void calculate_whenPreviousReadingNull_treatsItAsZero() {
-        assertThat(calculator.calculate(ctx(120, null))).isEqualTo(120);
+        assertThat(calculator.calculate(ctx(120, null))).isEqualTo(120_000L);
     }
 
     @Test
     void calculate_whenCurrentReadingNull_returnsZero() {
         assertThat(calculator.calculate(ctx(null, 100))).isZero();
+    }
+
+    @Test
+    void calculate_largeDeltaDoesNotOverflowInt() {
+        // 3,000,000 m3 x 1000 = 3e9 L, past Integer.MAX_VALUE. Before the long return type this
+        // silently wrapped negative; it must now come back exact.
+        assertThat(calculator.calculate(ctx(3_000_000, 0))).isEqualTo(3_000_000_000L);
+    }
+
+    @Test
+    void calculate_extremeReadingsDoNotWrapOnTheSubtraction() {
+        // Subtracting as int would overflow here; the delta is computed as long before conversion.
+        assertThat(calculator.calculate(ctx(Integer.MAX_VALUE, Integer.MIN_VALUE)))
+                .isEqualTo(4_294_967_295_000L);
     }
 
     private static WaterQuantityContext ctx(Integer currentReading, Integer previousReading) {
