@@ -9,7 +9,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -2149,94 +2148,6 @@ public class TelemetryTenantRepository {
                 WHERE id = ?
                 """, schemaName);
         jdbcTemplate.update(sql, latitude, longitude, updatedBy, readingId);
-    }
-
-    public void upsertAnalyticsWaterQuantity(Integer tenantId,
-                                             Long schemeId,
-                                             Long userId,
-                                             LocalDate date,
-                                             BigDecimal waterQuantity,
-                                             Integer submissionStatus) {
-        if (tenantId == null || schemeId == null || userId == null || date == null || waterQuantity == null) {
-            throw new IllegalArgumentException("tenantId, schemeId, userId, date, and waterQuantity are required");
-        }
-
-        int schemeIdInt = Math.toIntExact(schemeId);
-        int userIdInt = Math.toIntExact(userId);
-        int waterQuantityInt = Math.max(0, waterQuantity.setScale(0, RoundingMode.HALF_UP).intValue());
-
-        boolean hasSubmissionStatus = columnExists("analytics_schema", "fact_water_quantity_table", "submission_status");
-        boolean hasOutageReason = columnExists("analytics_schema", "fact_water_quantity_table", "outage_reason");
-        boolean hasNonSubmissionReason = columnExists("analytics_schema", "fact_water_quantity_table", "non_submission_reason");
-
-        List<Object> updateArgs = new ArrayList<>();
-        updateArgs.add(tenantId);
-        updateArgs.add(schemeIdInt);
-        updateArgs.add(date);
-        StringBuilder updateSql = new StringBuilder("""
-                UPDATE analytics_schema.fact_water_quantity_table
-                SET user_id = ?,
-                    water_quantity = ?,
-                    updated_at = NOW()
-                """);
-        updateArgs.add(userIdInt);
-        updateArgs.add(waterQuantityInt);
-        if (hasSubmissionStatus) {
-            updateSql.append(", submission_status = ?");
-            updateArgs.add(submissionStatus);
-        }
-        if (hasOutageReason) {
-            updateSql.append(", outage_reason = NULL");
-        }
-        if (hasNonSubmissionReason) {
-            updateSql.append(", non_submission_reason = NULL");
-        }
-        updateSql.insert(0, """
-                WITH latest AS (
-                    SELECT id
-                    FROM analytics_schema.fact_water_quantity_table
-                    WHERE tenant_id = ?
-                      AND scheme_id = ?
-                      AND "date" = ?
-                    ORDER BY updated_at DESC NULLS LAST, id DESC
-                    LIMIT 1
-                )
-                """);
-        updateSql.append("""
-
-                FROM latest
-                WHERE analytics_schema.fact_water_quantity_table.id = latest.id
-                """);
-
-        int updated = jdbcTemplate.update(updateSql.toString(), updateArgs.toArray());
-        if (updated > 0) {
-            return;
-        }
-
-        List<Object> insertArgs = new ArrayList<>();
-        StringBuilder columns = new StringBuilder("tenant_id, scheme_id, user_id, water_quantity, \"date\", created_at, updated_at");
-        StringBuilder values = new StringBuilder("?, ?, ?, ?, ?, NOW(), NOW()");
-        insertArgs.add(tenantId);
-        insertArgs.add(schemeIdInt);
-        insertArgs.add(userIdInt);
-        insertArgs.add(waterQuantityInt);
-        insertArgs.add(date);
-        if (hasSubmissionStatus) {
-            columns.append(", submission_status");
-            values.append(", ?");
-            insertArgs.add(submissionStatus);
-        }
-        if (hasOutageReason) {
-            columns.append(", outage_reason");
-            values.append(", NULL");
-        }
-        if (hasNonSubmissionReason) {
-            columns.append(", non_submission_reason");
-            values.append(", NULL");
-        }
-
-        String insertSql = "INSERT INTO analytics_schema.fact_water_quantity_table (" + columns + ") VALUES (" + values + ")";
-        jdbcTemplate.update(insertSql, insertArgs.toArray());
     }
 
     public Optional<Long> findLatestPlaceholderFlowReadingIdForDate(String schemaName,

@@ -30,9 +30,12 @@ import org.arghyam.jalsoochak.analytics.service.FactService;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculator;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityCalculatorRegistry;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
+import org.arghyam.jalsoochak.analytics.service.water.WaterVolumeUnits;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,7 +45,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.WeekFields;
@@ -81,6 +83,34 @@ public class FactServiceImpl implements FactService {
     private final SubmissionAttemptRepository submissionAttemptRepository;
     private final WaterQuantityCalculatorRegistry waterQuantityCalculatorRegistry;
     private final MeterRegistry meterRegistry;
+
+    /**
+     * Daily volume (in the meter's native m&sup3;) above which a derived quantity is reported as
+     * implausible. The default of 100,000 m&sup3;/day is 100 MLD — an order of magnitude beyond any
+     * single rural scheme, so it only fires on genuine garbage such as an OCR misread or a replaced
+     * meter. Implausible values are logged and counted, never clamped: clamping would invent data and
+     * hide the bad reading behind a plausible-looking number.
+     */
+    @Value("${analytics.water-quantity.implausible-daily-cubic-metres:100000}")
+    private long implausibleDailyCubicMetres = 100_000L;
+
+    /**
+     * Rejects a threshold that would make {@link WaterVolumeUnits#cubicMetresToLitres} throw on every
+     * implausibility check: negative values, and values whose litre conversion overflows {@code long}.
+     * Caught here rather than left to surface from {@link #warnIfImplausible} — that method runs on the
+     * Kafka consumer thread, where an uncaught {@code ArithmeticException} would fail the offset commit
+     * and retry forever, stalling the partition.
+     */
+    @PostConstruct
+    void validateImplausibleDailyCubicMetres() {
+        if (implausibleDailyCubicMetres < 0
+                || implausibleDailyCubicMetres > Long.MAX_VALUE / WaterVolumeUnits.LITRES_PER_CUBIC_METRE) {
+            throw new IllegalStateException(
+                    "analytics.water-quantity.implausible-daily-cubic-metres must be between 0 and "
+                            + (Long.MAX_VALUE / WaterVolumeUnits.LITRES_PER_CUBIC_METRE)
+                            + ", got " + implausibleDailyCubicMetres);
+        }
+    }
 
     @Override
     @Transactional
@@ -143,7 +173,11 @@ public class FactServiceImpl implements FactService {
         LocalDate date = parseDate(event.getDate());
         ensureDateExists(date);
         LocalDateTime now = LocalDateTime.now();
-        int normalizedWaterQuantity = Math.max(0, event.getWaterQuantity() != null ? event.getWaterQuantity() : 0);
+        // The event carries the meter's native m3 (telemetry derives the delta but does not convert);
+        // this column is litres. Same converter as the reading path, so the two cannot drift.
+        long normalizedWaterQuantity = WaterVolumeUnits.cubicMetresToLitres(
+                Math.max(0, event.getWaterQuantity() != null ? event.getWaterQuantity() : 0));
+        warnIfImplausible(normalizedWaterQuantity, event.getTenantId(), event.getSchemeId(), date, "correction");
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
                         event.getTenantId(),
@@ -288,15 +322,6 @@ public class FactServiceImpl implements FactService {
             return;
         }
 
-        Integer currentReading = event.getConfirmedReading() != null
-                ? event.getConfirmedReading()
-                : event.getExtractedReading();
-        if (currentReading == null) {
-            log.warn("Skipping water quantity update; current reading missing (tenantId={}, schemeId={}, date={})",
-                    event.getTenantId(), event.getSchemeId(), readingDate);
-            return;
-        }
-
         Optional<WaterQuantityCalculator> calculatorOpt = waterQuantityCalculatorRegistry.resolve(event.getChannel());
         if (calculatorOpt.isEmpty()) {
             log.warn("Skipping water quantity update; no calculator registered for channel={} (tenantId={}, schemeId={}, date={}). "
@@ -310,15 +335,33 @@ public class FactServiceImpl implements FactService {
             return;
         }
 
-        LocalDate previousDate = readingDate.minusDays(1);
-        Integer previousReading = meterReadingRepository
-                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDesc(
+        // Read the day's reading back from the table rather than taking it off the event. The history
+        // recompute defines it as "the latest row on that date"; if live ingestion used the event's own
+        // reading instead, the two would disagree on any day carrying more than one reading and would
+        // flip each other's values. Going through the table makes the definitions identical by
+        // construction. The row saved moments ago is visible here — the query flushes first.
+        Integer currentReading = meterReadingRepository
+                .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
                         event.getTenantId(),
                         event.getSchemeId(),
-                        previousDate
+                        readingDate
                 )
                 .map(FactMeterReading::getConfirmedReading)
-                .orElse(0);
+                .orElse(null);
+        if (currentReading == null) {
+            log.warn("Skipping water quantity update; no stored reading for the day (tenantId={}, schemeId={}, date={})",
+                    event.getTenantId(), event.getSchemeId(), readingDate);
+            return;
+        }
+
+        // Baseline is the latest reading strictly before this date, not the previous calendar day's.
+        // Left null when the scheme has none: the calculator decides what its channel can derive
+        // without one (BFM: nothing, so 0). Never defaulted to 0 here — that is what made every
+        // first-ever and post-gap reading store the whole cumulative meter index as a day's supply.
+        Integer previousReading = meterReadingRepository
+                .findLatestBefore(event.getTenantId(), event.getSchemeId(), readingDate)
+                .map(FactMeterReading::getConfirmedReading)
+                .orElse(null);
 
         WaterQuantityContext context = WaterQuantityContext.builder()
                 .tenantId(event.getTenantId())
@@ -328,7 +371,8 @@ public class FactServiceImpl implements FactService {
                 .previousReading(previousReading)
                 .channel(event.getChannel())
                 .build();
-        int waterQuantity = calculatorOpt.get().calculate(context);
+        long waterQuantity = calculatorOpt.get().calculate(context);
+        warnIfImplausible(waterQuantity, event.getTenantId(), event.getSchemeId(), readingDate, "reading");
         LocalDateTime now = LocalDateTime.now();
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
@@ -359,6 +403,27 @@ public class FactServiceImpl implements FactService {
                         .build());
 
         waterQuantityRepository.save(fact);
+    }
+
+    /**
+     * Reports a derived daily volume that is too large to be real. The value is still stored as
+     * derived — the column is BIGINT and holds it fine — because clamping would fabricate a plausible
+     * number and hide the underlying bad reading. The log line and the counter are what make it
+     * findable.
+     *
+     * @param litres the derived quantity, in litres
+     * @param source which write path produced it ({@code reading} or {@code correction})
+     */
+    private void warnIfImplausible(long litres, Integer tenantId, Integer schemeId, LocalDate date, String source) {
+        long thresholdLitres = WaterVolumeUnits.cubicMetresToLitres(implausibleDailyCubicMetres);
+        if (litres <= thresholdLitres) {
+            return;
+        }
+        log.warn("Implausible daily water quantity {} L (> {} L) stored as-is from {} path "
+                        + "(tenantId={}, schemeId={}, date={}); check the underlying meter reading",
+                litres, thresholdLitres, source, tenantId, schemeId, date);
+        meterRegistry.counter("water_quantity.implausible", "source", source)
+                .increment();
     }
 
     @Override

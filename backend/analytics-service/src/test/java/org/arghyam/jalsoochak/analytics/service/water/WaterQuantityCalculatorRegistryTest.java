@@ -20,9 +20,9 @@ class WaterQuantityCalculatorRegistryTest {
         }
 
         @Override
-        public int calculate(WaterQuantityContext context) {
+        public long calculate(WaterQuantityContext context) {
             // Distinct from BFM: the reading itself is the day's quantity.
-            return context.currentReading() != null ? Math.max(0, context.currentReading()) : 0;
+            return context.currentReading() != null ? Math.max(0L, context.currentReading()) : 0L;
         }
     }
 
