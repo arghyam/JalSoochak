@@ -36,7 +36,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         properties = {
                 // Prevent Spring Security from fetching OIDC config from Keycloak at startup;
                 // jwk-set-uri is loaded lazily (only when a JWT is validated).
-                "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost:9999/jwks"
+                "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost:9999/jwks",
+                "spring.profiles.active=dev"
         })
 @Testcontainers(disabledWithoutDocker = true)
 class OpenApiSpecGeneratorTest {

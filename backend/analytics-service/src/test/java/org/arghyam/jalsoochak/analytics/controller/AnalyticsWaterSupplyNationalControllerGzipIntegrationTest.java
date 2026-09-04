@@ -128,7 +128,8 @@ class AnalyticsWaterSupplyNationalControllerGzipIntegrationTest {
             KafkaAutoConfiguration.class,
             SecurityAutoConfiguration.class,
             OAuth2ResourceServerAutoConfiguration.class,
-            ManagementWebSecurityAutoConfiguration.class
+            ManagementWebSecurityAutoConfiguration.class,
+            org.springdoc.webmvc.ui.SwaggerConfig.class
     })
     @Import({AnalyticsWaterSupplyNationalController.class, GlobalExceptionHandler.class})
     static class MinimalTestApplication {
