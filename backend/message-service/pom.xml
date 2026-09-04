@@ -23,7 +23,7 @@
         <spring-kafka.version>3.1.4</spring-kafka.version>
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.36</lombok.version>
-        <springdoc.version>2.9.0</springdoc.version>
+        <springdoc.version>2.3.0</springdoc.version>
     </properties>
 
     <dependencyManagement>
