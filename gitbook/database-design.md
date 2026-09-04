@@ -79,7 +79,7 @@ Data is stored in **PostgreSQL** using **schema-per-tenant** isolation: a shared
 
 A star schema fed asynchronously via Kafka:
 
-* **Dimensions:** `dim_date`, `dim_tenant`, `dim_user`, `dim_scheme` (with an `is_active` flag for schemes idle ≥ 30 days), `dim_lgd_location`, `dim_department_location`, `dim_user_scheme_mapping`
+* **Dimensions:** `dim_date`, `dim_tenant`, `dim_user`, `dim_scheme` (carrying the scheme's `work_status` and `operating_status` as ingested from the tenant schema), `dim_lgd_location`, `dim_department_location`, `dim_user_scheme_mapping`
 * **Facts:** `fact_meter_reading`, `fact_water_quantity` (LPCD, norm achievement), `fact_escalation`, `fact_scheme_performance` (compliance rate)
 
 {% hint style="danger" %}

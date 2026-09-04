@@ -72,11 +72,3 @@ minio:
   region: ${MINIO_REGION:us-east-1}
   presigned-base-url: ${MINIO_PRESIGNED_BASE_URL:${MINIO_BASE_URL:${STORAGE_PRESIGNED_BASE_URL:}}}
   presigned-ttl-seconds: ${MINIO_PRESIGNED_TTL_SECONDS:3600}
-
-scheme:
-  activity-sync:
-    enabled: ${SCHEME_ACTIVITY_SYNC_ENABLED:true}
-    cron: ${SCHEME_ACTIVITY_SYNC_CRON:0 0 0 * * *}
-    zone: ${SCHEME_ACTIVITY_SYNC_ZONE:Asia/Kolkata}
-    inactivity-days: ${SCHEME_INACTIVITY_DAYS:30}
-    batch-size: ${SCHEME_ACTIVITY_SYNC_BATCH_SIZE:5000}

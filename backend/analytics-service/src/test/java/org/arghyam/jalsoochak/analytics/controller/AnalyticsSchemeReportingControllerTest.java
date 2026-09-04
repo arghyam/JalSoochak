@@ -1,6 +1,9 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusBreakdownResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusCountDTO;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusDTO;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
@@ -106,12 +109,19 @@ class AnalyticsSchemeReportingControllerTest {
     @ParameterizedTest
     @MethodSource("schemeStatusValidRoutes")
     void getSchemeStatusCount_validRoutes(String idParam, String idValue, boolean lgdRoute) throws Exception {
+        SchemeStatusBreakdownResponse breakdown = SchemeStatusBreakdownResponse.builder()
+                .total(6)
+                .workStatusCounts(List.of(statusCount(1, "Ongoing", 6)))
+                .operatingStatusCounts(List.of(
+                        statusCount(0, "Non-Operative", 1),
+                        statusCount(2, "Partially Operative", 5)))
+                .build();
         if (lgdRoute) {
             when(schemeRegularityService.getSchemeStatusCountByLgd(TENANT_ID, Integer.parseInt(idValue)))
-                    .thenReturn(Map.of("active_schemes_count", 5, "inactive_schemes_count", 1));
+                    .thenReturn(breakdown);
         } else {
             when(schemeRegularityService.getSchemeStatusCountByDepartment(TENANT_ID, Integer.parseInt(idValue)))
-                    .thenReturn(Map.of("active_schemes_count", 5, "inactive_schemes_count", 1));
+                    .thenReturn(breakdown);
         }
 
         mockMvc.perform(get(BASE + "/schemes/status-count")
@@ -119,8 +129,12 @@ class AnalyticsSchemeReportingControllerTest {
                         .param(idParam, idValue))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.active_schemes_count").value(5))
-                .andExpect(jsonPath("$.data.inactive_schemes_count").value(1));
+                .andExpect(jsonPath("$.data.total").value(6))
+                .andExpect(jsonPath("$.data.workStatusCounts[0].code").value(1))
+                .andExpect(jsonPath("$.data.workStatusCounts[0].label").value("Ongoing"))
+                .andExpect(jsonPath("$.data.operatingStatusCounts[1].code").value(2))
+                .andExpect(jsonPath("$.data.operatingStatusCounts[1].label").value("Partially Operative"))
+                .andExpect(jsonPath("$.data.operatingStatusCounts[1].count").value(5));
 
         if (lgdRoute) {
             verify(schemeRegularityService, times(1))
@@ -571,15 +585,15 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentLgdCName("Parent")
                         .parentLgdTitle("Parent LGD")
                         .parentLgdLevel(2)
-                        .activeSchemeCount(1)
-                        .inactiveSchemeCount(1)
+                        .workStatusCounts(List.of(statusCount(1, "Ongoing", 2)))
+                        .operatingStatusCounts(List.of(statusCount(1, "Operative", 2)))
                         .totalCount(42L)
                         .topSchemeCount(1)
                         .topSchemes(List.of(SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(1)
                                 .schemeName("Scheme A")
-                                .statusCode(1)
-                                .status("active")
+                                .workStatus(schemeStatus(1, "Ongoing"))
+                                .operatingStatus(schemeStatus(2, "Partially Operative"))
                                 .submissionDays(10)
                                 .reportingRate(BigDecimal.valueOf(0.5))
                                 .totalWaterSupplied(150L)
@@ -631,15 +645,15 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentDepartmentCName("Parent Dept")
                         .parentDepartmentTitle("Parent Dept")
                         .parentDepartmentLevel(4)
-                        .activeSchemeCount(1)
-                        .inactiveSchemeCount(1)
+                        .workStatusCounts(List.of(statusCount(1, "Ongoing", 2)))
+                        .operatingStatusCounts(List.of(statusCount(1, "Operative", 2)))
                         .totalCount(7L)
                         .topSchemeCount(1)
                         .topSchemes(List.of(SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(2)
                                 .schemeName("Scheme B")
-                                .statusCode(1)
-                                .status("active")
+                                .workStatus(schemeStatus(1, "Ongoing"))
+                                .operatingStatus(schemeStatus(2, "Partially Operative"))
                                 .submissionDays(8)
                                 .reportingRate(BigDecimal.valueOf(0.4))
                                 .totalWaterSupplied(80L)
@@ -689,8 +703,8 @@ class AnalyticsSchemeReportingControllerTest {
         when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 1, 5, "schemeName", "asc"))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentLgdId(101)
-                        .activeSchemeCount(0)
-                        .inactiveSchemeCount(0)
+                        .workStatusCounts(List.of())
+                        .operatingStatusCounts(List.of())
                         .totalCount(0L)
                         .topSchemeCount(0)
                         .topSchemes(List.of())
@@ -729,8 +743,8 @@ class AnalyticsSchemeReportingControllerTest {
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentLgdId(101)
                         .totalSchemeCount(1)
-                        .activeSchemeCount(1)
-                        .inactiveSchemeCount(0)
+                        .workStatusCounts(List.of(statusCount(1, "Ongoing", 1)))
+                        .operatingStatusCounts(List.of(statusCount(1, "Operative", 1)))
                         .schemeCountInResponse(1)
                         .schemes(List.of(
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
@@ -738,8 +752,8 @@ class AnalyticsSchemeReportingControllerTest {
                                         .schemeName("Scheme A")
                                         .stateSchemeId(10001)
                                         .centreSchemeId(20001)
-                                        .statusCode(1)
-                                        .status("active")
+                                        .workStatus(schemeStatus(1, "Ongoing"))
+                                        .operatingStatus(schemeStatus(2, "Partially Operative"))
                                         .supplyDays(2)
                                         .averageRegularity(BigDecimal.valueOf(0.6667))
                                         .submissionDays(3)
@@ -770,8 +784,8 @@ class AnalyticsSchemeReportingControllerTest {
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentDepartmentId(201)
                         .totalSchemeCount(1)
-                        .activeSchemeCount(0)
-                        .inactiveSchemeCount(1)
+                        .workStatusCounts(List.of(statusCount(4, "Handed Over", 1)))
+                        .operatingStatusCounts(List.of(statusCount(0, "Non-Operative", 1)))
                         .schemeCountInResponse(1)
                         .schemes(List.of(
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
@@ -779,8 +793,8 @@ class AnalyticsSchemeReportingControllerTest {
                                         .schemeName("Scheme B")
                                         .stateSchemeId(10002)
                                         .centreSchemeId(20002)
-                                        .statusCode(0)
-                                        .status("inactive")
+                                        .workStatus(schemeStatus(4, "Handed Over"))
+                                        .operatingStatus(schemeStatus(0, "Non-Operative"))
                                         .supplyDays(0)
                                         .averageRegularity(BigDecimal.ZERO)
                                         .submissionDays(1)
@@ -854,8 +868,8 @@ class AnalyticsSchemeReportingControllerTest {
                                         .schemeName("Scheme A")
                                         .stateSchemeId(10001)
                                         .centreSchemeId(20001)
-                                        .statusCode(1)
-                                        .status("active")
+                                        .workStatus(schemeStatus(1, "Ongoing"))
+                                        .operatingStatus(schemeStatus(2, "Partially Operative"))
                                         .supplyDays(2)
                                         .averageRegularity(BigDecimal.valueOf(0.6667))
                                         .submissionDays(3)
@@ -874,8 +888,11 @@ class AnalyticsSchemeReportingControllerTest {
                         "attachment; filename=\"scheme-region-report_parent_lgd_name_2026-01-01_to_2026-01-31.csv\""))
                 .andExpect(content().contentTypeCompatibleWith("text/csv"))
                 .andExpect(content().string(startsWith(
-                        "scheme_id,scheme_name,state_scheme_id,centre_scheme_id,status_code,status,supply_days,average_regularity,submission_days,submission_rate")))
-                .andExpect(content().string(containsString("1,Scheme A,10001,20001,1,active,2,0.6667,3,1.0")));
+                        "scheme_id,scheme_name,state_scheme_id,centre_scheme_id,"
+                                + "work_status_code,work_status,operating_status_code,operating_status,"
+                                + "supply_days,average_regularity,submission_days,submission_rate")))
+                .andExpect(content().string(containsString(
+                        "1,Scheme A,10001,20001,1,Ongoing,2,Partially Operative,2,0.6667,3,1.0")));
     }
 
     @Test
@@ -890,8 +907,8 @@ class AnalyticsSchemeReportingControllerTest {
                                         .schemeName("Scheme, B")
                                         .stateSchemeId(10002)
                                         .centreSchemeId(20002)
-                                        .statusCode(0)
-                                        .status("inactive")
+                                        .workStatus(schemeStatus(4, "Handed Over"))
+                                        .operatingStatus(schemeStatus(0, "Non-Operative"))
                                         .supplyDays(0)
                                         .averageRegularity(BigDecimal.ZERO)
                                         .submissionDays(1)
@@ -909,7 +926,8 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(header().string("Content-Disposition",
                         "attachment; filename=\"scheme-region-report_department_hq_2026-01-01_to_2026-01-31.csv\""))
                 .andExpect(content().contentTypeCompatibleWith("text/csv"))
-                .andExpect(content().string(containsString("2,\"Scheme, B\",10002,20002,0,inactive,0,0,1,0.3333")));
+                .andExpect(content().string(containsString(
+                        "2,\"Scheme, B\",10002,20002,4,Handed Over,0,Non-Operative,0,0,1,0.3333")));
     }
 
     @Test
@@ -1584,6 +1602,14 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("schemeId", "11"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    private static SchemeStatusDTO schemeStatus(Integer code, String label) {
+        return SchemeStatusDTO.builder().code(code).label(label).build();
+    }
+
+    private static SchemeStatusCountDTO statusCount(Integer code, String label, Integer count) {
+        return SchemeStatusCountDTO.builder().code(code).label(label).count(count).build();
     }
 
     private static Stream<Arguments> schemeStatusValidRoutes() {
