@@ -36,7 +36,17 @@ import static org.assertj.core.api.Assertions.assertThat;
         properties = {
                 // Prevent Spring Security from fetching OIDC config from Keycloak at startup;
                 // jwk-set-uri is loaded lazily (only when a JWT is validated).
-                "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost:9999/jwks"
+                "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost:9999/jwks",
+                "spring.profiles.active=dev",
+                "spring.kafka.listener.auto-startup=false",
+                "spring.mail.username=test-user",
+                "spring.mail.password=test-pass",
+                "notification.mail.provider=sendgrid",
+                "notification.mail.sendgrid.api-key=SG.test-key",
+                "minio.access-key=minioadmin",
+                "minio.secret-key=minioadmin",
+                "pii.encryption-key=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+                "pii.hmac-key=ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA="
         })
 @Testcontainers(disabledWithoutDocker = true)
 class OpenApiSpecGeneratorTest {

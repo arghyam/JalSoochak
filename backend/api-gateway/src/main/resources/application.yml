@@ -17,6 +17,55 @@ spring:
           predicates:
             - Path=/api/v1/pumpoperator/**
 
+        - id: tenant-staff-flat
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/tenant/staff
+          filters:
+            - SetPath=/api/v1/tenant/user/staff
+
+        - id: tenant-staff-counts-flat
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/tenant/staff/counts/by-role
+          filters:
+            - SetPath=/api/v1/tenant/user/staff/counts/by-role
+
+        - id: user-service-flat
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/auth/**, /api/v1/users/**, /api/v1/tenant/user/**, /api/v1/state-admin/**
+
+        - id: tenant-service-flat
+          uri: ${TENANT_SERVICE_URI:http://localhost:8081}
+          predicates:
+            - Path=/api/v1/tenants/**, /api/v1/system/**, /api/v1/tenant-config/**, /api/v1/locations/**
+
+        - id: telemetry-service-flat
+          uri: ${TELEMETRY_SERVICE_URI:http://localhost:8084}
+          predicates:
+            - Path=/api/v1/telemetry/**
+
+        - id: scheme-service-flat
+          uri: ${SCHEME_SERVICE_URI:http://localhost:8086}
+          predicates:
+            - Path=/api/v1/scheme/**, /api/v1/public/**
+
+        - id: analytics-service-flat
+          uri: ${ANALYTICS_SERVICE_URI:http://localhost:8087}
+          predicates:
+            - Path=/api/v1/analytics/**
+
+        - id: message-service-flat
+          uri: ${MESSAGE_SERVICE_URI:http://localhost:8085}
+          predicates:
+            - Path=/api/v1/message/**
+
+        - id: anomaly-service-flat
+          uri: ${ANOMALY_SERVICE_URI:http://localhost:8083}
+          predicates:
+            - Path=/api/v1/anomalies/**
+
         - id: tenant-service
           uri: ${TENANT_SERVICE_URI:http://localhost:8081}
           predicates:
@@ -69,13 +118,6 @@ spring:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
-    # Disable client-side syntax highlighting. highlight.js' recursive
-    # processLines overflows the JS call stack ("Maximum call stack size
-    # exceeded") on large/deeply nested responses (e.g. the analytics
-    # water-quantity/region-wise endpoint), producing "Could not render
-    # responses". This aggregated UI is what staging serves, so the setting
-    # must live here. Plain-text rendering skips the highlighter; the
-    # response body still renders in full.
     syntax-highlight:
       activated: false
     urls:
@@ -91,6 +133,8 @@ springdoc:
         url: /scheme/v3/api-docs
       - name: analytics-service
         url: /analytics/v3/api-docs
+      - name: anomaly-service
+        url: /anomaly/v3/api-docs
 
 eureka:
   client:

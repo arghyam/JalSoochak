@@ -23,7 +23,8 @@
         <spring-kafka.version>3.1.4</spring-kafka.version>
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.36</lombok.version>
-        <springdoc.version>2.5.0</springdoc.version>
+        <springdoc.version>2.3.0</springdoc.version>
+        <swagger-ui.version>5.32.11</swagger-ui.version>
     </properties>
 
     <dependencyManagement>
@@ -115,6 +116,11 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>${springdoc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.webjars</groupId>
+            <artifactId>swagger-ui</artifactId>
+            <version>${swagger-ui.version}</version>
         </dependency>
         <!-- PDF generation for escalation reports -->
         <dependency>
