@@ -25,13 +25,17 @@ public class SecurityConfig {
                                 "/user/api/v1/auth/forgot-password",
                                 "/user/api/v1/auth/reset-password",
                                 "/user/api/v1/public/**",
-                                // Public staff/operator endpoints (user-service SecurityConfig marks these permitAll)
-                                "/user/api/v1/tenant/user/staff",
-                                "/user/api/v1/tenant/user/staff/counts/by-role",
-                                "/user/api/v1/tenant/staff",
-                                "/user/api/v1/tenant/staff/counts/by-role",
-                                "/user/api/v1/pumpoperator/**",
-                                "/api/v1/pumpoperator/**",
+                                // Public pump-operator endpoints (the anonymous village dashboard
+                                // reaches exactly these three; mirrors user-service SecurityConfig).
+                                // Every other /pumpoperator/** route — including the numeric-id
+                                // detail route — requires a token and falls through to
+                                // anyExchange().authenticated() below.
+                                "/user/api/v1/pumpoperator/pump-operators/by-uuid/*",
+                                "/user/api/v1/pumpoperator/pump-operators/by-scheme",
+                                "/user/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance",
+                                "/api/v1/pumpoperator/pump-operators/by-uuid/*",
+                                "/api/v1/pumpoperator/pump-operators/by-scheme",
+                                "/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance",
                                 // Upload endpoint — authorized via UploadAuthService internally
                                 "/user/api/v1/state-admin/pump-operators/upload"
                         ).permitAll()

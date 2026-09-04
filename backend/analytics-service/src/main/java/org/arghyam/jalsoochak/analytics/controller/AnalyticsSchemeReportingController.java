@@ -9,11 +9,9 @@ import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationPaginatedResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
-import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
@@ -44,7 +42,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -76,11 +73,7 @@ public class AnalyticsSchemeReportingController {
     private final UserAlertTotalsService userAlertTotalsService;
     private final AuthenticatedRequestContextService authenticatedRequestContextService;
     private final DimUserRepository dimUserRepository;
-    private final FactEscalationRepository factEscalationRepository;
     private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
-
-    public record UpdateEscalationResolutionStatusRequest(Integer resolutionStatus) {
-    }
 
     private Integer resolveUserIdByUuid(Integer tenantId, UUID userUuid) {
         return dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(tenantId, userUuid)
@@ -88,60 +81,6 @@ public class AnalyticsSchemeReportingController {
                 .orElseThrow(() -> new IllegalArgumentException("No user found for uuid: " + userUuid));
     }
 
-    @PutMapping("/escalations/status")
-    @Operation(summary = "Update escalation resolution status (UUID-scoped)")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> updateEscalationResolutionStatus(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "uuid") UUID userUuid,
-            @RequestParam(name = "escalation_id", required = false) Long escalationId,
-            @RequestParam(name = "correlation_id", required = false) String correlationId,
-            @RequestBody UpdateEscalationResolutionStatusRequest request
-    ) {
-        try {
-            if (request == null || request.resolutionStatus() == null) {
-                throw new IllegalArgumentException("resolutionStatus is required");
-            }
-            boolean hasEscalationId = escalationId != null;
-            boolean hasCorrelationId = correlationId != null && !correlationId.isBlank();
-            if (hasEscalationId == hasCorrelationId) {
-                throw new IllegalArgumentException("Provide exactly one of escalation_id or correlation_id");
-            }
-
-            Integer userId = resolveUserIdByUuid(tenantId, userUuid);
-
-            java.util.Optional<FactEscalation> opt = hasEscalationId
-                    ? factEscalationRepository.findByIdAndTenantIdAndUserId(escalationId, tenantId, userId)
-                    : factEscalationRepository.findFirstByTenantIdAndUserIdAndCorrelationIdOrderByCreatedAtDesc(
-                    tenantId, userId, correlationId.trim());
-
-            FactEscalation escalation = opt.orElseThrow(() -> new IllegalArgumentException("Escalation not found for the given user/identifier"));
-
-            escalation.setResolutionStatus(request.resolutionStatus());
-            escalation.setUpdatedAt(LocalDateTime.now());
-            FactEscalation saved = factEscalationRepository.save(escalation);
-
-            return ResponseEntity.ok(ApiResponse.<Map<String, Object>>builder()
-                    .success(true)
-                    .data(Map.of(
-                            "escalation_id", saved.getId(),
-                            "resolution_status", saved.getResolutionStatus()
-                    ))
-                    .build());
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(ApiResponse.<Map<String, Object>>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        } catch (Exception ex) {
-            log.error(
-                    "Failed PUT /escalations/status (tenantId={}, uuid={}, escalationId={}, correlationId={})",
-                    tenantId, userUuid, escalationId, correlationId, ex);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<Map<String, Object>>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
-    }
     @GetMapping("/schemes/status-count")
     @Operation(
             summary = "Get active and inactive scheme count for an LGD or department area",
