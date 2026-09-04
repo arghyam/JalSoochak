@@ -38,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
                 // jwk-set-uri is loaded lazily (only when a JWT is validated).
                 "spring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost:9999/jwks",
                 "spring.profiles.active=dev",
+                "spring.kafka.listener.auto-startup=false",
                 "spring.mail.username=test-user",
                 "spring.mail.password=test-pass",
                 "notification.mail.provider=sendgrid",
