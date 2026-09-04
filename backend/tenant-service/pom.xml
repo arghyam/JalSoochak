@@ -23,6 +23,7 @@
         <spring-kafka.version>3.1.4</spring-kafka.version>
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.36</lombok.version>
+        <springdoc.version>2.9.0</springdoc.version>
         <aws-sdk.version>2.34.0</aws-sdk.version>
         <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
@@ -123,7 +124,7 @@
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.5.0</version>
+            <version>${springdoc.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
