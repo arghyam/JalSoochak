@@ -26,7 +26,7 @@ public class SecurityConfig {
                                 "/user/api/v1/auth/forgot-password", "/api/v1/auth/forgot-password",
                                 "/user/api/v1/auth/reset-password", "/api/v1/auth/reset-password",
                                 "/user/api/v1/auth/staff/otp", "/api/v1/auth/staff/otp",
-                                "/user/api/v1/auth/otp/verify", "/api/v1/auth/otp/verify",
+                                "/user/api/v1/auth/staff/otp/verify", "/api/v1/auth/staff/otp/verify",
                                 "/user/api/v1/public/**", "/api/v1/public/**",
                                 // Staff and operator public endpoints
                                 "/user/api/v1/tenant/user/staff", "/api/v1/tenant/user/staff",

@@ -30,6 +30,32 @@ public class SecurityConfigTest {
     }
 
     @Test
+    void whenVerifyingStaffOtp_thenNotUnauthorized() {
+        webTestClient.post()
+                .uri("/api/v1/auth/staff/otp/verify")
+                .exchange()
+                .expectStatus().isNotFound();
+
+        webTestClient.post()
+                .uri("/user/api/v1/auth/staff/otp/verify")
+                .exchange()
+                .expectStatus().isNotFound();
+    }
+
+    @Test
+    void whenAccessingFlatTenantStaffEndpoints_thenNotUnauthorized() {
+        webTestClient.get()
+                .uri("/api/v1/tenant/staff")
+                .exchange()
+                .expectStatus().isNotFound();
+
+        webTestClient.get()
+                .uri("/api/v1/tenant/staff/counts/by-role")
+                .exchange()
+                .expectStatus().isNotFound();
+    }
+
+    @Test
     void whenAccessingProtectedEndpointUnauthenticated_thenUnauthorized() {
         webTestClient.get()
                 .uri("/api/v1/protected-resource")

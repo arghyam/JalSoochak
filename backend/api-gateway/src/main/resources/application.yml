@@ -17,6 +17,20 @@ spring:
           predicates:
             - Path=/api/v1/pumpoperator/**
 
+        - id: tenant-staff-flat
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/tenant/staff
+          filters:
+            - SetPath=/api/v1/tenant/user/staff
+
+        - id: tenant-staff-counts-flat
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/tenant/staff/counts/by-role
+          filters:
+            - SetPath=/api/v1/tenant/user/staff/counts/by-role
+
         - id: user-service-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}
           predicates:
