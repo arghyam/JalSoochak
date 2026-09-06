@@ -1,0 +1,30 @@
+# Test overrides: the gateway boots with its real security chain but forwards nothing.
+#
+# With no routes registered, a request that clears the security chain falls through to a 404
+# instead of being proxied to a service that is not running -- so a permitted route is a fast 404
+# and a blocked route is a 401, with no network involved either way.
+spring:
+  cloud:
+    gateway:
+      routes: []
+      discovery:
+        locator:
+          enabled: false
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # A jwk-set-uri decoder resolves keys lazily, so nothing is fetched at startup. The
+          # ReactiveJwtDecoder is mocked in the test anyway; this only keeps the issuer-uri in the
+          # main config from triggering an OIDC discovery call during context refresh.
+          jwk-set-uri: http://localhost:1/jwks
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+logging:
+  file:
+    name: target/api-gateway-test.log

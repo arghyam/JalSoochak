@@ -122,6 +122,38 @@ public class PublicPumpOperatorRepository {
             LocalDate startDate,
             LocalDate endDate
     ) {
+        return findPumpOperatorBy(schemaName, "id", pumpOperatorId, schemeId, startDate, endDate);
+    }
+
+    /**
+     * Same detail query keyed on the random {@code uuid} instead of the sequential {@code id}.
+     * Used by the anonymous public route, which must not expose an enumerable identifier.
+     */
+    public PumpOperatorDetailsDTO findPumpOperatorByUuid(
+            String schemaName,
+            String uuid,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        return findPumpOperatorBy(schemaName, "uuid", uuid, schemeId, startDate, endDate);
+    }
+
+    /**
+     * @param identityColumn must be {@code id} or {@code uuid} — it is interpolated into the SQL,
+     *                       so it is checked against that closed set rather than parameterised.
+     */
+    private PumpOperatorDetailsDTO findPumpOperatorBy(
+            String schemaName,
+            String identityColumn,
+            Object identityValue,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        if (!"id".equals(identityColumn) && !"uuid".equals(identityColumn)) {
+            throw new IllegalArgumentException("Unsupported identity column: " + identityColumn);
+        }
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String schemeJoin;
@@ -251,17 +283,17 @@ public class PublicPumpOperatorRepository {
                     FROM bounds
                 ) comp ON true
                 WHERE u.deleted_at IS NULL
-                  AND u.id = ?
+                  AND u.%s = ?
                   %s
                   AND upper(COALESCE(ut.c_name, '')) = 'PUMP_OPERATOR'
                 LIMIT 1
-                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName, schemeRequiredSql);
+                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName, identityColumn, schemeRequiredSql);
         try {
             params.add(startDate);
             params.add(endDate);
             params.add(startDate);
             params.add(endDate);
-            params.add(pumpOperatorId);
+            params.add(identityValue);
             return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
                 Timestamp lastTs = (Timestamp) rs.getObject("last_submission_at");
                 LocalDateTime lastSubmissionAt = lastTs == null ? null : lastTs.toLocalDateTime();

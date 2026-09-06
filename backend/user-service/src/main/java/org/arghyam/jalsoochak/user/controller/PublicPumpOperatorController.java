@@ -41,6 +41,19 @@ public class PublicPumpOperatorController {
 
     private static final int MAX_PAGE_SIZE = 100;
 
+    /**
+     * Deepest page an anonymous caller may request. With a mandatory scheme filter no legitimate
+     * public view comes anywhere near this; it exists so that "walk every page" is not expressible
+     * even if a future endpoint loosens its filter.
+     */
+    private static final int MAX_PUBLIC_PAGE = 50;
+
+    /**
+     * Most schemes one {@code by-scheme} call may span. The village dashboard requests one scheme
+     * per call, so this only bounds a caller trying to batch the whole tenant into one request.
+     */
+    private static final int MAX_SCHEME_IDS_PER_REQUEST = 25;
+
     private final PublicPumpOperatorService publicPumpOperatorService;
     private final PersonSchemeService personSchemeService;
 
@@ -58,6 +71,34 @@ public class PublicPumpOperatorController {
         PumpOperatorDetailsDTO dto = publicPumpOperatorService.getPumpOperatorDetails(
                 tenantCode,
                 pumpOperatorId,
+                schemeId,
+                startDate,
+                endDate
+        );
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operator retrieved", dto));
+    }
+
+    /**
+     * UUID-keyed operator detail — the route the anonymous village dashboard uses.
+     *
+     * <p>The sequential {@code /pump-operators/{pumpOperatorId}} route above is authenticated, so a
+     * caller with no token cannot walk operator ids 1..N. {@code uuid} is {@code gen_random_uuid()}
+     * (v4, random), so it is not guessable from a neighbouring record.
+     */
+    @GetMapping("/pump-operators/by-uuid/{uuid}")
+    public ResponseEntity<ApiResponseDTO<PumpOperatorDetailsDTO>> getPumpOperatorDetailsByUuid(
+            @PathVariable String uuid,
+            @RequestParam(required = false) Long schemeId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam String tenantCode
+    ) {
+        if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+            throw new IllegalArgumentException("startDate must be on or before endDate");
+        }
+        PumpOperatorDetailsDTO dto = publicPumpOperatorService.getPumpOperatorDetailsByUuid(
+                tenantCode,
+                uuid,
                 schemeId,
                 startDate,
                 endDate
@@ -100,7 +141,7 @@ public class PublicPumpOperatorController {
             @RequestParam(required = false) Long pumpOperatorId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "0") @Min(0) @Max(MAX_PUBLIC_PAGE) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size
     ) {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
@@ -131,6 +172,20 @@ public class PublicPumpOperatorController {
         List<Long> effectiveSchemeIds = schemeIds;
         if (schemeId != null) {
             effectiveSchemeIds = List.of(schemeId);
+        }
+
+        // A scheme filter is mandatory. Without one this endpoint took the unpaginated branch in
+        // PublicPumpOperatorRepository#listPumpOperatorsByScheme and returned every operator in the
+        // tenant — name, email and phone number — to an anonymous caller in a single response. The
+        // MAX_PAGE_SIZE ceiling did not apply, because that branch only runs when the caller omits
+        // page and size. schemeName alone is not a substitute: a one-character term matches most of
+        // the table.
+        if (effectiveSchemeIds == null || effectiveSchemeIds.isEmpty()) {
+            throw new IllegalArgumentException("schemeId or schemeIds is required");
+        }
+        if (effectiveSchemeIds.size() > MAX_SCHEME_IDS_PER_REQUEST) {
+            throw new IllegalArgumentException(
+                    "at most " + MAX_SCHEME_IDS_PER_REQUEST + " schemeIds may be requested at once");
         }
 
         // Backwards-compatible: only paginate when caller provides page and/or size.

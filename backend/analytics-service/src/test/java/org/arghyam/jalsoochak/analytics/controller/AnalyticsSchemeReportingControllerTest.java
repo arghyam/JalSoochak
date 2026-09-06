@@ -5,10 +5,8 @@ import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReporting
 import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
-import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
@@ -98,8 +96,6 @@ class AnalyticsSchemeReportingControllerTest {
     private AuthenticatedRequestContextService authenticatedRequestContextService;
     @MockBean
     private DimUserRepository dimUserRepository;
-    @MockBean
-    private FactEscalationRepository factEscalationRepository;
     @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
@@ -1184,160 +1180,6 @@ class AnalyticsSchemeReportingControllerTest {
 
         verify(anomalyQueryService, times(1)).getAnomaliesForUserSchemes(
                 eq(10), eq(9001), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_withEscalationId_updatesOnlyForSameUuid() throws Exception {
-        UUID uuid = UUID.fromString("44444444-4444-4444-4444-444444444444");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        FactEscalation escalation = FactEscalation.builder()
-                .id(77L)
-                .tenantId(10)
-                .userId(9001)
-                .schemeId(101)
-                .resolutionStatus(0)
-                .createdAt(LocalDateTime.of(2026, 2, 1, 10, 0))
-                .updatedAt(LocalDateTime.of(2026, 2, 1, 10, 0))
-                .build();
-
-        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001)))
-                .thenReturn(Optional.of(escalation));
-        when(factEscalationRepository.save(any(FactEscalation.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "77")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":2}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.escalation_id").value(77))
-                .andExpect(jsonPath("$.data.resolution_status").value(2));
-
-        verify(factEscalationRepository, times(1))
-                .findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001));
-        verify(factEscalationRepository, times(1)).save(any(FactEscalation.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_whenNotOwnedByUuid_returnsBadRequest() throws Exception {
-        UUID uuid = UUID.fromString("55555555-5555-5555-5555-555555555555");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(88L), eq(10), eq(9001)))
-                .thenReturn(Optional.empty());
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "88")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":1}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-
-        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_withBothIdentifiers_returnsBadRequest() throws Exception {
-        UUID uuid = UUID.fromString("66666666-6666-6666-6666-666666666666");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "77")
-                        .param("correlation_id", "esc-1")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":1}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false));
-
-        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_withoutResolutionStatus_returnsBadRequest() throws Exception {
-        UUID uuid = UUID.fromString("77777777-7777-7777-7777-777777777777");
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "77")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-
-        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_withCorrelationId_updatesLatestRow() throws Exception {
-        UUID uuid = UUID.fromString("88888888-8888-8888-8888-888888888888");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        FactEscalation escalation = FactEscalation.builder()
-                .id(99L)
-                .tenantId(10)
-                .userId(9001)
-                .schemeId(101)
-                .resolutionStatus(0)
-                .createdAt(LocalDateTime.of(2026, 2, 2, 10, 0))
-                .updatedAt(LocalDateTime.of(2026, 2, 2, 10, 0))
-                .build();
-
-        when(factEscalationRepository.findFirstByTenantIdAndUserIdAndCorrelationIdOrderByCreatedAtDesc(eq(10), eq(9001), eq("esc-1")))
-                .thenReturn(Optional.of(escalation));
-        when(factEscalationRepository.save(any(FactEscalation.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("correlation_id", "  esc-1  ")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":1}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.escalation_id").value(99))
-                .andExpect(jsonPath("$.data.resolution_status").value(1));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_whenUnexpectedError_returnsServerError() throws Exception {
-        UUID uuid = UUID.fromString("99999999-9999-9999-9999-999999999999");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        FactEscalation escalation = FactEscalation.builder()
-                .id(77L)
-                .tenantId(10)
-                .userId(9001)
-                .resolutionStatus(0)
-                .build();
-        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001)))
-                .thenReturn(Optional.of(escalation));
-        when(factEscalationRepository.save(any(FactEscalation.class)))
-                .thenThrow(new RuntimeException("db down"));
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "77")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":2}"))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
     }
 
     @Test
