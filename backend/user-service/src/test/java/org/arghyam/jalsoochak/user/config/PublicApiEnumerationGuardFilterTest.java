@@ -156,5 +156,51 @@ class PublicApiEnumerationGuardFilterTest {
 
             assertThat(response.getStatus()).isEqualTo(200);
         }
+
+        @Test
+        @DisplayName("does not merge two clients whose addresses share a 32-bit hash")
+        void clientsWithCollidingHashCodesKeepSeparateBudgets() throws Exception {
+            // "Aa" and "BB" have identical String.hashCode values. The client key was once that
+            // hash, so a pair like this shared one budget and an ordinary caller could be turned
+            // away for a scraper it never met. Over 50,000 tracked clients that collision was about
+            // a one-in-four event, so this is the shape of a real false positive, not a curiosity.
+            assertThat("Aa".hashCode()).isEqualTo("BB".hashCode());
+
+            walk("AS", 1, 20, "Aa");
+            MockHttpServletResponse other = walk("AS", 1, 2, "BB");
+
+            assertThat(other.getStatus()).isEqualTo(200);
+        }
+    }
+
+    @Nested
+    @DisplayName("Path matching")
+    class PathMatching {
+
+        private MockHttpServletRequest underContextPath(long schemeId) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/user" + BY_SCHEME);
+            request.setContextPath("/user");
+            request.setRequestURI("/user" + BY_SCHEME);
+            request.setParameter("tenantCode", "AS");
+            request.setParameter("schemeId", String.valueOf(schemeId));
+            request.setRemoteAddr("10.0.0.9");
+            return request;
+        }
+
+        @Test
+        @DisplayName("still guards the public tree when deployed under a servlet context path")
+        void stripsContextPathBeforeMatching() throws Exception {
+            // Comparing the raw URI would make every path miss the prefix, so the guard would stop
+            // firing entirely -- a security control failing open on a deployment setting.
+            assertThat(filter.shouldNotFilter(underContextPath(1L))).isFalse();
+
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            for (int schemeId = 1; schemeId <= 20; schemeId++) {
+                response = new MockHttpServletResponse();
+                filter.doFilter(underContextPath(schemeId), response, new MockFilterChain());
+            }
+
+            assertThat(response.getStatus()).isEqualTo(429);
+        }
     }
 }
