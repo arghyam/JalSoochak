@@ -75,16 +75,20 @@ class TelemetryEventPublisherTest {
             assertThat(event.getTenantId()).isEqualTo(17);
             assertThat(event.getSchemeId()).isEqualTo(7);
             assertThat(event.getUserId()).isEqualTo(11);
-            assertThat(event.getWaterQuantity()).isEqualTo(150);
+            assertThat(event.getWaterQuantity()).isEqualByComparingTo("150");
             assertThat(event.getSubmissionStatus()).isEqualTo(1);
             assertThat(event.getDate()).isEqualTo("2026-03-01");
         }
 
         @Test
-        void roundsAFractionalQuantityHalfUp() {
+        void carriesAFractionalQuantityThroughUnrounded() {
+            // The correction paths derive this by subtracting two NUMERIC readings, so it is decimal at
+            // source. Rounding it here — as this publisher used to — threw away up to 500 L of a day's
+            // supply, and did so inconsistently with the reading path, which subtracts after rounding.
             publisher.publishWaterQuantityRecorded(17, 7L, 11L, DATE, new BigDecimal("150.5"), 1);
 
-            assertThat(publishedTo(TOPIC, WaterQuantityEvent.class).getWaterQuantity()).isEqualTo(151);
+            assertThat(publishedTo(TOPIC, WaterQuantityEvent.class).getWaterQuantity())
+                    .isEqualByComparingTo("150.5");
         }
 
         @Test
@@ -326,8 +330,8 @@ class TelemetryEventPublisherTest {
 
             MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
             assertThat(event.getEventType()).isEqualTo("METER_READING_RECORDED");
-            assertThat(event.getExtractedReading()).isEqualTo(1234);
-            assertThat(event.getConfirmedReading()).isEqualTo(1234);
+            assertThat(event.getExtractedReading()).isEqualByComparingTo("1234");
+            assertThat(event.getConfirmedReading()).isEqualByComparingTo("1234");
             assertThat(event.getImageUrl()).isEqualTo("https://minio/img.jpg");
             assertThat(event.getReadingAt()).isEqualTo("2026-03-01T06:30");
             assertThat(event.getChannel()).isEqualTo(1);
@@ -340,6 +344,30 @@ class TelemetryEventPublisherTest {
                     null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, null, 1, 0);
 
             assertThat(publishedTo(TOPIC, MeterReadingEvent.class).getReadingDate()).isEqualTo("2026-03-01");
+        }
+
+        @Test
+        void publishesTheMetersDecimalDigitRatherThanRoundingItAway() {
+            // flow_reading_table holds these as NUMERIC and the meters genuinely read to a tenth of a
+            // m3. Rounding here cost up to 0.5 m3 per reading, i.e. up to 1000 L on the daily delta
+            // analytics derives from two of them.
+            publisher.publishMeterReadingRecorded(17, 7L, 11L,
+                    new BigDecimal("1247.8"), new BigDecimal("1235.55"), null,
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0);
+
+            MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
+            assertThat(event.getExtractedReading()).isEqualByComparingTo("1247.8");
+            assertThat(event.getConfirmedReading()).isEqualByComparingTo("1235.55");
+        }
+
+        @Test
+        void carriesNullReadingsThrough() {
+            publisher.publishMeterReadingRecorded(17, 7L, 11L, null, null, null,
+                    null, LocalDateTime.of(2026, 3, 1, 6, 30), 1, DATE, 1, 0);
+
+            MeterReadingEvent event = publishedTo(TOPIC, MeterReadingEvent.class);
+            assertThat(event.getExtractedReading()).isNull();
+            assertThat(event.getConfirmedReading()).isNull();
         }
 
         @Test

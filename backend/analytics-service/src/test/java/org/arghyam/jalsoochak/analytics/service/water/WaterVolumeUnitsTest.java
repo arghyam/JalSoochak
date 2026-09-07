@@ -2,8 +2,11 @@ package org.arghyam.jalsoochak.analytics.service.water;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.InstanceOfAssertFactories.throwable;
 
 class WaterVolumeUnitsTest {
 
@@ -22,9 +25,10 @@ class WaterVolumeUnitsTest {
     }
 
     @Test
-    void cubicMetresToLitres_widestPossibleReadingDeltaDoesNotOverflow() {
-        // Readings are INT, so the widest conceivable delta is Integer.MAX_VALUE m3. Multiplying it
-        // must stay inside long — otherwise the ingestion path could throw and stall a Kafka partition.
+    void cubicMetresToLitres_widestPlausibleReadingDeltaDoesNotOverflow() {
+        // Meter indices are bounded by their digit count, not by a Java type, but a delta of this size
+        // must still convert rather than throw — the ingestion path runs on the Kafka consumer thread,
+        // where an ArithmeticException would fail the offset commit and retry forever.
         assertThat(WaterVolumeUnits.cubicMetresToLitres(Integer.MAX_VALUE))
                 .isEqualTo(2_147_483_647_000L);
     }
@@ -33,5 +37,59 @@ class WaterVolumeUnitsTest {
     void cubicMetresToLitres_overflowingLongThrowsRatherThanWrapping() {
         assertThatThrownBy(() -> WaterVolumeUnits.cubicMetresToLitres(Long.MAX_VALUE))
                 .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    void cubicMetresToLitres_decimalCubicMetresBecomeExactLitres() {
+        // The meters' decimal digit is a tenth of a m3, i.e. exactly 100 L — the precision this
+        // conversion exists to carry through.
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("0.1"))).isEqualTo(100L);
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("12.3"))).isEqualTo(12_300L);
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("150.0"))).isEqualTo(150_000L);
+    }
+
+    @Test
+    void cubicMetresToLitres_roundsToTheNearestLitreHalfUp() {
+        // Below a litre there is nothing real left to keep — three orders of magnitude finer than the
+        // meters resolve. HALF_UP is not a free choice: Postgres ROUND() in recompute_water_quantity.sql
+        // is half-away-from-zero, and these two must agree for the backfill parity test to hold.
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("0.00049"))).isZero();
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("0.0005"))).isEqualTo(1L);
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("0.0015"))).isEqualTo(2L);
+    }
+
+    @Test
+    void cubicMetresToLitres_trailingZerosDoNotChangeTheResult() {
+        // NUMERIC is unconstrained at both ends of the wire, so the same volume can arrive at different
+        // scales; the litre value must not depend on which.
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("42")))
+                .isEqualTo(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("42.000")))
+                .isEqualTo(42_000L);
+    }
+
+    @Test
+    void cubicMetresToLitres_decimalOverflowingLongIsSignalledNotTruncatedOrClamped() {
+        // Reachable input, not a theoretical one: readings are unbounded NUMERIC on both sides of the
+        // topic and the submission API bounds them only from below. The ingestion boundary catches this
+        // and declines to write a volume; saturating at Long.MAX_VALUE here would invent a number and
+        // hide the bad reading behind it.
+        BigDecimal absurd = new BigDecimal("1e16");
+
+        assertThatThrownBy(() -> WaterVolumeUnits.cubicMetresToLitres(absurd))
+                .isInstanceOf(WaterVolumeOutOfRangeException.class)
+                .isInstanceOf(ArithmeticException.class)
+                .asInstanceOf(throwable(WaterVolumeOutOfRangeException.class))
+                .extracting(WaterVolumeOutOfRangeException::getCubicMetres)
+                .isEqualTo(absurd);
+    }
+
+    @Test
+    void cubicMetresToLitres_theLargestStorableVolumeStillConverts() {
+        // Long.MAX_VALUE litres exactly. The guard must reject what cannot be stored and nothing more.
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("9223372036854775.807")))
+                .isEqualTo(Long.MAX_VALUE);
+
+        assertThatThrownBy(() -> WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("9223372036854775.808")))
+                .isInstanceOf(WaterVolumeOutOfRangeException.class);
     }
 }
