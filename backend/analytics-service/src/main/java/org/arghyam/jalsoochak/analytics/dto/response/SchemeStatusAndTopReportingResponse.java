@@ -27,8 +27,8 @@ public class SchemeStatusAndTopReportingResponse {
     private LocalDate startDate;
     private LocalDate endDate;
     private Integer daysInRange;
-    private List<SchemeStatusCountDTO> workStatusCounts;
-    private List<SchemeStatusCountDTO> operatingStatusCounts;
+    private Integer activeSchemeCount;
+    private Integer inactiveSchemeCount;
     private Long totalCount;
     private Integer topSchemeCount;
     private List<TopReportingScheme> topSchemes;
@@ -40,8 +40,8 @@ public class SchemeStatusAndTopReportingResponse {
     public static class TopReportingScheme {
         private Integer schemeId;
         private String schemeName;
-        private SchemeStatusDTO workStatus;
-        private SchemeStatusDTO operatingStatus;
+        private Integer statusCode;
+        private String status;
         private Integer submissionDays;
         private BigDecimal reportingRate;
         private Long totalWaterSupplied;

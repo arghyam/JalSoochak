@@ -16,7 +16,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -134,12 +133,11 @@ class TelemetryTenantRepositorySchemesQueryTest {
         verifyNoInteractions(jdbcTemplate);
     }
 
-    // LENIENT-INGEST: placeholder schemes must be created Non-Operative so they never inflate
-    // operative-scheme dashboards, and flagged is_auto_provisioned so they stay discoverable for
-    // reconciliation. The retired is_active column is deliberately absent from the insert.
+    // LENIENT-INGEST: placeholder schemes must be created inactive so they never inflate active-scheme
+    // dashboards, and flagged is_auto_provisioned so they stay discoverable for reconciliation.
     @SuppressWarnings("unchecked")
     @Test
-    void getOrCreatePlaceholderSchemeInsertsNonOperativeAutoProvisionedScheme() {
+    void getOrCreatePlaceholderSchemeInsertsInactiveAutoProvisionedScheme() {
         TelemetryTenantRepository repository = new TelemetryTenantRepository(jdbcTemplate, piiEncryptionService);
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(), any())).thenReturn(List.of());
         when(jdbcTemplate.queryForObject(anyString(), eq(Number.class), any(), any(), any())).thenReturn(55555L);
@@ -151,10 +149,9 @@ class TelemetryTenantRepositorySchemesQueryTest {
         verify(jdbcTemplate).queryForObject(sqlCaptor.capture(), eq(Number.class), any(), any(), any());
         String insertSql = sqlCaptor.getValue();
         assertTrue(insertSql.contains("is_auto_provisioned"), "placeholder must be flagged is_auto_provisioned");
-        assertFalse(insertSql.contains("is_active"),
-                "placeholder insert must not reference the retired is_active column");
-        assertTrue(insertSql.contains("0, 0, TRUE"),
-                "placeholder must be work_status=0, operating_status=0 and is_auto_provisioned=TRUE");
+        assertTrue(insertSql.contains("is_active"), "placeholder insert must set is_active explicitly");
+        assertTrue(insertSql.contains("TRUE, FALSE"),
+                "placeholder must be is_auto_provisioned=TRUE and is_active=FALSE");
     }
 
     // LENIENT-INGEST: when two concurrent unknown-scheme submissions race, the unique index (V31) makes

@@ -1,9 +1,10 @@
 package org.arghyam.jalsoochak.scheme.service;
 
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
@@ -24,8 +25,9 @@ public interface SchemeService {
             String stateSchemeId,
             String schemeName,
             String name,
-            List<String> workStatus,
-            List<String> operatingStatus
+            String workStatus,
+            String operatingStatus,
+            String status
     );
 
     PageResponseDTO<SchemeMappingDTO> listSchemeMappings(
@@ -35,15 +37,18 @@ public interface SchemeService {
             String sortBy,
             String sortDir,
             String name,
-            List<String> workStatus,
-            List<String> operatingStatus,
+            String workStatus,
+            String operatingStatus,
+            String status,
             String villageLgdCode,
             String subDivisionName
     );
 
     PageResponseDTO<SchemeYesterdayFinalReadingDTO> listSchemesWithYesterdayFinalReading(String tenantCode, int page, int limit, String schemeName);
 
-    SchemeStatusBreakdownDTO getSchemeStatusCounts(String tenantCode);
+    SchemeCountsDTO getSchemeCounts(String tenantCode);
+
+    SchemeStatusCountsDTO getSchemeStatusCounts(String tenantCode);
 
     SchemeStatusesResponseDTO getSchemeStatuses(Integer tenantId, int schemeId);
 

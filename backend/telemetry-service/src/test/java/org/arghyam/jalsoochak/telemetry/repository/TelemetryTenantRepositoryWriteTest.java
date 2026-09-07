@@ -138,18 +138,14 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
                             ArgumentMatchers.eq(Number.class), ArgumentMatchers.any(Object[].class));
         }
 
-        // LENIENT-INGEST: placeholders must be created Non-Operative so they never inflate
-        // operative-scheme dashboards, and flagged is_auto_provisioned so they stay discoverable for
-        // reconciliation. The retired is_active column is deliberately absent from the insert.
         @Test
-        void getOrCreatePlaceholderSchemeInsertsNonOperativeAutoProvisionedRow() {
+        void getOrCreatePlaceholderSchemeInsertsInactiveAutoProvisionedRow() {
             onScalar("INSERT INTO", Number.class, 901L);
 
             assertThat(repository.getOrCreatePlaceholderScheme(SCHEMA, "S-1", "C-1")).isEqualTo(901L);
             assertThat(capturedInsertSql())
                     .contains("is_auto_provisioned")
-                    .doesNotContain("is_active")
-                    .contains("0, 0, TRUE");
+                    .contains("TRUE, FALSE");
         }
 
         @Test

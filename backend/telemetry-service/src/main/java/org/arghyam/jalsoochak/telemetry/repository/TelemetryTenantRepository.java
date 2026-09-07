@@ -526,21 +526,13 @@ public class TelemetryTenantRepository {
 
         String label = !state.isEmpty() ? ("state:" + state) : ("centre:" + centre);
         String placeholderName = "Auto-provisioned scheme (" + label + ")";
-        // LENIENT-INGEST: placeholders are created operating_status = 0 (Non-Operative) so they never
-        // inflate operative-scheme counts/dashboards; they stay discoverable via is_auto_provisioned
-        // for later reconciliation.
-        //
-        // work_status = 0 is deliberate and is NOT a SchemeWorkStatus code. The column is NOT NULL, so
-        // "we could not resolve this scheme" needs some stored value, and 0 is reserved for exactly
-        // that: it sits outside the 1..4 table, SchemeWorkStatus.labelOf resolves it to "Unknown" like
-        // any unmapped code, and SchemeWorkStatus.fromInput keeps rejecting it so Unknown can never be
-        // uploaded or PATCHed as a real work status. Do not substitute a real code here — 3 (Not
-        // Started) would assert a construction state nobody recorded.
+        // LENIENT-INGEST: placeholders are created is_active = FALSE so they never inflate active-scheme
+        // counts/dashboards; they stay discoverable via is_auto_provisioned for later reconciliation.
         String insertSql = String.format("""
                 INSERT INTO %s.scheme_master_table
                     (state_scheme_id, centre_scheme_id, scheme_name, work_status, operating_status,
-                     is_auto_provisioned, created_at, updated_at)
-                VALUES (?, ?, ?, 0, 0, TRUE, NOW(), NOW())
+                     is_auto_provisioned, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, 0, 0, TRUE, FALSE, NOW(), NOW())
                 RETURNING id
                 """, schemaName);
         try {

@@ -107,8 +107,7 @@ public final class SwaggerExamples {
                   "schemeId": 1,
                   "tenantId": 10,
                   "schemeName": "Scheme A",
-                  "workStatus": 1,
-                  "operatingStatus": 1
+                  "status": 1
                 }
               ]
             }
@@ -221,16 +220,8 @@ public final class SwaggerExamples {
             {
               "success": true,
               "data": {
-                "total": 6,
-                "workStatusCounts": [
-                  { "code": 1, "label": "Ongoing", "count": 4 },
-                  { "code": 2, "label": "Completed", "count": 2 }
-                ],
-                "operatingStatusCounts": [
-                  { "code": 0, "label": "Non-Operative", "count": 1 },
-                  { "code": 1, "label": "Operative", "count": 4 },
-                  { "code": 2, "label": "Partially Operative", "count": 1 }
-                ]
+                "active_schemes_count": 5,
+                "inactive_schemes_count": 1
               }
             }
             """;
@@ -427,21 +418,15 @@ public final class SwaggerExamples {
                 "parentLgdCName": "Parent",
                 "parentLgdTitle": "Parent LGD",
                 "parentLgdLevel": 2,
-                "workStatusCounts": [
-                  { "code": 1, "label": "Ongoing", "count": 1 },
-                  { "code": 2, "label": "Completed", "count": 1 }
-                ],
-                "operatingStatusCounts": [
-                  { "code": 1, "label": "Operative", "count": 1 },
-                  { "code": 2, "label": "Partially Operative", "count": 1 }
-                ],
+                "activeSchemeCount": 1,
+                "inactiveSchemeCount": 1,
                 "topSchemeCount": 1,
                 "topSchemes": [
                   {
                     "schemeId": 1,
                     "schemeName": "Scheme A",
-                    "workStatus": { "code": 1, "label": "Ongoing" },
-                    "operatingStatus": { "code": 1, "label": "Operative" },
+                    "statusCode": 1,
+                    "status": "active",
                     "submissionDays": 10,
                     "reportingRate": 0.5,
                     "totalWaterSupplied": 150,
@@ -478,19 +463,15 @@ public final class SwaggerExamples {
                 "parentLgdId": 101,
                 "parentLgdCName": "Parent LGD Name",
                 "totalSchemeCount": 1,
-                "workStatusCounts": [
-                  { "code": 1, "label": "Ongoing", "count": 1 }
-                ],
-                "operatingStatusCounts": [
-                  { "code": 1, "label": "Operative", "count": 1 }
-                ],
+                "activeSchemeCount": 1,
+                "inactiveSchemeCount": 0,
                 "schemeCountInResponse": 1,
                 "schemes": [
                   {
                     "schemeId": 1,
                     "schemeName": "Scheme A",
-                    "workStatus": { "code": 1, "label": "Ongoing" },
-                    "operatingStatus": { "code": 1, "label": "Operative" },
+                    "statusCode": 1,
+                    "status": "active",
                     "supplyDays": 2,
                     "averageRegularity": 0.6667,
                     "isRegular": false,

@@ -2,14 +2,12 @@ package org.arghyam.jalsoochak.scheme.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.List;
-
 import org.arghyam.jalsoochak.scheme.config.RequiresTenantAccess;
+import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
@@ -48,10 +46,11 @@ public class SchemeController {
             @RequestParam(required = false) String stateSchemeId,
             @RequestParam(required = false) String schemeName,
             @RequestParam(required = false) String name,
-            @RequestParam(required = false) List<String> workStatus,
-            @RequestParam(required = false, name = "workstatus") List<String> workstatus,
-            @RequestParam(required = false) List<String> operatingStatus,
-            @RequestParam(required = false, name = "operatingstatus") List<String> operatingstatus
+            @RequestParam(required = false) String workStatus,
+            @RequestParam(required = false, name = "workstatus") String workstatus,
+            @RequestParam(required = false) String operatingStatus,
+            @RequestParam(required = false, name = "operatingstatus") String operatingstatus,
+            @RequestParam(required = false) String status
     ) {
         log.info("GET /api/schemes called");
         return ResponseEntity.ok(schemeService.listSchemes(
@@ -63,8 +62,9 @@ public class SchemeController {
                 stateSchemeId,
                 schemeName,
                 name,
-                firstNonEmpty(workStatus, workstatus),
-                firstNonEmpty(operatingStatus, operatingstatus)
+                firstNonBlank(workStatus, workstatus),
+                firstNonBlank(operatingStatus, operatingstatus),
+                status
         ));
     }
 
@@ -87,13 +87,6 @@ public class SchemeController {
         return b;
     }
 
-    private static List<String> firstNonEmpty(List<String> a, List<String> b) {
-        if (a != null && !a.isEmpty()) {
-            return a;
-        }
-        return b;
-    }
-
     @RequiresTenantAccess
     @GetMapping("/schemes/mappings")
     public ResponseEntity<PageResponseDTO<SchemeMappingDTO>> listSchemeMappings(
@@ -104,8 +97,9 @@ public class SchemeController {
             @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(required = false) String schemeName,
             @RequestParam(required = false) String name,
-            @RequestParam(required = false) List<String> workStatus,
-            @RequestParam(required = false) List<String> operatingStatus,
+            @RequestParam(required = false) String workStatus,
+            @RequestParam(required = false) String operatingStatus,
+            @RequestParam(required = false) String status,
             @RequestParam(required = false) String villageLgdCode,
             @RequestParam(required = false) String subDivisionName
     ) {
@@ -119,14 +113,24 @@ public class SchemeController {
                 firstNonBlank(schemeName, name),
                 workStatus,
                 operatingStatus,
+                status,
                 villageLgdCode,
                 subDivisionName
         ));
     }
 
     @RequiresTenantAccess
+    @GetMapping("/schemes/counts")
+    public ResponseEntity<SchemeCountsDTO> getSchemeCounts(
+            @RequestParam String tenantCode
+    ) {
+        log.info("GET /api/schemes/counts called");
+        return ResponseEntity.ok(schemeService.getSchemeCounts(tenantCode));
+    }
+
+    @RequiresTenantAccess
     @GetMapping("/schemes/counts/by-status")
-    public ResponseEntity<SchemeStatusBreakdownDTO> getSchemeStatusCounts(
+    public ResponseEntity<SchemeStatusCountsDTO> getSchemeStatusCounts(
             @RequestParam String tenantCode
     ) {
         log.info("GET /api/schemes/counts/by-status called");
