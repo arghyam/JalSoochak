@@ -45,9 +45,14 @@ class RateLimiterConfigTest {
     }
 
     @Test
-    void allowsRequestsWithoutContactingRedisWhenDisabled() {
-        var limiter = config.redisRateLimiter(1, 1, false);
-
-        assertEquals(true, limiter.isAllowed("test-route", "test-key").block().isAllowed());
+    void differentRoutesHaveSeparateBuckets() {
+        var limiter = config.redisRateLimiter(1, 1, true);
+        // First request on route A is allowed
+        assertTrue(limiter.isAllowed("routeA", "key").block().isAllowed());
+        // Second request on same route exceeds limit
+        assertFalse(limiter.isAllowed("routeA", "key").block().isAllowed());
+        // Same key on a different route should be allowed (separate bucket)
+        assertTrue(limiter.isAllowed("routeB", "key").block().isAllowed());
     }
+
 }

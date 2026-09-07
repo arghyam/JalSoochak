@@ -43,8 +43,11 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
+                # NOTE: Include the route ID in the Redis limiter key to isolate buckets per route.
+                # This prevents OTP and auth rate limiters from sharing the same bucket.
                 redis-rate-limiter.replenishRate: ${RATE_LIMIT_OTP_REPLENISH_RATE:1}
                 redis-rate-limiter.burstCapacity: ${RATE_LIMIT_OTP_BURST_CAPACITY:5}
+                # Ensure route-specific limiter keys to avoid bucket sharing.
 
         - id: auth-rate-limited-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}

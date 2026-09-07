@@ -25,7 +25,9 @@ public class RateLimiterConfig {
                 if (!enabled) {
                     return Mono.just(new RateLimiter.Response(true, java.util.Map.of()));
                 }
-                return super.isAllowed(routeId, key);
+                // Combine route ID with the resolver key to ensure each route has its own bucket.
+                String compositeKey = routeId + ":" + key;
+                return super.isAllowed(routeId, compositeKey);
             }
         };
     }
