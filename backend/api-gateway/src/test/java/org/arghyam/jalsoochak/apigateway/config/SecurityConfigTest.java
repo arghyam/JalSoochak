@@ -43,23 +43,34 @@ public class SecurityConfigTest {
     }
 
     @Test
-    void whenAccessingFlatTenantStaffEndpoints_thenNotUnauthorized() {
+    void whenAccessingFlatTenantStaffEndpoints_thenUnauthorized() {
         webTestClient.get()
                 .uri("/api/v1/tenant/staff")
                 .exchange()
-                .expectStatus().isNotFound();
+                .expectStatus().isUnauthorized();
 
         webTestClient.get()
                 .uri("/api/v1/tenant/staff/counts/by-role")
                 .exchange()
-                .expectStatus().isNotFound();
+                .expectStatus().isUnauthorized();
     }
 
     @Test
     void whenAccessingProtectedEndpointUnauthenticated_thenUnauthorized() {
-        webTestClient.get()
-                .uri("/api/v1/protected-resource")
-                .exchange()
-                .expectStatus().isUnauthorized();
+        String[] protectedEndpoints = {
+                "/api/v1/protected-resource",
+                "/api/v1/pumpoperator/something",
+                "/api/v1/telemetry/readings/device-1",
+                "/api/v1/analytics/dashboard",
+                "/api/v1/tenant-config/public/settings",
+                "/actuator/prometheus"
+        };
+
+        for (String endpoint : protectedEndpoints) {
+            webTestClient.get()
+                    .uri(endpoint)
+                    .exchange()
+                    .expectStatus().isUnauthorized();
+        }
     }
 }

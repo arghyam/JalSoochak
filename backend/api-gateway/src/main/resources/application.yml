@@ -43,8 +43,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_OTP_PREFIXED_REPLENISH_RATE:1}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_OTP_PREFIXED_BURST_CAPACITY:5}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_OTP_REPLENISH_RATE:1}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_OTP_BURST_CAPACITY:5}
 
         - id: auth-rate-limited-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -54,8 +54,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_AUTH_FLAT_REPLENISH_RATE:2}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_AUTH_FLAT_BURST_CAPACITY:10}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_AUTH_REPLENISH_RATE:2}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_AUTH_BURST_CAPACITY:10}
 
         - id: auth-rate-limited
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -66,8 +66,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_AUTH_PREFIXED_REPLENISH_RATE:2}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_AUTH_PREFIXED_BURST_CAPACITY:10}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_AUTH_REPLENISH_RATE:2}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_AUTH_BURST_CAPACITY:10}
 
         - id: pumpoperator-public
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -77,8 +77,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_PUMPOPERATOR_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_PUMPOPERATOR_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: tenant-staff-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -89,8 +89,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TENANT_STAFF_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TENANT_STAFF_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: tenant-staff-counts-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -101,8 +101,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TENANT_STAFF_COUNTS_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TENANT_STAFF_COUNTS_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: user-service-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -112,8 +112,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_USER_SERVICE_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_USER_SERVICE_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: tenant-service-flat
           uri: ${TENANT_SERVICE_URI:http://localhost:8081}
@@ -123,8 +123,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TENANT_SERVICE_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TENANT_SERVICE_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: telemetry-service-flat
           uri: ${TELEMETRY_SERVICE_URI:http://localhost:8084}
@@ -134,8 +134,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TELEMETRY_SERVICE_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TELEMETRY_SERVICE_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: scheme-service-flat
           uri: ${SCHEME_SERVICE_URI:http://localhost:8086}
@@ -145,8 +145,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_SCHEME_SERVICE_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_SCHEME_SERVICE_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: analytics-service-flat
           uri: ${ANALYTICS_SERVICE_URI:http://localhost:8087}
@@ -156,8 +156,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_ANALYTICS_SERVICE_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_ANALYTICS_SERVICE_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: message-service-flat
           uri: ${MESSAGE_SERVICE_URI:http://localhost:8085}
@@ -167,8 +167,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_MESSAGE_SERVICE_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_MESSAGE_SERVICE_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: anomaly-service-flat
           uri: ${ANOMALY_SERVICE_URI:http://localhost:8083}
@@ -178,8 +178,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_ANOMALY_SERVICE_FLAT_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_ANOMALY_SERVICE_FLAT_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: tenant-service
           uri: ${TENANT_SERVICE_URI:http://localhost:8081}
@@ -190,8 +190,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TENANT_SERVICE_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TENANT_SERVICE_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: user-service
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -202,8 +202,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_USER_SERVICE_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_USER_SERVICE_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: anomaly-service
           uri: ${ANOMALY_SERVICE_URI:http://localhost:8083}
@@ -214,8 +214,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_ANOMALY_SERVICE_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_ANOMALY_SERVICE_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: telemetry-service
           uri: ${TELEMETRY_SERVICE_URI:http://localhost:8084}
@@ -226,8 +226,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TELEMETRY_SERVICE_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TELEMETRY_SERVICE_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: message-service
           uri: ${MESSAGE_SERVICE_URI:http://localhost:8085}
@@ -238,8 +238,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_MESSAGE_SERVICE_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_MESSAGE_SERVICE_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: scheme-service
           uri: ${SCHEME_SERVICE_URI:http://localhost:8086}
@@ -250,8 +250,8 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_SCHEME_SERVICE_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_SCHEME_SERVICE_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
         - id: analytics-service
           uri: ${ANALYTICS_SERVICE_URI:http://localhost:8087}
@@ -262,12 +262,19 @@ spring:
             - name: RequestRateLimiter
               args:
                 key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_ANALYTICS_SERVICE_REPLENISH_RATE:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_ANALYTICS_SERVICE_BURST_CAPACITY:40}
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
 
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+    # Disable client-side syntax highlighting. highlight.js' recursive
+    # processLines overflows the JS call stack ("Maximum call stack size
+    # exceeded") on large/deeply nested responses (e.g. the analytics
+    # water-quantity/region-wise endpoint), producing "Could not render
+    # responses". This aggregated UI is what staging serves, so the setting
+    # must live here. Plain-text rendering skips the highlighter; the
+    # response body still renders in full.
     syntax-highlight:
       activated: false
     urls:

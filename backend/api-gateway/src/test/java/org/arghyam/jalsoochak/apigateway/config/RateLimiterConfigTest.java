@@ -35,13 +35,13 @@ class RateLimiterConfigTest {
     }
 
     @Test
-    void resolvesForwardedPublicRequestsByFirstForwardedIp() {
+    void resolvesForwardedPublicRequestsByRightmostForwardedIp() {
         var request = MockServerHttpRequest.get("/api/v1/auth/login")
                 .header("X-Forwarded-For", "192.0.2.20, 10.0.0.5")
                 .build();
         var exchange = MockServerWebExchange.from(request);
 
-        assertEquals("192.0.2.20", config.userOrIpKeyResolver().resolve(exchange).block());
+        assertEquals("10.0.0.5", config.userOrIpKeyResolver().resolve(exchange).block());
     }
 
     @Test

@@ -29,25 +29,10 @@ public class SecurityConfig {
                                 "/user/api/v1/auth/staff/otp/verify", "/api/v1/auth/staff/otp/verify",
                                 "/user/api/v1/public/**", "/api/v1/public/**",
                                 // Staff and operator public endpoints
-                                "/user/api/v1/tenant/user/staff", "/api/v1/tenant/user/staff",
-                                "/user/api/v1/tenant/user/staff/counts/by-role", "/api/v1/tenant/user/staff/counts/by-role",
-                                "/user/api/v1/tenant/staff", "/api/v1/tenant/staff",
-                                "/user/api/v1/tenant/staff/counts/by-role", "/api/v1/tenant/staff/counts/by-role",
-                                "/user/api/v1/pumpoperator/**", "/api/v1/pumpoperator/**",
                                 "/user/api/v1/state-admin/pump-operators/upload", "/api/v1/state-admin/pump-operators/upload",
                                 "/user/api/v1/state-admin/user-scheme-mappings/upload", "/api/v1/state-admin/user-scheme-mappings/upload",
                                 // Tenant service public endpoints
                                 "/tenant/api/v1/tenants", "/api/v1/tenants",
-                                "/tenant/api/v1/tenant-config/public/**", "/api/v1/tenant-config/public/**",
-                                "/tenant/api/v1/tenant/logo/**", "/api/v1/tenant/logo/**",
-                                "/tenant/api/v1/locations/**", "/api/v1/locations/**",
-                                // Analytics public dashboard endpoints
-                                "/analytics/api/v1/analytics/**", "/api/v1/analytics/**",
-                                // Scheme public endpoints
-                                "/scheme/api/v1/scheme/**", "/api/v1/scheme/**",
-                                // Telemetry public webhooks
-                                "/telemetry/api/v1/telemetry/readings/**", "/api/v1/telemetry/readings/**",
-                                "/telemetry/api/v1/telemetry/schemes/**", "/api/v1/telemetry/schemes/**",
                                 // Message welcome trigger
                                 "/message/api/v1/message/trigger-welcome-message", "/api/v1/message/trigger-welcome-message"
                         ).permitAll()
@@ -55,7 +40,6 @@ public class SecurityConfig {
                         .pathMatchers(
                                 "/actuator/health",
                                 "/actuator/info",
-                                "/actuator/prometheus",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/webjars/swagger-ui/**",

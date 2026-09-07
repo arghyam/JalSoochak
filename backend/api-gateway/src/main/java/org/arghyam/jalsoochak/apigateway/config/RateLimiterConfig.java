@@ -42,7 +42,8 @@ public class RateLimiterConfig {
 
     private String clientIp(String forwardedFor, InetSocketAddress remoteAddress) {
         if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return forwardedFor.split(",", 2)[0].trim();
+            String[] ips = forwardedFor.split(",");
+            return ips[ips.length - 1].trim();
         }
         if (remoteAddress == null || remoteAddress.getAddress() == null) {
             return "unknown-client";
