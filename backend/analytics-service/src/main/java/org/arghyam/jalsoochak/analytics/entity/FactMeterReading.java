@@ -11,6 +11,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -35,11 +36,18 @@ public class FactMeterReading {
     @Column(name = "user_id", nullable = false)
     private Integer userId;
 
+    /**
+     * Readings are {@code BigDecimal} over a bare {@code NUMERIC} column, mirroring
+     * {@code flow_reading_table} — the meters have a decimal digit and the warehouse keeps it.
+     *
+     * <p>No precision or scale is declared: the column is unconstrained, as at the source, and this
+     * entity must not impose one it does not have.
+     */
     @Column(name = "extracted_reading", nullable = false)
-    private Integer extractedReading;
+    private BigDecimal extractedReading;
 
     @Column(name = "confirmed_reading", nullable = false)
-    private Integer confirmedReading;
+    private BigDecimal confirmedReading;
 
     private Integer confidence;
 

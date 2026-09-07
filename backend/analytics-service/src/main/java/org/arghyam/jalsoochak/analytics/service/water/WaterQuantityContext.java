@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.service.water;
 
 import lombok.Builder;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
@@ -21,14 +22,18 @@ import java.time.LocalDate;
  * Because interpretation is delegated to the channel's calculator, a reading is only ever
  * processed by the calculator that understands its units; see
  * {@link WaterQuantityCalculatorRegistry#resolve(Integer)}.
+ *
+ * <p>The readings are {@code BigDecimal} because they are decimal at the source — bulk flow meters
+ * carry a decimal digit — and because a channel whose reading is not a whole count of anything
+ * (ELM's kWh, PDU's pump minutes) cannot be represented otherwise.
  */
 @Builder
 public record WaterQuantityContext(
         Integer tenantId,
         Integer schemeId,
         LocalDate readingDate,
-        Integer currentReading,
-        Integer previousReading,
+        BigDecimal currentReading,
+        BigDecimal previousReading,
         Integer channel
 ) {
 }

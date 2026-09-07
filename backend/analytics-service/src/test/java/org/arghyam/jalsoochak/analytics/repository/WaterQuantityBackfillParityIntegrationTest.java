@@ -20,6 +20,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -81,6 +82,7 @@ class WaterQuantityBackfillParityIntegrationTest {
     private static final int TENANT = 1;
     private static final int SCHEME = 1;
     private static final int GAP_SCHEME = 2;
+    private static final int DECIMAL_SCHEME = 3;
 
     private static final LocalDate D1 = LocalDate.of(2026, 1, 1);
     private static final LocalDate D2 = LocalDate.of(2026, 1, 2);
@@ -114,7 +116,8 @@ class WaterQuantityBackfillParityIntegrationTest {
                  parent_lgd_location_id, parent_department_location_id,
                  operating_status, created_at, updated_at)
                 VALUES (1, 1, 'Scheme A', 1001, 2001, 100, 200, 1, NOW(), NOW()),
-                       (2, 1, 'Scheme B', 1002, 2002, 100, 200, 1, NOW(), NOW())
+                       (2, 1, 'Scheme B', 1002, 2002, 100, 200, 1, NOW(), NOW()),
+                       (3, 1, 'Scheme C', 1003, 2003, 100, 200, 1, NOW(), NOW())
                 """);
     }
 
@@ -134,6 +137,9 @@ class WaterQuantityBackfillParityIntegrationTest {
         // exception. Legacy value is irrelevant, as with the other seeded rows.
         seedLegacyQuantityRow(GAP_SCHEME, D2, 5L);
         seedLegacyQuantityRow(GAP_SCHEME, D4, 70L);
+        seedLegacyQuantityRow(DECIMAL_SCHEME, D1, 1235L);
+        seedLegacyQuantityRow(DECIMAL_SCHEME, D2, 12L);
+        seedLegacyQuantityRow(DECIMAL_SCHEME, D3, 0L);
 
         Map<Long, Long> recomputed = runRecompute();
 
@@ -192,6 +198,30 @@ class WaterQuantityBackfillParityIntegrationTest {
         assertThat(isLatest(latest)).isTrue();
     }
 
+    @Test
+    void aDecimalReadingKeepsItsPrecisionOnBothSides() {
+        seedReadings();
+        // 1247.8 - 1235.5 = 12.3 m3. Rounding the readings to whole m3 first — as both sides did before
+        // the columns were widened — gives 1248 - 1236 = 12 m3, understating the day by 300 L.
+        seedLegacyQuantityRow(DECIMAL_SCHEME, D2, 12L);
+
+        long id = idOf(DECIMAL_SCHEME, D2);
+        assertThat(runRecompute().get(id)).isEqualTo(12_300L).isEqualTo(liveValueFor(id));
+    }
+
+    @Test
+    void aDeltaLandingOnAHalfLitreRoundsTheSameWayInSqlAndInJava() {
+        seedReadings();
+        // 1247.8005 - 1247.8 = 0.0005 m3 = exactly 0.5 L, the one input where a rounding-mode
+        // disagreement would show. Postgres ROUND() is half-away-from-zero and WaterVolumeUnits uses
+        // HALF_UP; on non-negative values those coincide, which is precisely what this asserts. Far
+        // below anything a meter resolves — the point is that the two definitions cannot drift.
+        seedLegacyQuantityRow(DECIMAL_SCHEME, D3, 0L);
+
+        long id = idOf(DECIMAL_SCHEME, D3);
+        assertThat(runRecompute().get(id)).isEqualTo(1L).isEqualTo(liveValueFor(id));
+    }
+
     /**
      * Readings covering every case the previous-day baseline got wrong.
      *
@@ -205,18 +235,25 @@ class WaterQuantityBackfillParityIntegrationTest {
      * GAP_SCHEME  D1 500          first ever                       -> 0
      *             D2 0            a genuine zero, not a baseline
      *             D4 560          three-day gap, baseline is D1    -> (560-500) * 1000
+     * DECIMAL_    D1 1235.5       first ever                       -> 0
+     * SCHEME      D2 1247.8       the meters' decimal digit        -> 12.3 m3 = 12,300 L
+     *             D3 1247.8005    delta rounds on a .5 litre tie   -> 1 L on both sides
      * </pre>
      */
     private void seedReadings() {
-        insertReading(SCHEME, D1, 100, "2026-01-01T08:00:00");
-        insertReading(SCHEME, D2, 140, "2026-01-02T08:00:00");
-        insertReading(SCHEME, D2, 150, "2026-01-02T17:30:00");
-        insertReading(SCHEME, D3, 150, "2026-01-03T08:00:00");
-        insertReading(SCHEME, D4, 120, "2026-01-04T08:00:00");
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
+        insertReading(SCHEME, D2, "140", "2026-01-02T08:00:00");
+        insertReading(SCHEME, D2, "150", "2026-01-02T17:30:00");
+        insertReading(SCHEME, D3, "150", "2026-01-03T08:00:00");
+        insertReading(SCHEME, D4, "120", "2026-01-04T08:00:00");
 
-        insertReading(GAP_SCHEME, D1, 500, "2026-01-01T08:00:00");
-        insertReading(GAP_SCHEME, D2, 0, "2026-01-02T08:00:00");
-        insertReading(GAP_SCHEME, D4, 560, "2026-01-04T08:00:00");
+        insertReading(GAP_SCHEME, D1, "500", "2026-01-01T08:00:00");
+        insertReading(GAP_SCHEME, D2, "0", "2026-01-02T08:00:00");
+        insertReading(GAP_SCHEME, D4, "560", "2026-01-04T08:00:00");
+
+        insertReading(DECIMAL_SCHEME, D1, "1235.5", "2026-01-01T08:00:00");
+        insertReading(DECIMAL_SCHEME, D2, "1247.8", "2026-01-02T08:00:00");
+        insertReading(DECIMAL_SCHEME, D3, "1247.8005", "2026-01-03T08:00:00");
     }
 
     /** The value {@code FactServiceImpl.updateWaterQuantityFromReading} would derive for that row. */
@@ -228,14 +265,14 @@ class WaterQuantityBackfillParityIntegrationTest {
         Integer schemeId = (Integer) row.get("scheme_id");
         LocalDate date = ((java.sql.Date) row.get("date")).toLocalDate();
 
-        Integer current = meterReadingRepository
+        BigDecimal current = meterReadingRepository
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(tenantId, schemeId, date)
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(null);
         if (current == null) {
             return null;
         }
-        Integer previous = meterReadingRepository
+        BigDecimal previous = meterReadingRepository
                 .findLatestBefore(tenantId, schemeId, date)
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(null);
@@ -289,13 +326,14 @@ class WaterQuantityBackfillParityIntegrationTest {
                 """, dateKey, date, date, date, date, date, date, date, date, date);
     }
 
-    private void insertReading(int schemeId, LocalDate readingDate, int confirmedReading, String readingAt) {
+    /** {@code confirmedReading} is written as text so the fixture states an exact NUMERIC, not a double. */
+    private void insertReading(int schemeId, LocalDate readingDate, String confirmedReading, String readingAt) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.fact_meter_reading_table
                 (tenant_id, scheme_id, user_id, extracted_reading, confirmed_reading,
                  reading_at, reading_date, submission_status, reading_type, created_at)
                 VALUES (?, ?, 11, ?, ?, ?, ?, 1, 0, NOW())
-                """, TENANT, schemeId, confirmedReading, confirmedReading,
+                """, TENANT, schemeId, new BigDecimal(confirmedReading), new BigDecimal(confirmedReading),
                 LocalDateTime.parse(readingAt), readingDate);
     }
 

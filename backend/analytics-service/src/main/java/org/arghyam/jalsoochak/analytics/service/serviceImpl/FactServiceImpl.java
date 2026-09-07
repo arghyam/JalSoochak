@@ -175,8 +175,11 @@ public class FactServiceImpl implements FactService {
         LocalDateTime now = LocalDateTime.now();
         // The event carries the meter's native m3 (telemetry derives the delta but does not convert);
         // this column is litres. Same converter as the reading path, so the two cannot drift.
+        BigDecimal reportedWaterQuantity = event.getWaterQuantity() != null
+                ? event.getWaterQuantity()
+                : BigDecimal.ZERO;
         long normalizedWaterQuantity = WaterVolumeUnits.cubicMetresToLitres(
-                Math.max(0, event.getWaterQuantity() != null ? event.getWaterQuantity() : 0));
+                reportedWaterQuantity.max(BigDecimal.ZERO));
         warnIfImplausible(normalizedWaterQuantity, event.getTenantId(), event.getSchemeId(), date, "correction");
         FactWaterQuantity fact = waterQuantityRepository
                 .findTopByTenantIdAndSchemeIdAndDateOrderByUpdatedAtDescIdDesc(
@@ -340,7 +343,7 @@ public class FactServiceImpl implements FactService {
         // reading instead, the two would disagree on any day carrying more than one reading and would
         // flip each other's values. Going through the table makes the definitions identical by
         // construction. The row saved moments ago is visible here — the query flushes first.
-        Integer currentReading = meterReadingRepository
+        BigDecimal currentReading = meterReadingRepository
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(
                         event.getTenantId(),
                         event.getSchemeId(),
@@ -358,7 +361,7 @@ public class FactServiceImpl implements FactService {
         // Left null when the scheme has none: the calculator decides what its channel can derive
         // without one (BFM: nothing, so 0). Never defaulted to 0 here — that is what made every
         // first-ever and post-gap reading store the whole cumulative meter index as a day's supply.
-        Integer previousReading = meterReadingRepository
+        BigDecimal previousReading = meterReadingRepository
                 .findLatestBefore(event.getTenantId(), event.getSchemeId(), readingDate)
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(null);

@@ -14,7 +14,8 @@
 --   previous = the latest reading strictly BEFORE it     -- FactMeterReadingRepository.findLatestBefore
 --              with confirmed_reading > 0, ordered by
 --              reading_date DESC, reading_at DESC, id DESC
---   quantity = GREATEST(0, current - previous) * 1000    -- BfmWaterQuantityCalculator + WaterVolumeUnits
+--   quantity = ROUND(GREATEST(0, current - previous)     -- BfmWaterQuantityCalculator + WaterVolumeUnits
+--                    * 1000)
 --
 -- and the two boundary cases that caused the defects this backfill repairs:
 --
@@ -37,7 +38,14 @@ SELECT fwq.id,
        CASE
            WHEN cur.confirmed_reading IS NULL THEN NULL
            WHEN prev.confirmed_reading IS NULL THEN 0
-           ELSE GREATEST(0, cur.confirmed_reading::bigint - prev.confirmed_reading::bigint) * 1000
+           -- The readings are NUMERIC (the meters carry a decimal digit), so the subtraction happens at
+           -- their own precision and the result is rounded once, at the litre boundary — the same order
+           -- BfmWaterQuantityCalculator and WaterVolumeUnits use. Rounding the readings first and
+           -- subtracting after is what cost up to 1000 L per day. ROUND() on numeric rounds
+           -- half-away-from-zero, which is the Java HALF_UP for the non-negative values GREATEST admits;
+           -- it is spelled out rather than left to the implicit assignment cast into the BIGINT column,
+           -- because the parity with the Java path is the point of this file.
+           ELSE ROUND(GREATEST(0, cur.confirmed_reading - prev.confirmed_reading) * 1000)
        END::bigint                                         AS new_qty,
        -- Which row of a (tenant, scheme, date) group every consumer actually reads. The table has no
        -- uniqueness on that triple; ingestion and the LATEST_WATER_QUANTITY / DISTINCT ON de-duplication
