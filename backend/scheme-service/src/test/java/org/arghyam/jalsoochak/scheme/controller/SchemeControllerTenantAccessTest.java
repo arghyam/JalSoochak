@@ -1,8 +1,7 @@
 package org.arghyam.jalsoochak.scheme.controller;
 
 import org.arghyam.jalsoochak.scheme.config.SchemeSecurityEvaluator;
-import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
@@ -105,26 +104,16 @@ class SchemeControllerTenantAccessTest {
 
     @Test
     @DisplayName("counts for the caller's own tenant are served")
-    void getSchemeCounts_ownTenant_isServed() {
+    void getSchemeStatusCounts_ownTenant_isServed() {
         authenticate(stateAdmin("AS"));
-        SchemeCountsDTO counts = SchemeCountsDTO.builder().activeSchemes(4).inactiveSchemes(2).build();
-        when(schemeService.getSchemeCounts("AS")).thenReturn(counts);
+        SchemeStatusBreakdownDTO counts = SchemeStatusBreakdownDTO.builder().totalSchemes(6).build();
+        when(schemeService.getSchemeStatusCounts("AS")).thenReturn(counts);
 
-        assertThat(controller.getSchemeCounts("AS").getBody()).isEqualTo(counts);
+        assertThat(controller.getSchemeStatusCounts("AS").getBody()).isEqualTo(counts);
     }
 
     @Test
     @DisplayName("counts for another tenant are denied before the service is reached")
-    void getSchemeCounts_otherTenant_isDenied() {
-        authenticate(stateAdmin("AS"));
-
-        assertThatThrownBy(() -> controller.getSchemeCounts("UP"))
-                .isInstanceOf(AccessDeniedException.class);
-        verify(schemeService, never()).getSchemeCounts(any());
-    }
-
-    @Test
-    @DisplayName("counts/by-status is guarded too — the endpoint that survives the counts removal")
     void getSchemeStatusCounts_otherTenant_isDenied() {
         authenticate(stateAdmin("AS"));
 
@@ -139,7 +128,7 @@ class SchemeControllerTenantAccessTest {
         authenticate(stateAdmin("AS"));
 
         assertThatThrownBy(() -> controller.listSchemes(
-                "UP", 0, 20, "id", "desc", null, null, null, null, null, null, null, null))
+                "UP", 0, 20, "id", "desc", null, null, null, null, null, null, null))
                 .isInstanceOf(AccessDeniedException.class);
     }
 
@@ -149,7 +138,7 @@ class SchemeControllerTenantAccessTest {
         authenticate(stateAdmin("AS"));
 
         assertThatThrownBy(() -> controller.listSchemeMappings(
-                "UP", 0, 20, "id", "desc", null, null, null, null, null, null, null))
+                "UP", 0, 20, "id", "desc", null, null, null, null, null, null))
                 .isInstanceOf(AccessDeniedException.class);
     }
 
@@ -212,16 +201,16 @@ class SchemeControllerTenantAccessTest {
     @DisplayName("SUPER_USER keeps its national cross-tenant reach")
     void superUser_reachesAnyTenant() {
         authenticate(token(Map.of("sub", "national-admin"), "ROLE_SUPER_USER"));
-        when(schemeService.getSchemeCounts("UP")).thenReturn(SchemeCountsDTO.builder().build());
+        when(schemeService.getSchemeStatusCounts("UP")).thenReturn(SchemeStatusBreakdownDTO.builder().build());
 
-        assertThatCode(() -> controller.getSchemeCounts("UP")).doesNotThrowAnyException();
+        assertThatCode(() -> controller.getSchemeStatusCounts("UP")).doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("SUPER_STATE_ADMIN stays scoped to its own tenant in multi-tenant mode")
     void superStateAdmin_multiTenantMode_isScopedToOwnTenant() {
         authenticate(token(claims("AS"), "ROLE_SUPER_STATE_ADMIN"));
-        when(schemeService.getSchemeStatusCounts("AS")).thenReturn(SchemeStatusCountsDTO.builder().build());
+        when(schemeService.getSchemeStatusCounts("AS")).thenReturn(SchemeStatusBreakdownDTO.builder().build());
 
         assertThatCode(() -> controller.getSchemeStatusCounts("AS")).doesNotThrowAnyException();
         assertThatThrownBy(() -> controller.getSchemeStatusCounts("UP"))
@@ -233,7 +222,7 @@ class SchemeControllerTenantAccessTest {
     void superStateAdmin_singleTenantMode_isAllowedThrough() {
         authenticate(token(claims("AS"),
                 "ROLE_SUPER_STATE_ADMIN", "ROLE_SUPER_USER", "ROLE_STATE_ADMIN"));
-        when(schemeService.getSchemeStatusCounts("UP")).thenReturn(SchemeStatusCountsDTO.builder().build());
+        when(schemeService.getSchemeStatusCounts("UP")).thenReturn(SchemeStatusBreakdownDTO.builder().build());
 
         assertThatCode(() -> controller.getSchemeStatusCounts("UP")).doesNotThrowAnyException();
     }

@@ -532,19 +532,30 @@ class SchemeRegularityRepositoryIntegrationTest {
     }
 
     @Test
-    void getSchemeStatusCountByLgd_countsActiveAndInactiveSchemes() {
-        SchemeRegularityRepository.SchemeStatusCount count = repository.getSchemeStatusCountByLgd(100);
+    void getSchemeStatusCountByLgd_breaksDownBothStatusDimensions() {
+        SchemeRegularityRepository.SchemeStatusBreakdown breakdown = repository.getSchemeStatusCountByLgd(100);
 
-        assertThat(count.activeSchemeCount()).isEqualTo(1);
-        assertThat(count.inactiveSchemeCount()).isEqualTo(1);
+        assertThat(breakdown.total()).isEqualTo(2);
+        assertThat(breakdown.workStatusCounts())
+                .containsExactly(codeCount(1, 1), codeCount(4, 1));
+        assertThat(breakdown.operatingStatusCounts())
+                .containsExactly(codeCount(0, 1), codeCount(1, 1));
     }
 
     @Test
-    void getSchemeStatusCountByDepartment_countsActiveAndInactiveSchemes() {
-        SchemeRegularityRepository.SchemeStatusCount count = repository.getSchemeStatusCountByDepartment(200);
+    void getSchemeStatusCountByDepartment_breaksDownBothStatusDimensions() {
+        SchemeRegularityRepository.SchemeStatusBreakdown breakdown =
+                repository.getSchemeStatusCountByDepartment(200);
 
-        assertThat(count.activeSchemeCount()).isEqualTo(1);
-        assertThat(count.inactiveSchemeCount()).isEqualTo(1);
+        assertThat(breakdown.total()).isEqualTo(2);
+        assertThat(breakdown.workStatusCounts())
+                .containsExactly(codeCount(1, 1), codeCount(4, 1));
+        assertThat(breakdown.operatingStatusCounts())
+                .containsExactly(codeCount(0, 1), codeCount(1, 1));
+    }
+
+    private static SchemeRegularityRepository.SchemeStatusCodeCount codeCount(Integer code, int count) {
+        return new SchemeRegularityRepository.SchemeStatusCodeCount(code, count);
     }
 
     @Test
@@ -1306,24 +1317,24 @@ class SchemeRegularityRepositoryIntegrationTest {
                 (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
                  parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
                  parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
-                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                 operating_status, work_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 """, 1, 1, "Scheme A", 1001, 2001, 0.0, 0.0,
                 100, 100, 101, null, null, null, null,
                 200, 200, 201, null, null, null, null,
-                1, 10, 10, 10);
+                1, 1, 10, 10, 10);
 
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.dim_scheme_table
                 (scheme_id, tenant_id, scheme_name, state_scheme_id, centre_scheme_id, longitude, latitude,
                  parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_3_lgd_id, level_4_lgd_id, level_5_lgd_id, level_6_lgd_id,
                  parent_department_location_id, level_1_dept_id, level_2_dept_id, level_3_dept_id, level_4_dept_id, level_5_dept_id, level_6_dept_id,
-                 operating_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                 operating_status, work_status, fhtc_count, planned_fhtc, house_hold_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 """, 2, 1, "Scheme B", 1002, 2002, 0.0, 0.0,
                 100, 100, 102, null, null, null, null,
                 200, 200, 202, null, null, null, null,
-                0, 20, 20, 20);
+                0, 4, 20, 20, 20);
 
         insertDate(D1);
         insertDate(D2);
