@@ -1273,6 +1273,7 @@ public class TelemetryTenantRepository {
         jdbcTemplate.update(sql, updatedBy, updatedBy, schemeId, operatorId, keepId);
     }
 
+    /** Writes both reading columns — see the warning on {@link #updateReadingValues}. Currently unused. */
     public void updatePendingMeterChangeReading(String schemaName,
                                                 Long readingId,
                                                 BigDecimal readingValue,
@@ -1681,6 +1682,13 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * "Completed" means a value was recorded, which is {@code confirmed_reading > 0} and nothing
+     * else — that alone excludes every placeholder, location, meter-change and issue-report row,
+     * all of which carry 0. Do not re-add {@code extracted_reading > 0}: it filters nothing extra
+     * and hides the rows whose value was never extracted from a photo (hand-typed manual entries
+     * and API submissions carrying confirmed_reading both store the 0 sentinel there).
+     */
     public Optional<TelemetryReadingRecord> findLatestCompletedReadingForToday(String schemaName,
                                                                                 Long schemeId,
                                                                                 Long operatorId) {
@@ -1692,7 +1700,6 @@ public class TelemetryTenantRepository {
                 WHERE scheme_id = ?
                   AND created_by = ?
                   AND reading_date = (now() AT TIME ZONE 'Asia/Kolkata')::date
-                  AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY %s DESC, id DESC
@@ -1707,6 +1714,7 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
     public Optional<TelemetryReadingRecord> findLatestCompletedReadingForPreviousDay(String schemaName,
                                                                                       Long schemeId,
                                                                                       Long operatorId) {
@@ -1718,7 +1726,6 @@ public class TelemetryTenantRepository {
                 WHERE scheme_id = ?
                   AND created_by = ?
                   AND reading_date = ((now() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '1 day')::date
-                  AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY %s DESC, id DESC
@@ -1764,6 +1771,7 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
     public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingBeforeDate(String schemaName,
                                                                                              Long schemeId,
                                                                                              Long operatorId,
@@ -1776,7 +1784,6 @@ public class TelemetryTenantRepository {
                 WHERE scheme_id = ?
                   AND created_by = ?
                   AND reading_date < ?
-                  AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY reading_date DESC, %s DESC, id DESC
@@ -1798,6 +1805,7 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
     public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingOnDate(String schemaName,
                                                                                         Long schemeId,
                                                                                         LocalDate readingDate) {
@@ -1811,6 +1819,7 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND reading_date = ?
+                  AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY %s DESC, created_at DESC, id DESC
                 LIMIT 1
@@ -1830,6 +1839,7 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
     public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingForScheme(String schemaName,
                                                                                            Long schemeId) {
         validateSchemaName(schemaName);
@@ -1841,6 +1851,7 @@ public class TelemetryTenantRepository {
                 SELECT id, correlation_id, created_by, reading_date, confirmed_reading
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
+                  AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY %s DESC, created_at DESC, id DESC
                 LIMIT 1
@@ -1859,6 +1870,12 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * The reading immediately before {@code targetReadingId}, used as the baseline for that day's
+     * consumption delta. Only real readings qualify ({@code confirmed_reading > 0}) — a placeholder or
+     * issue-report row as the baseline would make the delta the whole cumulative meter value. The
+     * target side stays unfiltered: it is addressed by id, not searched for.
+     */
     public Optional<TelemetryCompletedFlowReading> findPreviousFlowReadingForScheme(String schemaName,
                                                                                     Long readingId) {
         validateSchemaName(schemaName);
@@ -1872,6 +1889,7 @@ public class TelemetryTenantRepository {
                 JOIN %1$s.flow_reading_table target
                   ON target.id = ?
                 WHERE fr.scheme_id = target.scheme_id
+                  AND fr.confirmed_reading > 0
                   AND fr.deleted_at IS NULL
                   AND target.deleted_at IS NULL
                   AND (
@@ -1925,6 +1943,7 @@ public class TelemetryTenantRepository {
         return !rows.isEmpty();
     }
 
+    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
     public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingOnDateForUser(String schemaName,
                                                                                                Long schemeId,
                                                                                                Long userId,
@@ -1940,7 +1959,6 @@ public class TelemetryTenantRepository {
                 WHERE scheme_id = ?
                   AND created_by = ?
                   AND reading_date = ?
-                  AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY %s DESC, created_at DESC, id DESC
@@ -1962,6 +1980,7 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
     public Optional<TelemetryCompletedFlowReading> findLatestCompletedFlowReadingBeforeDateForScheme(String schemaName,
                                                                                                       Long schemeId,
                                                                                                       LocalDate beforeDate) {
@@ -1975,6 +1994,7 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND reading_date < ?
+                  AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY reading_date DESC, %s DESC, id DESC
                 LIMIT 1
@@ -1994,6 +2014,7 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
     public Optional<TelemetryCompletedFlowReading> findEarliestCompletedFlowReadingAfterDateForScheme(String schemaName,
                                                                                                        Long schemeId,
                                                                                                        LocalDate afterDate) {
@@ -2007,6 +2028,7 @@ public class TelemetryTenantRepository {
                 FROM %s.flow_reading_table
                 WHERE scheme_id = ?
                   AND reading_date > ?
+                  AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY reading_date ASC, %s ASC, id ASC
                 LIMIT 1
@@ -2026,6 +2048,7 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /** "Completed" = {@code confirmed_reading > 0}; see {@link #findLatestCompletedReadingForToday}. */
     public Optional<TelemetryCompletedFlowReading> findEarliestCompletedFlowReadingAfterDate(String schemaName,
                                                                                               Long schemeId,
                                                                                               Long operatorId,
@@ -2038,7 +2061,6 @@ public class TelemetryTenantRepository {
                 WHERE scheme_id = ?
                   AND created_by = ?
                   AND reading_date > ?
-                  AND extracted_reading > 0
                   AND confirmed_reading > 0
                   AND deleted_at IS NULL
                 ORDER BY reading_date ASC, %s ASC, id ASC
@@ -2060,6 +2082,14 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * Overwrites <em>both</em> extracted_reading and confirmed_reading with the same value. No manual
+     * correction may use this: a hand-typed or officer-supplied number is not an extraction, and writing
+     * it into extracted_reading destroys the only record of what FlowVision read off the meter photo and
+     * files the row as a "compliant" (extracted == confirmed) submission on the dashboards. Corrections
+     * go through {@link #updateConfirmedReading(String, Long, BigDecimal, Long, Integer)} with a
+     * {@code SOURCE_MANUAL} provenance marker. Kept only for a caller that genuinely re-states both.
+     */
     public void updateReadingValues(String schemaName, Long readingId, BigDecimal readingValue, Long updatedBy) {
         validateSchemaName(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");

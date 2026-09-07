@@ -220,9 +220,16 @@ public class BfmReadingService {
                 .orElse(null);
         LocalDateTime readingAt = Optional.ofNullable(request.getReadingTime()).orElse(ReadingTime.now());
 
-        BigDecimal extractedReading = Optional.ofNullable(ocrResult)
-                .map(FlowVisionResult::getAdjustedReading)
-                .orElse(finalReading);
+        // READING-PROVENANCE: extracted_reading records what FlowVision read off the meter photo. The
+        // OCR gate above runs only when the caller supplied no value, so on an API-asserted submission
+        // nothing extracted anything — echoing the caller's own number back into extracted_reading made
+        // such a row indistinguishable from an AI-extracted one, fed the duplicate-image guard below a
+        // value no image ever produced, and counted the submission as "compliant" (extracted ==
+        // confirmed) on the dashboards. ocrExtractedReading is null on that path and gates both; the
+        // persisted column is NOT NULL, so it takes the same 0 sentinel every other non-OCR row already
+        // uses (scheme-selection placeholder, manual entry, meter-change, issue-report).
+        BigDecimal ocrExtractedReading = ocrResult != null ? ocrResult.getAdjustedReading() : null;
+        BigDecimal extractedReading = ocrExtractedReading != null ? ocrExtractedReading : BigDecimal.ZERO;
         BigDecimal confirmedReading = request.getReadingValue() != null ? request.getReadingValue() : finalReading;
         BigDecimal effectiveConfirmedReading = confirmedReading;
 
@@ -327,8 +334,12 @@ public class BfmReadingService {
 //                    .build();
 //        }
 
-        if (latestSnapshotOpt.isPresent() && extractedReading != null
-                && extractedReading.compareTo(latestSnapshotOpt.get().confirmedReading()) == 0
+        // A duplicate *image* is one FlowVision re-read to the previous confirmed value. An asserted
+        // value carries no extraction, so ocrExtractedReading is null and the guard stays out of its way
+        // — otherwise a genuine zero-consumption day resubmitted through the API was rejected as a
+        // duplicate photo.
+        if (latestSnapshotOpt.isPresent() && ocrExtractedReading != null
+                && ocrExtractedReading.compareTo(latestSnapshotOpt.get().confirmedReading()) == 0
                 && request.getReadingUrl() != null && !request.getReadingUrl().isBlank()) {
             TelemetryConfirmedReadingSnapshot previousSnapshot = latestSnapshotOpt.get();
             String anomalyCorrelationId = UUID.randomUUID().toString();
@@ -340,7 +351,7 @@ public class BfmReadingService {
                     AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION,
                     "Duplicate image submission detected. Extracted reading matches previous confirmed reading.",
                     0,
-                    extractedReading,
+                    ocrExtractedReading,
                     confidenceLevel,
                     effectiveConfirmedReading,
                     previousSnapshot.confirmedReading(),
@@ -464,7 +475,11 @@ public class BfmReadingService {
                 tenantId,
                 request.getSchemeId(),
                 operatorInRequest.id(),
-                extractedReading,
+                // Null, not the persisted 0: analytics buckets a submission as compliant when
+                // extracted_reading == confirmed_reading and anomalous when they differ, and both
+                // filters skip NULL. Publishing 0 would file every asserted reading as an operator
+                // overriding the AI.
+                ocrExtractedReading,
                 effectiveConfirmedReading,
                 confidenceLevel,
                 request.getReadingUrl(),
@@ -706,6 +721,23 @@ public class BfmReadingService {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tenant could not be resolved");
     }
 
+    /**
+     * The extracted reading to publish for a stored row. {@code extracted_reading} is NOT NULL, so every
+     * row whose value did not come from FlowVision carries a 0 sentinel — an API submission that supplied
+     * confirmed_reading, a hand-typed reading that opened the row, a reused placeholder. Republishing that
+     * 0 would file the row under "operator overrode the AI" (extracted <> confirmed) on the dashboards,
+     * which needs an AI reading to have existed; null keeps it out of both buckets. A row that really was
+     * extracted always has a positive value, so nothing legitimate is suppressed.
+     *
+     * <p>Rows written before that sentinel was introduced still hold the supplied value and keep
+     * publishing it — this is forward-only, with no backfill.
+     */
+    private static BigDecimal publishableExtractedReading(BigDecimal storedExtractedReading) {
+        return storedExtractedReading == null || storedExtractedReading.signum() == 0
+                ? null
+                : storedExtractedReading;
+    }
+
     private void publishConfirmedReadingUpdate(Integer tenantId,
                                                TelemetryLatestFlowReadingRecord reading,
                                                BigDecimal confirmedReading) {
@@ -715,7 +747,7 @@ public class BfmReadingService {
                 tenantId,
                 reading.schemeId(),
                 reading.createdBy(),
-                reading.extractedReading(),
+                publishableExtractedReading(reading.extractedReading()),
                 confirmedReading,
                 null,
                 reading.imageUrl(),
@@ -787,7 +819,7 @@ public class BfmReadingService {
                 operator.tenantId(),
                 latestReading.schemeId(),
                 operator.id(),
-                latestReading.extractedReading(),
+                publishableExtractedReading(latestReading.extractedReading()),
                 BigDecimal.ZERO,
                 null,
                 latestReading.imageUrl(),

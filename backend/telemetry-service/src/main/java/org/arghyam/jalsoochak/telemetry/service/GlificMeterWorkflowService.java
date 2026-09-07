@@ -1269,16 +1269,33 @@ public class GlificMeterWorkflowService {
                         correlationId = todaysFlow.correlationId();
                     }
                 } else {
-                    telemetryTenantRepository.createFlowReading(
+                    // Nothing recorded for today yet, so the manual value opens the row: extracted_reading
+                    // keeps the 0 sentinel (nothing extracted it) and the row is tagged MANUAL. Without the
+                    // tag it would keep confirmed_reading_source at its DEFAULT 0 = AS_EXTRACTED and claim
+                    // the AI picked a number it never saw.
+                    //
+                    // Both writes go through the @Transactional persist helper rather than an insert
+                    // followed by a separate applyConfirmedReadingSource: a marker write that failed on its
+                    // own would commit exactly the mislabelled row this is here to prevent. NORMAL
+                    // ingestion with no submitted ids skips the tracking UPDATE, so this is the same two
+                    // statements the API path already runs, under one transaction.
+                    telemetryTenantRepository.persistFlowReadingWithTracking(
                             operatorWithSchema.schemaName(),
+                            null,
                             schemeId,
                             operatorWithSchema.operator().id(),
                             ReadingTime.now(),
                             BigDecimal.ZERO,
                             effectiveConfirmedReading,
                             correlationId,
+                            null,
                             "",
-                            isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason()
+                            isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason(),
+                            IngestionSource.NORMAL,
+                            null,
+                            null,
+                            null,
+                            RolloverResolutionService.SOURCE_MANUAL
                     );
                 }
             }
@@ -1542,11 +1559,18 @@ public class GlificMeterWorkflowService {
 //                }
             }
 
-            telemetryTenantRepository.updateReadingValues(
+            // A hand-typed correction moves confirmed_reading only. This used to call
+            // updateReadingValues, which also overwrote extracted_reading and so destroyed the only
+            // record of what FlowVision read off that day's photo. Retag MANUAL only when the value
+            // actually moves, so restating the stored number keeps an existing ROLLOVER_RESOLVED or
+            // EXTERNALLY_ASSERTED marker.
+            telemetryTenantRepository.updateConfirmedReading(
                     operatorWithSchema.schemaName(),
                     targetDayRecord.id(),
                     readingValue,
-                    operatorId
+                    operatorId,
+                    RolloverResolutionService.manualConfirmSource(
+                            readingValue, targetDayRecord.confirmedReading())
             );
             BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
                     .map(TelemetryCompletedFlowReading::confirmedReading)

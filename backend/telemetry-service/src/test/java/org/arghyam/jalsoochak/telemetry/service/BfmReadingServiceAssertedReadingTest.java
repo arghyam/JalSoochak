@@ -91,14 +91,14 @@ class BfmReadingServiceAssertedReadingTest {
     }
 
     @Test
-    @DisplayName("an API-supplied value is stored with EXTERNALLY_ASSERTED provenance")
+    @DisplayName("an API-supplied value is stored with EXTERNALLY_ASSERTED provenance and a 0 extracted_reading")
     void suppliedValueIsMarkedAsExternallyAsserted() {
         stubPersistence();
 
         service.createReading(assertedRequest(new BigDecimal("150")), SCHEMA, operator, CONTACT, false);
 
         verify(repo).persistFlowReadingWithTracking(eq(SCHEMA), isNull(), eq(SCHEME_ID), eq(OPERATOR_ID),
-                any(LocalDateTime.class), eq(new BigDecimal("150")), eq(new BigDecimal("150")), anyString(),
+                any(LocalDateTime.class), eq(BigDecimal.ZERO), eq(new BigDecimal("150")), anyString(),
                 isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
                 eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED));
     }
@@ -155,6 +155,44 @@ class BfmReadingServiceAssertedReadingTest {
         verify(repo, org.mockito.Mockito.never()).persistFlowReadingWithTracking(anyString(), any(), anyLong(),
                 anyLong(), any(), any(), any(), anyString(), any(), any(), any(), anyInt(), any(), any(),
                 any(), any());
+    }
+
+    @Test
+    @DisplayName("an API-supplied value is published with no extracted_reading at all")
+    void suppliedValueIsPublishedWithoutAnExtractedReading() {
+        stubPersistence();
+
+        service.createReading(assertedRequest(new BigDecimal("150")), SCHEMA, operator, CONTACT, false);
+
+        // A null extracted_reading keeps the row out of both dashboard buckets (compliant =
+        // extracted == confirmed, anomalous = extracted <> confirmed). Publishing 0 instead would
+        // count every API submission as an operator overriding the AI.
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
+                eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
+                any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0));
+    }
+
+    @Test
+    @DisplayName("an API-supplied value equal to the last confirmed reading is not a duplicate image")
+    void suppliedValueMatchingThePreviousConfirmedReadingIsAccepted() {
+        stubPersistence();
+
+        // 140 is the scheme's last confirmed reading (see setUp): a genuine zero-consumption day.
+        // The duplicate-image guard compares what FlowVision read off the photo, and FlowVision never
+        // ran here, so it must not fire even though an image URL rode along with the submission.
+        CreateReadingResponse response = service.createReading(
+                CreateReadingRequest.builder()
+                        .schemeId(SCHEME_ID)
+                        .operatorId(OPERATOR_ID)
+                        .readingValue(new BigDecimal("140"))
+                        .readingUrl("https://img.example.com/a.jpg")
+                        .externallyAsserted(true)
+                        .build(),
+                SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getErrorCode()).isNull();
+        verify(flowVisionService, org.mockito.Mockito.never()).extractReading(anyString());
     }
 
     private static CreateReadingRequest assertedRequest(BigDecimal value) {

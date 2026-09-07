@@ -413,6 +413,106 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
+    void manualReadingWithNoRowForTodayCreatesARowTaggedManual() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+                .thenReturn(Optional.empty());
+
+        // Nothing recorded for today yet: the manual value opens the row.
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any()))
+                .thenReturn(4242L);
+
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
+        doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                anyInt(),
+                anyString(),
+                anyInt()
+        );
+
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+
+        // extracted_reading keeps its 0 sentinel (nothing extracted this number) and the row must not
+        // keep confirmed_reading_source at its DEFAULT 0 (= AS_EXTRACTED), which would claim the AI
+        // picked a value it never saw. Both go in through the @Transactional persist helper, so the row
+        // can never commit without its provenance marker.
+        verify(telemetryTenantRepository).persistFlowReadingWithTracking(ArgumentMatchers.eq("tenant_test"),
+                ArgumentMatchers.isNull(), ArgumentMatchers.eq(10L), ArgumentMatchers.eq(1L), any(),
+                ArgumentMatchers.eq(BigDecimal.ZERO), ArgumentMatchers.eq(new BigDecimal("123")), anyString(),
+                ArgumentMatchers.isNull(), ArgumentMatchers.eq(""), ArgumentMatchers.isNull(),
+                ArgumentMatchers.eq(IngestionSource.NORMAL), ArgumentMatchers.isNull(),
+                ArgumentMatchers.isNull(), ArgumentMatchers.isNull(),
+                ArgumentMatchers.eq(RolloverResolutionService.SOURCE_MANUAL));
+        // The two-statement route is what allowed a row to commit unmarked if the second write failed.
+        verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(),
+                any(), any(), anyString(), anyString(), any());
+        verify(telemetryTenantRepository, never()).applyConfirmedReadingSource(anyString(), anyLong(), anyInt(), any());
+    }
+
+    @Test
+    void manualReadingReportsAFailureWhenTheRowCannotBePersisted() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.empty());
+
+        // The provenance write is inside the persist transaction, so its failure rolls the insert back
+        // and surfaces here as one failed call — never as a committed row missing its marker.
+        when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
+                any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("confirmed_reading_source write failed"));
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(false, resp.isSuccess());
+        // No anomaly, no escalation, no confirmation template lookup once the reading did not land.
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), anyLong(), anyLong(),
+                anyInt(), anyString(), anyInt());
+        verify(telemetryTenantRepository, never()).applyConfirmedReadingSource(anyString(), anyLong(), anyInt(), any());
+    }
+
+    @Test
     void manualReadingWhenNoPreviousSnapshotBeforeTodayAllowsSubmission() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",
