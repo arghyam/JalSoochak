@@ -21,11 +21,15 @@
 
 COMMENT ON COLUMN analytics_schema.dim_scheme_table.work_status IS
     'Construction workflow state. 1 = Ongoing, 2 = Completed, 3 = Not Started, 4 = Handed Over. '
-    'NULL means not recorded and is served as "Unknown". Dashboard aggregates additionally restrict '
+    'NULL means not recorded and is served as "Unknown", and so is 0: the tenant scheme_master_table '
+    'reserves 0 for the placeholder schemes lenient ingest auto-provisions, deliberately outside the '
+    'code table so it can never be uploaded or set as a real status. Dashboard aggregates additionally restrict '
     'to the effective included_work_statuses set (dim_tenant_table, tenant-0 default, then the '
     'analytics.dashboard.included-work-statuses env default).';
 
 COMMENT ON COLUMN analytics_schema.dim_scheme_table.operating_status IS
     'Current operating state. 0 = Non-Operative, 1 = Operative, 2 = Partially Operative. '
     'NULL means not recorded and is served as "Unknown". This is NOT an active/inactive flag: '
-    'code 2 exists precisely because the two-value reading was wrong, and nothing filters on it.';
+    'code 2 exists precisely because the two-value reading was wrong. What is being retired is the '
+    'derived active/inactive filter (the "operating_status > 0" test), not filtering on the column: '
+    'callers may still filter on the explicit codes, as the scheme-list status filter does.';

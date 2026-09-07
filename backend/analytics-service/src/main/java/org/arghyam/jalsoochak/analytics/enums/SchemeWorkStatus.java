@@ -13,6 +13,13 @@ import java.util.stream.Collectors;
  * {@link #getWireKey()} is the stable machine-readable key for clients that must not key off a
  * display string.
  *
+ * <p><strong>0 is reserved and is not a member.</strong> {@code scheme_master_table.work_status} is
+ * NOT NULL, so lenient ingest stores 0 on the placeholder schemes it auto-provisions for a scheme id
+ * it cannot resolve ({@code TelemetryTenantRepository#getOrCreatePlaceholderScheme}). Keeping it out
+ * of this table is the point: {@link #labelOf(Integer)} resolves it to {@link #UNKNOWN_LABEL} like
+ * any unmapped code, while {@link #fromInput(String)} goes on rejecting it, so "Unknown" stays
+ * unsettable through a scheme upload or a status PATCH.
+ *
  * <p><strong>Duplicated on purpose.</strong> Services here share no Maven module, so this file is
  * copied verbatim — package declaration aside — into every service that needs it. Change one, change
  * them all; {@code SchemeStatusVocabularyTest} pins the table in each copy so drift fails a build.

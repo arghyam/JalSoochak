@@ -18,7 +18,7 @@ offending parameter — they are never silently clamped.
 Exception: `/api/v1/pumpoperator/pump-operators/by-scheme` only paginates when `page` or `size` is
 supplied. When either is, the same bounds apply.
 
-Endpoints on the other services do not share this contract. Scheme-service's `/api/v1/schemes`
+Endpoints on the other services do not share this contract. Scheme-service's `/api/v1/scheme/schemes`
 family, for one, takes `page`/`limit` unvalidated at the controller and clamps them in the service
 layer (`page` to `>= 0`, `limit` to `1..100`), so an out-of-range value there returns `200` with the
 clamped page rather than `400`.
