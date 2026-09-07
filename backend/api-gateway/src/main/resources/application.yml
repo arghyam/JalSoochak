@@ -1,9 +1,20 @@
 server:
   port: 8080
 
+rate-limit:
+  enabled: ${RATE_LIMIT_ENABLED:false}
+  default:
+    replenish-rate: ${RATE_LIMIT_DEFAULT_REPLENISH_RATE:20}
+    burst-capacity: ${RATE_LIMIT_DEFAULT_BURST_CAPACITY:40}
+
 spring:
   application:
     name: api-gateway
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      timeout: ${SPRING_DATA_REDIS_TIMEOUT:2s}
   security:
     oauth2:
       resourceserver:
@@ -12,10 +23,62 @@ spring:
   cloud:
     gateway:
       routes:
+        - id: otp-rate-limited-flat
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/auth/staff/otp, /api/v1/auth/staff/otp/verify
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_OTP_FLAT_REPLENISH_RATE:1}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_OTP_FLAT_BURST_CAPACITY:5}
+
+        - id: otp-rate-limited
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/user/api/v1/auth/staff/otp, /user/api/v1/auth/staff/otp/verify
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_OTP_PREFIXED_REPLENISH_RATE:1}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_OTP_PREFIXED_BURST_CAPACITY:5}
+
+        - id: auth-rate-limited-flat
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/auth/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_AUTH_FLAT_REPLENISH_RATE:2}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_AUTH_FLAT_BURST_CAPACITY:10}
+
+        - id: auth-rate-limited
+          uri: ${USER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/user/api/v1/auth/**
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_AUTH_PREFIXED_REPLENISH_RATE:2}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_AUTH_PREFIXED_BURST_CAPACITY:10}
+
         - id: pumpoperator-public
           uri: ${USER_SERVICE_URI:http://localhost:8082}
           predicates:
             - Path=/api/v1/pumpoperator/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_PUMPOPERATOR_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_PUMPOPERATOR_BURST_CAPACITY:40}
 
         - id: tenant-staff-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -23,6 +86,11 @@ spring:
             - Path=/api/v1/tenant/staff
           filters:
             - SetPath=/api/v1/tenant/user/staff
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TENANT_STAFF_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TENANT_STAFF_FLAT_BURST_CAPACITY:40}
 
         - id: tenant-staff-counts-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -30,41 +98,88 @@ spring:
             - Path=/api/v1/tenant/staff/counts/by-role
           filters:
             - SetPath=/api/v1/tenant/user/staff/counts/by-role
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TENANT_STAFF_COUNTS_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TENANT_STAFF_COUNTS_FLAT_BURST_CAPACITY:40}
 
         - id: user-service-flat
           uri: ${USER_SERVICE_URI:http://localhost:8082}
           predicates:
-            - Path=/api/v1/auth/**, /api/v1/users/**, /api/v1/tenant/user/**, /api/v1/state-admin/**
+            - Path=/api/v1/users/**, /api/v1/tenant/user/**, /api/v1/state-admin/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_USER_SERVICE_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_USER_SERVICE_FLAT_BURST_CAPACITY:40}
 
         - id: tenant-service-flat
           uri: ${TENANT_SERVICE_URI:http://localhost:8081}
           predicates:
             - Path=/api/v1/tenants/**, /api/v1/system/**, /api/v1/tenant-config/**, /api/v1/locations/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TENANT_SERVICE_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TENANT_SERVICE_FLAT_BURST_CAPACITY:40}
 
         - id: telemetry-service-flat
           uri: ${TELEMETRY_SERVICE_URI:http://localhost:8084}
           predicates:
             - Path=/api/v1/telemetry/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TELEMETRY_SERVICE_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TELEMETRY_SERVICE_FLAT_BURST_CAPACITY:40}
 
         - id: scheme-service-flat
           uri: ${SCHEME_SERVICE_URI:http://localhost:8086}
           predicates:
             - Path=/api/v1/scheme/**, /api/v1/public/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_SCHEME_SERVICE_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_SCHEME_SERVICE_FLAT_BURST_CAPACITY:40}
 
         - id: analytics-service-flat
           uri: ${ANALYTICS_SERVICE_URI:http://localhost:8087}
           predicates:
             - Path=/api/v1/analytics/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_ANALYTICS_SERVICE_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_ANALYTICS_SERVICE_FLAT_BURST_CAPACITY:40}
 
         - id: message-service-flat
           uri: ${MESSAGE_SERVICE_URI:http://localhost:8085}
           predicates:
             - Path=/api/v1/message/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_MESSAGE_SERVICE_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_MESSAGE_SERVICE_FLAT_BURST_CAPACITY:40}
 
         - id: anomaly-service-flat
           uri: ${ANOMALY_SERVICE_URI:http://localhost:8083}
           predicates:
             - Path=/api/v1/anomalies/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_ANOMALY_SERVICE_FLAT_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_ANOMALY_SERVICE_FLAT_BURST_CAPACITY:40}
 
         - id: tenant-service
           uri: ${TENANT_SERVICE_URI:http://localhost:8081}
@@ -72,6 +187,11 @@ spring:
             - Path=/tenant/**
           filters:
             - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TENANT_SERVICE_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TENANT_SERVICE_BURST_CAPACITY:40}
 
         - id: user-service
           uri: ${USER_SERVICE_URI:http://localhost:8082}
@@ -79,6 +199,11 @@ spring:
             - Path=/user/**
           filters:
             - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_USER_SERVICE_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_USER_SERVICE_BURST_CAPACITY:40}
 
         - id: anomaly-service
           uri: ${ANOMALY_SERVICE_URI:http://localhost:8083}
@@ -86,6 +211,11 @@ spring:
             - Path=/anomaly/**
           filters:
             - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_ANOMALY_SERVICE_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_ANOMALY_SERVICE_BURST_CAPACITY:40}
 
         - id: telemetry-service
           uri: ${TELEMETRY_SERVICE_URI:http://localhost:8084}
@@ -93,6 +223,11 @@ spring:
             - Path=/telemetry/**
           filters:
             - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_TELEMETRY_SERVICE_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_TELEMETRY_SERVICE_BURST_CAPACITY:40}
 
         - id: message-service
           uri: ${MESSAGE_SERVICE_URI:http://localhost:8085}
@@ -100,6 +235,11 @@ spring:
             - Path=/message/**
           filters:
             - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_MESSAGE_SERVICE_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_MESSAGE_SERVICE_BURST_CAPACITY:40}
 
         - id: scheme-service
           uri: ${SCHEME_SERVICE_URI:http://localhost:8086}
@@ -107,6 +247,11 @@ spring:
             - Path=/scheme/**
           filters:
             - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_SCHEME_SERVICE_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_SCHEME_SERVICE_BURST_CAPACITY:40}
 
         - id: analytics-service
           uri: ${ANALYTICS_SERVICE_URI:http://localhost:8087}
@@ -114,6 +259,11 @@ spring:
             - Path=/analytics/**
           filters:
             - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@userOrIpKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_ANALYTICS_SERVICE_REPLENISH_RATE:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_ANALYTICS_SERVICE_BURST_CAPACITY:40}
 
 springdoc:
   swagger-ui:
