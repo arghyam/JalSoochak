@@ -29,6 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -104,6 +106,28 @@ class BfmReadingServiceResetLatestTenantScopeTest {
 
     private TelemetryOperator operator(Integer tenantId) {
         return new TelemetryOperator(1L, tenantId, "op", "op@example.com", PHONE, null);
+    }
+
+    /** Same sentinel rule as the correction path: a 0 extracted_reading means "no extraction", not 0. */
+    @Test
+    void resettingARowWithNoExtractedValuePublishesNoExtractedReading() {
+        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+                .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
+        when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
+                .thenReturn(Optional.of(new TelemetryLatestFlowReadingRecord(
+                        99L, 10L, 1L, "corr-1",
+                        BigDecimal.ZERO,
+                        new BigDecimal("1450"),
+                        "",
+                        READING_DATE, READING_AT, "BFM")));
+
+        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
+
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(
+                eq(CALLER_TENANT_ID), eq(10L), eq(1L),
+                isNull(),
+                eq(BigDecimal.ZERO), isNull(), eq(""), eq(READING_AT),
+                any(), eq(READING_DATE), eq(1), eq(0));
     }
 
     @Test

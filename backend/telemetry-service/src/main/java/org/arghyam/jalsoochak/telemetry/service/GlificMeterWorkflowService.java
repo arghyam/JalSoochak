@@ -1273,22 +1273,29 @@ public class GlificMeterWorkflowService {
                     // keeps the 0 sentinel (nothing extracted it) and the row is tagged MANUAL. Without the
                     // tag it would keep confirmed_reading_source at its DEFAULT 0 = AS_EXTRACTED and claim
                     // the AI picked a number it never saw.
-                    Long createdReadingId = telemetryTenantRepository.createFlowReading(
+                    //
+                    // Both writes go through the @Transactional persist helper rather than an insert
+                    // followed by a separate applyConfirmedReadingSource: a marker write that failed on its
+                    // own would commit exactly the mislabelled row this is here to prevent. NORMAL
+                    // ingestion with no submitted ids skips the tracking UPDATE, so this is the same two
+                    // statements the API path already runs, under one transaction.
+                    telemetryTenantRepository.persistFlowReadingWithTracking(
                             operatorWithSchema.schemaName(),
+                            null,
                             schemeId,
                             operatorWithSchema.operator().id(),
                             ReadingTime.now(),
                             BigDecimal.ZERO,
                             effectiveConfirmedReading,
                             correlationId,
+                            null,
                             "",
-                            isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason()
-                    );
-                    telemetryTenantRepository.applyConfirmedReadingSource(
-                            operatorWithSchema.schemaName(),
-                            createdReadingId,
-                            RolloverResolutionService.SOURCE_MANUAL,
-                            null
+                            isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason(),
+                            IngestionSource.NORMAL,
+                            null,
+                            null,
+                            null,
+                            RolloverResolutionService.SOURCE_MANUAL
                     );
                 }
             }

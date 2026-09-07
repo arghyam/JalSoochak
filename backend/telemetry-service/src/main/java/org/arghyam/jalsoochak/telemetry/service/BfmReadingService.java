@@ -721,6 +721,23 @@ public class BfmReadingService {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tenant could not be resolved");
     }
 
+    /**
+     * The extracted reading to publish for a stored row. {@code extracted_reading} is NOT NULL, so every
+     * row whose value did not come from FlowVision carries a 0 sentinel — an API submission that supplied
+     * confirmed_reading, a hand-typed reading that opened the row, a reused placeholder. Republishing that
+     * 0 would file the row under "operator overrode the AI" (extracted <> confirmed) on the dashboards,
+     * which needs an AI reading to have existed; null keeps it out of both buckets. A row that really was
+     * extracted always has a positive value, so nothing legitimate is suppressed.
+     *
+     * <p>Rows written before that sentinel was introduced still hold the supplied value and keep
+     * publishing it — this is forward-only, with no backfill.
+     */
+    private static BigDecimal publishableExtractedReading(BigDecimal storedExtractedReading) {
+        return storedExtractedReading == null || storedExtractedReading.signum() == 0
+                ? null
+                : storedExtractedReading;
+    }
+
     private void publishConfirmedReadingUpdate(Integer tenantId,
                                                TelemetryLatestFlowReadingRecord reading,
                                                BigDecimal confirmedReading) {
@@ -730,7 +747,7 @@ public class BfmReadingService {
                 tenantId,
                 reading.schemeId(),
                 reading.createdBy(),
-                reading.extractedReading(),
+                publishableExtractedReading(reading.extractedReading()),
                 confirmedReading,
                 null,
                 reading.imageUrl(),
@@ -802,7 +819,7 @@ public class BfmReadingService {
                 operator.tenantId(),
                 latestReading.schemeId(),
                 operator.id(),
-                latestReading.extractedReading(),
+                publishableExtractedReading(latestReading.extractedReading()),
                 BigDecimal.ZERO,
                 null,
                 latestReading.imageUrl(),
