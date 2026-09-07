@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.InstanceOfAssertFactories.throwable;
 
 class WaterVolumeUnitsTest {
 
@@ -67,9 +68,28 @@ class WaterVolumeUnitsTest {
     }
 
     @Test
-    void cubicMetresToLitres_decimalOverflowingLongThrowsRatherThanTruncating() {
-        assertThatThrownBy(() -> WaterVolumeUnits.cubicMetresToLitres(
-                BigDecimal.valueOf(Long.MAX_VALUE)))
-                .isInstanceOf(ArithmeticException.class);
+    void cubicMetresToLitres_decimalOverflowingLongIsSignalledNotTruncatedOrClamped() {
+        // Reachable input, not a theoretical one: readings are unbounded NUMERIC on both sides of the
+        // topic and the submission API bounds them only from below. The ingestion boundary catches this
+        // and declines to write a volume; saturating at Long.MAX_VALUE here would invent a number and
+        // hide the bad reading behind it.
+        BigDecimal absurd = new BigDecimal("1e16");
+
+        assertThatThrownBy(() -> WaterVolumeUnits.cubicMetresToLitres(absurd))
+                .isInstanceOf(WaterVolumeOutOfRangeException.class)
+                .isInstanceOf(ArithmeticException.class)
+                .asInstanceOf(throwable(WaterVolumeOutOfRangeException.class))
+                .extracting(WaterVolumeOutOfRangeException::getCubicMetres)
+                .isEqualTo(absurd);
+    }
+
+    @Test
+    void cubicMetresToLitres_theLargestStorableVolumeStillConverts() {
+        // Long.MAX_VALUE litres exactly. The guard must reject what cannot be stored and nothing more.
+        assertThat(WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("9223372036854775.807")))
+                .isEqualTo(Long.MAX_VALUE);
+
+        assertThatThrownBy(() -> WaterVolumeUnits.cubicMetresToLitres(new BigDecimal("9223372036854775.808")))
+                .isInstanceOf(WaterVolumeOutOfRangeException.class);
     }
 }

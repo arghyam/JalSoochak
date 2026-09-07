@@ -42,14 +42,26 @@ public final class WaterVolumeUnits {
      * negative, where half-up and half-away-from-zero coincide — which is what lets
      * {@code WaterQuantityBackfillParityIntegrationTest} assert the two land on the same value.
      *
+     * <p><strong>Out of range is signalled, never clamped.</strong> Readings are unbounded
+     * {@code NUMERIC} end to end and the submission API bounds them only from below, so a mis-read
+     * reading really can produce a delta past {@code long}. Saturating at {@code Long.MAX_VALUE} would
+     * invent a number and bury the bad reading behind it — the same reason
+     * {@code FactServiceImpl.warnIfImplausible} reports rather than clamps. The ingestion boundary
+     * catches {@link WaterVolumeOutOfRangeException}, reports it, and declines to write a volume for
+     * that day; the reading itself still lands.
+     *
      * @param cubicMetres volume in m&sup3;
      * @return the same volume in litres, rounded to the nearest whole litre
-     * @throws ArithmeticException if the result overflows {@code long}
+     * @throws WaterVolumeOutOfRangeException if the result does not fit the {@code BIGINT} column
      */
     public static long cubicMetresToLitres(BigDecimal cubicMetres) {
-        return cubicMetres.multiply(LITRES_PER_CUBIC_METRE_DECIMAL)
-                .setScale(0, RoundingMode.HALF_UP)
-                .longValueExact();
+        BigDecimal litres = cubicMetres.multiply(LITRES_PER_CUBIC_METRE_DECIMAL)
+                .setScale(0, RoundingMode.HALF_UP);
+        try {
+            return litres.longValueExact();
+        } catch (ArithmeticException e) {
+            throw new WaterVolumeOutOfRangeException(cubicMetres);
+        }
     }
 
     /**

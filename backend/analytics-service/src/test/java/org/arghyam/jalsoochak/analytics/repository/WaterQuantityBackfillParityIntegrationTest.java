@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.analytics.entity.FactMeterReading;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.arghyam.jalsoochak.analytics.service.water.BfmWaterQuantityCalculator;
 import org.arghyam.jalsoochak.analytics.service.water.WaterQuantityContext;
+import org.arghyam.jalsoochak.analytics.service.water.WaterVolumeOutOfRangeException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -222,6 +223,28 @@ class WaterQuantityBackfillParityIntegrationTest {
         assertThat(runRecompute().get(id)).isEqualTo(1L).isEqualTo(liveValueFor(id));
     }
 
+    @Test
+    void aVolumeTooLargeToStoreIsDeclinedRatherThanAbortingTheRecompute() {
+        seedReadings();
+        // A mis-read reading, which the unbounded NUMERIC columns and the lower-bound-only submission
+        // validation both permit: 1e16 m3 x 1000 is past BIGINT. Before the guard, the ::bigint cast
+        // raised and took down the entire recompute — every other row included — over this one row.
+        insertReading(DECIMAL_SCHEME, D4, "1e16", "2026-01-04T08:00:00");
+        seedLegacyQuantityRow(DECIMAL_SCHEME, D4, 0L);
+        // A neighbouring row, to prove the bad one does not take the run down with it.
+        seedLegacyQuantityRow(DECIMAL_SCHEME, D2, 12L);
+
+        long id = idOf(DECIMAL_SCHEME, D4);
+        Map<Long, Long> recomputed = runRecompute();
+
+        // NULL, i.e. "not recomputable" — which the repair script reports as an exception rather than
+        // applying, and which is exactly what live ingestion stores for this reading: nothing.
+        assertThat(recomputed.get(id)).isNull();
+        assertThat(liveValueFor(id)).isNull();
+        // The rest of the recompute still ran.
+        assertThat(recomputed.get(idOf(DECIMAL_SCHEME, D2))).isEqualTo(12_300L);
+    }
+
     /**
      * Readings covering every case the previous-day baseline got wrong.
      *
@@ -277,14 +300,20 @@ class WaterQuantityBackfillParityIntegrationTest {
                 .map(FactMeterReading::getConfirmedReading)
                 .orElse(null);
 
-        return calculator.calculate(WaterQuantityContext.builder()
-                .tenantId(tenantId)
-                .schemeId(schemeId)
-                .readingDate(date)
-                .currentReading(current)
-                .previousReading(previous)
-                .channel(ReadingChannel.BFM.getCode())
-                .build());
+        try {
+            return calculator.calculate(WaterQuantityContext.builder()
+                    .tenantId(tenantId)
+                    .schemeId(schemeId)
+                    .readingDate(date)
+                    .currentReading(current)
+                    .previousReading(previous)
+                    .channel(ReadingChannel.BFM.getCode())
+                    .build());
+        } catch (WaterVolumeOutOfRangeException e) {
+            // Mirrors FactServiceImpl: it catches this and writes no volume for the day, so the value
+            // live ingestion would have stored is "none" — null, the same thing the recompute returns.
+            return null;
+        }
     }
 
     /** Runs the shipped recompute definition verbatim and returns {@code id -> new_qty}. */

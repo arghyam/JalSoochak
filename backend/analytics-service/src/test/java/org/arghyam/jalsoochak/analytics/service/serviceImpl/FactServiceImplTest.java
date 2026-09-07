@@ -231,6 +231,45 @@ class FactServiceImplTest {
     }
 
     @Test
+    void ingestMeterReading_whenTheDerivedVolumeCannotBeStored_keepsTheReadingAndSkipsTheVolume() {
+        // A mis-read reading: the submission API bounds readings only from below and the column is
+        // unbounded NUMERIC, so this reaches ingestion. 1e16 m3 x 1000 is past BIGINT.
+        //
+        // What must NOT happen is the exception escaping: this runs inside ingestMeterReading's
+        // transaction, so it would roll back the reading that was just saved, and the consumer would
+        // retry and eventually drop a submission worth keeping. Only the derived volume is undecidable.
+        MeterReadingEvent event = readingEvent("1e16", "2026-01-02");
+        stubReadingLookups("1e16", "100");
+        when(dimDateRepository.findByFullDate(any())).thenReturn(Optional.empty());
+        when(dimOperatorAttendanceRepository.existsByTenantIdAndSchemeIdAndUserIdAndDateKey(any(), any(), any(), any()))
+                .thenReturn(false);
+
+        service.ingestMeterReading(event);
+
+        verify(meterReadingRepository, times(1)).save(any(FactMeterReading.class));
+        verify(waterQuantityRepository, never()).save(any());
+        assertThat(meterRegistry.counter("water_quantity.unstorable", "source", "reading").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void ingestWaterQuantity_whenTheReportedVolumeCannotBeStored_recordsNothingForTheDay() {
+        WaterQuantityEvent event = new WaterQuantityEvent();
+        event.setTenantId(1);
+        event.setSchemeId(11);
+        event.setUserId(21);
+        event.setWaterQuantity(m3("1e16"));
+        event.setSubmissionStatus(1);
+        event.setDate("2026-01-02");
+
+        service.ingestWaterQuantity(event);
+
+        verify(waterQuantityRepository, never()).save(any());
+        assertThat(meterRegistry.counter("water_quantity.unstorable", "source", "correction").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
     void ingestMeterReading_afterAGapMeasuresAgainstTheLastActualReading() {
         // R1=100 on Jan 1, nothing on Jan 2 or Jan 3, R2=175 on Jan 4. The catch-up day carries all
         // three days of volume; it is not measured against a Jan 3 that has no reading.
