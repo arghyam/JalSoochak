@@ -8,7 +8,7 @@ import reactor.core.publisher.Mono;
 import java.net.InetSocketAddress;
 import java.security.Principal;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
 class RateLimiterConfigTest {
 
