@@ -413,6 +413,61 @@ class GlificMeterWorkflowServiceManualReadingTest {
     }
 
     @Test
+    void manualReadingWithNoRowForTodayCreatesARowTaggedManual() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+        when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
+                .thenReturn(Optional.empty());
+
+        // Nothing recorded for today yet: the manual value opens the row.
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(),
+                anyString(), anyString(), any())).thenReturn(4242L);
+
+        when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
+        when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
+        doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
+                anyString(),
+                anyLong(),
+                anyLong(),
+                anyInt(),
+                anyString(),
+                anyInt()
+        );
+
+        when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
+
+        CreateReadingResponse resp = service.manualReadingMessage(ManualReadingRequest.builder()
+                .contactId("919999999999")
+                .manualReading("123")
+                .build());
+
+        assertNotNull(resp);
+        assertEquals(true, resp.isSuccess());
+
+        // extracted_reading keeps its 0 sentinel — nothing extracted this number...
+        verify(telemetryTenantRepository).createFlowReading(ArgumentMatchers.eq("tenant_test"),
+                ArgumentMatchers.eq(10L), ArgumentMatchers.eq(1L), any(), ArgumentMatchers.eq(BigDecimal.ZERO),
+                ArgumentMatchers.eq(new BigDecimal("123")), anyString(), ArgumentMatchers.eq(""),
+                ArgumentMatchers.isNull());
+        // ...so the row must not keep confirmed_reading_source at its DEFAULT 0 (= AS_EXTRACTED),
+        // which would claim the AI picked a value it never saw.
+        verify(telemetryTenantRepository).applyConfirmedReadingSource("tenant_test", 4242L,
+                RolloverResolutionService.SOURCE_MANUAL, null);
+    }
+
+    @Test
     void manualReadingWhenNoPreviousSnapshotBeforeTodayAllowsSubmission() {
         TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
                 "tenant_test",

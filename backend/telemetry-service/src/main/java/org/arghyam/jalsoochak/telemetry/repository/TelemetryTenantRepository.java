@@ -1265,6 +1265,7 @@ public class TelemetryTenantRepository {
         jdbcTemplate.update(sql, updatedBy, updatedBy, schemeId, operatorId, keepId);
     }
 
+    /** Writes both reading columns — see the warning on {@link #updateReadingValues}. Currently unused. */
     public void updatePendingMeterChangeReading(String schemaName,
                                                 Long readingId,
                                                 BigDecimal readingValue,
@@ -2052,6 +2053,14 @@ public class TelemetryTenantRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * Overwrites <em>both</em> extracted_reading and confirmed_reading with the same value. No manual
+     * correction may use this: a hand-typed or officer-supplied number is not an extraction, and writing
+     * it into extracted_reading destroys the only record of what FlowVision read off the meter photo and
+     * files the row as a "compliant" (extracted == confirmed) submission on the dashboards. Corrections
+     * go through {@link #updateConfirmedReading(String, Long, BigDecimal, Long, Integer)} with a
+     * {@code SOURCE_MANUAL} provenance marker. Kept only for a caller that genuinely re-states both.
+     */
     public void updateReadingValues(String schemaName, Long readingId, BigDecimal readingValue, Long updatedBy) {
         validateSchemaName(schemaName);
         boolean hasPayloadJson = columnExists(schemaName, "flow_reading_table", "payload_json");

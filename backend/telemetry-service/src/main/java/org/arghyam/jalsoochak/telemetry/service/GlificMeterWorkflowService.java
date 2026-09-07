@@ -1269,7 +1269,11 @@ public class GlificMeterWorkflowService {
                         correlationId = todaysFlow.correlationId();
                     }
                 } else {
-                    telemetryTenantRepository.createFlowReading(
+                    // Nothing recorded for today yet, so the manual value opens the row: extracted_reading
+                    // keeps the 0 sentinel (nothing extracted it) and the row is tagged MANUAL. Without the
+                    // tag it would keep confirmed_reading_source at its DEFAULT 0 = AS_EXTRACTED and claim
+                    // the AI picked a number it never saw.
+                    Long createdReadingId = telemetryTenantRepository.createFlowReading(
                             operatorWithSchema.schemaName(),
                             schemeId,
                             operatorWithSchema.operator().id(),
@@ -1279,6 +1283,12 @@ public class GlificMeterWorkflowService {
                             correlationId,
                             "",
                             isMeterReplaced ? "METER_REPLACED" : request.getMeterChangeReason()
+                    );
+                    telemetryTenantRepository.applyConfirmedReadingSource(
+                            operatorWithSchema.schemaName(),
+                            createdReadingId,
+                            RolloverResolutionService.SOURCE_MANUAL,
+                            null
                     );
                 }
             }
@@ -1542,11 +1552,18 @@ public class GlificMeterWorkflowService {
 //                }
             }
 
-            telemetryTenantRepository.updateReadingValues(
+            // A hand-typed correction moves confirmed_reading only. This used to call
+            // updateReadingValues, which also overwrote extracted_reading and so destroyed the only
+            // record of what FlowVision read off that day's photo. Retag MANUAL only when the value
+            // actually moves, so restating the stored number keeps an existing ROLLOVER_RESOLVED or
+            // EXTERNALLY_ASSERTED marker.
+            telemetryTenantRepository.updateConfirmedReading(
                     operatorWithSchema.schemaName(),
                     targetDayRecord.id(),
                     readingValue,
-                    operatorId
+                    operatorId,
+                    RolloverResolutionService.manualConfirmSource(
+                            readingValue, targetDayRecord.confirmedReading())
             );
             BigDecimal previousDayConfirmedReading = dayBeforeTargetOpt
                     .map(TelemetryCompletedFlowReading::confirmedReading)
