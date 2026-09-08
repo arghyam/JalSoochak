@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.config.TenantContext;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
@@ -149,6 +150,44 @@ class BfmReadingServiceResetLatestTenantScopeTest {
         assertTrue(response.isSuccess());
         assertEquals(BigDecimal.ZERO, response.getMeterReading());
         verify(telemetryTenantRepository).updateConfirmedReading(CALLER_SCHEMA, 99L, BigDecimal.ZERO, 1L);
+    }
+
+    /**
+     * SUPPLY-PLAUSIBILITY: a reset destroys the value the quarantine marker described, so the marker
+     * goes with it. Not housekeeping — a quarantined row that has been reset satisfies every clause
+     * of the placeholder predicate for an API submission that carried no image, so the next
+     * submission that day reuses the row; the reuse paths leave the column alone, and a stale marker
+     * would withhold a good reading from every baseline and from the warehouse.
+     */
+    @Test
+    void clearsTheQuarantineMarkerAlongWithTheValueItDescribed() {
+        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+                .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
+        when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
+                .thenReturn(Optional.of(new TelemetryLatestFlowReadingRecord(
+                        99L, 10L, 1L, "corr-1",
+                        BigDecimal.ZERO,
+                        new BigDecimal("1450"),
+                        "",
+                        READING_DATE, READING_AT, "BFM",
+                        QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY)));
+
+        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
+
+        verify(telemetryTenantRepository).applyQuarantineReason(CALLER_SCHEMA, 99L, QuarantineReason.NONE);
+    }
+
+    /** Unconditional, so no branch on the row's prior state can drift back in. */
+    @Test
+    void clearsTheMarkerOnACleanRowToo() {
+        when(glificOperatorContextService.resolveOperatorWithSchema(PHONE, CALLER_TENANT_ID))
+                .thenReturn(new TelemetryOperatorWithSchema(CALLER_SCHEMA, operator(CALLER_TENANT_ID)));
+        when(telemetryTenantRepository.findLatestFlowReadingByOperator(CALLER_SCHEMA, 1L))
+                .thenReturn(Optional.of(reading()));
+
+        service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
+
+        verify(telemetryTenantRepository).applyQuarantineReason(CALLER_SCHEMA, 99L, QuarantineReason.NONE);
     }
 
     @Test

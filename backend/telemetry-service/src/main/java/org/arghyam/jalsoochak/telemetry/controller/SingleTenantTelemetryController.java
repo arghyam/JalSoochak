@@ -360,16 +360,33 @@ public class SingleTenantTelemetryController {
                     request.getConfirmedReading(),
                     tenantId
             );
-            log.info("PUT /api/v1/telemetry/readings updated tenantId={} response={}",
+            // SUPPLY-PLAUSIBILITY: a correction can now be refused on its value rather than on its
+            // shape, which arrives as a REJECTED response instead of an exception. Mapped exactly as
+            // the POST handler maps a rejected submission, so both endpoints refuse an implausible
+            // reading with the same status and the same error code. There is no RETRY arm here: the
+            // correction path runs no OCR, so it has no transient upstream to be unavailable.
+            boolean rejected = response == null
+                    || !response.isSuccess()
+                    || "REJECTED".equalsIgnoreCase(response.getQualityStatus());
+            log.info("PUT /api/v1/telemetry/readings updated tenantId={} status={} response={}",
                     tenantId,
+                    rejected ? "FAILED" : "SUCCESS",
                     summarizeCreateReadingResponse(response));
             logReadingSubmission(
                     "/api/v1/telemetry/readings",
                     request,
                     tenantId,
-                    "SUCCESS",
+                    rejected ? "FAILED" : "SUCCESS",
                     response != null ? response.getMessage() : "Reading updated."
             );
+            if (rejected) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                        ReadingsApiResponse.builder()
+                                .success(false)
+                                .data(toReadingsDataResponse(response, false))
+                                .build()
+                );
+            }
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)

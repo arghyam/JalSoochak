@@ -738,23 +738,8 @@ public class BfmReadingService {
                 .findLatestFlowReadingByOperator(schemaName, operator.id())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, OPERATOR_LOOKUP_MISS));
 
-        telemetryTenantRepository.updateConfirmedReading(
-                schemaName,
-                latestReading.id(),
-                confirmedReading,
-                operator.id(),
-                RolloverResolutionService.manualConfirmSource(confirmedReading, latestReading.confirmedReading())
-        );
-
-        publishConfirmedReadingUpdate(operator.tenantId(), latestReading, confirmedReading);
-
-        return CreateReadingResponse.builder()
-                .success(true)
-                .message("Reading updated successfully")
-                .correlationId(latestReading.correlationId())
-                .meterReading(confirmedReading)
-                .qualityStatus("CONFIRMED")
-                .build();
+        return applyConfirmedReadingCorrection(
+                schemaName, latestReading, confirmedReading, operator.id(), operator.tenantId());
     }
 
     private CreateReadingResponse updateConfirmedReadingByCorrelationId(String correlationId,
@@ -770,14 +755,6 @@ public class BfmReadingService {
                 .findFlowReadingDetailsByCorrelationId(schemaName, correlationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reading not found"));
 
-        telemetryTenantRepository.updateConfirmedReading(
-                schemaName,
-                reading.id(),
-                confirmedReading,
-                reading.createdBy() != null ? reading.createdBy() : 1L,
-                RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading())
-        );
-
         Integer eventTenantId = null;
         if (reading.createdBy() != null) {
             eventTenantId = telemetryTenantRepository.findOperatorById(schemaName, reading.createdBy())
@@ -786,19 +763,19 @@ public class BfmReadingService {
         }
         // analytics-service drops the operator-attendance and water-quantity facts for any event with a
         // null tenantId, so fall back to the tenant the caller authenticated as rather than publishing a
-        // correction that silently never reaches the dashboards.
+        // correction that silently never reaches the dashboards. Resolved before the write rather than
+        // after it because the plausibility check needs the tenant to read its household-size config;
+        // the lookup is read-only, so hoisting it changes nothing else.
         if (eventTenantId == null) {
             eventTenantId = tenantId;
         }
-        publishConfirmedReadingUpdate(eventTenantId, reading, confirmedReading);
 
-        return CreateReadingResponse.builder()
-                .success(true)
-                .message("Reading updated successfully")
-                .correlationId(reading.correlationId())
-                .meterReading(confirmedReading)
-                .qualityStatus("CONFIRMED")
-                .build();
+        return applyConfirmedReadingCorrection(
+                schemaName,
+                reading,
+                confirmedReading,
+                reading.createdBy() != null ? reading.createdBy() : 1L,
+                eventTenantId);
     }
 
     /**
@@ -839,11 +816,192 @@ public class BfmReadingService {
                 : storedExtractedReading;
     }
 
+    /**
+     * The body both correction routes share once they have resolved the row to correct: apply the
+     * supply-plausibility rule, then either write the value or refuse it.
+     *
+     * <p>SUPPLY-PLAUSIBILITY, §6.3. <strong>A failing correction never writes
+     * {@code confirmed_reading}</strong>; a passing one writes it and clears the quarantine flag.
+     * Neither decision looks at the target row's own quarantine state — {@code quarantineReason}
+     * selects the anomaly reason text and nothing else.
+     *
+     * <p>That is not fastidiousness, it is the whole point. Storing a refused value <em>and</em>
+     * quarantining it would drop the row out of telemetry's baselines while analytics kept the older
+     * published figure, so the next day's delta would be measured from a baseline two readings back
+     * and land far above the ceiling — one bad correction would quarantine the scheme indefinitely,
+     * the mirror image of the divergence this feature exists to prevent. Leaving the row alone keeps
+     * both stores agreeing in every case: a published target keeps its published value, a
+     * quarantined target keeps being excluded on both sides.
+     *
+     * <p>The cost, stated plainly: when the target was published, analytics keeps a value the
+     * operator has just called wrong. There is no better candidate, because the proposed replacement
+     * is the one we have declared impossible. If the value really is right, the fix is the FHTC
+     * master data or the threshold, not forcing the number through.
+     *
+     * <p>Unlike the submission path there is no opt-in flag: {@code createReading} is shared with the
+     * Glific image workflow and so needs one, whereas this method is reached only from
+     * {@code PUT /readings} — the Glific confirm path updates the repository directly.
+     *
+     * @param updatedBy     the operator credited with the correction, and the operator the anomaly
+     *                      is filed against
+     * @param eventTenantId the tenant for the published event and for the household-size config
+     */
+    private CreateReadingResponse applyConfirmedReadingCorrection(String schemaName,
+                                                                  TelemetryLatestFlowReadingRecord reading,
+                                                                  BigDecimal confirmedReading,
+                                                                  Long updatedBy,
+                                                                  Integer eventTenantId) {
+        LocalDate readingDate = readingDateOf(reading);
+
+        // A pre-V40 tenant is skipped rather than checked, as on the submission path: refusing a
+        // correction on a schema that cannot record a quarantine leaves the two stores' notion of
+        // this row's status unexpressible. Only BFM rows are cumulative m3 indices, so the delta is
+        // not a water volume on any other channel; an absent channel reads as BFM, which is what
+        // analytics assumes for the same rows.
+        boolean supplyCheckApplies = !supplyPlausibilityGuard.isDisabled()
+                && ReadingChannel.fromChannelValue(reading.channel()) == ReadingChannel.BFM
+                && telemetryTenantRepository.supportsQuarantine(schemaName);
+
+        if (supplyCheckApplies) {
+            // excludeReadingId exists for exactly this: the row being corrected must not be its own
+            // baseline. Otherwise the correction would be measured against the value it replaces and
+            // every correction would look like a tiny delta.
+            TelemetryConfirmedReadingSnapshot baseline = telemetryTenantRepository
+                    .findLatestConfirmedReadingSnapshotBeforeDate(
+                            schemaName, reading.schemeId(), readingDate, reading.id())
+                    .orElse(null);
+            Verdict verdict = supplyPlausibilityGuard.assess(
+                    schemaName,
+                    eventTenantId,
+                    updatedBy,
+                    reading.schemeId(),
+                    readingDate,
+                    confirmedReading,
+                    baseline != null ? baseline.confirmedReading() : null,
+                    SupplyPlausibilityGuard.Path.CORRECTION);
+            // Under AUDIT the guard has already logged and counted what it would have refused; the
+            // correction proceeds untouched from here.
+            if (verdict instanceof Verdict.Quarantined && supplyPlausibilityGuard.isEnforcing()) {
+                return refuseCorrection(schemaName, reading, confirmedReading, updatedBy, eventTenantId, baseline);
+            }
+        }
+
+        telemetryTenantRepository.updateConfirmedReading(
+                schemaName,
+                reading.id(),
+                confirmedReading,
+                updatedBy,
+                RolloverResolutionService.manualConfirmSource(confirmedReading, reading.confirmedReading())
+        );
+        // SUPPLY-PLAUSIBILITY: the release path. Unconditional, and deliberately outside the check's
+        // own branch — a clean row is set to the 0 it already holds, and a quarantined row is
+        // published below for the first time. Clearing here rather than only when the check ran is
+        // what keeps mode=OFF a real kill switch: a row quarantined during an earlier ENFORCE window
+        // would otherwise sit outside every baseline with no route back. A no-op on pre-V40 schemas,
+        // where the repository guards on the column existing.
+        telemetryTenantRepository.applyQuarantineReason(schemaName, reading.id(), QuarantineReason.NONE);
+
+        publishConfirmedReadingUpdate(eventTenantId, reading, confirmedReading);
+
+        return CreateReadingResponse.builder()
+                .success(true)
+                .message("Reading updated successfully")
+                .correlationId(reading.correlationId())
+                .meterReading(confirmedReading)
+                .qualityStatus("CONFIRMED")
+                .build();
+    }
+
+    /**
+     * SUPPLY-PLAUSIBILITY: records a refused correction and returns the rejection. Writes nothing to
+     * {@code flow_reading_table} — not the value, and not a marker: the row is untouched by
+     * definition, so {@code quarantine_reason} keeps whatever it held. The anomaly's reason text is
+     * therefore the only thing telling a refusal over a published reading (B) from one over a
+     * quarantined reading (C), which is why {@link #anomalyReasonForRefusedCorrection} reads the
+     * row's state and the write path above does not.
+     */
+    private CreateReadingResponse refuseCorrection(String schemaName,
+                                                   TelemetryLatestFlowReadingRecord reading,
+                                                   BigDecimal attemptedReading,
+                                                   Long updatedBy,
+                                                   Integer eventTenantId,
+                                                   TelemetryConfirmedReadingSnapshot baseline) {
+        recordAnomaly(
+                schemaName,
+                eventTenantId,
+                updatedBy,
+                reading.schemeId(),
+                AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY,
+                anomalyReasonForRefusedCorrection(reading),
+                0,
+                // No OCR pass on a correction: the caller supplied the number directly, so there is
+                // no AI reading to file the attempt against.
+                null,
+                null,
+                attemptedReading,
+                // The baseline the litres were measured against, not the standing stored value, so
+                // (overridden_reading - previous_reading) * 1000 reproduces the decision from the
+                // persisted row alone. The standing value is not lost either: the reading row is
+                // untouched, so confirmed_reading still holds it.
+                baseline != null ? baseline.confirmedReading() : null,
+                baseline != null ? baseline.createdAt() : null,
+                0,
+                // Deliberately null, so the publisher mints a random uuid per attempt. Analytics
+                // dedups on a uuid derived from the correlationId and touches rather than inserts a
+                // repeat, so a deterministic key would collapse a second refused attempt into the
+                // first and the operator's repeated tries would be invisible. The submission path
+                // wants the opposite and keys on (type, operator, scheme, date).
+                null);
+
+        return CreateReadingResponse.builder()
+                .success(false)
+                // THRESHOLD-DISCLOSURE: names no ceiling, population or FHTC figure, for the same
+                // reason the submission rejection does not.
+                .message("Correction rejected: the implied daily supply is not plausible for this scheme.")
+                .correlationId(reading.correlationId())
+                .meterReading(attemptedReading)
+                .qualityStatus("REJECTED")
+                .errorCode(TelemetryErrorCode.ABNORMAL_READING)
+                // The value that still stands. It is the caller's own stored reading, so it
+                // discloses nothing they could not already read back.
+                .lastConfirmedReading(reading.confirmedReading())
+                .build();
+    }
+
+    /**
+     * Case B or case C of the refusal (§6.3), told apart by whether the reading the correction
+     * targeted is itself quarantined. They mean different things to whoever picks the anomaly up: in
+     * B a published value stands and the day is counted, in C the day is still missing from analytics
+     * and needs a plausible value before it will ever appear.
+     *
+     * <p>{@code null} means a pre-V40 schema, where the check never runs at all; it reads as
+     * published for completeness.
+     */
+    private static String anomalyReasonForRefusedCorrection(TelemetryLatestFlowReadingRecord reading) {
+        Integer quarantineReason = reading.quarantineReason();
+        boolean targetQuarantined = quarantineReason != null && quarantineReason != QuarantineReason.NONE;
+        return targetQuarantined
+                ? AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_CORRECTION_REJECTED_QUARANTINED
+                : AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_CORRECTION_REJECTED_PUBLISHED;
+    }
+
+    /**
+     * The date a stored reading belongs to, falling back through {@code reading_at} to today for the
+     * legacy rows that carry neither. Shared so the baseline cutoff and the published event agree on
+     * which day is being corrected.
+     */
+    private static LocalDate readingDateOf(TelemetryLatestFlowReadingRecord reading) {
+        if (reading.readingDate() != null) {
+            return reading.readingDate();
+        }
+        return (reading.readingAt() != null ? reading.readingAt() : ReadingTime.now()).toLocalDate();
+    }
+
     private void publishConfirmedReadingUpdate(Integer tenantId,
                                                TelemetryLatestFlowReadingRecord reading,
                                                BigDecimal confirmedReading) {
         LocalDateTime readingAt = reading.readingAt() != null ? reading.readingAt() : ReadingTime.now();
-        LocalDate readingDate = reading.readingDate() != null ? reading.readingDate() : readingAt.toLocalDate();
+        LocalDate readingDate = readingDateOf(reading);
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
                 reading.schemeId(),
@@ -913,6 +1071,15 @@ public class BfmReadingService {
                 BigDecimal.ZERO,
                 operator.id()
         );
+        // SUPPLY-PLAUSIBILITY: the marker described the value the reset has just destroyed, so it
+        // cannot outlive it — 0 is not an implausible supply. Leaving it behind is not cosmetic:
+        // a quarantined row that is reset now satisfies every clause of the placeholder predicate
+        // (zero extracted and confirmed readings, no image, no meter-change or issue reason) for an
+        // API submission that carried no image, so the next submission that day reuses the row. The
+        // reuse paths pass no quarantine reason, meaning "leave the column alone", and a stale 1
+        // would then silently withhold a perfectly good reading from every baseline and from the
+        // warehouse. Same unconditional clear as the correction path, and the same no-op on pre-V40.
+        telemetryTenantRepository.applyQuarantineReason(schemaName, latestReading.id(), QuarantineReason.NONE);
 
         LocalDateTime readingAt = latestReading.readingAt() != null ? latestReading.readingAt() : ReadingTime.now();
         LocalDate readingDate = latestReading.readingDate() != null ? latestReading.readingDate() : readingAt.toLocalDate();

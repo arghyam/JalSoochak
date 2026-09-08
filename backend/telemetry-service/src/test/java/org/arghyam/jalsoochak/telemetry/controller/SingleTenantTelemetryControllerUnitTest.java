@@ -845,6 +845,58 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(TelemetryErrorCode.PROCESSING_FAILED, response.getBody().getData().getErrorCode());
     }
 
+    /**
+     * SUPPLY-PLAUSIBILITY: a correction refused on its value comes back as a REJECTED response
+     * rather than an exception, and the handler has to map that to 400 itself — before this it
+     * returned 200 with success=true for anything that did not throw, so an implausible correction
+     * would have been reported to the caller as applied.
+     */
+    @Test
+    void updateReadingReturnsBadRequestWhenCorrectionIsRejected() {
+        BfmReadingService rejecting = new BfmReadingService(null, null, null, null, null, null, null, null, null, null) {
+            @Override
+            public CreateReadingResponse updateConfirmedReading(String correlationId,
+                                                                String phoneNumber,
+                                                                BigDecimal confirmedReading,
+                                                                Integer tenantId) {
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message("Correction rejected: the implied daily supply is not plausible for this scheme.")
+                        .correlationId(correlationId)
+                        .meterReading(confirmedReading)
+                        .lastConfirmedReading(new BigDecimal("950"))
+                        .qualityStatus("REJECTED")
+                        .errorCode(TelemetryErrorCode.ABNORMAL_READING)
+                        .build();
+            }
+        };
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                rejecting
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .confirmedReading(new BigDecimal("1100"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertFalse(response.getBody().isSuccess());
+        assertEquals(TelemetryErrorCode.ABNORMAL_READING, response.getBody().getData().getErrorCode());
+        assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
+        // THRESHOLD-DISCLOSURE: the wire carries no ceiling, population or connection count. An
+        // API-key holder who learns the ceiling can solve for both of its factors in two requests.
+        String message = response.getBody().getData().getMessage();
+        assertFalse(message.contains("75000"));
+        assertFalse(message.contains("500"));
+        assertFalse(message.contains("150"));
+    }
+
     @Test
     void resetLatestReadingSetsBadRequestErrorCodeWhenContactIdMissing() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
