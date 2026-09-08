@@ -25,8 +25,17 @@ public class RateLimiterConfig {
                 if (!enabled) {
                     return Mono.just(new RateLimiter.Response(true, java.util.Map.of()));
                 }
-                // Combine route ID with the resolver key to ensure each route has its own bucket.
-                String compositeKey = routeId + ":" + key;
+                // Determine logical group for rate limiting to share buckets across legacy and flat routes.
+                String group;
+                if (routeId.contains("otp-rate-limited")) {
+                    group = "otp";
+                } else if (routeId.contains("auth-rate-limited")) {
+                    group = "auth";
+                } else {
+                    group = routeId; // fallback to unique per route
+                }
+                // Composite key combines group and client identifier (user or IP).
+                String compositeKey = group + ":" + key;
                 return super.isAllowed(routeId, compositeKey);
             }
         };
@@ -43,6 +52,11 @@ public class RateLimiterConfig {
     }
 
     private String clientIp(String forwardedFor, InetSocketAddress remoteAddress) {
+        // Rightmost-IP choice:
+        // When nginx does NOT use forwarded headers (use-forwarded-headers: false), the X-Forwarded-For header contains
+        // a comma‑separated list of client IPs where the leftmost is the original client and the rightmost is the nearest
+        // proxy. Selecting the rightmost IP ensures we rate‑limit based on the immediate hop (the load balancer or CDN).
+        // If an ALB is placed in front and forwards headers, this logic would need to be adjusted.
         if (forwardedFor != null && !forwardedFor.isBlank()) {
             String[] ips = forwardedFor.split(",");
             return ips[ips.length - 1].trim();

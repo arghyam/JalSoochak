@@ -23,54 +23,9 @@ spring:
   cloud:
     gateway:
       routes:
-        - id: otp-rate-limited-flat
-          uri: ${USER_SERVICE_URI:http://localhost:8082}
-          predicates:
-            - Path=/api/v1/auth/staff/otp, /api/v1/auth/staff/otp/verify
-          filters:
-            - name: RequestRateLimiter
-              args:
-                key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_OTP_FLAT_REPLENISH_RATE:1}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_OTP_FLAT_BURST_CAPACITY:5}
 
-        - id: otp-rate-limited
-          uri: ${USER_SERVICE_URI:http://localhost:8082}
-          predicates:
-            - Path=/user/api/v1/auth/staff/otp, /user/api/v1/auth/staff/otp/verify
-          filters:
-            - StripPrefix=1
-            - name: RequestRateLimiter
-              args:
-                key-resolver: "#{@userOrIpKeyResolver}"
-                # NOTE: Include the route ID in the Redis limiter key to isolate buckets per route.
-                # This prevents OTP and auth rate limiters from sharing the same bucket.
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_OTP_REPLENISH_RATE:1}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_OTP_BURST_CAPACITY:5}
-                # Ensure route-specific limiter keys to avoid bucket sharing.
 
-        - id: auth-rate-limited-flat
-          uri: ${USER_SERVICE_URI:http://localhost:8082}
-          predicates:
-            - Path=/api/v1/auth/**
-          filters:
-            - name: RequestRateLimiter
-              args:
-                key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_AUTH_REPLENISH_RATE:2}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_AUTH_BURST_CAPACITY:10}
 
-        - id: auth-rate-limited
-          uri: ${USER_SERVICE_URI:http://localhost:8082}
-          predicates:
-            - Path=/user/api/v1/auth/**
-          filters:
-            - StripPrefix=1
-            - name: RequestRateLimiter
-              args:
-                key-resolver: "#{@userOrIpKeyResolver}"
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_AUTH_REPLENISH_RATE:2}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_AUTH_BURST_CAPACITY:10}
 
         - id: pumpoperator-public
           uri: ${USER_SERVICE_URI:http://localhost:8082}
