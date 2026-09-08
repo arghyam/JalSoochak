@@ -70,5 +70,17 @@ class RateLimiterConfigTest {
         // Same key on a different route should be allowed (separate bucket)
         assertTrue(mockLimiter.isAllowed("routeB", "key").block().isAllowed());
     }
+    @Test
+    void otpRoutesShareBucket() {
+        var limiter = config.redisRateLimiter(1, 1, true);
+        assertTrue(limiter.isAllowed("otp-rate-limited-flat", "client1").block().isAllowed());
+        assertFalse(limiter.isAllowed("otp-rate-limited", "client1").block().isAllowed());
+    }
 
+    @Test
+    void authRoutesShareBucket() {
+        var limiter = config.redisRateLimiter(1, 1, true);
+        assertTrue(limiter.isAllowed("auth-rate-limited-flat", "client2").block().isAllowed());
+        assertFalse(limiter.isAllowed("auth-rate-limited", "client2").block().isAllowed());
+    }
 }
