@@ -29,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -419,6 +420,8 @@ class AnalyticsKafkaConsumerTest {
 
     @Test
     void consumeTelemetryEvents_meterReadingRecorded_routesToIngestMeterReading() throws Exception {
+        // A whole-number reading, i.e. what a telemetry-service still on the old contract publishes.
+        // This service is deployed first, so it has to keep accepting exactly this.
         String message = """
                 {"eventType":"METER_READING_RECORDED","tenantId":8,"schemeId":10,"userId":2,"extractedReading":123}
                 """;
@@ -430,8 +433,26 @@ class AnalyticsKafkaConsumerTest {
         MeterReadingEvent event = captor.getValue();
         assertThat(readField(event, "tenantId")).isEqualTo(8);
         assertThat(readField(event, "schemeId")).isEqualTo(10);
-        assertThat(readField(event, "extractedReading")).isEqualTo(123);
+        assertThat((BigDecimal) readField(event, "extractedReading")).isEqualByComparingTo("123");
         verifyNoInteractions(dimensionService);
+    }
+
+    @Test
+    void consumeTelemetryEvents_meterReadingRecorded_keepsTheDecimalDigitOffTheWire() throws Exception {
+        String message = """
+                {"eventType":"METER_READING_RECORDED","tenantId":8,"schemeId":10,"userId":2,\
+                "extractedReading":1247.8,"confirmedReading":1235.55}
+                """;
+
+        consumer.consumeTelemetryEvents(message);
+
+        ArgumentCaptor<MeterReadingEvent> captor = ArgumentCaptor.forClass(MeterReadingEvent.class);
+        verify(factService).ingestMeterReading(captor.capture());
+        MeterReadingEvent event = captor.getValue();
+        // Decimal, and exactly decimal: deserialising through double would make 1235.55 inexact before
+        // it ever reached the NUMERIC column.
+        assertThat((BigDecimal) readField(event, "extractedReading")).isEqualByComparingTo("1247.8");
+        assertThat((BigDecimal) readField(event, "confirmedReading")).isEqualByComparingTo("1235.55");
     }
 
     @Test
@@ -445,9 +466,24 @@ class AnalyticsKafkaConsumerTest {
         ArgumentCaptor<WaterQuantityEvent> captor = ArgumentCaptor.forClass(WaterQuantityEvent.class);
         verify(factService).ingestWaterQuantity(captor.capture());
         WaterQuantityEvent event = captor.getValue();
-        assertThat(readField(event, "waterQuantity")).isEqualTo(45);
+        assertThat((BigDecimal) readField(event, "waterQuantity")).isEqualByComparingTo("45");
         assertThat(readField(event, "date")).isEqualTo("2026-04-10");
         verifyNoInteractions(dimensionService);
+    }
+
+    @Test
+    void consumeTelemetryEvents_waterQuantityRecorded_keepsADecimalCorrectionIntact() throws Exception {
+        // The correction path subtracts two NUMERIC readings, so its derived volume is decimal too.
+        String message = """
+                {"eventType":"WATER_QUANTITY_RECORDED","tenantId":8,"schemeId":10,"userId":2,\
+                "waterQuantity":45.3,"submissionStatus":1,"date":"2026-04-10"}
+                """;
+
+        consumer.consumeTelemetryEvents(message);
+
+        ArgumentCaptor<WaterQuantityEvent> captor = ArgumentCaptor.forClass(WaterQuantityEvent.class);
+        verify(factService).ingestWaterQuantity(captor.capture());
+        assertThat((BigDecimal) readField(captor.getValue(), "waterQuantity")).isEqualByComparingTo("45.3");
     }
 
     @Test

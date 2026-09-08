@@ -12,18 +12,18 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.arghyam.jalsoochak.scheme.config.SchemeSecurityEvaluator;
 import org.arghyam.jalsoochak.scheme.config.TenantContext;
-import org.arghyam.jalsoochak.scheme.dto.CodeCountDTO;
 import org.arghyam.jalsoochak.scheme.dto.ReportLinkResponseDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeCountsDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeMappingDTO;
-import org.arghyam.jalsoochak.scheme.dto.SchemeStatusCountsDTO;
+import org.arghyam.jalsoochak.scheme.dto.SchemeStatusBreakdownDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusUpdateRequestDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeStatusesResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeYesterdayFinalReadingDTO;
 import org.arghyam.jalsoochak.scheme.dto.common.PageResponseDTO;
+import org.arghyam.jalsoochak.scheme.enums.SchemeOperatingStatus;
+import org.arghyam.jalsoochak.scheme.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.scheme.exception.FileValidationException;
 import org.arghyam.jalsoochak.scheme.exception.UnsupportedFileTypeException;
 import org.arghyam.jalsoochak.scheme.kafka.KafkaProducer;
@@ -56,13 +56,16 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 @Service
 @Slf4j
@@ -121,26 +124,6 @@ public class SchemeServiceImpl implements SchemeService {
             "sub_division_name"
     );
 
-    private static final Map<String, Integer> WORK_STATUS_MAP = Map.of(
-            "1", 1,
-            "ongoing", 1,
-            "2", 2,
-            "completed", 2,
-            "3", 3,
-            "not started", 3,
-            "4", 4,
-            "handed over", 4
-    );
-
-    private static final Map<String, Integer> OPERATING_STATUS_MAP = Map.of(
-            "1", 1,
-            "operative", 1,
-            "0", 0,
-            "non-operative", 0,
-            "2", 2,
-            "partially operative", 2
-    );
-
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("csv", "xlsx");
     private static final DataFormatter DATA_FORMATTER = new DataFormatter();
     private static final String REPORT_FORMAT_CSV = "csv";
@@ -163,14 +146,13 @@ public class SchemeServiceImpl implements SchemeService {
             String stateSchemeId,
             String schemeName,
             String name,
-            String workStatus,
-            String operatingStatus,
-            String status
+            List<String> workStatus,
+            List<String> operatingStatus
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
-        Integer workStatusCode = parseWorkStatus(workStatus);
-        Integer operatingStatusCode = parseOperatingStatus(operatingStatus);
+        List<Integer> workStatusCodes = parseWorkStatuses(workStatus);
+        List<Integer> operatingStatusCodes = parseOperatingStatuses(operatingStatus);
 
         int size = clampLimit(limit);
         int p = Math.max(0, page);
@@ -181,15 +163,14 @@ public class SchemeServiceImpl implements SchemeService {
                 stateSchemeId,
                 schemeName,
                 name,
-                workStatusCode,
-                operatingStatusCode,
-                status,
+                workStatusCodes,
+                operatingStatusCodes,
                 sortBy,
                 sortDir,
                 offset,
                 size
         );
-        long total = schemeDbRepository.countSchemes(schemaName, stateSchemeId, schemeName, name, workStatusCode, operatingStatusCode, status);
+        long total = schemeDbRepository.countSchemes(schemaName, stateSchemeId, schemeName, name, workStatusCodes, operatingStatusCodes);
         return PageResponseDTO.of(rows, total, p, size);
     }
 
@@ -201,16 +182,15 @@ public class SchemeServiceImpl implements SchemeService {
             String sortBy,
             String sortDir,
             String name,
-            String workStatus,
-            String operatingStatus,
-            String status,
+            List<String> workStatus,
+            List<String> operatingStatus,
             String villageLgdCode,
             String subDivisionName
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
-        Integer workStatusCode = parseWorkStatus(workStatus);
-        Integer operatingStatusCode = parseOperatingStatus(operatingStatus);
+        List<Integer> workStatusCodes = parseWorkStatuses(workStatus);
+        List<Integer> operatingStatusCodes = parseOperatingStatuses(operatingStatus);
 
         int size = clampLimit(limit);
         int p = Math.max(0, page);
@@ -219,9 +199,8 @@ public class SchemeServiceImpl implements SchemeService {
         List<SchemeMappingDTO> rows = schemeDbRepository.listSchemeMappings(
                 schemaName,
                 name,
-                workStatusCode,
-                operatingStatusCode,
-                status,
+                workStatusCodes,
+                operatingStatusCodes,
                 villageLgdCode,
                 subDivisionName,
                 sortBy,
@@ -229,7 +208,7 @@ public class SchemeServiceImpl implements SchemeService {
                 offset,
                 size
         );
-        long total = schemeDbRepository.countSchemeMappings(schemaName, name, workStatusCode, operatingStatusCode, status, villageLgdCode, subDivisionName);
+        long total = schemeDbRepository.countSchemeMappings(schemaName, name, workStatusCodes, operatingStatusCodes, villageLgdCode, subDivisionName);
         return PageResponseDTO.of(rows, total, p, size);
     }
 
@@ -279,31 +258,11 @@ public class SchemeServiceImpl implements SchemeService {
     }
 
     @Override
-    public SchemeCountsDTO getSchemeCounts(String tenantCode) {
+    public SchemeStatusBreakdownDTO getSchemeStatusCounts(String tenantCode) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
 
-        SchemeDbRepository.SchemeCounts counts = schemeDbRepository.countActiveInactiveSchemes(schemaName);
-        return SchemeCountsDTO.builder()
-                .activeSchemes(counts.activeSchemes())
-                .inactiveSchemes(counts.inactiveSchemes())
-                .build();
-    }
-
-    @Override
-    public SchemeStatusCountsDTO getSchemeStatusCounts(String tenantCode) {
-        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-
-        long total = schemeDbRepository.countSchemesTotal(schemaName);
-        SchemeDbRepository.SchemeCounts activeInactive = schemeDbRepository.countActiveInactiveSchemes(schemaName);
-
-        return SchemeStatusCountsDTO.builder()
-                .totalSchemes(total)
-                .activeSchemes(activeInactive.activeSchemes())
-                .inactiveSchemes(activeInactive.inactiveSchemes())
-                .statusCounts(List.of(
-                        CodeCountDTO.builder().status("ACTIVE").count(activeInactive.activeSchemes()).build(),
-                        CodeCountDTO.builder().status("INACTIVE").count(activeInactive.inactiveSchemes()).build()
-                ))
+        return SchemeStatusBreakdownDTO.builder()
+                .totalSchemes(schemeDbRepository.countSchemesTotal(schemaName))
                 .workStatusCounts(schemeDbRepository.countSchemesByWorkStatus(schemaName))
                 .operatingStatusCounts(schemeDbRepository.countSchemesByOperatingStatus(schemaName))
                 .build();
@@ -851,9 +810,13 @@ public class SchemeServiceImpl implements SchemeService {
                 parseInteger(values.get("house_hold_count"), rowNumber, "house_hold_count", errors);
                 parseDouble(values.get("latitude"), rowNumber, "latitude", errors);
                 parseDouble(values.get("longitude"), rowNumber, "longitude", errors);
-                parseEnum(values.get("work_status"), rowNumber, "work_status", WORK_STATUS_MAP, "Ongoing, Completed, Not Started, Handed Over or 1/2/3/4", errors);
+                parseEnum(values.get("work_status"), rowNumber, "work_status",
+                        v -> SchemeWorkStatus.fromInput(v).map(SchemeWorkStatus::getCode),
+                        SchemeWorkStatus.acceptedInputs(), errors);
                 if (!normalize(values.get("operating_status")).isBlank()) {
-                    parseEnum(values.get("operating_status"), rowNumber, "operating_status", OPERATING_STATUS_MAP, "Operative, Non-Operative, Partially Operative or 0/1/2", errors);
+                    parseEnum(values.get("operating_status"), rowNumber, "operating_status",
+                            v -> SchemeOperatingStatus.fromInput(v).map(SchemeOperatingStatus::getCode),
+                            SchemeOperatingStatus.acceptedInputs(), errors);
                 }
 
                 if (errors.size() == before && !stateSchemeId.isBlank()) {
@@ -926,9 +889,13 @@ public class SchemeServiceImpl implements SchemeService {
                 Double latitude = latRaw.isBlank() ? null : Double.parseDouble(latRaw);
                 Double longitude = lonRaw.isBlank() ? null : Double.parseDouble(lonRaw);
                 Integer channel = null;
-                Integer workStatus = WORK_STATUS_MAP.get(normalize(values.get("work_status")).toLowerCase());
-                String operatingRaw = normalize(values.get("operating_status")).toLowerCase();
-                Integer operatingStatus = operatingRaw.isBlank() ? 1 : OPERATING_STATUS_MAP.get(operatingRaw);
+                Integer workStatus = SchemeWorkStatus.fromInput(values.get("work_status"))
+                        .map(SchemeWorkStatus::getCode)
+                        .orElse(null);
+                String operatingRaw = normalize(values.get("operating_status"));
+                Integer operatingStatus = operatingRaw.isBlank()
+                        ? SchemeOperatingStatus.OPERATIVE.getCode()
+                        : SchemeOperatingStatus.fromInput(operatingRaw).map(SchemeOperatingStatus::getCode).orElse(null);
 
                 chunk.add(new SchemeCreateRecord(
                         UUID.randomUUID().toString(),
@@ -1418,46 +1385,63 @@ public class SchemeServiceImpl implements SchemeService {
         return Math.min(limit, 100);
     }
 
+    private List<Integer> parseWorkStatuses(List<String> values) {
+        return parseStatusCodes(values, this::parseWorkStatus);
+    }
+
+    private List<Integer> parseOperatingStatuses(List<String> values) {
+        return parseStatusCodes(values, this::parseOperatingStatus);
+    }
+
+    /**
+     * Resolves a multi-valued status filter — {@code ?workStatus=Ongoing&workStatus=2} or the
+     * comma-separated {@code ?workStatus=Ongoing,2}, both of which Spring binds to this list. Blanks
+     * are dropped and duplicates collapsed, so the result is bounded by the status enum's size; any
+     * unrecognised value fails the whole request rather than being silently ignored.
+     */
+    private List<Integer> parseStatusCodes(List<String> values, Function<String, Integer> parser) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        Set<Integer> codes = new LinkedHashSet<>();
+        for (String value : values) {
+            Integer code = parser.apply(value);
+            if (code != null) {
+                codes.add(code);
+            }
+        }
+        return List.copyOf(codes);
+    }
+
     private Integer parseWorkStatus(String value) {
-        String v = value == null ? "" : value.trim();
-        if (v.isBlank()) {
+        if (normalize(value).isBlank()) {
             return null;
         }
-        String k = v.toLowerCase(Locale.ROOT);
-        Integer byName = WORK_STATUS_MAP.get(k);
-        if (byName != null) {
-            return byName;
-        }
-        try {
-            int n = Integer.parseInt(v);
-            if (n >= 1 && n <= 4) {
-                return n;
-            }
-        } catch (NumberFormatException ignored) {
-        }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Invalid workStatus. Expected one of: Ongoing, Completed, Not Started, Handed Over or 1/2/3/4");
+        return SchemeWorkStatus.fromInput(value)
+                .or(() -> parseCode(value).flatMap(SchemeWorkStatus::fromCode))
+                .map(SchemeWorkStatus::getCode)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Invalid workStatus. Expected one of: " + SchemeWorkStatus.acceptedInputs()));
     }
 
     private Integer parseOperatingStatus(String value) {
-        String v = value == null ? "" : value.trim();
-        if (v.isBlank()) {
+        if (normalize(value).isBlank()) {
             return null;
         }
-        String k = v.toLowerCase(Locale.ROOT);
-        Integer byName = OPERATING_STATUS_MAP.get(k);
-        if (byName != null) {
-            return byName;
-        }
+        return SchemeOperatingStatus.fromInput(value)
+                .or(() -> parseCode(value).flatMap(SchemeOperatingStatus::fromCode))
+                .map(SchemeOperatingStatus::getCode)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Invalid operatingStatus. Expected one of: " + SchemeOperatingStatus.acceptedInputs()));
+    }
+
+    /** Non-canonical numeric spellings the filters have always tolerated, e.g. {@code "01"}. */
+    private Optional<Integer> parseCode(String value) {
         try {
-            int n = Integer.parseInt(v);
-            if (n >= 0 && n <= 2) {
-                return n;
-            }
+            return Optional.of(Integer.valueOf(normalize(value)));
         } catch (NumberFormatException ignored) {
+            return Optional.empty();
         }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Invalid operatingStatus. Expected one of: Operative, Non-Operative, Partially Operative or 0/1/2");
     }
 
     private void requireField(Map<String, String> values, int rowNumber, String field, List<SchemeUploadErrorDTO> errors) {
@@ -1496,20 +1480,19 @@ public class SchemeServiceImpl implements SchemeService {
             String value,
             int rowNumber,
             String field,
-            Map<String, Integer> mapping,
+            Function<String, Optional<Integer>> resolver,
             String expected,
             List<SchemeUploadErrorDTO> errors
     ) {
-        String normalized = normalize(value).toLowerCase();
-        if (normalized.isBlank()) {
+        if (normalize(value).isBlank()) {
             return null;
         }
 
-        Integer mappedValue = mapping.get(normalized);
-        if (mappedValue == null) {
+        Optional<Integer> mappedValue = resolver.apply(value);
+        if (mappedValue.isEmpty()) {
             errors.add(error(rowNumber, field, "Invalid " + field + ". Expected: " + expected));
         }
-        return mappedValue;
+        return mappedValue.orElse(null);
     }
 
     private SchemeUploadErrorDTO error(int rowNumber, String field, String message) {

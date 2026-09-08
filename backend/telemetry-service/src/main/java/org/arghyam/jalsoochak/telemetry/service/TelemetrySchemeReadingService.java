@@ -130,7 +130,12 @@ public class TelemetrySchemeReadingService {
             }
 
             // Always treat this as a "confirmed correction": keep extracted_reading untouched (or 0 for created rows).
-            telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId);
+            // The officer's number is a manual override, so the row must also stop claiming its
+            // confirmed_reading is what the AI extracted (confirmed_reading_source DEFAULT 0 =
+            // AS_EXTRACTED). Retag only when the value actually moves, so a correction that restates the
+            // stored number preserves an existing ROLLOVER_RESOLVED or EXTERNALLY_ASSERTED marker.
+            telemetryTenantRepository.updateConfirmedReading(schemaName, targetDayRecord.id(), finalReading, updaterUserId,
+                    RolloverResolutionService.manualConfirmSource(finalReading, targetDayRecord.confirmedReading()));
             log.info("[update-yesterday-final-reading] updated readingId={} newFinalReading={}",
                     targetDayRecord.id(), finalReading);
 

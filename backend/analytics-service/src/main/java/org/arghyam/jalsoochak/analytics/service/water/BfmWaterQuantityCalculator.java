@@ -3,6 +3,8 @@ package org.arghyam.jalsoochak.analytics.service.water;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+
 /**
  * Default water-quantity calculator for bulk flow meters (cumulative meters).
  *
@@ -23,8 +25,8 @@ public class BfmWaterQuantityCalculator implements WaterQuantityCalculator {
 
     @Override
     public long calculate(WaterQuantityContext context) {
-        Integer current = context.currentReading();
-        Integer previous = context.previousReading();
+        BigDecimal current = context.currentReading();
+        BigDecimal previous = context.previousReading();
         // A null previous reading means no baseline exists yet, not "the meter was at zero". A
         // cumulative index is a running total, so without something to subtract there is no derivable
         // volume for the day — the honest answer is 0. Treating the absence as 0 instead would write
@@ -33,7 +35,9 @@ public class BfmWaterQuantityCalculator implements WaterQuantityCalculator {
         if (current == null || previous == null) {
             return 0L;
         }
-        // Subtract as long: the readings are Integer, so an int subtraction could wrap on extreme values.
-        return WaterVolumeUnits.cubicMetresToLitres(Math.max(0L, (long) current - previous));
+        // Subtract at the readings' own precision and round only once, on the way into litres. Rounding
+        // the readings first and subtracting after is what cost up to 1000 L per day.
+        BigDecimal delta = current.subtract(previous).max(BigDecimal.ZERO);
+        return WaterVolumeUnits.cubicMetresToLitres(delta);
     }
 }

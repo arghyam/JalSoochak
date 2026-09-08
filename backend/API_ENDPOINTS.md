@@ -18,7 +18,7 @@ offending parameter — they are never silently clamped.
 Exception: `/api/v1/pumpoperator/pump-operators/by-scheme` only paginates when `page` or `size` is
 supplied. When either is, the same bounds apply.
 
-Endpoints on the other services do not share this contract. Scheme-service's `/api/v1/schemes`
+Endpoints on the other services do not share this contract. Scheme-service's `/api/v1/scheme/schemes`
 family, for one, takes `page`/`limit` unvalidated at the controller and clamps them in the service
 layer (`page` to `>= 0`, `limit` to `1..100`), so an out-of-range value there returns `200` with the
 clamped page rather than `400`.
@@ -134,10 +134,9 @@ Set the following environment variables before running the Telemetry services:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/v1/public/schemes/{schemeId}?tenantCode={tenantCode}` | Get scheme by ID. Authenticated despite the `public` path — `tenantCode` must match the caller's own tenant. Optional `tenantId` is validated for consistency with `tenantCode` (400 on mismatch) |
-| GET | `/api/v1/scheme/schemes` | List all schemes |
-| GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings |
-| GET | `/api/v1/scheme/schemes/counts` | Scheme counts |
-| GET | `/api/v1/scheme/schemes/counts/by-status` | Scheme counts by status |
+| GET | `/api/v1/scheme/schemes` | List all schemes; `workStatus` / `operatingStatus` accept repeated or comma-separated values |
+| GET | `/api/v1/scheme/schemes/mappings` | List scheme mappings; same multi-valued status filters |
+| GET | `/api/v1/scheme/schemes/counts/by-status` | Total schemes plus the work-status and operating-status breakdowns |
 | PATCH | `/api/v1/scheme/schemes/{schemeId}/status?tenantCode={tenantCode}` | Update scheme work/operating status (one or both) |
 | POST | `/api/v1/scheme/schemes/upload` | Bulk upload schemes (CSV) |
 | POST | `/api/v1/scheme/schemes/mappings/upload` | Bulk upload scheme mappings (CSV) |
@@ -151,9 +150,9 @@ Set the following environment variables before running the Telemetry services:
 - `4` = `Handed Over`
 
 `operating_status`
+- `0` = `Non-Operative`
 - `1` = `Operative`
-- `2` = `Non-Operative`
-- `3` = `Partially Operative`
+- `2` = `Partially Operative`
 
 ---
 

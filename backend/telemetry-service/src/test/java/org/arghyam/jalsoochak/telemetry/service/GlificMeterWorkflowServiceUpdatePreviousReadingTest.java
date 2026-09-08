@@ -30,6 +30,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * The operator's "update previous day's reading" flow is a manual correction: it must move
+ * {@code confirmed_reading} only. It used to go through {@code updateReadingValues}, which also
+ * overwrote {@code extracted_reading} with the hand-typed number, destroying the only record of what
+ * FlowVision actually read off that day's photo.
+ */
 @ExtendWith(MockitoExtension.class)
 class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
 
@@ -89,7 +95,8 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertNotNull(resp);
         assertEquals(true, resp.isSuccess());
         assertEquals("CONFIRMED", resp.getQualityStatus());
-        verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("1100"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1100"), 1L, null);
+        verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryEventPublisher).publishWaterQuantityRecorded(
                 1,
                 10L,
@@ -140,7 +147,9 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertEquals("CONFIRMED", resp.getQualityStatus());
         assertEquals(new BigDecimal("1000"), resp.getMeterReading());
         assertEquals("corr-2", resp.getCorrelationId());
-        verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("1000"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1000"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
+        verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryEventPublisher).publishWaterQuantityRecorded(
                 1,
                 10L,
@@ -192,7 +201,9 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         assertEquals("CONFIRMED", resp.getQualityStatus());
         assertEquals(new BigDecimal("1110"), resp.getMeterReading());
         assertEquals("corr-2", resp.getCorrelationId());
-        verify(telemetryTenantRepository).updateReadingValues("tenant_test", 22L, new BigDecimal("1110"), 1L);
+        verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 22L, new BigDecimal("1110"), 1L,
+                RolloverResolutionService.SOURCE_MANUAL);
+        verify(telemetryTenantRepository, never()).updateReadingValues(anyString(), anyLong(), any(), anyLong());
         verify(telemetryEventPublisher).publishWaterQuantityRecorded(
                 1,
                 10L,

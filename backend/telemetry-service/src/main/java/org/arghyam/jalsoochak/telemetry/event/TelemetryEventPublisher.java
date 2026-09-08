@@ -49,7 +49,7 @@ public class TelemetryEventPublisher {
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
                 .userId(toInt(userId))
-                .waterQuantity(toInt(waterQuantity))
+                .waterQuantity(waterQuantity)
                 .submissionStatus(submissionStatus)
                 .outageReason(null)
                 .nonSubmissionReason(null)
@@ -80,7 +80,7 @@ public class TelemetryEventPublisher {
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
                 .userId(toInt(userId))
-                .waterQuantity(0)
+                .waterQuantity(BigDecimal.ZERO)
                 .submissionStatus(NOT_SUBMITTED_STATUS)
                 .outageReason(payload.outageReason)
                 .nonSubmissionReason(payload.nonSubmissionReason)
@@ -109,7 +109,7 @@ public class TelemetryEventPublisher {
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
                 .userId(toInt(userId))
-                .waterQuantity(0)
+                .waterQuantity(BigDecimal.ZERO)
                 .submissionStatus(NOT_SUBMITTED_STATUS)
                 .outageReason(null)
                 .nonSubmissionReason(meterChangeReason)
@@ -212,8 +212,8 @@ public class TelemetryEventPublisher {
                 .tenantId(tenantId)
                 .schemeId(toInt(schemeId))
                 .userId(toInt(userId))
-                .extractedReading(toInt(extractedReading))
-                .confirmedReading(toInt(confirmedReading))
+                .extractedReading(extractedReading)
+                .confirmedReading(confirmedReading)
                 .confidence(toConfidenceInt(confidence))
                 .imageUrl(imageUrl)
                 .readingAt(readingAt != null ? readingAt.toString() : null)
@@ -274,13 +274,6 @@ public class TelemetryEventPublisher {
 
     private static Integer toInt(Long value) {
         return value == null ? null : value.intValue();
-    }
-
-    private static Integer toInt(BigDecimal value) {
-        if (value == null) {
-            return null;
-        }
-        return value.setScale(0, RoundingMode.HALF_UP).intValue();
     }
 
     private static Integer toConfidenceInt(BigDecimal value) {

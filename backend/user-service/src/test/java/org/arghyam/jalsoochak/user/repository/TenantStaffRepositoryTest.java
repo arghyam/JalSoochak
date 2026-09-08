@@ -324,4 +324,67 @@ class TenantStaffRepositoryTest {
                             .containsExactly("Gamma Scheme"));
         }
     }
+
+    // ── status labels ────────────────────────────────────────────────────────
+
+    /**
+     * Every code the tenant schema can hold must map to the label the rest of the platform
+     * uses for it. The codes are fixed by scheme_master_table and shared with scheme-service:
+     * work_status 1..4, operating_status 0..2.
+     */
+    @Nested
+    @DisplayName("Scheme status labels")
+    class StatusLabels {
+
+        /** Each probe needs its own user: phone_number_hash and email are unique per tenant. */
+        private int probeCount;
+
+        private String workStatusLabelFor(int code) {
+            return labelsFor(code, 1).workStatus();
+        }
+
+        private String operatingStatusLabelFor(int code) {
+            return labelsFor(1, code).operatingStatus();
+        }
+
+        private SchemeSummaryDTO labelsFor(int workStatus, int operatingStatus) {
+            int n = ++probeCount;
+            long userId = insertUserReturningId(
+                    "Status Probe " + n,
+                    String.format("91XXXXXXXXX%d", n),
+                    "probe" + n + "@example.com",
+                    3, 1);
+            mapUserToScheme(userId, insertScheme("Probe Scheme " + n, workStatus, operatingStatus));
+
+            Optional<TenantStaffResponseDTO> result = staffRepository.findStaffById(SCHEMA, userId);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().schemes()).hasSize(1);
+            return result.get().schemes().get(0);
+        }
+
+        @Test
+        @DisplayName("maps every work_status code to its canonical label")
+        void mapsEveryWorkStatusCode() {
+            assertThat(workStatusLabelFor(1)).isEqualTo("Ongoing");
+            assertThat(workStatusLabelFor(2)).isEqualTo("Completed");
+            assertThat(workStatusLabelFor(3)).isEqualTo("Not Started");
+            assertThat(workStatusLabelFor(4)).isEqualTo("Handed Over");
+        }
+
+        @Test
+        @DisplayName("maps every operating_status code to its canonical label")
+        void mapsEveryOperatingStatusCode() {
+            assertThat(operatingStatusLabelFor(0)).isEqualTo("Non-Operative");
+            assertThat(operatingStatusLabelFor(1)).isEqualTo("Operative");
+            assertThat(operatingStatusLabelFor(2)).isEqualTo("Partially Operative");
+        }
+
+        @Test
+        @DisplayName("falls back to Unknown for a code outside the documented range")
+        void unknownForUnrecognisedCode() {
+            assertThat(workStatusLabelFor(99)).isEqualTo("Unknown");
+            assertThat(operatingStatusLabelFor(99)).isEqualTo("Unknown");
+        }
+    }
 }
