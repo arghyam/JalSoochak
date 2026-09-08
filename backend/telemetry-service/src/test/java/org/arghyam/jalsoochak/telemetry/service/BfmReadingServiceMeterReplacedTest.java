@@ -6,6 +6,7 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -64,6 +65,11 @@ class BfmReadingServiceMeterReplacedTest {
 
     @Mock
     private RolloverResolutionService rolloverResolutionService;
+
+    // SUPPLY-PLAUSIBILITY: declared so @InjectMocks supplies it rather than leaving it null. These
+    // tests never set CreateReadingRequest.supplyPlausibilityChecked, so the guard is never consulted.
+    @Mock
+    private SupplyPlausibilityGuard supplyPlausibilityGuard;
 
     @InjectMocks
     private BfmReadingService service;

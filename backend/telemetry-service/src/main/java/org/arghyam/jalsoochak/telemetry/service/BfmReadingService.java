@@ -19,6 +19,9 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
+import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
+import org.arghyam.jalsoochak.telemetry.service.water.Verdict;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +51,7 @@ public class BfmReadingService {
     private final FlowVisionReadingsRetryService flowVisionReadingsRetryService;
     private final ReadingChannelResolver readingChannelResolver;
     private final RolloverResolutionService rolloverResolutionService;
+    private final SupplyPlausibilityGuard supplyPlausibilityGuard;
 
     /**
      * Trailing-history window (days) fetched for the rollover consumption band. A few extra days over
@@ -343,7 +347,7 @@ public class BfmReadingService {
                 && request.getReadingUrl() != null && !request.getReadingUrl().isBlank()) {
             TelemetryConfirmedReadingSnapshot previousSnapshot = latestSnapshotOpt.get();
             String anomalyCorrelationId = UUID.randomUUID().toString();
-            recordImageAnomaly(
+            recordAnomaly(
                     schemaName,
                     tenantId,
                     operatorInRequest.id(),
@@ -389,6 +393,53 @@ public class BfmReadingService {
             rolloverAuditJson = rollover.get().auditJson();
         }
 
+        // ── SUPPLY-PLAUSIBILITY: decide before the row is written, not after.
+        // Placed after rollover resolution so the value assessed is effectiveConfirmedReading — the
+        // number that will actually be stored — and before persistence so the publish/no-publish
+        // decision is held in memory rather than depending on a second write succeeding.
+        //
+        // The channel lookup is hoisted from below the insert for the same reason: only BFM readings
+        // are cumulative m3 indices, so the delta is meaningless on any other channel. There are no
+        // early returns between the old position and this one, so the resolver runs in exactly the
+        // cases it ran in before.
+        ReadingChannel resolvedChannel = readingChannelResolver.resolve(tenantId, contactId);
+        Integer channel = resolvedChannel.getCode();
+
+        // A pre-V40 tenant is skipped entirely rather than checked: storing a quarantined row it has
+        // no column to mark would leave it indistinguishable from an accepted one, which is worse
+        // than not checking at all.
+        boolean supplyCheckApplies = request.isSupplyPlausibilityChecked()
+                && !supplyPlausibilityGuard.isDisabled()
+                && !isMeterReplaced
+                && resolvedChannel == ReadingChannel.BFM
+                && telemetryTenantRepository.supportsQuarantine(schemaName);
+
+        TelemetryConfirmedReadingSnapshot supplyBaseline = null;
+        boolean quarantined = false;
+        if (supplyCheckApplies) {
+            // Deliberately re-fetched rather than reusing latestSnapshotOpt: this is the same
+            // "latest non-quarantined confirmed reading strictly before this date" that analytics
+            // computes its volume from, so the litres judged here and the litres the warehouse
+            // would have stored are the same number by construction. One extra query on this path.
+            supplyBaseline = telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate(
+                    schemaName,
+                    request.getSchemeId(),
+                    LocalDate.from(readingAt),
+                    null).orElse(null);
+            Verdict verdict = supplyPlausibilityGuard.assess(
+                    schemaName,
+                    tenantId,
+                    operatorInRequest.id(),
+                    request.getSchemeId(),
+                    LocalDate.from(readingAt),
+                    effectiveConfirmedReading,
+                    supplyBaseline != null ? supplyBaseline.confirmedReading() : null,
+                    SupplyPlausibilityGuard.Path.SUBMISSION);
+            // Under AUDIT the guard has already logged and counted what it would have done; the
+            // reading proceeds untouched from here.
+            quarantined = verdict instanceof Verdict.Quarantined && supplyPlausibilityGuard.isEnforcing();
+        }
+
         Long readingId;
         Optional<Long> placeholderIdOpt = telemetryTenantRepository.findLatestPlaceholderFlowReadingIdForDate(
                 schemaName,
@@ -396,7 +447,7 @@ public class BfmReadingService {
                 operatorInRequest.id(),
                 LocalDate.from(readingAt)
         );
-        if (lenientIngestion || request.isExternallyAsserted()) {
+        if (lenientIngestion || request.isExternallyAsserted() || quarantined) {
             // LENIENT-INGEST: persist the reading and its ingestion tracking (source + submitted scheme
             // ids / phone hash) atomically, so a failure can never leave a recorded reading without its
             // tracking metadata. Covers both the new-insert and same-day placeholder-reuse paths.
@@ -418,7 +469,10 @@ public class BfmReadingService {
                     request.getSubmittedStateSchemeId(),
                     request.getSubmittedCentreSchemeId(),
                     request.getSubmittedPhoneHash(),
-                    request.isExternallyAsserted() ? confirmedReadingSource : null);
+                    request.isExternallyAsserted() ? confirmedReadingSource : null,
+                    // SUPPLY-PLAUSIBILITY: the marker commits inside the same transaction as the
+                    // insert, so the row cannot land without it.
+                    quarantined ? QuarantineReason.IMPLAUSIBLE_WATER_SUPPLY : null);
         } else if (placeholderIdOpt.isPresent()) {
             readingId = placeholderIdOpt.get();
             telemetryTenantRepository.updateFlowReadingFromIngestion(
@@ -458,6 +512,54 @@ public class BfmReadingService {
                     schemaName, readingId, confirmedReadingSource, rolloverAuditJson);
         }
 
+        // SUPPLY-PLAUSIBILITY: the row is stored and marked, but it is not a reading. The channel
+        // still belongs on it, and the anomaly is still published — "nothing reaches analytics" was
+        // never literal. What is withheld is publishMeterReadingRecorded, the single event that
+        // writes fact_meter_reading, dim_operator_attendance and fact_water_quantity. Withholding it
+        // marks the operator absent and the scheme non-reporting for the day: intended, and called
+        // out in the ops runbook so the daily-report gap is not chased as a pipeline fault.
+        if (quarantined) {
+            telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, resolvedChannel.name());
+            recordAnomaly(
+                    schemaName,
+                    tenantId,
+                    operatorInRequest.id(),
+                    request.getSchemeId(),
+                    AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY,
+                    AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_SUBMITTED,
+                    0,
+                    ocrExtractedReading,
+                    confidenceLevel,
+                    effectiveConfirmedReading,
+                    // The baseline the litres were measured against, not the standing stored value:
+                    // (overridden_reading - previous_reading) * 1000 must reproduce the decision
+                    // from the persisted row alone.
+                    supplyBaseline != null ? supplyBaseline.confirmedReading() : null,
+                    supplyBaseline != null ? supplyBaseline.createdAt() : null,
+                    0,
+                    buildSupplyAnomalyCorrelationId(
+                            AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY,
+                            operatorInRequest.id(),
+                            request.getSchemeId(),
+                            LocalDate.from(readingAt)));
+            return CreateReadingResponse.builder()
+                    .success(false)
+                    // THRESHOLD-DISCLOSURE: names no ceiling, population or FHTC figure. Echoing
+                    // "maximum allowed: N" would let any API-key holder solve for the scheme's
+                    // connection count and the per-person limit in two submissions.
+                    .message(messageOverride(contactId,
+                            "Reading rejected: the implied daily supply is not plausible for this scheme."))
+                    .correlationId(responseCorrelationId)
+                    .meterReading(effectiveConfirmedReading)
+                    .qualityConfidence(confidenceLevel)
+                    .qualityStatus("REJECTED")
+                    .errorCode(TelemetryErrorCode.ABNORMAL_READING)
+                    // The caller's own previous reading, which every successful submission already
+                    // returns. It discloses nothing they did not submit themselves.
+                    .lastConfirmedReading(supplyBaseline != null ? supplyBaseline.confirmedReading() : null)
+                    .build();
+        }
+
         BigDecimal lastConfirmedReading = latestSnapshotOpt
                 .map(TelemetryConfirmedReadingSnapshot::confirmedReading)
                 .orElse(null);
@@ -467,9 +569,8 @@ public class BfmReadingService {
                     .orElse(null);
         }
 
-        // ReadingChannelResolver.resolve never returns null (it falls back to DEFAULT/BFM).
-        ReadingChannel resolvedChannel = readingChannelResolver.resolve(tenantId, contactId);
-        Integer channel = resolvedChannel.getCode();
+        // ReadingChannelResolver.resolve never returns null (it falls back to DEFAULT/BFM). Resolved
+        // above, ahead of the supply check, which is scoped to BFM.
         telemetryTenantRepository.updateFlowReadingChannel(schemaName, readingId, resolvedChannel.name());
         telemetryEventPublisher.publishMeterReadingRecorded(
                 tenantId,
@@ -943,6 +1044,20 @@ public class BfmReadingService {
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
+    /**
+     * SUPPLY-PLAUSIBILITY: one anomaly per operator, per scheme, per day.
+     *
+     * <p>Analytics derives {@code anomaly_table.uuid} deterministically from the correlationId, and
+     * dedups on it — a repeat is touched, not inserted. The date is in the key because the keys
+     * analytics builds for itself carry none: without it every type-10 anomaly for an operator and
+     * scheme would collapse into a single row forever, and the second day's rejection would be
+     * invisible. Same construction as {@link #buildImageAnomalyCorrelationId}.
+     */
+    private String buildSupplyAnomalyCorrelationId(int anomalyType, Long userId, Long schemeId, LocalDate readingDate) {
+        String key = anomalyType + ":" + userId + ":" + schemeId + ":" + readingDate;
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
+    }
+
     private void recordImageAnomalyOncePerDay(String schemaName,
                                               Integer tenantId,
                                               Long userId,
@@ -1018,7 +1133,12 @@ public class BfmReadingService {
         );
     }
 
-    private void recordImageAnomaly(String schemaName,
+    /**
+     * Records an anomaly on the tenant schema and publishes it, with no dedup of its own — the
+     * correlationId decides whether analytics collapses repeats. Named for images until the supply
+     * check reused it; nothing in the body was ever image-specific.
+     */
+    private void recordAnomaly(String schemaName,
                                     Integer tenantId,
                                     Long userId,
                                     Long schemeId,

@@ -7,6 +7,8 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
+import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -80,7 +82,9 @@ class BfmReadingServiceAssertedReadingTest {
                 glificOperatorContextService,
                 null,
                 readingChannelResolver,
-                new RolloverResolutionService(true, new ObjectMapper()));
+                new RolloverResolutionService(true, new ObjectMapper()),
+                SupplyPlausibilityFixtures.guard(
+                        SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
@@ -100,7 +104,9 @@ class BfmReadingServiceAssertedReadingTest {
         verify(repo).persistFlowReadingWithTracking(eq(SCHEMA), isNull(), eq(SCHEME_ID), eq(OPERATOR_ID),
                 any(LocalDateTime.class), eq(BigDecimal.ZERO), eq(new BigDecimal("150")), anyString(),
                 isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
-                eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED));
+                eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED),
+                // SUPPLY-PLAUSIBILITY: unchecked path, so the row carries no quarantine marker.
+                isNull());
     }
 
     @Test
@@ -209,7 +215,7 @@ class BfmReadingServiceAssertedReadingTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any()))
+                any(), any(), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(99L);
     }
 }

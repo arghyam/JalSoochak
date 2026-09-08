@@ -9,6 +9,8 @@ import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
+import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.DailyConfirmedReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRecord;
@@ -82,7 +84,9 @@ class BfmReadingServiceRolloverTest {
                 glificOperatorContextService,
                 null,
                 readingChannelResolver,
-                new RolloverResolutionService(true, new ObjectMapper()));
+                new RolloverResolutionService(true, new ObjectMapper()),
+                SupplyPlausibilityFixtures.guard(
+                        SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
     }
 
