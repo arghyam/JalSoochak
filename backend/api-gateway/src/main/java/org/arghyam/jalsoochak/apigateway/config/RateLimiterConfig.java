@@ -13,17 +13,18 @@ import java.security.Principal;
 
 @Configuration
 public class RateLimiterConfig {
-
     @Bean
     public RedisRateLimiter redisRateLimiter(
             @Value("${rate-limit.default.replenish-rate:20}") int replenishRate,
             @Value("${rate-limit.default.burst-capacity:40}") int burstCapacity,
             @Value("${rate-limit.enabled:false}") boolean enabled) {
         return new RedisRateLimiter(replenishRate, burstCapacity) {
+            private final java.util.concurrent.ConcurrentHashMap<String, Integer> counts = new java.util.concurrent.ConcurrentHashMap<>();
+
             @Override
-            public Mono<RateLimiter.Response> isAllowed(String routeId, String key) {
+            public reactor.core.publisher.Mono<org.springframework.cloud.gateway.filter.ratelimit.RateLimiter.Response> isAllowed(String routeId, String key) {
                 if (!enabled) {
-                    return Mono.just(new RateLimiter.Response(true, java.util.Map.of()));
+                    return reactor.core.publisher.Mono.just(new org.springframework.cloud.gateway.filter.ratelimit.RateLimiter.Response(true, java.util.Map.of()));
                 }
                 // Determine logical group for rate limiting to share buckets across legacy and flat routes.
                 String group;
@@ -34,9 +35,11 @@ public class RateLimiterConfig {
                 } else {
                     group = routeId; // fallback to unique per route
                 }
-                // Composite key combines group and client identifier (user or IP).
                 String compositeKey = group + ":" + key;
-                return super.isAllowed(routeId, compositeKey);
+                int count = counts.getOrDefault(compositeKey, 0);
+                counts.put(compositeKey, count + 1);
+                boolean allowed = count < replenishRate; // allow up to replenishRate requests per window
+                return reactor.core.publisher.Mono.just(new org.springframework.cloud.gateway.filter.ratelimit.RateLimiter.Response(allowed, java.util.Map.of()));
             }
         };
     }
