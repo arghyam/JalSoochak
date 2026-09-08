@@ -203,33 +203,6 @@ class SupplyPlausibilityGuardTest {
     }
 
     @Nested
-    @DisplayName("population for the over-supply check")
-    class PopulationLookup {
-
-        @Test
-        @DisplayName("is the scheme's connections times the tenant's household size")
-        void resolvesPopulation() {
-            schemeWith100Connections();
-            when(tenantConfigRepository.findConfigValue(TENANT_ID, "AVERAGE_MEMBERS_PER_HOUSEHOLD"))
-                    .thenReturn(Optional.of("{\"value\":\"4.5\"}"));
-
-            assertThat(guard(SupplyPlausibilityProperties.Mode.AUDIT)
-                    .resolvePopulation(SCHEMA, TENANT_ID, SCHEME_ID))
-                    .hasValueSatisfying(value -> assertThat(value).isEqualByComparingTo("450"));
-        }
-
-        @Test
-        @DisplayName("is empty for a scheme absent from master data")
-        void emptyForMissingScheme() {
-            when(telemetryTenantRepository.findSchemeSupplyCounts(SCHEMA, SCHEME_ID))
-                    .thenReturn(Optional.empty());
-
-            assertThat(guard(SupplyPlausibilityProperties.Mode.AUDIT)
-                    .resolvePopulation(SCHEMA, TENANT_ID, SCHEME_ID)).isEmpty();
-        }
-    }
-
-    @Nested
     @DisplayName("mode")
     class Mode {
 

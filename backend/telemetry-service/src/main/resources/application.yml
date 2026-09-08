@@ -101,9 +101,10 @@ telemetry:
     # warehouse and answered with 400 ABNORMAL_READING; a failing PUT correction leaves the stored
     # value untouched. The release path is a corrected PUT that passes.
     #
-    # Governs the OVER_WATER_SUPPLY check on the WhatsApp path too, whose units were corrected in
-    # the same change - that one went from effectively never firing to firing often, so the two must
-    # be observed and enforced together.
+    # Scope: this mode governs the quarantine gate above and nothing else. The OVER_WATER_SUPPLY
+    # check on the WhatsApp path is untouched by it, and still adds a per-capita litre figure to a
+    # cubic-metre index - a known unit bug, deliberately not fixed here, tracked in the plan's
+    # section 8.
     #
     # AUDIT (default) records what would have been quarantined and serves normally; ENFORCE
     # quarantines; OFF skips entirely. Same shape as telemetry.webhook.auth.mode above - the kill

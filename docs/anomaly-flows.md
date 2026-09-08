@@ -55,8 +55,17 @@ The current anomaly type constants in `telemetry-service` are:
 - `7` - `LOW_WATER_SUPPLY`
 - `8` - `OVER_WATER_SUPPLY`
 - `9` - `NO_SUBMISSION`
+- `10` - `IMPLAUSIBLE_WATER_SUPPLY`
 
 Source: `telemetry-service` `AnomalyConstants`.
+
+`10` is distinct from `8`: `OVER_WATER_SUPPLY` means "above the tenant's configured tolerance over
+the norm", while `IMPLAUSIBLE_WATER_SUPPLY` means "more than this scheme's connected population could
+physically consume". Unlike every other type here, a type-10 anomaly is attached to a reading that
+was **withheld from the warehouse**, so the scheme shows as non-reporting and the operator as absent
+for that day — see [implausible-water-supply-runbook.md](implausible-water-supply-runbook.md) before
+treating such a gap as a pipeline fault. Its wire-facing rejection code is the deliberately vaguer
+`ABNORMAL_READING`, which discloses no threshold.
 
 ---
 

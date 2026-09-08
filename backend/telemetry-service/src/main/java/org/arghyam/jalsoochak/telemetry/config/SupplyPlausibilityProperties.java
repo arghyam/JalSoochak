@@ -12,10 +12,11 @@ import java.util.Locale;
 /**
  * SUPPLY-PLAUSIBILITY: rollout mode and thresholds for the implausible-daily-supply check.
  *
- * <p>Governs <strong>both</strong> volume checks on the reading path — the new quarantine gate and
- * the {@code OVER_WATER_SUPPLY} check whose units were corrected alongside it. The second went from
- * effectively never firing to firing often, so the two must be observed and enforced together or a
- * deploy starts rejecting field submissions en masse.
+ * <p>Governs the quarantine gate and nothing else. In particular it does not reach the
+ * {@code OVER_WATER_SUPPLY} check on the WhatsApp path, which remains as it was — adding a
+ * per-capita litre figure to a cubic-metre index, a unit bug left unfixed by decision rather than
+ * by oversight. Do not widen this mode to cover it without correcting that arithmetic first: gating
+ * a broken ceiling changes how often it is wrong, not whether it is.
  *
  * <p>Mode follows {@code telemetry.webhook.auth.mode}: the kill switch is a restart, not a deploy.
  * The default is {@code AUDIT} rather than {@code ENFORCE} — the inverse of the webhook filter's

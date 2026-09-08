@@ -138,25 +138,9 @@ public class SupplyPlausibilityGuard {
      * plausible household size, and an absent default skips the check rather than inventing a
      * ceiling.
      */
-    public Optional<BigDecimal> resolveMembersPerHousehold(Integer tenantId) {
+    Optional<BigDecimal> resolveMembersPerHousehold(Integer tenantId) {
         return readPositiveDecimalConfig(tenantId, AVERAGE_MEMBERS_PER_HOUSEHOLD)
                 .or(() -> Optional.ofNullable(properties.getResolvedDefaultMembersPerHousehold()));
-    }
-
-    /**
-     * The persons a scheme serves, for callers that need the population without a verdict — the
-     * {@code OVER_WATER_SUPPLY} check turns a per-capita norm into a scheme-wide one with it.
-     */
-    public Optional<BigDecimal> resolvePopulation(String schemaName, Integer tenantId, Long schemeId) {
-        Optional<TelemetrySchemeSupplyCounts> countsOpt =
-                telemetryTenantRepository.findSchemeSupplyCounts(schemaName, schemeId);
-        if (countsOpt.isEmpty()) {
-            return Optional.empty();
-        }
-        TelemetrySchemeSupplyCounts counts = countsOpt.get();
-        return ImplausibleSupplyPolicy.resolvePopulation(
-                counts.fhtcCount(), counts.plannedFhtc(), counts.houseHoldCount(),
-                resolveMembersPerHousehold(tenantId).orElse(null));
     }
 
     private Optional<BigDecimal> readPositiveDecimalConfig(Integer tenantId, String key) {

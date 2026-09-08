@@ -146,10 +146,15 @@ public final class ImplausibleSupplyPolicy {
     /**
      * The persons a scheme serves: its connection count times the tenant's average household size.
      *
-     * <p>Shared with the {@code OVER_WATER_SUPPLY} check, which needs the same population to turn a
-     * per-capita norm into a scheme-wide one. Kept fractional — {@code AVERAGE_MEMBERS_PER_HOUSEHOLD}
-     * is commonly a decimal such as 4.5, and rounding persons before multiplying by the litre limit
-     * would move the ceiling by hundreds of litres.
+     * <p>Kept fractional — {@code AVERAGE_MEMBERS_PER_HOUSEHOLD} is commonly a decimal such as 4.5,
+     * and rounding persons before multiplying by the litre limit would move the ceiling by hundreds
+     * of litres.
+     *
+     * <p>Public and separately tested rather than folded into {@link #evaluate}: it is the one input
+     * an operator disputing a rejection will challenge, so it has to be checkable on its own. The
+     * {@code OVER_WATER_SUPPLY} check on the WhatsApp path wants the same number — that correction is
+     * deferred, and when it lands it should call this rather than recompute, so the two checks cannot
+     * disagree about how many people a scheme serves.
      *
      * @return the served population, or empty when no count is recorded or the household size is
      *         missing or non-positive
