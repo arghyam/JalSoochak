@@ -93,6 +93,21 @@ telemetry:
       # Startup fails if this is empty while mode=ENFORCE, or if an entry is not 64-char lowercase hex.
       token-hashes: ${TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES:}
 
+security:
+  method-guard:
+    # Restricts the service to GET/HEAD/POST/PUT/PATCH/DELETE and suppresses the Allow and
+    # Accept-Patch headers, closing the "OPTIONS method enabled" audit finding (CWE-650):
+    # OPTIONS /api/v1/telemetry/schemes used to answer 200 with Allow: POST,OPTIONS, and a wrong
+    # method on a real route still answered 405 with Allow: POST.
+    #
+    # ENFORCE (default) rejects with 405. OFF skips the check AND the header suppression, restoring
+    # the previous behaviour exactly — it is the rollback switch, an env-var change with no rebuild.
+    #
+    # There is deliberately no AUDIT mode (unlike telemetry.webhook.auth above): no client can be
+    # depending on the removed behaviour, since an OPTIONS request only ever received an empty 200
+    # and a browser preflight already failed. See MethodGuardProperties.
+    mode: ${SECURITY_METHOD_GUARD_MODE:ENFORCE}
+
 flowvision:
   url: ${FLOWVISION_URL:https://jalsoochak.beehyv.com/flowvision/v1/extract-reading}
   bypass-system-proxy: ${FLOWVISION_BYPASS_SYSTEM_PROXY:true}
