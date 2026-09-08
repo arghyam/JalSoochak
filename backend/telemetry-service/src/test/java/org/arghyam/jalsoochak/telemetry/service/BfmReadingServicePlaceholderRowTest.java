@@ -204,7 +204,8 @@ class BfmReadingServicePlaceholderRowTest {
                 "http://example.com/img.jpg",
                 readingDate,
                 readingAt,
-                "BFM"
+                "BFM",
+                0
         );
 
         when(glificOperatorContextService.resolveOperatorWithSchema("919999999999"))
@@ -253,7 +254,8 @@ class BfmReadingServicePlaceholderRowTest {
                 "http://example.com/img.jpg",
                 readingDate,
                 readingAt,
-                "BFM"
+                "BFM",
+                0
         );
 
         when(telemetryTenantRepository.findFlowReadingDetailsByCorrelationId(schemaName, "corr-1"))

@@ -100,7 +100,8 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                 "http://example.com/img.jpg",
                 READING_DATE,
                 READING_AT,
-                "BFM"
+                "BFM",
+                0
         );
     }
 
@@ -119,7 +120,7 @@ class BfmReadingServiceResetLatestTenantScopeTest {
                         BigDecimal.ZERO,
                         new BigDecimal("1450"),
                         "",
-                        READING_DATE, READING_AT, "BFM")));
+                        READING_DATE, READING_AT, "BFM", 0)));
 
         service.resetLatestConfirmedReadingByPhone(PHONE, CALLER_TENANT_ID);
 

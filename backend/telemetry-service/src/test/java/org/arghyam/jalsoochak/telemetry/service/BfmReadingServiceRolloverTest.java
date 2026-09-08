@@ -159,7 +159,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, LocalDate.now(), LocalDateTime.now(), "BFM");
+                    IMAGE_URL, LocalDate.now(), LocalDateTime.now(), "BFM", 0);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -186,7 +186,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, LocalDate.now(), LocalDateTime.now(), "BFM");
+                    IMAGE_URL, LocalDate.now(), LocalDateTime.now(), "BFM", 0);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));

@@ -91,7 +91,8 @@ class BfmReadingServicePhoneOptionalUpdateTest {
                 "http://example.com/img.jpg",
                 READING_DATE,
                 READING_AT,
-                "BFM"
+                "BFM",
+                0
         );
     }
 
@@ -125,7 +126,7 @@ class BfmReadingServicePhoneOptionalUpdateTest {
                 BigDecimal.ZERO,
                 new BigDecimal("100"),
                 "",
-                READING_DATE, READING_AT, "BFM");
+                READING_DATE, READING_AT, "BFM", 0);
     }
 
     @Test

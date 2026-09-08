@@ -431,6 +431,76 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
     }
 
     @Nested
+    @DisplayName("quarantine marker (SUPPLY-PLAUSIBILITY)")
+    class QuarantineMarker {
+
+        @Test
+        void applyQuarantineReasonIsNoOpOnPreMigrationSchema() {
+            onColumnExists(false);
+
+            repository.applyQuarantineReason(SCHEMA, 5L, 1);
+
+            Mockito.verify(jdbcTemplate, Mockito.never())
+                    .update(ArgumentMatchers.anyString(), ArgumentMatchers.any(Object[].class));
+        }
+
+        @Test
+        void applyQuarantineReasonIsNoOpForNullReadingId() {
+            onColumnExists(true);
+
+            repository.applyQuarantineReason(SCHEMA, null, 1);
+
+            Mockito.verify(jdbcTemplate, Mockito.never())
+                    .update(ArgumentMatchers.anyString(), ArgumentMatchers.any(Object[].class));
+        }
+
+        @Test
+        void applyQuarantineReasonWritesTheMarker() {
+            onColumnsExisting("quarantine_reason");
+
+            repository.applyQuarantineReason(SCHEMA, 5L, 1);
+
+            assertThat(capturedUpdateSql()).contains("quarantine_reason");
+            assertThat(capturedUpdateArgs()).containsExactly(1, 5L);
+        }
+
+        @Test
+        void applyQuarantineReasonClearsTheMarkerOnRelease() {
+            onColumnsExisting("quarantine_reason");
+
+            repository.applyQuarantineReason(SCHEMA, 5L, 0);
+
+            assertThat(capturedUpdateArgs()).containsExactly(0, 5L);
+        }
+
+        @Test
+        void persistFlowReadingWithTrackingCommitsTheMarkerWithTheRow() {
+            // The marker is what stops the row becoming a later baseline, so it must land with the
+            // insert rather than in a separate write that could fail on its own.
+            onColumnExists(true);
+            onScalar("INSERT INTO", Number.class, 604L);
+
+            repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
+                    0, null, null, null, 3, 1);
+
+            assertThat(allUpdateSql()).anySatisfy(sql -> assertThat(sql).contains("quarantine_reason"));
+        }
+
+        @Test
+        void persistFlowReadingWithTrackingLeavesTheColumnAtItsDefaultWhenNoReasonGiven() {
+            onColumnExists(true);
+            onScalar("INSERT INTO", Number.class, 605L);
+
+            repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
+                    0, null, null, null, 3, null);
+
+            assertThat(allUpdateSql()).noneSatisfy(sql -> assertThat(sql).contains("quarantine_reason"));
+        }
+    }
+
+    @Nested
     @DisplayName("pending meter-change and issue-report records")
     class PendingRecords {
 
