@@ -435,4 +435,222 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 org.mockito.ArgumentMatchers.anyString()
         );
     }
+
+    // ── Free-text character allowlist (CWE-20 remediation) ──────────────────────────────────────
+    //
+    // ISSUE_REASON_ALLOWED guards only input that matched no configured reason. The rejection is a
+    // localised 200 rather than a 400 so a real operator typo does not stall the Glific flow, and
+    // it happens before any write, so nothing is stored or published.
+
+    private TelemetryOperatorWithSchema stubOperator() {
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_test",
+                new TelemetryOperator(1L, 1, "op", "op@example.com", "919999999999", null)
+        );
+        when(operatorContextService.resolveOperatorWithSchema("919999999999")).thenReturn(operatorWithSchema);
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 1)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        return operatorWithSchema;
+    }
+
+    private void stubLocalisedRejection(String defaultMessage) {
+        when(localizationService.resolveLanguageKeyForContact("919999999999")).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(
+                org.mockito.ArgumentMatchers.any(),
+                eq(defaultMessage),
+                eq("english")
+        )).thenReturn("Issue reason can only contain letters, numbers, and spaces.");
+    }
+
+    private IntroResponse submitFreeText(String issueReason) {
+        return service.issueReportSubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason(issueReason)
+                .build());
+    }
+
+    @Test
+    void issueReportSubmitRejectsHtmlTagsInFreeTextAndStoresNothing() {
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
+        stubLocalisedRejection("Issue report could not be saved.");
+
+        IntroResponse resp = submitFreeText("<script>alert(1)</script>");
+
+        assertNotNull(resp);
+        assertEquals(false, resp.isSuccess());
+        assertEquals("Issue reason can only contain letters, numbers, and spaces.", resp.getMessage());
+
+        // The guard runs before findFirstSchemeForUser, so the tenant repository is never touched
+        // at all — no row written, and no wasted lookup either.
+        org.mockito.Mockito.verifyNoInteractions(telemetryTenantRepository);
+        org.mockito.Mockito.verifyNoInteractions(telemetryEventPublisher);
+    }
+
+    @Test
+    void issueReportSubmitRejectsPunctuationInFreeText() {
+        // Deliberate: the allowlist admits no punctuation, and the localised copy says exactly
+        // that. Pinned so the rule cannot be quietly relaxed without updating the copy too.
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
+        stubLocalisedRejection("Issue report could not be saved.");
+
+        IntroResponse resp = submitFreeText("Motor burnt out, 3 days");
+
+        assertEquals(false, resp.isSuccess());
+        org.mockito.Mockito.verifyNoInteractions(telemetryTenantRepository);
+    }
+
+    @Test
+    void issueReportSubmitAcceptsDevanagariFreeTextAndStoresItIntact() {
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+
+        IntroResponse resp = submitFreeText("पानी की आपूर्ति नहीं");
+
+        assertEquals(true, resp.isSuccess());
+        // Unmatched free text is stored as a no-submission anomaly, and the point of this test is
+        // that the Devanagari survives byte-for-byte: not rejected by the allowlist, not escaped.
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                eq("tenant_test"),
+                eq(1L),
+                eq(10L),
+                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
+                eq("पानी की आपूर्ति नहीं"),
+                eq(AnomalyConstants.STATUS_OPEN)
+        );
+    }
+
+    @Test
+    void issueReportSubmitStillRejectsInvisibleFormatCharactersInFreeText() {
+        // \p{M} admits combining marks so Indic scripts work, but zero-width and bidi-override
+        // characters are category Cf, not M, and must stay refused — they are the invisible-text
+        // abuse vector that a naive "allow all Unicode" fix would open up.
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
+        stubLocalisedRejection("Issue report could not be saved.");
+
+        IntroResponse resp = submitFreeText("water‮reversed​hidden");
+
+        assertEquals(false, resp.isSuccess());
+        org.mockito.Mockito.verifyNoInteractions(telemetryTenantRepository);
+    }
+
+    @Test
+    void issueReportSubmitAcceptsATenantConfiguredLabelContainingPunctuation() {
+        // The regression test that protects the matchedConfiguredReason discriminator. Tenant
+        // labels come from the database and may contain punctuation the allowlist forbids;
+        // simplifying the guard to reasons.contains(...) or dropping the flag would start
+        // rejecting valid menu picks.
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english"))
+                .thenReturn(List.of("Motor burnt out, needs repair", "Pipe leak - urgent"));
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+
+        IntroResponse resp = submitFreeText("1");
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).createIssueReportRecord(
+                eq("tenant_test"),
+                eq(10L),
+                eq(1L),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                eq("Motor burnt out, needs repair")
+        );
+    }
+
+    @Test
+    void issueReportSubmitAcceptsAPunctuatedTenantLabelSelectedByItsExactText() {
+        // Same discriminator, reached through the label-equality branch of resolveSelection
+        // rather than the numeric-index branch.
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english"))
+                .thenReturn(List.of("Motor burnt out, needs repair", "Pipe leak - urgent"));
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+
+        IntroResponse resp = submitFreeText("Pipe leak - urgent");
+
+        assertEquals(true, resp.isSuccess());
+        // Position 2 maps to the "meterNotWorking" selection key, which routes to the anomaly
+        // sink rather than flow_reading_table — the punctuated label is what matters here.
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                eq("tenant_test"),
+                eq(1L),
+                eq(10L),
+                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
+                eq("Pipe leak - urgent"),
+                eq(AnomalyConstants.STATUS_OPEN)
+        );
+    }
+
+    @Test
+    void othersSubmittedNowAcceptsDevanagariFreeText() {
+        // Behaviour change on an endpoint outside the reported finding, and the reason \p{M} was
+        // added: this path already enforced ISSUE_REASON_ALLOWED, so before the fix a Hindi
+        // "other issue" was rejected outright. Guards against a regression to letters-only.
+        stubOperator();
+        when(templatesService.resolveScreenConfirmationTemplate(1, "ISSUE_REPORT", "english"))
+                .thenReturn(Optional.empty());
+        when(tenantConfigRepository.findIssueReportConfirmationTemplate(1, "english"))
+                .thenReturn(Optional.empty());
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+
+        IntroResponse resp = service.othersSubmittedMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("पानी की आपूर्ति नहीं")
+                .build());
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                eq("tenant_test"),
+                eq(1L),
+                eq(10L),
+                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
+                eq("पानी की आपूर्ति नहीं"),
+                eq(AnomalyConstants.STATUS_OPEN)
+        );
+    }
+
+    @Test
+    void telemetryIssueReportSubmitRejectsHtmlTagsInFreeTextAndStoresNothing() {
+        stubOperator();
+        stubLocalisedRejection("Issue report could not be saved.");
+
+        IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("<script>alert(1)</script>")
+                .build());
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("Issue reason can only contain letters, numbers, and spaces.", resp.getMessage());
+        org.mockito.Mockito.verifyNoInteractions(telemetryTenantRepository);
+        org.mockito.Mockito.verifyNoInteractions(telemetryEventPublisher);
+    }
+
+    @Test
+    void telemetryIssueReportSubmitWithConfiguredReasonsStillRejectsFreeTextAsInvalidChoice() {
+        // The SUPPLY_OUTAGE_REASONS branch requires a numeric index, so it never reaches the
+        // allowlist. Pinned so the new guard did not change this endpoint's other path.
+        stubOperator();
+        when(tenantConfigRepository.findConfigValue(1, "SUPPLY_OUTAGE_REASONS")).thenReturn(
+                Optional.of("{\"reasons\":[{\"id\":\"r1\",\"name\":\"No water\",\"sequenceOrder\":1}]}")
+        );
+
+        IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("<script>alert(1)</script>")
+                .build());
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("invalid choice, please restart the flow", resp.getMessage());
+        org.mockito.Mockito.verifyNoInteractions(telemetryTenantRepository);
+    }
 }
