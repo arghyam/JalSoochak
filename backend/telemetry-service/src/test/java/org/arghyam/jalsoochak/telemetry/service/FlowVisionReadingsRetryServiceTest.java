@@ -186,8 +186,11 @@ class FlowVisionReadingsRetryServiceTest {
         CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom()
                 .recordExceptions(FlowVisionTransientFailures.retriableExceptions())
                 .build();
+        // Null registry: these tests exercise the default-provider path (null settings), which the retry
+        // service routes straight to flowVisionService without consulting the registry.
         return new FlowVisionReadingsRetryService(
                 flowVisionService,
+                null,
                 RetryRegistry.of(retryConfig),
                 CircuitBreakerRegistry.of(circuitBreakerConfig),
                 bulkheadRegistry

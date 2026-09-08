@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.dto.response.RolloverPosition;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.client.RestClientResponseException;
@@ -22,26 +23,56 @@ import java.util.UUID;
 
 @Service
 @Slf4j
-public class FlowVisionService {
+public class FlowVisionService implements MeterReadingExtractor {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final RestTemplate restTemplate;
-    private final String flowVisionUrl;
+    /** Global-default settings used when a caller supplies none (the legacy single-endpoint path). */
+    private final OcrProviderSettings defaultSettings;
 
+    @Autowired
     public FlowVisionService(
             RestTemplate restTemplate,
-            @Value("${flowvision.url}") String flowVisionUrl
+            @Value("${flowvision.url}") String flowVisionUrl,
+            @Value("${flowvision.api-key:}") String apiKey,
+            @Value("${flowvision.auth-header:" + OcrProviderSettings.DEFAULT_AUTH_HEADER + "}") String authHeader
     ) {
         this.restTemplate = restTemplate;
-        this.flowVisionUrl = flowVisionUrl;
+        this.defaultSettings = new OcrProviderSettings(
+                OcrProviderSettings.DEFAULT_PROVIDER_ID,
+                flowVisionUrl,
+                (apiKey == null || apiKey.isBlank()) ? null : apiKey,
+                authHeader);
     }
 
+    /** Convenience constructor (no auth) retained for unit tests that stub the endpoint directly. */
+    public FlowVisionService(RestTemplate restTemplate, String flowVisionUrl) {
+        this(restTemplate, flowVisionUrl, null, OcrProviderSettings.DEFAULT_AUTH_HEADER);
+    }
+
+    @Override
+    public String providerId() {
+        return OcrProviderSettings.DEFAULT_PROVIDER_ID;
+    }
+
+    /** Extracts a reading against the global-default FlowVision endpoint (backwards-compatible entry point). */
     public FlowVisionResult extractReading(String readingUrl) {
+        return extractReading(readingUrl, defaultSettings);
+    }
+
+    /** Throwing variant against the global-default endpoint (backwards-compatible entry point). */
+    public FlowVisionResult extractReadingOrThrow(String readingUrl) {
+        return extractReadingOrThrow(readingUrl, defaultSettings);
+    }
+
+    @Override
+    public FlowVisionResult extractReading(String readingUrl, OcrProviderSettings settings) {
+        OcrProviderSettings effective = settings == null ? defaultSettings : settings;
         String requestId = UUID.randomUUID().toString();
 
         try {
-            return requestFlowVisionReading(readingUrl, requestId);
+            return requestFlowVisionReading(readingUrl, requestId, effective);
         } catch (RestClientResponseException ex) {
             return handleFlowVisionErrorResponse(ex, readingUrl, requestId);
         } catch (Exception ex) {
@@ -53,10 +84,12 @@ public class FlowVisionService {
         }
     }
 
-    public FlowVisionResult extractReadingOrThrow(String readingUrl) {
+    @Override
+    public FlowVisionResult extractReadingOrThrow(String readingUrl, OcrProviderSettings settings) {
+        OcrProviderSettings effective = settings == null ? defaultSettings : settings;
         String requestId = UUID.randomUUID().toString();
         try {
-            return requestFlowVisionReading(readingUrl, requestId);
+            return requestFlowVisionReading(readingUrl, requestId, effective);
         } catch (RestClientResponseException ex) {
             if (FlowVisionTransientFailures.isServiceUnavailable(ex)) {
                 // Let the retry mechanism handle transient FlowVision failures.
@@ -67,20 +100,26 @@ public class FlowVisionService {
         // Transient failures such as ResourceAccessException propagate for retry.
     }
 
-    private FlowVisionResult requestFlowVisionReading(String readingUrl, String requestId) {
+    private FlowVisionResult requestFlowVisionReading(String readingUrl, String requestId, OcrProviderSettings settings) {
         Map<String, String> payload = new HashMap<>();
         payload.put("id", requestId);
         payload.put("imageURL", readingUrl);
 
+        String endpoint = firstNonBlank(settings.endpointUrl(), defaultSettings.endpointUrl());
+
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        if (settings.hasApiKey()) {
+            headers.set(settings.resolvedAuthHeaderName(), settings.apiKey());
+        }
 
         HttpEntity<Map<String, String>> requestEntity =
                 new HttpEntity<>(payload, headers);
 
-        log.info("flowvision request imageUrlHash={} endpoint={}", imageUrlHash(readingUrl), flowVisionUrl);
+        log.info("flowvision request imageUrlHash={} provider={} endpoint={}",
+                imageUrlHash(readingUrl), settings.providerId(), endpoint);
         ResponseEntity<Map> responseEntity = restTemplate.exchange(
-                flowVisionUrl,
+                endpoint,
                 HttpMethod.POST,
                 requestEntity,
                 Map.class
