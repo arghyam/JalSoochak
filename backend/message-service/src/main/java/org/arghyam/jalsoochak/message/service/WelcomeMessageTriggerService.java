@@ -58,10 +58,7 @@ public class WelcomeMessageTriggerService {
                 return TriggerWelcomeMessageResponse.builder()
                         .success(false)
                         .tenantCode(tenantCode)
-                        .phoneNumber(normalizedPhone)
                         .contactId(null)
-                        .name(info.name)
-                        .state(stateName)
                         .message("Failed to create Glific contact via opt-in")
                         .build();
             }
@@ -76,10 +73,7 @@ public class WelcomeMessageTriggerService {
         return TriggerWelcomeMessageResponse.builder()
                 .success(true)
                 .tenantCode(tenantCode)
-                .phoneNumber(normalizedPhone)
                 .contactId(contactId)
-                .name(info.name)
-                .state(stateName)
                 .message("Welcome flow triggered")
                 .build();
     }

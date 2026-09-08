@@ -218,23 +218,15 @@ public class SchemeServiceImpl implements SchemeService {
                                                                                                 int limit,
                                                                                                 String schemeName) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        var auth = SecurityContextHolder.getContext().getAuthentication();
-        String phoneNumberClaim = null;
-        if (auth instanceof JwtAuthenticationToken jwtAuth) {
-            var jwt = jwtAuth.getToken();
-            phoneNumberClaim = firstNonBlank(
-                    jwt.getClaimAsString("phone_number"),
-                    firstNonBlank(jwt.getClaimAsString("phoneNumber"),
-                            firstNonBlank(jwt.getClaimAsString("phone"), jwt.getClaimAsString("mobile")))
-            );
-        }
-
         int userId = resolveCurrentUserId(schemaName);
-        String resolvedPhoneNumber = phoneNumberClaim;
-        if (resolvedPhoneNumber == null || resolvedPhoneNumber.isBlank()) {
-            String encrypted = schemeDbRepository.findUserPhoneNumberById(schemaName, userId);
-            resolvedPhoneNumber = piiEncryptionService != null ? piiEncryptionService.safeDecrypt(encrypted) : null;
-        }
+
+        // The phone number comes from the encrypted tenant column, never from the token. This used
+        // to prefer a phone_number/phoneNumber/phone/mobile claim and fall back here only when none
+        // was present; reading the claim is what justified putting the number in the token, and a
+        // JWT payload is base64, not encrypted, so every holder of the token could read it. The
+        // fallback was always the better source, so it is now the only one.
+        String encrypted = schemeDbRepository.findUserPhoneNumberById(schemaName, userId);
+        String resolvedPhoneNumber = piiEncryptionService != null ? piiEncryptionService.safeDecrypt(encrypted) : null;
         int size = clampLimit(limit);
         int p = Math.max(0, page);
         int offset = p * size;
@@ -248,13 +240,6 @@ public class SchemeServiceImpl implements SchemeService {
         }
         long total = schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName);
         return PageResponseDTO.of(rows, total, p, size);
-    }
-
-    private static String firstNonBlank(String a, String b) {
-        if (a != null && !a.isBlank()) {
-            return a;
-        }
-        return b;
     }
 
     @Override
