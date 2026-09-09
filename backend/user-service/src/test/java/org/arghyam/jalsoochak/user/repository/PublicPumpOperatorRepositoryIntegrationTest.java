@@ -369,6 +369,17 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
                     repo.listReadingCompliance(SCHEMA, 2, 2);
             assertThat(page2).hasSize(1);
         }
+
+        @Test
+        @DisplayName("accepts an offset beyond Integer.MAX_VALUE")
+        void acceptsOffsetBeyondIntegerRange() {
+            insertPumpOperator("919876540020", "PO Wide Offset");
+
+            List<PumpOperatorReadingComplianceRowDTO> result =
+                    repo.listReadingCompliance(SCHEMA, Integer.MAX_VALUE + 1L, 10);
+
+            assertThat(result).isEmpty();
+        }
     }
 
     // ── countReadingCompliance ────────────────────────────────────────────────

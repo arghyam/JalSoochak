@@ -809,7 +809,7 @@ public class PublicPumpOperatorRepository {
         }
     }
 
-    public List<PumpOperatorReadingComplianceRowDTO> listReadingCompliance(String schemaName, int offset, int limit) {
+    public List<PumpOperatorReadingComplianceRowDTO> listReadingCompliance(String schemaName, long offset, int limit) {
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String confirmedExpr = resolveConfirmedReadingExpression(schemaName, "fr");
@@ -872,7 +872,7 @@ public class PublicPumpOperatorRepository {
             Long pumpOperatorId,
             LocalDate startDate,
             LocalDate endDate,
-            int offset,
+            long offset,
             int limit
     ) {
         validateSchemaName(schemaName);

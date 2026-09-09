@@ -27,6 +27,10 @@ spring:
       minimum-idle: 20
       connection-timeout: 30000
       initialization-fail-timeout: -1
+      # A query that outlives the gateway timeout can only burn the connection it holds: the client
+      # is already gone with a 504. Fail it in the database instead, so the pool is returned and the
+      # caller gets a real error. Raise per-environment if a legitimate report needs longer.
+      connection-init-sql: SET statement_timeout = ${DB_STATEMENT_TIMEOUT_MS:15000}
 
   jpa:
     hibernate:
