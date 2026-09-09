@@ -23,7 +23,7 @@
         <spring-kafka.version>3.1.4</spring-kafka.version>
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.32</lombok.version>
-        <springdoc.version>2.5.0</springdoc.version>
+        <springdoc.version>2.9.0</springdoc.version>
         <resilience4j.version>2.1.0</resilience4j.version>
         <testcontainers.version>1.21.4</testcontainers.version>
         <sonar.coverage.exclusions>
