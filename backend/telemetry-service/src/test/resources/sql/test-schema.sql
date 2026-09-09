@@ -109,3 +109,42 @@ CREATE TABLE tenant_zz.flow_reading_table (
     updated_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
     deleted_at        TIMESTAMP
 );
+
+-- ── Anomalies ───────────────────────────────────────────────────────────────
+-- tenant_as is on the current level: the V8/V30 shape, with the structured columns
+-- (see create_tenant_schema() in V30__add_reports_and_data_versions_per_tenant.sql).
+
+CREATE TABLE tenant_as.anomaly_table (
+    id                          SERIAL       PRIMARY KEY,
+    uuid                        VARCHAR(36)  NOT NULL UNIQUE DEFAULT gen_random_uuid()::TEXT,
+    user_id                     INTEGER      NOT NULL,
+    scheme_id                   INTEGER      NOT NULL,
+    type                        INTEGER      NOT NULL,
+    reason                      TEXT,
+    ai_reading                  NUMERIC,
+    ai_confidence_percentage    NUMERIC,
+    overridden_reading          NUMERIC,
+    retries                     INTEGER      DEFAULT 0,
+    previous_reading            NUMERIC,
+    previous_reading_date       TIMESTAMP,
+    consecutive_days_overridden INTEGER      DEFAULT 0,
+    remarks                     TEXT,
+    resolved_by                 INTEGER,
+    resolved_at                 TIMESTAMP,
+    created_at                  TIMESTAMP    NOT NULL DEFAULT NOW(),
+    status                      INTEGER      NOT NULL,
+    deleted_at                  TIMESTAMP,
+    deleted_by                  INTEGER
+);
+
+-- tenant_zz predates V8: the reason column is still called detail and none of the
+-- structured columns exist yet. The insert must degrade to what is there.
+CREATE TABLE tenant_zz.anomaly_table (
+    id         SERIAL    PRIMARY KEY,
+    user_id    INTEGER   NOT NULL,
+    scheme_id  INTEGER   NOT NULL,
+    type       INTEGER   NOT NULL,
+    detail     TEXT,
+    status     INTEGER   NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

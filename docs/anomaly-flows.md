@@ -125,7 +125,8 @@ If the submitted reading is below the configured minimum threshold derived from 
 
 - `<tenant_schema>.anomaly_table`
 
-The row typically includes:
+The row carries the same structured detail as the `ANOMALY_RECORDED` event published beside it,
+so the tenant row and the `analytics_schema` row agree on what happened:
 
 - `user_id`
 - `scheme_id`
@@ -133,6 +134,23 @@ The row typically includes:
 - `reason`
 - `status`
 - `created_at`
+- `ai_reading`
+- `ai_confidence_percentage`
+- `overridden_reading`
+- `retries`
+- `previous_reading`
+- `previous_reading_date`
+- `consecutive_days_overridden`
+
+The structured columns are written only when the flow has a value for them and the tenant schema
+has the column — a schema that predates V8 still takes the insert, under whichever of `reason` or
+`detail` it has. `correlation_id` has no tenant column, and the tenant `uuid` is database-generated
+rather than derived from the event's, so the two rows are matched on
+`(user_id, scheme_id, type, created_at)` rather than by key.
+
+`consecutive_days_overridden` counts an override run and is filled only by the
+`CONSECUTIVE_OVERRIDE_5_DAYS` anomaly. It is not the event's `consecutive_days_missed`, which is a
+different metric and has no tenant column.
 
 ---
 

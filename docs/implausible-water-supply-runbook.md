@@ -164,7 +164,9 @@ tried to change it and was refused. C is an outstanding gap.
 The reason strings are exact constants with no numbers in them, so they can be counted with a
 `GROUP BY`. The per-row numbers are in the structured columns: `overridden_reading` is the value that
 failed and `previous_reading` is the baseline it was measured against, so
-`(overridden_reading − previous_reading) × 1000` reproduces the litres from the row alone.
+`(overridden_reading − previous_reading) × 1000` reproduces the litres from the row alone. Both
+anomaly stores carry them — `<tenant_schema>.anomaly_table` and `analytics_schema.anomaly_table` —
+so either one answers the question.
 
 Rejected attempts accumulate — each one lands its own anomaly. The client may simply retry with a
 different value.

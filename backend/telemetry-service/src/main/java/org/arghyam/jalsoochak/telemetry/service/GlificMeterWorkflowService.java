@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingReque
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
@@ -646,11 +647,14 @@ public class GlificMeterWorkflowService {
                         : AnomalyConstants.TYPE_NO_SUBMISSION;
                 telemetryTenantRepository.createTenantAnomalyRecord(
                         operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        anomalyType,
-                        resolvedIssueReason,
-                        AnomalyConstants.STATUS_OPEN
+                        TenantAnomalyRecord.builder()
+                                .userId(operatorWithSchema.operator().id())
+                                .schemeId(schemeId)
+                                .type(anomalyType)
+                                .reason(resolvedIssueReason)
+                                .status(AnomalyConstants.STATUS_OPEN)
+                                .retries(0)
+                                .build()
                 );
                 telemetryEventPublisher.publishAnomalyRecorded(
                         tenantId,
@@ -957,11 +961,14 @@ public class GlificMeterWorkflowService {
 
             telemetryTenantRepository.createTenantAnomalyRecord(
                     operatorWithSchema.schemaName(),
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    AnomalyConstants.TYPE_NO_SUBMISSION,
-                    issueReason,
-                    AnomalyConstants.STATUS_OPEN
+                    TenantAnomalyRecord.builder()
+                            .userId(operatorWithSchema.operator().id())
+                            .schemeId(schemeId)
+                            .type(AnomalyConstants.TYPE_NO_SUBMISSION)
+                            .reason(issueReason)
+                            .status(AnomalyConstants.STATUS_OPEN)
+                            .retries(0)
+                            .build()
             );
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
@@ -1209,11 +1216,20 @@ public class GlificMeterWorkflowService {
                     if (effectiveConfirmedReading.compareTo(maxAllowedReading) > 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
-                                operatorWithSchema.operator().id(),
-                                schemeId,
-                                AnomalyConstants.TYPE_OVER_WATER_SUPPLY,
-                                "Manual reading is above allowed maximum reading (" + toPlain(maxAllowedReading) + ").",
-                                AnomalyConstants.STATUS_OPEN
+                                TenantAnomalyRecord.builder()
+                                        .userId(operatorWithSchema.operator().id())
+                                        .schemeId(schemeId)
+                                        .type(AnomalyConstants.TYPE_OVER_WATER_SUPPLY)
+                                        .reason("Manual reading is above allowed maximum reading ("
+                                                + toPlain(maxAllowedReading) + ").")
+                                        .status(AnomalyConstants.STATUS_OPEN)
+                                        .aiReading(pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading)
+                                                .orElse(null))
+                                        .overriddenReading(effectiveConfirmedReading)
+                                        .retries(0)
+                                        .previousReading(previousConfirmed)
+                                        .previousReadingDate(previousConfirmedAt)
+                                        .build()
                         );
                         telemetryEventPublisher.publishAnomalyRecorded(
                                 tenantId,
@@ -1350,11 +1366,21 @@ public class GlificMeterWorkflowService {
 
             telemetryTenantRepository.createTenantAnomalyRecord(
                     operatorWithSchema.schemaName(),
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    AnomalyConstants.TYPE_MANUAL_OVERRIDE,
-                    "Manual reading submitted as override.",
-                    AnomalyConstants.STATUS_OPEN
+                    TenantAnomalyRecord.builder()
+                            .userId(operatorWithSchema.operator().id())
+                            .schemeId(schemeId)
+                            .type(AnomalyConstants.TYPE_MANUAL_OVERRIDE)
+                            .reason("Manual reading submitted as override.")
+                            .status(AnomalyConstants.STATUS_OPEN)
+                            .aiReading(pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading)
+                                    .orElse(null))
+                            .overriddenReading(manualReadingValue)
+                            .retries(unreadableRetryCountToday)
+                            .previousReading(previousSnapshotOpt
+                                    .map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null))
+                            .previousReadingDate(previousSnapshotOpt
+                                    .map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null))
+                            .build()
             );
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
@@ -1387,11 +1413,17 @@ public class GlificMeterWorkflowService {
             if (consecutiveOverrideDays >= 5) {
                 telemetryTenantRepository.createTenantAnomalyRecord(
                         operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS,
-                        "Manual overrides recorded for five or more consecutive days.",
-                        AnomalyConstants.STATUS_OPEN
+                        TenantAnomalyRecord.builder()
+                                .userId(operatorWithSchema.operator().id())
+                                .schemeId(schemeId)
+                                .type(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS)
+                                .reason("Manual overrides recorded for five or more consecutive days.")
+                                .status(AnomalyConstants.STATUS_OPEN)
+                                .retries(0)
+                                // The only anomaly that counts an override run, and so the only one
+                                // with a real value for the column named after it.
+                                .consecutiveDaysOverridden(consecutiveOverrideDays)
+                                .build()
                 );
                 for (Long recipientUserId : analyticsUserIds) {
                     telemetryEventPublisher.publishEscalationCreated(

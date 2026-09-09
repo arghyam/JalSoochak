@@ -20,6 +20,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -81,12 +82,12 @@ class GlificMeterWorkflowServiceIssueReportTest {
 
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
-                eq(1L),
-                eq(10L),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
-                eq("Meter not working"),
-                eq(AnomalyConstants.STATUS_OPEN)
-        );
+                argThat(anomaly -> anomaly.userId() == 1L
+                        && anomaly.schemeId() == 10L
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_SUBMISSION
+                        && "Meter not working".equals(anomaly.reason())
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
+            );
         verify(telemetryEventPublisher).publishOutageOrNonSubmissionReason(
                 eq(1),
                 eq(10L),
@@ -156,12 +157,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyInt()
-        );
+                org.mockito.ArgumentMatchers.any()
+            );
     }
 
     @Test
@@ -193,12 +190,12 @@ class GlificMeterWorkflowServiceIssueReportTest {
         // Current behavior: reason "5" is treated as an anomaly selection (legacy numeric rule).
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
-                eq(1L),
-                eq(10L),
-                eq(AnomalyConstants.TYPE_NO_WATER_SUPPLY),
-                eq("No Water Supply"),
-                eq(AnomalyConstants.STATUS_OPEN)
-        );
+                argThat(anomaly -> anomaly.userId() == 1L
+                        && anomaly.schemeId() == 10L
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_WATER_SUPPLY
+                        && "No Water Supply".equals(anomaly.reason())
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
+            );
         verify(telemetryEventPublisher).publishOutageOrNonSubmissionReason(
                 eq(1),
                 eq(10L),
@@ -248,12 +245,12 @@ class GlificMeterWorkflowServiceIssueReportTest {
 
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
-                eq(1L),
-                eq(10L),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
-                eq("No Reading Submission"),
-                eq(AnomalyConstants.STATUS_OPEN)
-        );
+                argThat(anomaly -> anomaly.userId() == 1L
+                        && anomaly.schemeId() == 10L
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_SUBMISSION
+                        && "No Reading Submission".equals(anomaly.reason())
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
+            );
     }
 
     @Test
@@ -285,12 +282,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyInt()
-        );
+                org.mockito.ArgumentMatchers.any()
+            );
     }
 
     @Test
@@ -345,12 +338,12 @@ class GlificMeterWorkflowServiceIssueReportTest {
 
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
-                eq(1L),
-                eq(10L),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
-                eq("pipe leakage"),
-                eq(AnomalyConstants.STATUS_OPEN)
-        );
+                argThat(anomaly -> anomaly.userId() == 1L
+                        && anomaly.schemeId() == 10L
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_SUBMISSION
+                        && "pipe leakage".equals(anomaly.reason())
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
+            );
         verify(telemetryEventPublisher).publishOutageOrNonSubmissionReason(
                 eq(1),
                 eq(10L),
@@ -420,12 +413,8 @@ class GlificMeterWorkflowServiceIssueReportTest {
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyInt()
-        );
+                org.mockito.ArgumentMatchers.any()
+            );
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyLong(),
@@ -517,12 +506,12 @@ class GlificMeterWorkflowServiceIssueReportTest {
         // that the Devanagari survives byte-for-byte: not rejected by the allowlist, not escaped.
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
-                eq(1L),
-                eq(10L),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
-                eq("पानी की आपूर्ति नहीं"),
-                eq(AnomalyConstants.STATUS_OPEN)
-        );
+                argThat(anomaly -> anomaly.userId() == 1L
+                        && anomaly.schemeId() == 10L
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_SUBMISSION
+                        && "पानी की आपूर्ति नहीं".equals(anomaly.reason())
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
+            );
     }
 
     @Test
@@ -591,12 +580,12 @@ class GlificMeterWorkflowServiceIssueReportTest {
         assertEquals(true, resp.isSuccess());
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
-                eq(1L),
-                eq(10L),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
-                eq("मीटर में पानी नहीं"),
-                eq(AnomalyConstants.STATUS_OPEN)
-        );
+                argThat(anomaly -> anomaly.userId() == 1L
+                        && anomaly.schemeId() == 10L
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_SUBMISSION
+                        && "मीटर में पानी नहीं".equals(anomaly.reason())
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
+            );
     }
 
     // ── Resolved-reason length (analytics VARCHAR(255) sink) ────────────────────────────────────
@@ -732,12 +721,12 @@ class GlificMeterWorkflowServiceIssueReportTest {
         // sink rather than flow_reading_table — the punctuated label is what matters here.
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
-                eq(1L),
-                eq(10L),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
-                eq("Pipe leak - urgent"),
-                eq(AnomalyConstants.STATUS_OPEN)
-        );
+                argThat(anomaly -> anomaly.userId() == 1L
+                        && anomaly.schemeId() == 10L
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_SUBMISSION
+                        && "Pipe leak - urgent".equals(anomaly.reason())
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
+            );
     }
 
     @Test
@@ -760,12 +749,12 @@ class GlificMeterWorkflowServiceIssueReportTest {
         assertEquals(true, resp.isSuccess());
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 eq("tenant_test"),
-                eq(1L),
-                eq(10L),
-                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
-                eq("पानी की आपूर्ति नहीं"),
-                eq(AnomalyConstants.STATUS_OPEN)
-        );
+                argThat(anomaly -> anomaly.userId() == 1L
+                        && anomaly.schemeId() == 10L
+                        && anomaly.type() == AnomalyConstants.TYPE_NO_SUBMISSION
+                        && "पानी की आपूर्ति नहीं".equals(anomaly.reason())
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
+            );
     }
 
     @Test

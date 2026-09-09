@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnap
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
@@ -35,6 +36,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
@@ -186,10 +188,12 @@ class BfmReadingServiceImplausibleSupplyTest {
             assertThat(response.isSuccess()).isFalse();
             assertThat(response.getQualityStatus()).isEqualTo("REJECTED");
             assertThat(response.getErrorCode()).isEqualTo(TelemetryErrorCode.ABNORMAL_READING);
-            verify(repo).createTenantAnomalyRecord(SCHEMA, OPERATOR_ID, SCHEME_ID,
-                    AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY,
-                    AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_SUBMITTED,
-                    AnomalyConstants.STATUS_OPEN);
+            verify(repo).createTenantAnomalyRecord(eq(SCHEMA), argThat(anomaly ->
+                    anomaly.userId() == OPERATOR_ID
+                            && anomaly.schemeId() == SCHEME_ID
+                            && anomaly.type() == AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY
+                            && AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_SUBMITTED.equals(anomaly.reason())
+                            && anomaly.status() == AnomalyConstants.STATUS_OPEN));
         }
 
         @Test
@@ -212,6 +216,26 @@ class BfmReadingServiceImplausibleSupplyTest {
             // (1100 - 900) * 1000 = 200,000 L, the figure the decision was taken on.
             assertThat(overridden.getValue().subtract(previous.getValue())
                     .multiply(BigDecimal.valueOf(1000))).isEqualByComparingTo("200000");
+        }
+
+        /**
+         * The tenant row has to carry the same numbers as the event. It did not once: the insert
+         * wrote only the identifying columns, so staff querying the tenant schema saw the anomaly
+         * with no way to tell what value had been refused or what it was measured against.
+         */
+        @Test
+        @DisplayName("the tenant row carries the same numbers as the event")
+        void tenantRowCarriesTheSameNumbers() {
+            checkableScheme();
+
+            submit(SupplyPlausibilityProperties.Mode.ENFORCE, "1100", true);
+
+            ArgumentCaptor<TenantAnomalyRecord> anomaly = ArgumentCaptor.forClass(TenantAnomalyRecord.class);
+            verify(repo).createTenantAnomalyRecord(eq(SCHEMA), anomaly.capture());
+
+            assertThat(anomaly.getValue().overriddenReading()).isEqualByComparingTo("1100");
+            assertThat(anomaly.getValue().previousReading()).isEqualByComparingTo(BASELINE);
+            assertThat(anomaly.getValue().previousReadingDate()).isEqualTo(BASELINE_AT);
         }
 
         @Test
@@ -239,8 +263,7 @@ class BfmReadingServiceImplausibleSupplyTest {
             verify(repo).persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                     any(LocalDateTime.class), any(BigDecimal.class), eq(new BigDecimal("950")), anyString(),
                     any(), any(), any(), anyInt(), any(), any(), any(), any(), isNull());
-            verify(repo, never()).createTenantAnomalyRecord(anyString(), anyLong(), anyLong(),
-                    anyInt(), anyString(), anyInt());
+            verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
         }
 
         @Test
@@ -312,8 +335,7 @@ class BfmReadingServiceImplausibleSupplyTest {
 
             submit(SupplyPlausibilityProperties.Mode.AUDIT, "1100", true);
 
-            verify(repo, never()).createTenantAnomalyRecord(anyString(), anyLong(), anyLong(),
-                    anyInt(), anyString(), anyInt());
+            verify(repo, never()).createTenantAnomalyRecord(anyString(), any());
             verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                     any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                     any(), any());

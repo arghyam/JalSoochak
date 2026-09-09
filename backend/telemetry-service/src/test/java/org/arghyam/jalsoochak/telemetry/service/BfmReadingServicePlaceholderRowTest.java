@@ -174,7 +174,7 @@ class BfmReadingServicePlaceholderRowTest {
         assertEquals("Meter reading service is temporarily unavailable. Please try again shortly.", resp.getMessage());
         assertEquals("RETRY", resp.getQualityStatus());
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
-                anyString(), anyLong(), anyLong(), anyInt(), anyString(), anyInt()
+                anyString(), any()
         );
         verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 any(),

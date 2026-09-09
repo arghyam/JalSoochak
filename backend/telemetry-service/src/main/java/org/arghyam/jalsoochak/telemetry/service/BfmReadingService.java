@@ -18,6 +18,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRec
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityGuard;
@@ -1276,11 +1277,9 @@ public class BfmReadingService {
 
         telemetryTenantRepository.createTenantAnomalyRecord(
                 schemaName,
-                userId,
-                schemeId,
-                anomalyType,
-                reason,
-                AnomalyConstants.STATUS_OPEN
+                tenantAnomaly(userId, schemeId, anomalyType, reason, retries,
+                        aiReading, aiConfidencePercentage, overriddenReading,
+                        previousReading, previousReadingDate)
         );
         telemetryEventPublisher.publishAnomalyRecorded(
                 tenantId,
@@ -1321,11 +1320,9 @@ public class BfmReadingService {
                                     String correlationId) {
         telemetryTenantRepository.createTenantAnomalyRecord(
                 schemaName,
-                userId,
-                schemeId,
-                anomalyType,
-                reason,
-                AnomalyConstants.STATUS_OPEN
+                tenantAnomaly(userId, schemeId, anomalyType, reason, retries,
+                        aiReading, aiConfidencePercentage, overriddenReading,
+                        previousReading, previousReadingDate)
         );
         telemetryEventPublisher.publishAnomalyRecorded(
                 tenantId,
@@ -1343,6 +1340,40 @@ public class BfmReadingService {
                 AnomalyConstants.STATUS_OPEN,
                 correlationId
         );
+    }
+
+    /**
+     * The tenant-schema half of an anomaly, carrying the same numbers as the event published beside
+     * it so the two rows agree.
+     *
+     * <p>{@code consecutiveDaysOverridden} is deliberately left unset. The event's
+     * {@code consecutiveDaysMissed} is a different metric and every caller on this path passes zero;
+     * the tenant column defaults to 0, so writing the event's value would only invite the two to be
+     * read as the same thing. It is filled where a real override run is counted, on the WhatsApp path.
+     */
+    private static TenantAnomalyRecord tenantAnomaly(Long userId,
+                                                     Long schemeId,
+                                                     int anomalyType,
+                                                     String reason,
+                                                     int retries,
+                                                     BigDecimal aiReading,
+                                                     BigDecimal aiConfidencePercentage,
+                                                     BigDecimal overriddenReading,
+                                                     BigDecimal previousReading,
+                                                     LocalDateTime previousReadingDate) {
+        return TenantAnomalyRecord.builder()
+                .userId(userId)
+                .schemeId(schemeId)
+                .type(anomalyType)
+                .reason(reason)
+                .status(AnomalyConstants.STATUS_OPEN)
+                .aiReading(aiReading)
+                .aiConfidencePercentage(aiConfidencePercentage)
+                .overriddenReading(overriddenReading)
+                .retries(retries)
+                .previousReading(previousReading)
+                .previousReadingDate(previousReadingDate)
+                .build();
     }
 
     private String summarizeFlowVisionResult(FlowVisionResult result) {

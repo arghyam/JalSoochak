@@ -1680,39 +1680,56 @@ public class TelemetryTenantRepository {
         );
     }
 
-    public void createTenantAnomalyRecord(String schemaName,
-                                          Long userId,
-                                          Long schemeId,
-                                          Integer type,
-                                          String reason,
-                                          Integer status) {
+    /**
+     * Inserts one anomaly into a tenant schema, writing every structured column the record fills and
+     * the schema actually has.
+     *
+     * <p>The column list is built rather than fixed because tenant schemas sit at different migration
+     * levels: V8 renamed {@code detail} to {@code reason} and added the seven structured columns, and
+     * a schema that predates it must still take the insert. An optional column is written only when
+     * it exists <em>and</em> the record supplies a value — omitting it lets the table's own
+     * {@code DEFAULT 0} stand for {@code retries} and {@code consecutive_days_overridden}, which a
+     * literal NULL would not.
+     *
+     * <p>The four {@code NOT NULL} columns are always written; {@link TenantAnomalyRecord} has
+     * already rejected a null in any of them.
+     */
+    public void createTenantAnomalyRecord(String schemaName, TenantAnomalyRecord anomaly) {
         validateSchemaName(schemaName);
-        boolean hasDetail = columnExists(schemaName, "anomaly_table", "detail");
-        boolean hasReason = columnExists(schemaName, "anomaly_table", "reason");
 
-        String sql;
-        if (hasDetail && hasReason) {
-            sql = String.format("""
-                    INSERT INTO %s.anomaly_table
-                        (user_id, scheme_id, type, reason, detail, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, NOW())
-                    """, schemaName);
-            jdbcTemplate.update(sql, userId, schemeId, type, reason, reason, status);
-        } else if (hasDetail) {
-            sql = String.format("""
-                    INSERT INTO %s.anomaly_table
-                        (user_id, scheme_id, type, detail, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, NOW())
-                    """, schemaName);
-            jdbcTemplate.update(sql, userId, schemeId, type, reason, status);
-        } else {
-            sql = String.format("""
-                    INSERT INTO %s.anomaly_table
-                        (user_id, scheme_id, type, reason, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, NOW())
-                    """, schemaName);
-            jdbcTemplate.update(sql, userId, schemeId, type, reason, status);
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("user_id", anomaly.userId());
+        row.put("scheme_id", anomaly.schemeId());
+        row.put("type", anomaly.type());
+        row.put("status", anomaly.status());
+        // The reason column is named for how far the schema has migrated. Pre-V8 schemas that carry
+        // both get both, so a reader on either name sees the same text.
+        putIfWritable(schemaName, row, "reason", anomaly.reason());
+        putIfWritable(schemaName, row, "detail", anomaly.reason());
+        putIfWritable(schemaName, row, "ai_reading", anomaly.aiReading());
+        putIfWritable(schemaName, row, "ai_confidence_percentage", anomaly.aiConfidencePercentage());
+        putIfWritable(schemaName, row, "overridden_reading", anomaly.overriddenReading());
+        putIfWritable(schemaName, row, "retries", anomaly.retries());
+        putIfWritable(schemaName, row, "previous_reading", anomaly.previousReading());
+        putIfWritable(schemaName, row, "previous_reading_date", anomaly.previousReadingDate());
+        putIfWritable(schemaName, row, "consecutive_days_overridden", anomaly.consecutiveDaysOverridden());
+
+        String sql = String.format("""
+                INSERT INTO %s.anomaly_table (%s, created_at)
+                VALUES (%s, NOW())
+                """, schemaName, String.join(", ", row.keySet()), placeholders(row.size()));
+        jdbcTemplate.update(sql, row.values().toArray());
+    }
+
+    /** Adds an optional anomaly column when the schema has it and the caller supplied a value. */
+    private void putIfWritable(String schemaName, Map<String, Object> row, String column, Object value) {
+        if (value != null && columnExists(schemaName, "anomaly_table", column)) {
+            row.put(column, value);
         }
+    }
+
+    private static String placeholders(int count) {
+        return String.join(", ", Collections.nCopies(count, "?"));
     }
 
     public Optional<TelemetryReadingRecord> findReadingByCorrelationId(String schemaName, String correlationId) {

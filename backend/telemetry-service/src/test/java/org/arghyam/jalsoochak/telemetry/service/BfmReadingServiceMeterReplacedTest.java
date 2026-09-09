@@ -132,11 +132,8 @@ class BfmReadingServiceMeterReplacedTest {
         );
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
-                anyString(),
-                org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+                org.mockito.ArgumentMatchers.argThat(anomaly -> anomaly != null
+                        && anomaly.type() == AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS)
         );
         verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),

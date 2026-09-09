@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetrySchemeSupplyCounts;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
+import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.service.water.QuarantineReason;
 import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
@@ -37,6 +38,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
@@ -143,12 +145,18 @@ class BfmReadingServiceCorrectionOutcomeTest {
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
+    private TenantAnomalyRecord capturedAnomaly() {
+        ArgumentCaptor<TenantAnomalyRecord> anomaly = ArgumentCaptor.forClass(TenantAnomalyRecord.class);
+        verify(repo).createTenantAnomalyRecord(eq(SCHEMA), anomaly.capture());
+        assertThat(anomaly.getValue().userId()).isEqualTo(OPERATOR_ID);
+        assertThat(anomaly.getValue().schemeId()).isEqualTo(SCHEME_ID);
+        assertThat(anomaly.getValue().type()).isEqualTo(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY);
+        assertThat(anomaly.getValue().status()).isEqualTo(AnomalyConstants.STATUS_OPEN);
+        return anomaly.getValue();
+    }
+
     private String capturedAnomalyReason() {
-        ArgumentCaptor<String> reason = ArgumentCaptor.forClass(String.class);
-        verify(repo).createTenantAnomalyRecord(eq(SCHEMA), eq(OPERATOR_ID), eq(SCHEME_ID),
-                eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), reason.capture(),
-                eq(AnomalyConstants.STATUS_OPEN));
-        return reason.getValue();
+        return capturedAnomaly().reason();
     }
 
     @Nested
@@ -320,6 +328,29 @@ class BfmReadingServiceCorrectionOutcomeTest {
         }
 
         /**
+         * The same numbers have to reach the tenant schema, not only the warehouse. They did not
+         * once: the tenant insert wrote the identifying columns alone, so a refused correction landed
+         * there with previous_reading and overridden_reading NULL while analytics held both.
+         */
+        @Test
+        @DisplayName("the tenant row carries the attempt and the baseline too, not just the event")
+        void tenantRowCarriesTheSameNumbersAsTheEvent() {
+            checkableScheme(QuarantineReason.NONE);
+
+            correct(SupplyPlausibilityProperties.Mode.ENFORCE, IMPLAUSIBLE);
+
+            TenantAnomalyRecord anomaly = capturedAnomaly();
+            assertThat(anomaly.overriddenReading()).isEqualByComparingTo(IMPLAUSIBLE);
+            assertThat(anomaly.previousReading()).isEqualByComparingTo(BASELINE);
+            assertThat(anomaly.previousReadingDate()).isEqualTo(BASELINE_AT);
+            // (1100 - 900) * 1000 = 200,000 L, recomputable from the persisted row alone.
+            assertThat(anomaly.overriddenReading().subtract(anomaly.previousReading())
+                    .multiply(BigDecimal.valueOf(1000))).isEqualByComparingTo("200000");
+            assertThat(anomaly.reason())
+                    .isEqualTo(AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_CORRECTION_REJECTED_PUBLISHED);
+        }
+
+        /**
          * Analytics dedups on a uuid derived from the correlationId, so a deterministic key would
          * collapse the second attempt into the first. A null correlationId keeps every attempt.
          */
@@ -332,9 +363,9 @@ class BfmReadingServiceCorrectionOutcomeTest {
             service.updateConfirmedReading(null, CONTACT, IMPLAUSIBLE, TENANT_ID);
             service.updateConfirmedReading(null, CONTACT, new BigDecimal("1200"), TENANT_ID);
 
-            verify(repo, times(2)).createTenantAnomalyRecord(eq(SCHEMA), eq(OPERATOR_ID), eq(SCHEME_ID),
-                    eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), anyString(),
-                    eq(AnomalyConstants.STATUS_OPEN));
+            verify(repo, times(2)).createTenantAnomalyRecord(eq(SCHEMA), argThat(anomaly ->
+                    anomaly.type() == AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY
+                            && anomaly.reason() != null));
             verify(telemetryEventPublisher, times(2)).publishAnomalyRecorded(
                     any(), eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), any(), any(), any(),
                     any(), any(), any(), any(), any(), any(), anyString(), any(), isNull());
@@ -354,7 +385,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             CreateReadingResponse response = correct(SupplyPlausibilityProperties.Mode.AUDIT, IMPLAUSIBLE);
 
             verify(repo).updateConfirmedReading(eq(SCHEMA), eq(READING_ID), eq(IMPLAUSIBLE), eq(OPERATOR_ID), any());
-            verify(repo, never()).createTenantAnomalyRecord(any(), any(), any(), any(), any(), any());
+            verify(repo, never()).createTenantAnomalyRecord(any(), any());
             assertThat(response.isSuccess()).isTrue();
         }
 

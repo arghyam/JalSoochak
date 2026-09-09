@@ -30,6 +30,7 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -96,11 +97,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                anyInt(),
-                anyString(),
-                anyInt()
+                any()
         );
 
         when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
@@ -152,11 +149,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                anyInt(),
-                anyString(),
-                anyInt()
+                any()
         );
 
         when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
@@ -209,11 +202,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                anyInt(),
-                anyString(),
-                anyInt()
+                any()
         );
 
         when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
@@ -273,11 +262,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         verify(telemetryTenantRepository, never()).createFlowReading(anyString(), anyLong(), anyLong(), any(), any(), any(), anyString(), anyString(), any());
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                ArgumentMatchers.eq(AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS),
-                anyString(),
-                ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+                argThat(anomaly -> anomaly != null && anomaly.type() == AnomalyConstants.TYPE_READING_LESS_THAN_PREVIOUS)
         );
         verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 ArgumentMatchers.eq(1),
@@ -346,11 +331,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
 
         verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                ArgumentMatchers.eq(AnomalyConstants.TYPE_LOW_WATER_SUPPLY),
-                anyString(),
-                ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+                argThat(anomaly -> anomaly != null && anomaly.type() == AnomalyConstants.TYPE_LOW_WATER_SUPPLY)
         );
         verify(telemetryEventPublisher, never()).publishOutageOrNonSubmissionReason(
                 ArgumentMatchers.eq(1),
@@ -401,11 +382,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
 
         verify(telemetryTenantRepository).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                ArgumentMatchers.eq(AnomalyConstants.TYPE_OVER_WATER_SUPPLY),
-                anyString(),
-                ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN)
+                argThat(anomaly -> anomaly != null && anomaly.type() == AnomalyConstants.TYPE_OVER_WATER_SUPPLY)
         );
 
         verify(telemetryTenantRepository, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
@@ -440,11 +417,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                anyInt(),
-                anyString(),
-                anyInt()
+                any()
         );
 
         when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
@@ -507,8 +480,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertNotNull(resp);
         assertEquals(false, resp.isSuccess());
         // No anomaly, no escalation, no confirmation template lookup once the reading did not land.
-        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), anyLong(), anyLong(),
-                anyInt(), anyString(), anyInt());
+        verify(telemetryTenantRepository, never()).createTenantAnomalyRecord(anyString(), any());
         verify(telemetryTenantRepository, never()).applyConfirmedReadingSource(anyString(), anyLong(), anyInt(), any());
     }
 
@@ -544,11 +516,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                anyInt(),
-                anyString(),
-                anyInt()
+                any()
         );
 
         when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
@@ -602,11 +570,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt())).thenReturn(List.of());
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                anyInt(),
-                anyString(),
-                anyInt()
+                any()
         );
 
         when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
@@ -667,11 +631,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
 
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
                 anyString(),
-                anyLong(),
-                anyLong(),
-                anyInt(),
-                anyString(),
-                anyInt()
+                any()
         );
         when(tenantConfigRepository.findManualReadingConfirmationTemplate(anyInt(), anyString())).thenReturn(Optional.empty());
 
