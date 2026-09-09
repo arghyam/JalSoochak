@@ -443,9 +443,9 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<ContinuousSchemesResponse>> getContinuousSchemesForUser(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "user_id") Integer userId,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "list", required = false, defaultValue = "false") boolean list,
@@ -472,6 +472,19 @@ public class AnalyticsSchemeReportingController {
                     throw new IllegalArgumentException("limit must be >= 1");
                 }
             }
+
+            // Identity comes from the token, never from the request. Taking tenant_id and user_id
+            // as query parameters let any authenticated caller read another officer's schemes --
+            // and, because tenant_id was equally free, another tenant's.
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef == null ? null : userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer userId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
 
             ContinuousSchemesResponse data =
                     schemeRegularityService.getContinuousSchemesByUser(tenantId, userId, startDate, endDate, list, page, limit);
@@ -993,13 +1006,25 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserAlertTotalsResponse>> getUserAlertTotals(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "user_id") Integer userId,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
         try {
+            // As with /continuous-schemes/user: the officer whose totals these are is the one
+            // holding the token, not whoever the caller names in a query string.
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef == null ? null : userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer userId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             UserAlertTotalsResponse data = userAlertTotalsService.getTotals(tenantId, userId, startDate, endDate);
             return ResponseEntity.ok(ApiResponse.<UserAlertTotalsResponse>builder()
                     .success(true)
