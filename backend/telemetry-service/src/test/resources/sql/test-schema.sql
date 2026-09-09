@@ -57,3 +57,55 @@ CREATE TABLE tenant_zz.user_scheme_mapping_table (
     status     INTEGER   NOT NULL,
     deleted_at TIMESTAMP
 );
+
+-- ── SUPPLY-PLAUSIBILITY (V40) ───────────────────────────────────────────────
+-- Schemes and flow readings, for the quarantine baseline-exclusion tests.
+-- tenant_as is on the current migration level (flow_reading_table has
+-- quarantine_reason); tenant_zz predates V40 and must keep the legacy SQL.
+
+CREATE TABLE tenant_as.scheme_master_table (
+    id               SERIAL   PRIMARY KEY,
+    fhtc_count       INTEGER  NOT NULL DEFAULT 0,
+    planned_fhtc     INTEGER  NOT NULL DEFAULT 0,
+    house_hold_count INTEGER  NOT NULL DEFAULT 0
+);
+
+CREATE TABLE tenant_as.flow_reading_table (
+    id                SERIAL       PRIMARY KEY,
+    scheme_id         INTEGER      NOT NULL,
+    reading_at        TIMESTAMP    NOT NULL,
+    reading_date      DATE         NOT NULL,
+    extracted_reading NUMERIC      NOT NULL,
+    confirmed_reading NUMERIC      NOT NULL,
+    correlation_id    VARCHAR(255) NOT NULL,
+    channel           VARCHAR(64),
+    image_url         TEXT DEFAULT '',
+    created_by        INTEGER      NOT NULL,
+    created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+    quarantine_reason SMALLINT     NOT NULL DEFAULT 0,
+    deleted_at        TIMESTAMP
+);
+
+CREATE TABLE tenant_zz.scheme_master_table (
+    id               SERIAL   PRIMARY KEY,
+    fhtc_count       INTEGER  NOT NULL DEFAULT 0,
+    planned_fhtc     INTEGER  NOT NULL DEFAULT 0,
+    house_hold_count INTEGER  NOT NULL DEFAULT 0
+);
+
+CREATE TABLE tenant_zz.flow_reading_table (
+    id                SERIAL       PRIMARY KEY,
+    scheme_id         INTEGER      NOT NULL,
+    reading_at        TIMESTAMP    NOT NULL,
+    reading_date      DATE         NOT NULL,
+    extracted_reading NUMERIC      NOT NULL,
+    confirmed_reading NUMERIC      NOT NULL,
+    correlation_id    VARCHAR(255) NOT NULL,
+    channel           VARCHAR(64),
+    image_url         TEXT DEFAULT '',
+    created_by        INTEGER      NOT NULL,
+    created_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMP    NOT NULL DEFAULT NOW(),
+    deleted_at        TIMESTAMP
+);

@@ -55,8 +55,27 @@ The current anomaly type constants in `telemetry-service` are:
 - `7` - `LOW_WATER_SUPPLY`
 - `8` - `OVER_WATER_SUPPLY`
 - `9` - `NO_SUBMISSION`
+- `10` - `IMPLAUSIBLE_WATER_SUPPLY`
 
 Source: `telemetry-service` `AnomalyConstants`.
+
+`10` is distinct from `8`: `OVER_WATER_SUPPLY` means "above the tenant's configured tolerance over
+the norm", while `IMPLAUSIBLE_WATER_SUPPLY` means "more than this scheme's connected population could
+physically consume". Its wire-facing rejection code is the deliberately vaguer `ABNORMAL_READING`,
+which discloses no threshold.
+
+A type-10 anomaly does not by itself mean the day is missing from analytics — that depends on which
+of three situations produced it, and the anomaly's `reason` text says which:
+
+- **A quarantined submission.** The reading is stored but **withheld from the warehouse**, so the
+  scheme shows as non-reporting and the operator as absent for that day.
+- **A correction refused over an already-published reading** (runbook case B). Nothing is written and
+  the published value stands, so the day *is* counted. The anomaly records the refused attempt only.
+- **A correction refused over a quarantined reading** (runbook case C). The day is still missing, for
+  the same reason the original submission was withheld.
+
+See [implausible-water-supply-runbook.md](implausible-water-supply-runbook.md) §5 before treating
+such a gap as a pipeline fault, or a type-10 anomaly as evidence of one.
 
 ---
 

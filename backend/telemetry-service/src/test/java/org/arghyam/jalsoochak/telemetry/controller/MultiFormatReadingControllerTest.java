@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.validation.Validator;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
+import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.ingest.CanonicalReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapper;
 import org.arghyam.jalsoochak.telemetry.ingest.ReadingRequestMapperRegistry;
@@ -21,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -118,6 +120,39 @@ class MultiFormatReadingControllerTest {
         assertEquals(7, tenantCaptor.getValue());
         assertEquals("91YYYYYYYYYY", requestCaptor.getValue().getPhoneNumber());
         assertEquals("SX-42", requestCaptor.getValue().getStateSchemeId());
+    }
+
+    @Test
+    void implausibleSupplyRejectionReachesTheWireAs400AbnormalReading() throws Exception {
+        // SUPPLY-PLAUSIBILITY: the contract an integrating client branches on. ABNORMAL_READING is
+        // deliberately vaguer than the internal IMPLAUSIBLE_WATER_SUPPLY anomaly it comes from.
+        when(apiKeyService.resolveTenantIdFromRawApiKey("valid")).thenReturn(Optional.of(22));
+        when(webhook.processAssamReading(any(), any())).thenReturn(CreateReadingResponse.builder()
+                .success(false)
+                .qualityStatus("REJECTED")
+                .errorCode(TelemetryErrorCode.ABNORMAL_READING)
+                .message("Reading rejected: the implied daily supply is not plausible for this scheme.")
+                .meterReading(new BigDecimal("1100"))
+                .lastConfirmedReading(new BigDecimal("900"))
+                .build());
+
+        String body = mockMvc().perform(post("/api/v1/telemetry/readings/formats/canonical")
+                        .header("X-Api-Key", "valid")
+                        .contentType("application/json")
+                        .content(CANONICAL_BODY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.errorCode").value("ABNORMAL_READING"))
+                .andExpect(jsonPath("$.data.qualityStatus").value("REJECTED"))
+                .andReturn().getResponse().getContentAsString();
+
+        // THRESHOLD-DISCLOSURE: nothing in the body names the ceiling (75000), the population (500),
+        // the connection count (100) or the per-person limit (150). Two submissions and any of those
+        // would give away the rest.
+        assertEquals(false, body.contains("75000"));
+        assertEquals(false, body.contains("\"population\""));
+        assertEquals(false, body.contains("fhtc"));
+        assertEquals(false, body.contains("implausible"));
     }
 
     @Test

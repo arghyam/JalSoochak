@@ -133,7 +133,8 @@ public class DailyReportPdfService {
             Map.entry("NO_WATER_SUPPLY", "No Water Supply"),
             Map.entry("LOW_WATER_SUPPLY", "Low Water Supply"),
             Map.entry("OVER_WATER_SUPPLY", "Over Water Supply"),
-            Map.entry("NO_SUBMISSION", "No Submission"));
+            Map.entry("NO_SUBMISSION", "No Submission"),
+            Map.entry("IMPLAUSIBLE_WATER_SUPPLY", "Implausible Water Supply"));
 
     /** Legacy fallback: some pre-migration rows store the numeric code string instead of the name. */
     private static final Map<String, String> CODE_TO_NAME = Map.ofEntries(
@@ -141,7 +142,7 @@ public class DailyReportPdfService {
             Map.entry("3", "CONSECUTIVE_OVERRIDE_5_DAYS"), Map.entry("4", "DUPLICATE_IMAGE_SUBMISSION"),
             Map.entry("5", "READING_LESS_THAN_PREVIOUS"), Map.entry("6", "NO_WATER_SUPPLY"),
             Map.entry("7", "LOW_WATER_SUPPLY"), Map.entry("8", "OVER_WATER_SUPPLY"),
-            Map.entry("9", "NO_SUBMISSION"));
+            Map.entry("9", "NO_SUBMISSION"), Map.entry("10", "IMPLAUSIBLE_WATER_SUPPLY"));
 
     /**
      * Generates the report PDF and returns the filename (not the full path).

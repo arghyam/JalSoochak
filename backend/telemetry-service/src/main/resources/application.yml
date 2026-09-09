@@ -92,6 +92,37 @@ telemetry:
       # Two entries make a rotation window: add the new hash, update Glific, drop the old one.
       # Startup fails if this is empty while mode=ENFORCE, or if an entry is not 64-char lowercase hex.
       token-hashes: ${TELEMETRY_WEBHOOK_AUTH_TOKEN_HASHES:}
+  supply-plausibility:
+    # SUPPLY-PLAUSIBILITY: rejects a meter reading whose implied daily volume exceeds what the
+    # scheme's connected population could physically consume:
+    #   litres  = (confirmed_reading - previous confirmed reading) * 1000
+    #   ceiling = connections * AVERAGE_MEMBERS_PER_HOUSEHOLD * limit-per-person-litres
+    # A failing POST is stored with flow_reading_table.quarantine_reason = 1, withheld from the
+    # warehouse and answered with 400 ABNORMAL_READING; a failing PUT correction leaves the stored
+    # value untouched. The release path is a corrected PUT that passes.
+    #
+    # Scope: this mode governs the quarantine gate above and nothing else. The OVER_WATER_SUPPLY
+    # check on the WhatsApp path is untouched by it, and still adds a per-capita litre figure to a
+    # cubic-metre index - a known unit bug, deliberately not fixed here, tracked in the plan's
+    # section 8.
+    #
+    # AUDIT (default) records what would have been quarantined and serves normally; ENFORCE
+    # quarantines; OFF skips entirely. Same shape as telemetry.webhook.auth.mode above - the kill
+    # switch is a restart, not a deploy.
+    #
+    # DO NOT ENFORCE ON DAY ONE. 150 L/person/day is a policy number, ~2.7x the 55 LPCD design norm,
+    # not one derived from production data. Run at AUDIT for at least a full week across all live
+    # tenants and review implausible_supply.would_quarantine on /actuator/prometheus against the
+    # field before flipping. Watch implausible_supply.skipped{reason="no_population"} too: a high
+    # count means scheme master data is missing and enforcing would be a no-op for those schemes.
+    # A quarantined reading also marks its operator absent and its scheme non-reporting for the day
+    # (the warehouse never sees it), so premature enforcement shows up as a daily-report discrepancy
+    # before anyone traces it back here.
+    mode: ${TELEMETRY_SUPPLY_PLAUSIBILITY_MODE:AUDIT}
+    limit-per-person-litres: ${HIGH_QUANTITY_THRESHOLD_LIMIT_PER_PERSON:150}
+    # Fallback when a tenant's AVERAGE_MEMBERS_PER_HOUSEHOLD config is missing or unparseable. Set
+    # it empty to have those tenants skipped instead of assessed against a number nobody chose.
+    default-members-per-household: ${DEFAULT_MEMBERS_PER_HOUSEHOLD:5}
 
 security:
   method-guard:
