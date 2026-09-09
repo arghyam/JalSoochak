@@ -119,6 +119,52 @@ class DisallowedHttpMethodFilterTest {
             assertThat(response.getStatus()).isEqualTo(405);
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {"pOsT", "post", "Post", "gEt", "get", "patch", "DeLeTe"})
+        @DisplayName("a re-spelled *allowed* method is rejected, not admitted by case-folding")
+        void reSpelledAllowedMethodNamesAreRejected(String method) throws Exception {
+            // The allowlist compares the raw token. Upper-casing before the check would turn every one
+            // of these into an allowed method and hand it to the chain — reaching
+            // TelemetryApiKeyAuthFilter's database lookup, which ORDER exists to keep a disallowed
+            // method away from. No mapping serves these spellings, so nothing legitimate sends them.
+            MockFilterChain chain = new MockFilterChain();
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter().doFilter(request(method, AUDITED_PATH), response, chain);
+
+            assertThat(response.getStatus()).isEqualTo(405);
+            assertThat(chain.getRequest())
+                    .as("%s must not reach the dispatcher or either auth gate", method)
+                    .isNull();
+            assertThat(response.getContentAsString())
+                    .as("the rejection body must be this filter's, not the dispatcher's")
+                    .isEqualTo("{\"success\":false,\"message\":\"Method Not Allowed\"}");
+        }
+
+        @Test
+        @DisplayName("a re-spelled allowed method is counted, so probing is visible in the metrics")
+        void reSpelledAllowedMethodsAreCounted() throws Exception {
+            filter().doFilter(request("pOsT", AUDITED_PATH), new MockHttpServletResponse(),
+                    new MockFilterChain());
+
+            assertThat(meterRegistry.get("http.method.rejected").tag("method", "OTHER").counter().count())
+                    .as("case-folding the check would have recorded nothing at all")
+                    .isEqualTo(1.0d);
+        }
+
+        @Test
+        @DisplayName("casings of one rejected method share a counter")
+        void casingsOfOneRejectedMethodShareATag() throws Exception {
+            filter().doFilter(request("OPTIONS", AUDITED_PATH), new MockHttpServletResponse(),
+                    new MockFilterChain());
+            filter().doFilter(request("options", AUDITED_PATH), new MockHttpServletResponse(),
+                    new MockFilterChain());
+
+            assertThat(meterRegistry.get("http.method.rejected").tag("method", "OPTIONS").counter().count())
+                    .as("the metric tag is normalised even though the allowlist check is not")
+                    .isEqualTo(2.0d);
+        }
+
         @Test
         @DisplayName("an invented method is rejected, proving this is an allowlist")
         void anUnknownMethodIsRejectedWith405() throws Exception {
@@ -177,6 +223,25 @@ class DisallowedHttpMethodFilterTest {
             assertThat(meterRegistry.get("http.method.rejected").tag("method", "OTHER").counter().count())
                     .as("unrecognised methods share one tag so tag cardinality stays bounded")
                     .isEqualTo(2.0d);
+        }
+
+        @Test
+        @DisplayName("a null method is rejected and counted without throwing")
+        void aNullMethodIsRejected() throws Exception {
+            // TAGGED_METHODS is a Set.of, which throws on contains(null), so the tag path has to
+            // normalise before it looks up.
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            request.setMethod(null);
+            request.setRequestURI(AUDITED_PATH);
+            MockFilterChain chain = new MockFilterChain();
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter().doFilter(request, response, chain);
+
+            assertThat(response.getStatus()).isEqualTo(405);
+            assertThat(chain.getRequest()).isNull();
+            assertThat(meterRegistry.get("http.method.rejected").tag("method", "OTHER").counter().count())
+                    .isEqualTo(1.0d);
         }
 
         @Test

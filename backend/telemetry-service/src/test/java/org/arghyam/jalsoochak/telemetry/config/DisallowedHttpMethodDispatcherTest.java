@@ -15,10 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 
+import java.net.URI;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 
 /**
  * Proves the fix against the real {@code DispatcherServlet}, offline.
@@ -141,6 +144,37 @@ class DisallowedHttpMethodDispatcherTest {
         MvcResult result = mockMvc(true).perform(get(AUDITED_PATH)).andReturn();
 
         assertThat(result.getResponse().getStatus()).isEqualTo(405);
+        assertThat(result.getResponse().getHeader("Allow")).isNull();
+    }
+
+    @Test
+    @DisplayName("BEFORE: a re-spelled POST is rejected by the dispatcher, which echoes the method")
+    void withoutTheFilterAReSpelledPostReachesTheDispatcherAndIsEchoedBack() throws Exception {
+        // Spring's method matching is case-sensitive, so "pOsT" matches no mapping and
+        // DefaultHandlerExceptionResolver answers it. Two things follow that the filter's contract
+        // rules out: the request has already traversed every filter behind this one — including
+        // TelemetryApiKeyAuthFilter's database lookup — and the rejection reflects the caller's
+        // method token instead of the filter's fixed, method-free body.
+        MvcResult result = mockMvc(false)
+                .perform(request("pOsT", URI.create(AUDITED_PATH))).andReturn();
+
+        assertThat(result.getResponse().getStatus()).isEqualTo(405);
+        assertThat(result.getResponse().getErrorMessage())
+                .as("the dispatcher's 405 names the method; the filter's body never does")
+                .contains("pOsT");
+    }
+
+    @Test
+    @DisplayName("AFTER: the filter answers it first, with a body that names no method")
+    void withTheFilterAReSpelledPostIsRejectedBeforeTheDispatcher() throws Exception {
+        MvcResult result = mockMvc(true)
+                .perform(request("pOsT", URI.create(AUDITED_PATH))).andReturn();
+
+        assertThat(result.getResponse().getStatus()).isEqualTo(405);
+        assertThat(result.getResponse().getErrorMessage())
+                .as("no sendError, so this never reached the dispatcher")
+                .isNull();
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("pOsT");
         assertThat(result.getResponse().getHeader("Allow")).isNull();
     }
 

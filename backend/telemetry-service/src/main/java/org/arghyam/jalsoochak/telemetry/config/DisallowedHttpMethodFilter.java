@@ -141,16 +141,21 @@ public class DisallowedHttpMethodFilter extends OncePerRequestFilter {
             return;
         }
 
-        // HTTP methods are case-sensitive per RFC 9110 §9, so a lowercase "options" is a distinct
-        // method that FrameworkServlet.service passes straight to processRequest rather than to
-        // doOptions. Upper-casing here means the guard cannot be sidestepped by re-spelling it.
+        // Compared as the raw token, because HTTP methods are case-sensitive per RFC 9110 §9: "pOsT"
+        // is a distinct method from "POST" and no mapping on this service serves it. Upper-casing
+        // before the check would admit every re-spelling of an allowed method, which is a fail-open
+        // in both halves of this filter's contract — the request would reach
+        // TelemetryApiKeyAuthFilter and its database lookup (see ORDER), and its rejection would come
+        // from the dispatcher instead, as a Tomcat error page reflecting the method token back rather
+        // than the method-free body below, with no rejection counted. Only the metric tag is
+        // normalised. Re-spelled disallowed methods were already rejected either way: "options" is no
+        // more in the allowlist than "OPTIONS" is.
         String method = request.getMethod();
-        String normalized = method == null ? "" : method.toUpperCase(Locale.ROOT);
 
-        if (!ALLOWED_METHODS.contains(normalized)) {
-            count(normalized);
+        if (method == null || !ALLOWED_METHODS.contains(method)) {
+            count(method);
             log.warn("http_method_rejected method={} path={} remoteAddr={}",
-                    normalized, request.getRequestURI(), request.getRemoteAddr());
+                    method, request.getRequestURI(), request.getRemoteAddr());
             writeMethodNotAllowed(response);
             return;
         }
@@ -158,12 +163,19 @@ public class DisallowedHttpMethodFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, new AllowHeaderSuppressingResponse(response));
     }
 
-    private void count(String normalizedMethod) {
+    /**
+     * Tags on the upper-cased method so every casing of one method shares a counter, and so a null
+     * method cannot reach {@link #TAGGED_METHODS} — {@code Set.of} throws on {@code contains(null)}.
+     * Normalising is safe here in a way it is not for the allowlist check: this only groups tags,
+     * whereas there it would widen what the guard admits.
+     */
+    private void count(String rejectedMethod) {
         if (meterRegistry == null) {
             return;
         }
+        String normalized = rejectedMethod == null ? "" : rejectedMethod.toUpperCase(Locale.ROOT);
         Counter.builder(METRIC_NAME)
-                .tag("method", TAGGED_METHODS.contains(normalizedMethod) ? normalizedMethod : "OTHER")
+                .tag("method", TAGGED_METHODS.contains(normalized) ? normalized : "OTHER")
                 .register(meterRegistry)
                 .increment();
     }

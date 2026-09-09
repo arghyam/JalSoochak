@@ -542,6 +542,155 @@ class GlificMeterWorkflowServiceIssueReportTest {
     }
 
     @Test
+    void issueReportSubmitRejectsAStandaloneCombiningMarkInFreeText() {
+        // \p{M} is admitted only after a base character. A reason made of nothing but combining
+        // marks is not a word in any script — it renders stacked over whatever text displays it —
+        // and it passed the allowlist while \p{M} sat in the leading character class.
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
+        stubLocalisedRejection("Issue report could not be saved.");
+
+        // U+093E DEVANAGARI VOWEL SIGN AA (Mc) and U+094D VIRAMA (Mn), with no consonant to attach
+        // to. Written as escapes because a bare mark renders onto its neighbour in a diff.
+        IntroResponse resp = submitFreeText("\u093E\u094D");
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("Issue reason can only contain letters, numbers, and spaces.", resp.getMessage());
+        org.mockito.Mockito.verifyNoInteractions(telemetryTenantRepository);
+        org.mockito.Mockito.verifyNoInteractions(telemetryEventPublisher);
+    }
+
+    @Test
+    void issueReportSubmitRejectsFreeTextWhoseSecondWordStartsWithACombiningMark() {
+        // The per-token rule: a leading base character on the first word must not license a
+        // mark-only token after the space.
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
+        stubLocalisedRejection("Issue report could not be saved.");
+
+        IntroResponse resp = submitFreeText("water \u094Dhidden");
+
+        assertEquals(false, resp.isSuccess());
+        org.mockito.Mockito.verifyNoInteractions(telemetryTenantRepository);
+    }
+
+    @Test
+    void issueReportSubmitStillAcceptsDevanagariWhereEveryMarkFollowsItsConsonant() {
+        // The other half of the per-token rule, and the one that matters: real Hindi is
+        // Lo Mc Lo Mc … so tightening the pattern must not have re-broken it. "पानी" is
+        // प + ा + न + ी — three of those four characters sit after a base.
+        stubOperator();
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of());
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+
+        IntroResponse resp = submitFreeText("मीटर में पानी नहीं");
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).createTenantAnomalyRecord(
+                eq("tenant_test"),
+                eq(1L),
+                eq(10L),
+                eq(AnomalyConstants.TYPE_NO_SUBMISSION),
+                eq("मीटर में पानी नहीं"),
+                eq(AnomalyConstants.STATUS_OPEN)
+        );
+    }
+
+    // ── Resolved-reason length (analytics VARCHAR(255) sink) ────────────────────────────────────
+    //
+    // IssueReportRequest caps what the operator types, so these cover the reasons that are not
+    // operator input: labels resolved out of tenant configuration, which arrive unmeasured.
+
+    @Test
+    void issueReportSubmitRejectsAnOverLengthTenantConfiguredLabelInsteadOfTruncatingIt() {
+        stubOperator();
+        String overLength = "a".repeat(IssueReportRequest.MAX_ISSUE_REASON_LENGTH + 1);
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of(overLength));
+        when(localizationService.resolveLanguageKeyForContact("919999999999")).thenReturn("english");
+        // The over-length message is deliberately outside the localiser's allowlist: a tenant has
+        // to fix the label, so the operator sees the caller's generic reply.
+        when(localizationService.resolveUserFacingErrorMessage(
+                org.mockito.ArgumentMatchers.any(),
+                eq("Issue report could not be saved."),
+                eq("english")
+        )).thenReturn("Issue report could not be saved.");
+
+        IntroResponse resp = submitFreeText("1");
+
+        assertEquals(false, resp.isSuccess());
+        assertEquals("Issue report could not be saved.", resp.getMessage());
+        // Rejected before the write, and rejected whole — no truncated row, no partial reason
+        // published to analytics.
+        verify(telemetryTenantRepository, never()).createIssueReportRecord(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()
+        );
+        org.mockito.Mockito.verifyNoInteractions(telemetryEventPublisher);
+    }
+
+    @Test
+    void issueReportSubmitAcceptsATenantLabelExactlyAtTheLengthCap() {
+        // The boundary, so the guard cannot drift to >= and start rejecting a label that stores.
+        stubOperator();
+        String atCap = "a".repeat(IssueReportRequest.MAX_ISSUE_REASON_LENGTH);
+        when(templatesService.resolveScreenReasons(1, "ISSUE_REPORT")).thenReturn(List.of());
+        when(tenantConfigRepository.findIssueReportReasons(1, "english")).thenReturn(List.of(atCap));
+        when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
+
+        IntroResponse resp = submitFreeText("1");
+
+        assertEquals(true, resp.isSuccess());
+        verify(telemetryTenantRepository).createIssueReportRecord(
+                eq("tenant_test"),
+                eq(10L),
+                eq(1L),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                eq(atCap)
+        );
+    }
+
+    @Test
+    void telemetryIssueReportSubmitRejectsAnOverLengthSupplyOutageReasonName() {
+        // The SUPPLY_OUTAGE_REASONS branch resolves its reason from tenant JSON and previously
+        // applied no validation at all before publishing it.
+        stubOperator();
+        String overLength = "a".repeat(IssueReportRequest.MAX_ISSUE_REASON_LENGTH + 1);
+        when(tenantConfigRepository.findConfigValue(1, "SUPPLY_OUTAGE_REASONS")).thenReturn(
+                Optional.of("{\"reasons\":[{\"id\":\"r1\",\"name\":\"" + overLength + "\",\"sequenceOrder\":1}]}")
+        );
+        when(localizationService.resolveLanguageKeyForContact("919999999999")).thenReturn("english");
+        when(localizationService.resolveUserFacingErrorMessage(
+                org.mockito.ArgumentMatchers.any(),
+                eq("Issue report could not be saved."),
+                eq("english")
+        )).thenReturn("Issue report could not be saved.");
+
+        IntroResponse resp = service.issueReportTelemetrySubmitMessage(IssueReportRequest.builder()
+                .contactId("919999999999")
+                .issueReason("1")
+                .build());
+
+        assertEquals(false, resp.isSuccess());
+        verify(telemetryTenantRepository, never()).upsertPendingIssueReportRecord(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString()
+        );
+        org.mockito.Mockito.verifyNoInteractions(telemetryEventPublisher);
+    }
+
+    @Test
     void issueReportSubmitAcceptsATenantConfiguredLabelContainingPunctuation() {
         // The regression test that protects the matchedConfiguredReason discriminator. Tenant
         // labels come from the database and may contain punctuation the allowlist forbids;
