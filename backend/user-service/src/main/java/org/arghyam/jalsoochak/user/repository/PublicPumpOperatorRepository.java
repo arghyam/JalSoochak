@@ -1093,6 +1093,12 @@ public class PublicPumpOperatorRepository {
         return results;
     }
 
+    /**
+     * Total for {@link #listPumpOperatorsBySchemeWithCompliance}, which paginates over readings —
+     * one row per reading, not per operator. The count is therefore over {@code fr.id} rather than
+     * the operator: counting distinct operators made an operator's every reading after the first
+     * unreachable, since the page holding it was rejected as past the end of a shorter total.
+     */
     public long countPumpOperatorsBySchemeWithCompliance(
             String schemaName,
             long schemeId,
@@ -1133,7 +1139,7 @@ public class PublicPumpOperatorRepository {
                       AND GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date))
                           <= LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE))
                 )
-                SELECT COUNT(DISTINCT l.id)
+                SELECT COUNT(DISTINCT fr.id)
                 FROM windowed_mapping l
                 JOIN %s.flow_reading_table fr
                   ON fr.created_by = l.id

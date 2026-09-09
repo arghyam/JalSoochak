@@ -221,6 +221,29 @@ class PublicPumpOperatorServiceImplTest {
             assertThat(page.getContent()).hasSize(1);
         }
 
+        /**
+         * The listing pages over readings while the count once counted operators, so an operator's
+         * second reading sat on a page the shorter total declared out of range and could never be
+         * fetched. Both now speak in readings.
+         */
+        @Test
+        @DisplayName("serves the second reading of a single operator at page 1 of size 1")
+        void returnsSecondReadingOfSingleOperator() {
+            List<PumpOperatorSchemeComplianceRowDTO> secondReading = List.of(
+                    PumpOperatorSchemeComplianceRowDTO.builder().id(9L).build()
+            );
+            when(repository.countPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null)).thenReturn(2L);
+            when(repository.listPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null, 1, 1))
+                    .thenReturn(secondReading);
+
+            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
+                    service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, 9L, null, null, 1, 1);
+
+            assertThat(page.getContent()).hasSize(1);
+            assertThat(page.getTotalElements()).isEqualTo(2);
+            assertThat(page.getTotalPages()).isEqualTo(2);
+        }
+
         @Test
         @DisplayName("skips the row query when the requested page starts past the last row")
         void skipsRowQueryForOutOfRangePage() {

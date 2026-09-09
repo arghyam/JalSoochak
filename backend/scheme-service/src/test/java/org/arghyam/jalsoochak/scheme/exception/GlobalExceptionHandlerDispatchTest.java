@@ -1,16 +1,22 @@
 package org.arghyam.jalsoochak.scheme.exception;
 
 import org.arghyam.jalsoochak.scheme.controller.PublicSchemeController;
+import org.arghyam.jalsoochak.scheme.dto.SchemeDTO;
 import org.arghyam.jalsoochak.scheme.repository.SchemeDbRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -52,6 +58,23 @@ class GlobalExceptionHandlerDispatchTest {
     @Test
     void wrongHttpMethodIsMethodNotAllowedNotServerError() throws Exception {
         mockMvc().perform(post("/api/v1/public/schemes/11").param("tenantCode", "KA"))
-                .andExpect(status().isMethodNotAllowed());
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(header().string(HttpHeaders.ALLOW, "GET"));
+    }
+
+    /**
+     * The caller accepts nothing this service produces. Without a mapping for it the catch-all
+     * answers 500 and then fails to write that body for the same reason, so the assertion on the
+     * empty body matters as much as the status.
+     */
+    @Test
+    void unacceptableAcceptHeaderIsNotAcceptableNotServerError() throws Exception {
+        when(schemeDbRepository.findSchemeById("tenant_ka", 11)).thenReturn(SchemeDTO.builder().id(11).build());
+
+        mockMvc().perform(get("/api/v1/public/schemes/11")
+                        .param("tenantCode", "KA")
+                        .accept(MediaType.APPLICATION_PDF))
+                .andExpect(status().isNotAcceptable())
+                .andExpect(content().string(""));
     }
 }

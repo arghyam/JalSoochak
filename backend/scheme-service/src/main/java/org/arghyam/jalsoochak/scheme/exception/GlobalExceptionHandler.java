@@ -3,10 +3,12 @@ package org.arghyam.jalsoochak.scheme.exception;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.scheme.dto.ApiErrorResponseDTO;
 import org.arghyam.jalsoochak.scheme.dto.SchemeUploadErrorDTO;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -127,9 +129,14 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Media type not supported: " + ex.getContentType(), List.of());
     }
 
+    /**
+     * Carries the exception's own headers through to the response: RFC 9110 requires a 405 to name
+     * the methods the resource does support in {@code Allow}, and Spring puts them there — dropping
+     * them leaves the caller with no way to discover the right verb.
+     */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiErrorResponseDTO> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
-        return build(HttpStatus.METHOD_NOT_ALLOWED, ex.getMessage(), List.of());
+        return build(HttpStatus.METHOD_NOT_ALLOWED, ex.getMessage(), List.of(), ex.getHeaders());
     }
 
     /**
@@ -139,6 +146,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiErrorResponseDTO> handleNoResourceFound(NoResourceFoundException ex) {
         return build(HttpStatus.NOT_FOUND, "Resource not found", List.of());
+    }
+
+    /**
+     * The caller accepts no media type this service can produce. Answered without a body on
+     * purpose: an {@link ApiErrorResponseDTO} here would have to be written as JSON, which is
+     * exactly what the caller refused, and the write would raise this same exception again from
+     * inside the resolver — where nothing is left to catch it and the response degrades to a 500.
+     */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleMediaTypeNotAcceptable(HttpMediaTypeNotAcceptableException ex) {
+        log.warn("No acceptable representation for request: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).build();
     }
 
     @ExceptionHandler(Exception.class)
@@ -152,6 +171,15 @@ public class GlobalExceptionHandler {
             String message,
             List<SchemeUploadErrorDTO> errors
     ) {
+        return build(status, message, errors, HttpHeaders.EMPTY);
+    }
+
+    private ResponseEntity<ApiErrorResponseDTO> build(
+            HttpStatus status,
+            String message,
+            List<SchemeUploadErrorDTO> errors,
+            HttpHeaders headers
+    ) {
         ApiErrorResponseDTO body = ApiErrorResponseDTO.builder()
                 .timestamp(OffsetDateTime.now())
                 .status(status.value())
@@ -159,6 +187,6 @@ public class GlobalExceptionHandler {
                 .message(message)
                 .errors(errors)
                 .build();
-        return ResponseEntity.status(status).body(body);
+        return ResponseEntity.status(status).headers(headers).body(body);
     }
 }
