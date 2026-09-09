@@ -369,6 +369,17 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
                     repo.listReadingCompliance(SCHEMA, 2, 2);
             assertThat(page2).hasSize(1);
         }
+
+        @Test
+        @DisplayName("accepts an offset beyond Integer.MAX_VALUE")
+        void acceptsOffsetBeyondIntegerRange() {
+            insertPumpOperator("919876540020", "PO Wide Offset");
+
+            List<PumpOperatorReadingComplianceRowDTO> result =
+                    repo.listReadingCompliance(SCHEMA, Integer.MAX_VALUE + 1L, 10);
+
+            assertThat(result).isEmpty();
+        }
     }
 
     // ── countReadingCompliance ────────────────────────────────────────────────
@@ -417,7 +428,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         }
 
         @Test
-        @DisplayName("returns count of distinct operators with at least one reading in scheme")
+        @DisplayName("counts readings, not operators, so it matches what the listing pages over")
         void returnsCorrectCountWithReadings() {
             long poId = insertPumpOperator("919876540021", "PO Read Compliance");
             backdateUserCreatedAt(poId, 10);
@@ -426,7 +437,9 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(2));
             insertReading(schemeId, poId, 200.0, LocalDate.now().minusDays(1));
 
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null)).isEqualTo(1);
+            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null)).isEqualTo(2);
+            assertThat(repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 100))
+                    .hasSize(2);
         }
     }
 

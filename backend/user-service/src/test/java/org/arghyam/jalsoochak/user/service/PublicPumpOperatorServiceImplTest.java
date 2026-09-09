@@ -1,6 +1,7 @@
 package org.arghyam.jalsoochak.user.service;
 
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
+import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
@@ -22,6 +23,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -158,6 +164,42 @@ class PublicPumpOperatorServiceImplTest {
             assertThat(page.getSize()).isEqualTo(100);
             verify(repository).listReadingCompliance("tenant_mp", 0, 100);
         }
+
+        @Test
+        @DisplayName("skips the row query when the requested page starts past the last row")
+        void skipsRowQueryForOutOfRangePage() {
+            when(repository.countReadingCompliance("tenant_mp")).thenReturn(40L);
+
+            assertThatThrownBy(() -> service.listReadingCompliance("mp", 999, 20))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("out of range");
+
+            verify(repository, never()).listReadingCompliance(anyString(), anyLong(), anyInt());
+        }
+
+        @Test
+        @DisplayName("still queries the first page of an empty tenant")
+        void queriesFirstPageWhenTotalIsZero() {
+            when(repository.listReadingCompliance("tenant_mp", 0, 20)).thenReturn(List.of());
+            when(repository.countReadingCompliance("tenant_mp")).thenReturn(0L);
+
+            PageResponseDTO<PumpOperatorReadingComplianceRowDTO> page = service.listReadingCompliance("mp", 0, 20);
+
+            assertThat(page.getContent()).isEmpty();
+            verify(repository).listReadingCompliance("tenant_mp", 0, 20);
+        }
+
+        @Test
+        @DisplayName("computes offsets past Integer.MAX_VALUE without overflowing")
+        void computesLargeOffsetWithoutOverflow() {
+            long expectedOffset = 200_000_000L * 20L;
+            when(repository.countReadingCompliance("tenant_mp")).thenReturn(expectedOffset + 5);
+            when(repository.listReadingCompliance("tenant_mp", expectedOffset, 20)).thenReturn(List.of());
+
+            service.listReadingCompliance("mp", 200_000_000, 20);
+
+            verify(repository).listReadingCompliance("tenant_mp", expectedOffset, 20);
+        }
     }
 
     @Nested
@@ -177,6 +219,42 @@ class PublicPumpOperatorServiceImplTest {
                     service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, 9L, null, null, 0, 20);
 
             assertThat(page.getContent()).hasSize(1);
+        }
+
+        /**
+         * The listing pages over readings while the count once counted operators, so an operator's
+         * second reading sat on a page the shorter total declared out of range and could never be
+         * fetched. Both now speak in readings.
+         */
+        @Test
+        @DisplayName("serves the second reading of a single operator at page 1 of size 1")
+        void returnsSecondReadingOfSingleOperator() {
+            List<PumpOperatorSchemeComplianceRowDTO> secondReading = List.of(
+                    PumpOperatorSchemeComplianceRowDTO.builder().id(9L).build()
+            );
+            when(repository.countPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null)).thenReturn(2L);
+            when(repository.listPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null, 1, 1))
+                    .thenReturn(secondReading);
+
+            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
+                    service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, 9L, null, null, 1, 1);
+
+            assertThat(page.getContent()).hasSize(1);
+            assertThat(page.getTotalElements()).isEqualTo(2);
+            assertThat(page.getTotalPages()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("skips the row query when the requested page starts past the last row")
+        void skipsRowQueryForOutOfRangePage() {
+            when(repository.countPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, null, null, null)).thenReturn(40L);
+
+            assertThatThrownBy(() -> service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, null, null, null, 999, 20))
+                    .isInstanceOf(BadRequestException.class)
+                    .hasMessageContaining("out of range");
+
+            verify(repository, never()).listPumpOperatorsBySchemeWithCompliance(
+                    anyString(), anyLong(), any(), any(), any(), anyLong(), anyInt());
         }
     }
 
