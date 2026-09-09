@@ -62,7 +62,7 @@ Any of these and the reading is served exactly as it was before the check existe
 
 | Condition | Why |
 | --- | --- |
-| `mode` is `OFF`, or `AUDIT` | See §3 |
+| `mode` is `OFF` | See §3. (`AUDIT` still evaluates — it just does not act on the result) |
 | Tenant schema predates the V40 migration | No column to mark the row with |
 | Channel is not BFM | Only BFM readings are cumulative m³ indices; the delta is not a volume otherwise |
 | Meter was replaced | The delta across a meter swap is meaningless |

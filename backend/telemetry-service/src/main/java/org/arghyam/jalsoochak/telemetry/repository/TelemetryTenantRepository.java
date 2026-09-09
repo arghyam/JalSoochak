@@ -1465,9 +1465,19 @@ public class TelemetryTenantRepository {
      * so it must not become the baseline the next day's delta is measured against.
      */
     private String quarantineFilter(String schemaName) {
-        return columnExists(schemaName, "flow_reading_table", "quarantine_reason")
-                ? "\n                  AND quarantine_reason = 0"
-                : "";
+        return quarantineFilter(schemaName, null);
+    }
+
+    /**
+     * The same predicate qualified by a table alias, for the joined lookups where an unqualified
+     * {@code quarantine_reason} would be ambiguous.
+     */
+    private String quarantineFilter(String schemaName, String alias) {
+        if (!columnExists(schemaName, "flow_reading_table", "quarantine_reason")) {
+            return "";
+        }
+        String qualifier = alias == null ? "" : alias + ".";
+        return "\n                  AND " + qualifier + "quarantine_reason = 0";
     }
 
     /**
@@ -1991,6 +2001,11 @@ public class TelemetryTenantRepository {
      * consumption delta. Only real readings qualify ({@code confirmed_reading > 0}) — a placeholder or
      * issue-report row as the baseline would make the delta the whole cumulative meter value. The
      * target side stays unfiltered: it is addressed by id, not searched for.
+     *
+     * <p>SUPPLY-PLAUSIBILITY: the baseline side also excludes quarantined rows, like every other
+     * baseline lookup here. A quarantined row was never published, so analytics measures its next
+     * delta from the last row that <em>was</em>; taking it as the baseline on this path would
+     * publish a water quantity the warehouse cannot reproduce.
      */
     public Optional<TelemetryCompletedFlowReading> findPreviousFlowReadingForScheme(String schemaName,
                                                                                     Long readingId) {
@@ -2006,7 +2021,7 @@ public class TelemetryTenantRepository {
                   ON target.id = ?
                 WHERE fr.scheme_id = target.scheme_id
                   AND fr.confirmed_reading > 0
-                  AND fr.deleted_at IS NULL
+                  AND fr.deleted_at IS NULL%3$s
                   AND target.deleted_at IS NULL
                   AND (
                         fr.reading_date < target.reading_date
@@ -2026,7 +2041,7 @@ public class TelemetryTenantRepository {
                   )
                 ORDER BY fr.reading_date DESC, fr.%2$s DESC, fr.created_at DESC, fr.id DESC
                 LIMIT 1
-                """, schemaName, timeColumn);
+                """, schemaName, timeColumn, quarantineFilter(schemaName, "fr"));
         List<TelemetryCompletedFlowReading> rows = jdbcTemplate.query(
                 sql,
                 (rs, n) -> new TelemetryCompletedFlowReading(
