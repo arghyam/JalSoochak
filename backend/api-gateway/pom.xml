@@ -44,11 +44,12 @@
             <!--
                 Security pin — audit finding: outdated DOMPurify in
                 /webjars/swagger-ui/swagger-ui-bundle.js.
-                springdoc-openapi 2.5.0 pulls org.webjars:swagger-ui 5.13.0, which bundles
-                DOMPurify 3.0.11 (CVE-2024-45801, CVE-2024-47875, CVE-2025-26791 + 17 more).
+                springdoc-openapi 2.6.0 resolves org.webjars:swagger-ui 5.17.14, which bundles
+                DOMPurify 3.1.4 (CVE-2025-26791 and 19 further advisories at the time of writing).
+                The pinned 5.32.14 bundles DOMPurify 3.4.13, against which none are reported.
                 Bumping springdoc itself to 2.9.1 would require Spring Boot 3.5.x.
                 MUST stay in sync with springdoc.swagger-ui.version in application.yml —
-                springdoc 2.5.0 hardcodes 5.13.0 in springdoc.config.properties and uses it to
+                springdoc 2.6.0 hardcodes 5.17.14 in springdoc.config.properties and uses it to
                 build the webjar resource path, so a mismatch 404s every Swagger UI asset.
             -->
             <dependency>
