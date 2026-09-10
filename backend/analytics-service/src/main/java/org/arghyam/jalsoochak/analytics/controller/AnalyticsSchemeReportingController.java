@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusBreakdownResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
@@ -144,7 +145,7 @@ public class AnalyticsSchemeReportingController {
     }
     @GetMapping("/schemes/status-count")
     @Operation(
-            summary = "Get active and inactive scheme count for an LGD or department area",
+            summary = "Get scheme counts by work status and operating status for an LGD or department area",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",
@@ -175,7 +176,7 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
-    public ResponseEntity<ApiResponse<Map<String, Integer>>> getSchemeStatusCount(
+    public ResponseEntity<ApiResponse<SchemeStatusBreakdownResponse>> getSchemeStatusCount(
             @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "lgd_id", required = false) Integer lgdId,
             @RequestParam(name = "department_id", required = false) Integer departmentId) {
@@ -187,21 +188,21 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("Provide either lgd_id or department_id");
             }
 
-            Map<String, Integer> data = (lgdId != null)
+            SchemeStatusBreakdownResponse data = (lgdId != null)
                     ? schemeRegularityService.getSchemeStatusCountByLgd(tenantId, lgdId)
                     : schemeRegularityService.getSchemeStatusCountByDepartment(tenantId, departmentId);
 
-            return ResponseEntity.ok(ApiResponse.<Map<String, Integer>>builder()
+            return ResponseEntity.ok(ApiResponse.<SchemeStatusBreakdownResponse>builder()
                     .success(true)
                     .data(data)
                     .build());
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(ApiResponse.<Map<String, Integer>>builder()
+            return ResponseEntity.badRequest().body(ApiResponse.<SchemeStatusBreakdownResponse>builder()
                     .success(false)
                     .data(null)
                     .build());
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<Map<String, Integer>>builder()
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<SchemeStatusBreakdownResponse>builder()
                     .success(false)
                     .data(null)
                     .build());
@@ -555,7 +556,7 @@ public class AnalyticsSchemeReportingController {
 
     @GetMapping("/schemes/dashboard")
     @Operation(
-            summary = "Get active/inactive scheme count and top-N schemes by reporting rate for a parent LGD or parent department",
+            summary = "Get scheme counts by work status and operating status, plus top-N schemes by reporting rate, for a parent LGD or parent department",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",

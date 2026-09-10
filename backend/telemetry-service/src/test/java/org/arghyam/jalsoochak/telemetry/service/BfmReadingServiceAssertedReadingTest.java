@@ -7,6 +7,8 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
+import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -80,7 +82,9 @@ class BfmReadingServiceAssertedReadingTest {
                 glificOperatorContextService,
                 null,
                 readingChannelResolver,
-                new RolloverResolutionService(true, new ObjectMapper()));
+                new RolloverResolutionService(true, new ObjectMapper()),
+                SupplyPlausibilityFixtures.guard(
+                        SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository));
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
@@ -91,16 +95,18 @@ class BfmReadingServiceAssertedReadingTest {
     }
 
     @Test
-    @DisplayName("an API-supplied value is stored with EXTERNALLY_ASSERTED provenance")
+    @DisplayName("an API-supplied value is stored with EXTERNALLY_ASSERTED provenance and a 0 extracted_reading")
     void suppliedValueIsMarkedAsExternallyAsserted() {
         stubPersistence();
 
         service.createReading(assertedRequest(new BigDecimal("150")), SCHEMA, operator, CONTACT, false);
 
         verify(repo).persistFlowReadingWithTracking(eq(SCHEMA), isNull(), eq(SCHEME_ID), eq(OPERATOR_ID),
-                any(LocalDateTime.class), eq(new BigDecimal("150")), eq(new BigDecimal("150")), anyString(),
+                any(LocalDateTime.class), eq(BigDecimal.ZERO), eq(new BigDecimal("150")), anyString(),
                 isNull(), isNull(), isNull(), eq(IngestionSource.NORMAL), isNull(), isNull(), isNull(),
-                eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED));
+                eq(RolloverResolutionService.SOURCE_EXTERNALLY_ASSERTED),
+                // SUPPLY-PLAUSIBILITY: unchecked path, so the row carries no quarantine marker.
+                isNull());
     }
 
     @Test
@@ -157,6 +163,44 @@ class BfmReadingServiceAssertedReadingTest {
                 any(), any());
     }
 
+    @Test
+    @DisplayName("an API-supplied value is published with no extracted_reading at all")
+    void suppliedValueIsPublishedWithoutAnExtractedReading() {
+        stubPersistence();
+
+        service.createReading(assertedRequest(new BigDecimal("150")), SCHEMA, operator, CONTACT, false);
+
+        // A null extracted_reading keeps the row out of both dashboard buckets (compliant =
+        // extracted == confirmed, anomalous = extracted <> confirmed). Publishing 0 instead would
+        // count every API submission as an operator overriding the AI.
+        verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
+                eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
+                any(LocalDateTime.class), anyInt(), any(LocalDate.class), eq(1), eq(0));
+    }
+
+    @Test
+    @DisplayName("an API-supplied value equal to the last confirmed reading is not a duplicate image")
+    void suppliedValueMatchingThePreviousConfirmedReadingIsAccepted() {
+        stubPersistence();
+
+        // 140 is the scheme's last confirmed reading (see setUp): a genuine zero-consumption day.
+        // The duplicate-image guard compares what FlowVision read off the photo, and FlowVision never
+        // ran here, so it must not fire even though an image URL rode along with the submission.
+        CreateReadingResponse response = service.createReading(
+                CreateReadingRequest.builder()
+                        .schemeId(SCHEME_ID)
+                        .operatorId(OPERATOR_ID)
+                        .readingValue(new BigDecimal("140"))
+                        .readingUrl("https://img.example.com/a.jpg")
+                        .externallyAsserted(true)
+                        .build(),
+                SCHEMA, operator, CONTACT, false);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getErrorCode()).isNull();
+        verify(flowVisionService, org.mockito.Mockito.never()).extractReading(anyString());
+    }
+
     private static CreateReadingRequest assertedRequest(BigDecimal value) {
         return CreateReadingRequest.builder()
                 .schemeId(SCHEME_ID)
@@ -171,7 +215,7 @@ class BfmReadingServiceAssertedReadingTest {
                 any(LocalDate.class))).thenReturn(Optional.empty());
         when(repo.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(LocalDateTime.class), any(BigDecimal.class), any(BigDecimal.class), anyString(), any(),
-                any(), any(), anyInt(), any(), any(), any(), any()))
+                any(), any(), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(99L);
     }
 }

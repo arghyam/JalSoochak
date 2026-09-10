@@ -25,8 +25,8 @@ public class SchemeRegularityListResponse {
     private LocalDate endDate;
     private Integer daysInRange;
     private Integer totalSchemeCount;
-    private Integer activeSchemeCount;
-    private Integer inactiveSchemeCount;
+    private List<SchemeStatusCountDTO> workStatusCounts;
+    private List<SchemeStatusCountDTO> operatingStatusCounts;
     private Integer schemeCountInResponse;
     private List<SchemeMetrics> schemes;
 
@@ -39,8 +39,8 @@ public class SchemeRegularityListResponse {
         private String schemeName;
         private Integer stateSchemeId;
         private Integer centreSchemeId;
-        private Integer statusCode;
-        private String status;
+        private SchemeStatusDTO workStatus;
+        private SchemeStatusDTO operatingStatus;
         private Integer supplyDays;
         private BigDecimal averageRegularity;
         /** Whether this scheme met the regularity threshold over the window (additive; rate unchanged). */

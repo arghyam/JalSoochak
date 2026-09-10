@@ -23,10 +23,10 @@ The corrected value for a row is a pure function of the readings:
 
 which is why this is one uniform recompute-from-readings rather than two targeted
 patches. fact_water_quantity_table holds rows from three writers (the pre-go-live
-backfill_water_quantity.sql, live ingestion, and the telemetry correction path — the last
-of which already applied the *correct* delta rule), and a recompute lands on the right
-answer for all three. Trying to identify "rows with the baseline bug" and separately
-"multiply everything by 1000" would double-apply on the third.
+backfill_water_quantity.sql, live ingestion, and the telemetry correction path), and a
+recompute lands on the right answer for the two reading-derived ones. Trying to identify
+"rows with the baseline bug" and separately "multiply everything by 1000" would
+double-apply on any row already written in litres.
 
 The recompute is therefore idempotent, cannot double-apply, and agrees exactly with what
 the deployed code now writes — so a reading arriving mid-run is harmless: it fails this
@@ -40,6 +40,44 @@ live ingestion. It is not duplicated here.
 Run this AFTER deploying analytics-service (Flyway V45 widens the column to BIGINT).
 Running it before would leave live ingestion writing cubic metres into a litre table for
 the same days.
+
+Case classification
+-------------------
+Every in-window row is classified into exactly one case. The classification is evaluated
+in the order below, so the codes are mutually exclusive:
+
+  A1  no reading row on the date at all               SKIP  — nothing to derive a volume from
+  A2  reading row exists, confirmed_reading IS NULL    SKIP  — unconfirmed; becomes derivable
+                                                              once someone confirms it (V15
+                                                              made the column nullable, so
+                                                              this is genuinely reachable)
+  B1  first-ever reading for the scheme                apply 0
+  B2  earlier readings exist, none usable as a         apply 0
+      baseline (all <= 0 or NULL)
+  C3  current < previous — meter rollover or           apply 0  LOSSY: the day's real supply
+      replacement, clamped by GREATEST(0, ...)                  cannot be recovered
+  C4  recomputes above the implausible threshold       SKIP  — a bad reading, not a bad
+                                                              recompute. Applying it would
+                                                              bake a garbage value in at
+                                                              1000x its current size.
+  C2  a gap precedes the date (previous_date < D-1)    apply — the multi-day delta
+  C1  contiguous previous day, plausible               apply — the ordinary case
+
+A1, A2 and C4 are left holding their pre-repair value, which for a historical row means
+they stay in CUBIC METRES. Skipping does not make them correct; it makes them unchanged
+and reported. Fix the underlying readings and re-run to pick them up.
+
+Every row the repair declines to touch (A1, A2, C4) is written to an Excel workbook — the
+run artefact — together with the full case split, the pre-flight checks, and the
+future-dated rows. The applied-but-notable cases (B2, C3, long gaps, duplicates) are
+reported as counts on the Summary sheet only; they are all still queryable from
+public.fact_water_quantity_recompute by case_code / gap_days / is_latest.
+
+Phase 3 refuses to run when a scheme's dim_scheme rows disagree on
+fhtc_count/house_hold_count, because the score formula then has more than one answer per
+(scheme, date) and UPDATE ... FROM would pick one arbitrarily — the same replay would give
+different scores run to run. --dim-drift-use-latest resolves that deterministically by
+scoring each scheme from its most recently updated dim_scheme row.
 
 Phases
 ------
@@ -59,8 +97,7 @@ Usage
 -----
   export ANALYTICS_DSN='host=localhost port=5432 dbname=shared_db user=postgres password=...'
 
-  # what would change? review public.fact_water_quantity_recompute afterwards,
-  # especially the exception list this prints
+  # what would change? review the Excel workbook it writes, especially the skipped cases
   python3 scripts/water_quantity_units_fix.py --dry-run
 
   # apply it, then check
@@ -74,8 +111,20 @@ Usage
   # undo
   python3 scripts/water_quantity_units_fix.py --rollback --backup-suffix 20260903_181500
 
+Over a VPN, run this from a host inside the network under tmux, and put TCP keepalives in
+the DSN — phase 1 is a single long statement that looks idle at the TCP layer and gets
+reaped by NAT/VPN gateways otherwise:
+
+    keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=5
+
+Pre-create the phase-1 lookup index CONCURRENTLY before the run (see ensure_backfill_index):
+the in-script CREATE INDEX takes a SHARE lock that blocks every write to
+fact_meter_reading_table for the duration of the build. That is the only step in this
+script with meaningful downtime.
+
 After --execute, flush the Redis dashboard keys: SchemeRegularityServiceImpl caches for
-24h, so stale 1000x-low values would keep being served for a full day otherwise.
+24h, so stale 1000x-low values would keep being served for a full day otherwise. Then
+VACUUM (ANALYZE) the water table — a full-table UPDATE leaves one dead tuple per row.
 """
 
 from __future__ import annotations
@@ -102,9 +151,26 @@ RECOMPUTE_SQL_PATH = (REPO_ROOT / "backend" / "analytics-service" / "src" / "mai
 
 WATER_TABLE = "analytics_schema.fact_water_quantity_table"
 PERFORMANCE_TABLE = "analytics_schema.fact_scheme_performance_table"
+READING_TABLE = "analytics_schema.fact_meter_reading_table"
+SCHEME_TABLE = "analytics_schema.dim_scheme_table"
 RECOMPUTE_TABLE = "public.fact_water_quantity_recompute"
 
 SAFE_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+# Every case the classifier can emit: code -> (skipped_by_design, one-line meaning).
+# Ordered as the SQL evaluates them, which is also the order they are reported in.
+CASE_CATALOGUE: dict[str, tuple[bool, str]] = {
+    "A1": (True, "No reading row on the date at all — no derivable volume"),
+    "A2": (True, "Reading row exists but confirmed_reading IS NULL — unconfirmed"),
+    "B1": (False, "First-ever reading for the scheme — no baseline, correctly 0"),
+    "B2": (False, "Earlier readings exist but none usable as a baseline — correctly 0"),
+    "C3": (False, "current < previous (meter rollover/replacement) — clamped to 0, LOSSY"),
+    "C4": (True, "Recomputes above the implausible threshold — bad reading, left unchanged"),
+    "C2": (False, "A gap precedes the date — delta spans more than one day"),
+    "C1": (False, "Contiguous previous day, plausible — the ordinary case"),
+}
+
+SKIPPED_CASES = tuple(code for code, (skipped, _) in CASE_CATALOGUE.items() if skipped)
 
 # Mirrors SchemePerformanceSchedulerRepository.insertDailySchemePerformanceScores. Kept as one
 # expression so the replay cannot disagree with the scheduler on the thresholds; the "5" is the
@@ -120,6 +186,41 @@ PERFORMANCE_SCORE_CASE = """
         ELSE 1.0
     END
 """
+
+# Columns every detail sheet carries, in order. Shared so the workbook reads uniformly and so a
+# reviewer can pivot one sheet against another without re-mapping headers.
+DETAIL_COLUMNS = [
+    "id", "tenant_id", "scheme_id", "date", "case_code", "skipped_by_design",
+    "old_qty", "new_qty", "current_reading", "previous_reading", "previous_date",
+    "gap_days", "is_latest", "is_future_dated",
+]
+
+# (sheet name, WHERE predicate over RECOMPUTE_TABLE, ORDER BY, why it is in the workbook).
+# Table-driven so adding a newly discovered edge case is one tuple, not a new function.
+DETAIL_SHEETS = [
+    ("A - No Usable Reading",
+     "case_code IN ('A1','A2')",
+     "old_qty DESC, id",
+     "SKIPPED. No reading to derive from, so these keep their pre-repair value — which for a "
+     "historical row means they are still in CUBIC METRES. A2 becomes repairable once the "
+     "reading is confirmed; re-run then."),
+    ("C4 - Implausible",
+     "case_code = 'C4'",
+     "new_qty DESC, id",
+     "SKIPPED. The recompute is correct but the underlying confirmed_reading is not — typically "
+     "a digit inserted during extraction. Fix the reading in fact_meter_reading_table and re-run; "
+     "until then these stay in CUBIC METRES."),
+    ("Future Dated",
+     "is_future_dated",
+     "date DESC, id",
+     "APPLIED. These rows are dated after today — a pre-existing data-quality problem this script "
+     "neither causes nor fixes. Listed so the repair is not blamed for them."),
+]
+
+# B2, C3, long gaps, duplicates and dim-scheme drift are deliberately NOT dumped as detail sheets:
+# every one of them is applied (or, for drift, resolved by --dim-drift-use-latest), so a reviewer
+# needs the count, not the rows. Their counts stay on the Summary sheet, and every one of them is
+# still queryable from RECOMPUTE_TABLE by case_code / gap_days / is_latest.
 
 
 # --------------------------------------------------------------------------------------
@@ -201,7 +302,7 @@ def _backup_covers_window(conn, backup_table: str, live_table: str, date_column:
     return covered_count == live_count
 
 
-def backup(conn, suffix: str, start: dt.date, end: dt.date, overwrite: bool) -> None:
+def backup(conn, suffix: str, start: dt.date, end: dt.date, overwrite: bool) -> dict:
     water_backup = f"public.fact_water_quantity_backup_{suffix}"
     performance_backup = f"public.fact_scheme_performance_backup_{suffix}"
 
@@ -252,6 +353,103 @@ def backup(conn, suffix: str, start: dt.date, end: dt.date, overwrite: bool) -> 
     if water_rows == 0:
         LOG.warning("backed up ZERO water rows for %s..%s — check the window and the database",
                     start, end)
+    return {
+        "water_backup": water_backup,
+        "performance_backup": performance_backup,
+        "water_rows": water_rows,
+        "water_sum": water_sum,
+        "performance_rows": performance_rows,
+        "performance_sum": performance_sum,
+    }
+
+
+# --------------------------------------------------------------------------------------
+# pre-flight integrity checks
+# --------------------------------------------------------------------------------------
+
+def preflight(conn, start: dt.date, end: dt.date) -> list[dict]:
+    """Integrity checks for conditions this script's SQL silently tolerates.
+
+    None of these are produced by the repair — they are pre-existing states that change what the
+    repair means, or that a reviewer must know about before signing off. Each returns a count; a
+    non-zero count is not automatically fatal, so they are reported rather than enforced.
+    """
+    checks = [
+        ("water_quantity IS NULL",
+         f"SELECT COUNT(*) FROM {WATER_TABLE} WHERE date BETWEEN %s AND %s "
+         "AND water_quantity IS NULL",
+         (start, end),
+         "Phase 2's value guard (water_quantity = old_qty) is NULL-unsafe, so these rows would "
+         "be silently skipped and would not appear in any case bucket. Expect 0; if not, the "
+         "case counts will not sum to the total."),
+        ("water_quantity < 0",
+         f"SELECT COUNT(*) FROM {WATER_TABLE} WHERE date BETWEEN %s AND %s "
+         "AND water_quantity < 0",
+         (start, end),
+         "No writer should ever have produced a negative volume. Expect 0."),
+        ("schemes phase 3 will not score",
+         f"""SELECT COUNT(*) FROM (
+                 SELECT DISTINCT fwq.tenant_id, fwq.scheme_id
+                 FROM {WATER_TABLE} fwq
+                 WHERE fwq.date BETWEEN %s AND %s
+                   AND NOT EXISTS (
+                       SELECT 1 FROM {SCHEME_TABLE} ds
+                       WHERE ds.tenant_id = fwq.tenant_id AND ds.scheme_id = fwq.scheme_id
+                         AND ds.operating_status > 0)
+             ) x""",
+         (start, end),
+         "These schemes have water rows but no dim_scheme row with operating_status > 0, so "
+         "phase 3 leaves their performance scores computed against cubic metres."),
+        ("dim_scheme attribute drift",
+         f"""SELECT COUNT(*) FROM (
+                 SELECT tenant_id, scheme_id
+                 FROM {SCHEME_TABLE}
+                 GROUP BY tenant_id, scheme_id
+                 HAVING COUNT(DISTINCT COALESCE(fhtc_count, -1)) > 1
+                     OR COUNT(DISTINCT COALESCE(house_hold_count, -1)) > 1
+             ) x""",
+         None,
+         "dim_scheme_table legitimately holds several rows per scheme (V16/V24), but a scheme "
+         "whose rows DISAGREE on fhtc_count/house_hold_count yields several different candidate "
+         "scores in phase 3, and UPDATE ... FROM picks one arbitrarily. Expect 0; if not, run "
+         "scripts/dim_scheme_fanout_diagnostics.sql before phase 3."),
+        ("duplicate groups mixing NULL/non-NULL updated_at",
+         f"""SELECT COUNT(*) FROM (
+                 SELECT tenant_id, scheme_id, date
+                 FROM {WATER_TABLE}
+                 WHERE date BETWEEN %s AND %s
+                 GROUP BY tenant_id, scheme_id, date
+                 HAVING COUNT(*) > 1
+                    AND COUNT(*) FILTER (WHERE updated_at IS NULL) > 0
+                    AND COUNT(*) FILTER (WHERE updated_at IS NOT NULL) > 0
+             ) x""",
+         (start, end),
+         "backfill_water_quantity.sql inserted created_at but no updated_at, and the de-dup "
+         "ordering is updated_at DESC (NULLS FIRST), so those rows currently WIN their group. "
+         "Phase 2 stamps updated_at = NOW() on every changed row, flipping the winner. "
+         "water_quantity is unaffected (the whole group converges on one value), but user_id, "
+         "submission_status and outage_reason are read from whichever row wins."),
+        ("readings with a tied (date, reading_at)",
+         f"""SELECT COUNT(*) FROM (
+                 SELECT tenant_id, scheme_id, reading_date
+                 FROM {READING_TABLE}
+                 WHERE reading_date BETWEEN %s AND %s
+                 GROUP BY tenant_id, scheme_id, reading_date
+                 HAVING COUNT(*) > COUNT(DISTINCT reading_at)
+             ) x""",
+         (start, end),
+         "'The latest reading on the date' is resolved by reading_at DESC, id DESC. On a tie the "
+         "id breaks it — identical to the Java findTopBy...OrderByReadingAtDescIdDesc, so the "
+         "repair and live ingestion agree. Informational."),
+    ]
+
+    results = []
+    for name, sql, params, guidance in checks:
+        count = scalar(conn, sql, params)
+        results.append({"check": name, "count": count, "guidance": guidance})
+        log = LOG.warning if count else LOG.info
+        log("preflight: %-46s %s", name, count)
+    return results
 
 
 # --------------------------------------------------------------------------------------
@@ -267,11 +465,27 @@ def ensure_backfill_index(conn) -> None:
     scheme's whole reading history. It also matches the ORDER BY on
     FactMeterReadingRepository's findTopBy...ReadingDateOrderByReadingAtDescIdDesc and
     findLatestBefore, so it keeps paying for itself on the live ingestion path after the backfill.
+
+    NOTE: a plain CREATE INDEX takes a SHARE lock, which blocks every INSERT/UPDATE on
+    fact_meter_reading_table until the build finishes — the only step in this script with
+    meaningful downtime. On production, build it out-of-band first and let the IF NOT EXISTS
+    below turn this into a no-op:
+
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fact_meter_reading_tenant_scheme_date_lookup
+            ON analytics_schema.fact_meter_reading_table
+            (tenant_id, scheme_id, reading_date DESC, reading_at DESC, id DESC);
     """
+    already_present = bool(scalar(
+        conn, "SELECT to_regclass('analytics_schema.idx_fact_meter_reading_tenant_scheme_date_lookup')"))
+    if not already_present:
+        LOG.warning("prep: building idx_fact_meter_reading_tenant_scheme_date_lookup with a plain "
+                    "CREATE INDEX — this holds a SHARE lock and BLOCKS ALL WRITES to %s until it "
+                    "completes. On production, cancel and pre-build it CONCURRENTLY instead.",
+                    READING_TABLE)
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
             CREATE INDEX IF NOT EXISTS idx_fact_meter_reading_tenant_scheme_date_lookup
-                ON analytics_schema.fact_meter_reading_table
+                ON {READING_TABLE}
                 (tenant_id, scheme_id, reading_date DESC, reading_at DESC, id DESC)
             """)
     conn.commit()
@@ -279,7 +493,16 @@ def ensure_backfill_index(conn) -> None:
              "fact_meter_reading_table")
 
 
-def identify(conn, start: dt.date, end: dt.date) -> dict:
+def identify(conn, start: dt.date, end: dt.date, threshold_litres: int) -> None:
+    """Builds public.fact_water_quantity_recompute — the review artefact and phase 2's work list.
+
+    The value columns come verbatim from the canonical recompute; everything added here is
+    classification, so the shared SQL that the parity test asserts against stays untouched.
+
+    The two EXISTS probes that separate A1/A2 and B1/B2 sit inside the branches of the outer CASE
+    rather than as top-level columns, so Postgres only evaluates them for rows that actually reach
+    those branches — a few tens of thousands of index probes rather than one per row.
+    """
     recompute_sql = load_recompute_sql()
     with conn.cursor() as cur:
         cur.execute(f"DROP TABLE IF EXISTS {RECOMPUTE_TABLE}")
@@ -287,97 +510,185 @@ def identify(conn, start: dt.date, end: dt.date) -> dict:
             CREATE TABLE {RECOMPUTE_TABLE} AS
             WITH recompute AS (
             {recompute_sql}
+            ),
+            windowed AS (
+                SELECT * FROM recompute WHERE date BETWEEN %s AND %s
+            ),
+            coded AS (
+                SELECT w.*,
+                       CASE
+                           WHEN w.current_reading IS NULL THEN
+                               CASE WHEN EXISTS (
+                                        SELECT 1 FROM {READING_TABLE} mr
+                                        WHERE mr.tenant_id = w.tenant_id
+                                          AND mr.scheme_id = w.scheme_id
+                                          AND mr.reading_date = w.date)
+                                    THEN 'A2' ELSE 'A1' END
+                           WHEN w.previous_reading IS NULL THEN
+                               CASE WHEN EXISTS (
+                                        SELECT 1 FROM {READING_TABLE} mr
+                                        WHERE mr.tenant_id = w.tenant_id
+                                          AND mr.scheme_id = w.scheme_id
+                                          AND mr.reading_date < w.date)
+                                    THEN 'B2' ELSE 'B1' END
+                           WHEN w.current_reading < w.previous_reading THEN 'C3'
+                           WHEN w.new_qty > %s THEN 'C4'
+                           WHEN w.previous_date < w.date - 1 THEN 'C2'
+                           ELSE 'C1'
+                       END AS case_code
+                FROM windowed w
             )
             SELECT id, tenant_id, scheme_id, date, old_qty, new_qty,
                    current_reading, previous_reading, previous_date, is_latest,
+                   case_code,
+                   (case_code = ANY(%s)) AS skipped_by_design,
+                   (date - previous_date) AS gap_days,
+                   (date > CURRENT_DATE) AS is_future_dated,
                    FALSE AS applied
-            FROM recompute
-            WHERE date BETWEEN %s AND %s
-            """, (start, end))
+            FROM coded
+            """, (start, end, threshold_litres, list(SKIPPED_CASES)))
         cur.execute(f"CREATE UNIQUE INDEX ON {RECOMPUTE_TABLE} (id)")
         cur.execute(f"CREATE INDEX ON {RECOMPUTE_TABLE} (date)")
+        cur.execute(f"CREATE INDEX ON {RECOMPUTE_TABLE} (case_code)")
 
-    stats = {
-        "total": scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE}"),
-        "changing": scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} "
-                                 "WHERE new_qty IS NOT NULL AND new_qty <> old_qty"),
-        "already_correct": scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} "
-                                        "WHERE new_qty IS NOT NULL AND new_qty = old_qty"),
-        "no_reading": scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} "
-                                   "WHERE new_qty IS NULL"),
-        "no_baseline": scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} "
-                                    "WHERE current_reading IS NOT NULL "
-                                    "AND previous_reading IS NULL"),
-        "duplicates": scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} "
-                                   "WHERE NOT is_latest"),
-    }
-    LOG.info("phase 1: %s built — %d row(s) in %s..%s",
-             RECOMPUTE_TABLE, stats["total"], start, end)
-    LOG.info("phase 1:   %d changing, %d already correct, %d with no reading on their date",
-             stats["changing"], stats["already_correct"], stats["no_reading"])
-    LOG.info("phase 1:   %d with no prior reading (correctly 0, previously the whole meter index)",
-             stats["no_baseline"])
-    if stats["duplicates"]:
+
+def case_counts(conn) -> list[dict]:
+    """Per-case counts, split by what the repair will actually do with each row."""
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT case_code,
+                   COUNT(*),
+                   COUNT(*) FILTER (WHERE NOT skipped_by_design
+                                      AND new_qty IS NOT NULL AND new_qty <> old_qty),
+                   COUNT(*) FILTER (WHERE new_qty IS NOT NULL AND new_qty = old_qty),
+                   COUNT(*) FILTER (WHERE skipped_by_design),
+                   COUNT(*) FILTER (WHERE skipped_by_design AND old_qty <> 0),
+                   COALESCE(SUM(old_qty), 0),
+                   COALESCE(SUM(new_qty) FILTER (WHERE NOT skipped_by_design), 0)
+            FROM {RECOMPUTE_TABLE}
+            GROUP BY case_code
+            """)
+        rows = {r[0]: r for r in cur.fetchall()}
+
+    counts = []
+    for code, (skipped, meaning) in CASE_CATALOGUE.items():
+        r = rows.pop(code, None)
+        counts.append({
+            "case": code,
+            "meaning": meaning,
+            "action": "SKIP" if skipped else "apply",
+            "rows": r[1] if r else 0,
+            "will_change": r[2] if r else 0,
+            "already_correct": r[3] if r else 0,
+            "skipped": r[4] if r else 0,
+            "skipped_non_zero": r[5] if r else 0,
+            "sum_old_qty": r[6] if r else 0,
+            "sum_new_qty_applied": r[7] if r else 0,
+        })
+    for leftover, r in rows.items():  # defensive: the CASE has an ELSE, so this should stay empty
+        counts.append({"case": leftover, "meaning": "UNCLASSIFIED — investigate before applying",
+                       "action": "apply", "rows": r[1], "will_change": r[2],
+                       "already_correct": r[3], "skipped": r[4], "skipped_non_zero": r[5],
+                       "sum_old_qty": r[6], "sum_new_qty_applied": r[7]})
+    return counts
+
+
+def report_cases(conn, counts: list[dict], long_gap_days: int) -> dict:
+    """Logs the case split and returns the run-level totals."""
+    total = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE}")
+    LOG.info("phase 1: %s built — %d row(s)", RECOMPUTE_TABLE, total)
+    LOG.info("phase 1: case split (action / case / rows / will change / already correct)")
+    for c in counts:
+        if not c["rows"]:
+            continue
+        LOG.info("phase 1:   %-5s %-3s %10d rows  %10d change  %8d already correct  — %s",
+                 c["action"], c["case"], c["rows"], c["will_change"], c["already_correct"],
+                 c["meaning"])
+
+    changing = sum(c["will_change"] for c in counts)
+    already_correct = sum(c["already_correct"] for c in counts)
+    skipped = sum(c["skipped"] for c in counts)
+    skipped_non_zero = sum(c["skipped_non_zero"] for c in counts)
+    accounted = changing + already_correct + skipped
+
+    LOG.info("phase 1: %d changing, %d already correct, %d skipped by design (%d of those hold a "
+             "non-zero value and stay in CUBIC METRES)",
+             changing, already_correct, skipped, skipped_non_zero)
+    if accounted != total:
+        LOG.warning("phase 1: %d row(s) fall into NO bucket (%d classified vs %d total) — almost "
+                    "certainly a NULL water_quantity, which the value guard cannot match. See the "
+                    "preflight check.", total - accounted, accounted, total)
+
+    duplicates = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} WHERE NOT is_latest")
+    long_gaps = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} "
+                             "WHERE case_code IN ('C1','C2') AND gap_days > %s", (long_gap_days,))
+    future_dated = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} WHERE is_future_dated")
+    if duplicates:
         LOG.info("phase 1:   %d shadow duplicate row(s) behind the latest row of their "
                  "(tenant, scheme, date) — repaired to the same value so none is left in m3",
-                 stats["duplicates"])
-    return stats
+                 duplicates)
+    if long_gaps:
+        LOG.warning("phase 1:   %d row(s) attribute a gap of more than %d day(s) to a single date "
+                    "— applied, but the daily KLD/LPCD for those dates is distorted",
+                    long_gaps, long_gap_days)
+    if future_dated:
+        LOG.warning("phase 1:   %d row(s) are dated AFTER today — pre-existing bad data, applied "
+                    "as derived", future_dated)
+
+    return {
+        "total": total,
+        "changing": changing,
+        "already_correct": already_correct,
+        "skipped": skipped,
+        "skipped_non_zero": skipped_non_zero,
+        "unaccounted": total - accounted,
+        "duplicates": duplicates,
+        "long_gaps": long_gaps,
+        "future_dated": future_dated,
+    }
 
 
-def report_exceptions(conn, limit: int) -> int:
-    """Rows with no reading on their date but a non-zero stored quantity.
+def fetch_detail(conn, predicate: str, order_by: str, limit: int, long_gap_days: int):
+    """Rows for one workbook sheet, plus the true (un-truncated) count for that predicate.
 
-    Live ingestion writes nothing for such a day, so the recompute has no defensible value
-    to put there. They are listed, never touched — silently zeroing them would discard data
-    this script cannot re-derive.
+    The count is a separate aggregate rather than len(rows) on purpose: a LIMIT-ed fetch reported
+    as a count silently understates exactly the lists a reviewer is using to decide whether to
+    accept the run.
     """
+    params = {"long_gap_days": long_gap_days}
+    total = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} WHERE {predicate}", params)
     with conn.cursor() as cur:
         cur.execute(f"""
-            SELECT id, tenant_id, scheme_id, date, old_qty
+            SELECT {', '.join(DETAIL_COLUMNS)}
             FROM {RECOMPUTE_TABLE}
-            WHERE new_qty IS NULL AND old_qty <> 0
-            ORDER BY old_qty DESC, id
-            """)
+            WHERE {predicate}
+            ORDER BY {order_by}
+            LIMIT {int(limit)}
+            """, params)
         rows = cur.fetchall()
-    if not rows:
-        LOG.info("exceptions: none — every row with no reading on its date is already 0")
-        return 0
-    LOG.warning("exceptions: %d row(s) have NO reading on their date but a non-zero quantity. "
-                "Left untouched — no reading means no derivable volume.", len(rows))
-    for row_id, tenant_id, scheme_id, date, old_qty in rows[:limit]:
-        LOG.warning("  id=%s tenant=%s scheme=%s date=%s water_quantity=%s",
-                    row_id, tenant_id, scheme_id, date, old_qty)
-    if len(rows) > limit:
-        LOG.warning("  ... %d more; full list: SELECT * FROM %s WHERE new_qty IS NULL "
-                    "AND old_qty <> 0", len(rows) - limit, RECOMPUTE_TABLE)
-    return len(rows)
+    return total, rows
 
 
-def report_outliers(conn, threshold_litres: int, limit: int) -> None:
-    """The review list: corrected values still too large to be a real day's supply.
-
-    Mirrors the analytics.water-quantity.implausible-daily-cubic-metres warning the service
-    now emits, so the same days show up here before the write as they would in the logs after.
-    """
-    with conn.cursor() as cur:
-        cur.execute(f"""
-            SELECT id, tenant_id, scheme_id, date, old_qty, new_qty,
-                   previous_reading, current_reading, previous_date
-            FROM {RECOMPUTE_TABLE}
-            WHERE new_qty > %s
-            ORDER BY new_qty DESC
-            LIMIT %s
-            """, (threshold_litres, limit))
-        rows = cur.fetchall()
-    if not rows:
-        LOG.info("outliers: none above %d L/day", threshold_litres)
+def log_skipped_samples(conn, limit: int) -> None:
+    """Prints the skipped rows that hold a non-zero value, keeping the old log shape."""
+    total, rows = fetch_detail(conn, "skipped_by_design AND old_qty <> 0", "old_qty DESC, id",
+                               limit, 0)
+    if not total:
+        LOG.info("skipped: none — every skipped row already holds 0")
         return
-    LOG.warning("outliers: %d row(s) recompute to more than %d L/day — a bad reading, not a "
-                "bad recompute. Applied as derived; review before accepting.",
-                len(rows), threshold_litres)
+    LOG.warning("skipped: %d row(s) are left untouched AND hold a non-zero value, so they remain "
+                "in CUBIC METRES. Full list in the workbook.", total)
+    by_index = {name: i for i, name in enumerate(DETAIL_COLUMNS)}
     for r in rows:
-        LOG.warning("  id=%s tenant=%s scheme=%s date=%s  %s -> %s L  (reading %s on %s -> %s)",
-                    r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[8], r[7])
+        LOG.warning("  [%s] id=%s tenant=%s scheme=%s date=%s old=%s new=%s "
+                    "(reading %s on %s -> %s)",
+                    r[by_index["case_code"]], r[by_index["id"]], r[by_index["tenant_id"]],
+                    r[by_index["scheme_id"]], r[by_index["date"]], r[by_index["old_qty"]],
+                    r[by_index["new_qty"]], r[by_index["previous_reading"]],
+                    r[by_index["previous_date"]], r[by_index["current_reading"]])
+    if total > limit:
+        LOG.warning("  ... %d more; see the workbook or: SELECT * FROM %s WHERE "
+                    "skipped_by_design AND old_qty <> 0", total - limit, RECOMPUTE_TABLE)
 
 
 # --------------------------------------------------------------------------------------
@@ -390,6 +701,10 @@ def apply_water(conn, start: dt.date, end: dt.date) -> int:
     The UPDATE is guarded on the value this script read (water_quantity = old_qty), which is
     what makes it resumable and safe to run against a live system: a row the new code rewrote
     since phase 1 simply fails the guard and keeps the value the new code wrote.
+
+    NOT skipped_by_design excludes A1/A2 (no derivable value) and C4 (derivable but the source
+    reading is garbage). Because the case is a function of (tenant, scheme, date) only, every
+    duplicate row of a group is classified identically — a group is never half-applied.
     """
     total = 0
     for chunk_start, chunk_end in month_chunks(start, end):
@@ -401,6 +716,7 @@ def apply_water(conn, start: dt.date, end: dt.date) -> int:
                 FROM {RECOMPUTE_TABLE} r
                 WHERE fwq.id = r.id
                   AND r.date BETWEEN %s AND %s
+                  AND NOT r.skipped_by_design
                   AND r.new_qty IS NOT NULL
                   AND r.new_qty <> r.old_qty
                   AND fwq.water_quantity = r.old_qty
@@ -412,6 +728,7 @@ def apply_water(conn, start: dt.date, end: dt.date) -> int:
                 FROM {WATER_TABLE} fwq
                 WHERE fwq.id = r.id
                   AND r.date BETWEEN %s AND %s
+                  AND NOT r.skipped_by_design
                   AND r.new_qty IS NOT NULL
                   AND fwq.water_quantity = r.new_qty
                 """, (chunk_start, chunk_end))
@@ -419,14 +736,14 @@ def apply_water(conn, start: dt.date, end: dt.date) -> int:
         total += updated
         LOG.info("phase 2: %s..%s — %d row(s) updated", chunk_start, chunk_end, updated)
 
-    skipped = scalar(conn, f"""
+    stranded = scalar(conn, f"""
         SELECT COUNT(*) FROM {RECOMPUTE_TABLE}
-        WHERE new_qty IS NOT NULL AND new_qty <> old_qty AND NOT applied
+        WHERE NOT skipped_by_design AND new_qty IS NOT NULL AND new_qty <> old_qty AND NOT applied
         """)
-    if skipped:
+    if stranded:
         LOG.warning("phase 2: %d row(s) failed the value guard — rewritten by live ingestion "
                     "since phase 1, so they already hold a correctly derived value. Re-run "
-                    "--dry-run to confirm.", skipped)
+                    "--dry-run to confirm.", stranded)
     LOG.info("phase 2: %d row(s) updated in total", total)
     return total
 
@@ -435,14 +752,60 @@ def apply_water(conn, start: dt.date, end: dt.date) -> int:
 # phase 3 — performance
 # --------------------------------------------------------------------------------------
 
-def apply_performance(conn, start: dt.date, end: dt.date) -> int:
+def dim_scheme_drift(conn) -> list[tuple]:
+    """Schemes whose several dim_scheme rows disagree on the attributes the score formula reads.
+
+    dim_scheme_table legitimately holds one row per (scheme x village x sub-division) since
+    V16/V24, but fhtc_count and house_hold_count describe the SCHEME, so every row of a scheme
+    must carry the same values. When they don't, the scores CTE produces several different
+    candidate scores for one (tenant, scheme, date) and UPDATE ... FROM picks one arbitrarily —
+    the same replay then yields a different score run to run. Measured on a fixture: a scheme
+    with fhtc_count 10 vs 99 flipped 0.5 -> 1.0 -> 0.5 across three identical runs.
+
+    The production scheduler has the same nondeterminism, so this is not introduced here; but a
+    repair that writes an arbitrary score to history is worse than one that stops and says so.
+    """
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT tenant_id, scheme_id,
+                   COUNT(*) AS dim_rows,
+                   ARRAY_AGG(DISTINCT fhtc_count) AS fhtc_counts,
+                   ARRAY_AGG(DISTINCT house_hold_count) AS household_counts
+            FROM {SCHEME_TABLE}
+            GROUP BY tenant_id, scheme_id
+            HAVING COUNT(DISTINCT COALESCE(fhtc_count, -1)) > 1
+                OR COUNT(DISTINCT COALESCE(house_hold_count, -1)) > 1
+            ORDER BY tenant_id, scheme_id
+            """)
+        return cur.fetchall()
+
+
+def apply_performance(conn, start: dt.date, end: dt.date, dim_drift_use_latest: bool) -> int:
     """Replays the daily performance score over the corrected quantities.
+
+    dim_drift_use_latest collapses dim_scheme_table to one row per (tenant, scheme) — the most
+    recently updated one — before the join, which is what makes the replay deterministic when a
+    scheme's rows disagree. Note it also changes what operating_status > 0 means: "the scheme's
+    current row says it is operating", rather than the raw scheduler's "some row of the scheme
+    says so". That is the more defensible reading of a slowly-changing dimension, but it is a
+    deliberate divergence from the scheduler, so it only happens when the flag asks for it.
 
     Updates existing rows only. The scheduler's own INSERT is guarded by NOT EXISTS, so it
     would no-op over history; and creating scores for days the scheduler never ran would
     invent history rather than repair it. Days with no performance row are counted and
     reported, not filled in.
+
+    Reads the water table rather than the recompute table, so rows this run skipped still
+    contribute their (unrepaired, cubic-metre) value to the day's supply — exactly as the
+    scheduler would see them. Those (scheme, date) pairs are listed in the workbook.
     """
+    scheme_source = f"""(
+                        SELECT DISTINCT ON (tenant_id, scheme_id) *
+                        FROM {SCHEME_TABLE}
+                        ORDER BY tenant_id, scheme_id,
+                                 COALESCE(updated_at, created_at) DESC NULLS LAST, id DESC
+                    )""" if dim_drift_use_latest else SCHEME_TABLE
+
     total = 0
     for chunk_start, chunk_end in month_chunks(start, end):
         with conn.cursor() as cur:
@@ -466,7 +829,7 @@ def apply_performance(conn, start: dt.date, end: dt.date) -> int:
                            ds.scheme_id,
                            supply.date,
                            {PERFORMANCE_SCORE_CASE} AS performance_score
-                    FROM analytics_schema.dim_scheme_table ds
+                    FROM {scheme_source} ds
                     JOIN analytics_schema.dim_tenant_table dt
                       ON dt.tenant_id = ds.tenant_id
                     JOIN supply
@@ -493,7 +856,7 @@ def apply_performance(conn, start: dt.date, end: dt.date) -> int:
         FROM (
             SELECT DISTINCT fwq.tenant_id, fwq.scheme_id, fwq.date
             FROM {WATER_TABLE} fwq
-            JOIN analytics_schema.dim_scheme_table ds
+            JOIN {SCHEME_TABLE} ds
               ON ds.tenant_id = fwq.tenant_id AND ds.scheme_id = fwq.scheme_id
              AND ds.operating_status > 0
             WHERE fwq.date BETWEEN %s AND %s
@@ -516,16 +879,24 @@ def apply_performance(conn, start: dt.date, end: dt.date) -> int:
 # phase 4 — verify
 # --------------------------------------------------------------------------------------
 
-def verify(conn, start: dt.date, end: dt.date) -> int:
+def verify(conn, start: dt.date, end: dt.date) -> tuple[int, dict]:
     """Reports on an applied (or partially applied) repair and returns the still-unrepaired count.
 
-    That count (at_old) is the caller's signal for a non-zero exit status: rows recomputable from a
-    reading but still holding their pre-repair value are a failure to finish the job. It is distinct
-    from report_exceptions's rows, which have no reading to recompute from and are intentionally
-    left untouched — informational, not a failure.
+    at_old counts only rows the repair was SUPPOSED to change, so it is the caller's signal for a
+    non-zero exit status. Rows skipped by design sit at their old value permanently and must not
+    make a successful run look like a failure — they are counted and reported separately.
     """
     if not scalar(conn, "SELECT to_regclass(%s)", (RECOMPUTE_TABLE,)):
         sys.exit(f"{RECOMPUTE_TABLE} does not exist — run --dry-run or --execute first.")
+    # A table left behind by an older revision of this script has no classification columns, and
+    # every query below would fail halfway through on a missing column instead of up front.
+    if not scalar(conn, """
+            SELECT COUNT(*) = 2 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'fact_water_quantity_recompute'
+              AND column_name IN ('case_code', 'skipped_by_design')
+            """):
+        sys.exit(f"{RECOMPUTE_TABLE} predates the case classification — re-run --dry-run to "
+                 "rebuild it before verifying.")
 
     with conn.cursor() as cur:
         cur.execute(f"""
@@ -536,21 +907,27 @@ def verify(conn, start: dt.date, end: dt.date) -> int:
                    COUNT(*) FILTER (WHERE fwq.water_quantity NOT IN (r.old_qty, r.new_qty))
             FROM {RECOMPUTE_TABLE} r
             JOIN {WATER_TABLE} fwq ON fwq.id = r.id
-            WHERE r.new_qty IS NOT NULL
+            WHERE r.new_qty IS NOT NULL AND NOT r.skipped_by_design
             """)
         total, at_new, at_old, elsewhere = cur.fetchone()
-    LOG.info("verify: %d recomputable row(s) — %d at the corrected value, %d still at the old "
+    LOG.info("verify: %d applicable row(s) — %d at the corrected value, %d still at the old "
              "value, %d at neither (rewritten by live ingestion since)",
              total, at_new, at_old, elsewhere)
     if at_old:
         LOG.warning("verify: %d row(s) were NOT applied — re-run --execute", at_old)
+
+    skipped = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} WHERE skipped_by_design")
+    skipped_non_zero = scalar(conn, f"SELECT COUNT(*) FROM {RECOMPUTE_TABLE} "
+                                    "WHERE skipped_by_design AND old_qty <> 0")
+    LOG.info("verify: %d row(s) skipped by design (%s); %d of them hold a non-zero value and "
+             "remain in CUBIC METRES", skipped, "/".join(SKIPPED_CASES), skipped_non_zero)
 
     with conn.cursor() as cur:
         cur.execute(f"""
             SELECT MIN(old_qty), MAX(old_qty), ROUND(AVG(old_qty)),
                    MIN(new_qty), MAX(new_qty), ROUND(AVG(new_qty))
             FROM {RECOMPUTE_TABLE}
-            WHERE new_qty IS NOT NULL
+            WHERE new_qty IS NOT NULL AND NOT skipped_by_design
             """)
         row = cur.fetchone()
     # Distribution as of whenever phase 1 last ran. Inside --execute that is the pre-repair data, so
@@ -560,21 +937,130 @@ def verify(conn, start: dt.date, end: dt.date) -> int:
     LOG.info("verify: old_qty  min=%s max=%s avg=%s", row[0], row[1], row[2])
     LOG.info("verify: new_qty  min=%s max=%s avg=%s", row[3], row[4], row[5])
 
-    report_exceptions(conn, limit=20)
+    log_skipped_samples(conn, limit=20)
 
     supplied_before = scalar(conn, f"""
         SELECT COALESCE(SUM(old_qty), 0) FROM {RECOMPUTE_TABLE}
         WHERE is_latest AND new_qty IS NOT NULL
         """)
     supplied_after = scalar(conn, f"""
-        SELECT COALESCE(SUM(new_qty), 0) FROM {RECOMPUTE_TABLE}
+        SELECT COALESCE(SUM(CASE WHEN skipped_by_design THEN old_qty ELSE new_qty END), 0)
+        FROM {RECOMPUTE_TABLE}
         WHERE is_latest AND new_qty IS NOT NULL
         """)
-    LOG.info("verify: total supplied over %s..%s — %s L at old_qty, %s L at new_qty",
-             start, end, supplied_before, supplied_after)
-    LOG.info("verify: remember to flush the Redis dashboard keys; the cache TTL is 24h")
+    LOG.info("verify: total over %s..%s — %s stored before, %s stored after (skipped rows counted "
+             "at their unchanged value)", start, end, supplied_before, supplied_after)
+    LOG.info("verify: remember to flush the Redis dashboard keys (24h TTL) and to "
+             "VACUUM (ANALYZE) %s", WATER_TABLE)
 
-    return at_old
+    return at_old, {
+        "applicable": total, "at_new": at_new, "at_old": at_old, "elsewhere": elsewhere,
+        "skipped": skipped, "skipped_non_zero": skipped_non_zero,
+        "old_min": row[0], "old_max": row[1], "old_avg": row[2],
+        "new_min": row[3], "new_max": row[4], "new_avg": row[5],
+        "stored_before": supplied_before, "stored_after": supplied_after,
+    }
+
+
+# --------------------------------------------------------------------------------------
+# workbook — the run artefact
+# --------------------------------------------------------------------------------------
+
+def write_workbook(conn, path: Path, meta: dict, counts: list[dict], totals: dict,
+                   preflight_rows: list[dict], long_gap_days: int, max_rows: int) -> None:
+    """Writes the run's Excel artefact: the count split, the preflight checks, and every
+    skipped / lossy / ambiguous row.
+
+    write_only keeps the workbook streaming rather than materialising every sheet in memory —
+    the long-gap and duplicate sheets can each run to tens of thousands of rows.
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.cell import WriteOnlyCell
+        from openpyxl.styles import Alignment, Font
+    except ImportError:
+        LOG.error("openpyxl is not installed, so no workbook was written: pip install openpyxl "
+                  "(or pass --no-report). Everything in it is still queryable from %s.",
+                  RECOMPUTE_TABLE)
+        return
+
+    wb = Workbook(write_only=True)
+    bold = Font(bold=True)
+    wrap = Alignment(vertical="top", wrap_text=True)
+
+    def header(ws, names):
+        cells = []
+        for name in names:
+            c = WriteOnlyCell(ws, value=name)
+            c.font = bold
+            cells.append(c)
+        ws.append(cells)
+
+    # --- Summary -----------------------------------------------------------------------
+    ws = wb.create_sheet("Summary")
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["I"].width = 80
+    header(ws, ["Water quantity repair — run summary"])
+    ws.append([])
+    for key, value in meta.items():
+        ws.append([key, str(value)])
+    ws.append([])
+
+    header(ws, ["Case", "Action", "Rows", "Will change", "Already correct",
+                "Skipped", "Skipped & non-zero", "SUM(old_qty)", "SUM(new_qty) applied",
+                "Meaning"])
+    for c in counts:
+        ws.append([c["case"], c["action"], c["rows"], c["will_change"], c["already_correct"],
+                   c["skipped"], c["skipped_non_zero"], c["sum_old_qty"],
+                   c["sum_new_qty_applied"], c["meaning"]])
+    ws.append([])
+    header(ws, ["Total", "", "Rows", "Will change", "Already correct", "Skipped",
+                "Skipped & non-zero"])
+    ws.append(["ALL", "", totals["total"], totals["changing"], totals["already_correct"],
+               totals["skipped"], totals["skipped_non_zero"]])
+    ws.append([])
+    header(ws, ["Cross-cutting flag", "Rows", "Note"])
+    ws.append(["Unclassified (no bucket)", totals["unaccounted"],
+               "Must be 0. Anything here is invisible to the value guard — investigate."])
+    ws.append(["Shadow duplicates", totals["duplicates"],
+               "Repaired to the same value as their group's winner."])
+    ws.append([f"Gaps longer than {long_gap_days} day(s)", totals["long_gaps"],
+               "Applied. A multi-day delta attributed to one date."])
+    ws.append(["Future-dated rows", totals["future_dated"],
+               "Applied. Dated after today — pre-existing bad data."])
+
+    # --- Preflight ---------------------------------------------------------------------
+    ws = wb.create_sheet("Preflight")
+    ws.column_dimensions["A"].width = 46
+    ws.column_dimensions["B"].width = 10
+    ws.column_dimensions["C"].width = 110
+    header(ws, ["Check", "Count", "What a non-zero count means"])
+    for row in preflight_rows:
+        c = WriteOnlyCell(ws, value=row["guidance"])
+        c.alignment = wrap
+        ws.append([row["check"], row["count"], c])
+
+    # --- One sheet per reportable case -------------------------------------------------
+    for name, predicate, order_by, note in DETAIL_SHEETS:
+        total, rows = fetch_detail(conn, predicate, order_by, max_rows, long_gap_days)
+        ws = wb.create_sheet(name[:31])
+        ws.freeze_panes = "A4"
+        ws.column_dimensions["A"].width = 14
+        note_cell = WriteOnlyCell(ws, value=note)
+        note_cell.alignment = wrap
+        ws.append([note_cell])
+        truncated = f"  (showing the first {max_rows:,} — raise --max-report-rows)" if total > max_rows else ""
+        ws.append([f"{total:,} row(s) match{truncated}"])
+        header(ws, DETAIL_COLUMNS)
+        for r in rows:
+            ws.append(list(r))
+        LOG.info("report: %-26s %8d row(s)%s", name, total,
+                 " [TRUNCATED]" if total > max_rows else "")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+    LOG.info("report: workbook written to %s", path)
 
 
 # --------------------------------------------------------------------------------------
@@ -648,7 +1134,22 @@ def main() -> int:
                         help="re-take a phase-0 backup that already exists, discarding the "
                              "original values it holds")
     parser.add_argument("--implausible-daily-cubic-metres", type=int, default=100_000,
-                        help="outlier review threshold; matches the service's default")
+                        help="rows recomputing above this are classified C4 and SKIPPED; "
+                             "matches the service's warning threshold")
+    parser.add_argument("--long-gap-days", type=int, default=90,
+                        help="rows whose delta spans more than this many days are reported "
+                             "(still applied)")
+    parser.add_argument("--report-path", type=Path, default=None,
+                        help="workbook path; defaults to ./water_quantity_fix_<suffix>.xlsx")
+    parser.add_argument("--no-report", action="store_true", help="skip the Excel workbook")
+    parser.add_argument("--max-report-rows", type=int, default=50_000,
+                        help="row cap per workbook sheet; the true count is always reported")
+    parser.add_argument("--skip-preflight", action="store_true",
+                        help="skip the integrity checks (they scan the reading table)")
+    parser.add_argument("--dim-drift-use-latest", action="store_true",
+                        help="resolve dim_scheme drift by using each scheme's most recently "
+                             "updated row (COALESCE(updated_at, created_at) DESC, id DESC); "
+                             "without this, phase 3 refuses to run on drift and exits 2")
     parser.add_argument("--statement-timeout", default="15min",
                         help="server-side statement_timeout for every statement")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -663,13 +1164,16 @@ def main() -> int:
     suffix = args.backup_suffix or dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
     if not SAFE_SUFFIX_RE.match(suffix):
         sys.exit(f"--backup-suffix must be alphanumeric/underscore, got {suffix!r}")
+    threshold_litres = args.implausible_daily_cubic_metres * 1000
+    report_path = args.report_path or Path(f"water_quantity_fix_{suffix}.xlsx")
 
     conn = psycopg2.connect(args.dsn)
     conn.autocommit = False
     try:
         with conn.cursor() as cur:
             cur.execute("SET statement_timeout = %s", (args.statement_timeout,))
-        LOG.info("connected: %s", describe_connection(conn))
+        connection_description = describe_connection(conn)
+        LOG.info("connected: %s", connection_description)
 
         if args.rollback:
             if not args.backup_suffix:
@@ -678,35 +1182,97 @@ def main() -> int:
             return 0
 
         start, end = resolve_window(conn, args.start_date, args.end_date)
-        LOG.info("window: %s..%s, phase=%s", start, end, args.phase)
+        mode_name = "verify" if args.verify else ("execute" if args.execute else "dry-run")
+        LOG.info("window: %s..%s, phase=%s, mode=%s", start, end, args.phase, mode_name)
+        LOG.info("C4 threshold: %d L/day (%d m3/day) — rows above this are SKIPPED, not applied",
+                 threshold_litres, args.implausible_daily_cubic_metres)
+
+        meta = {
+            "generated_at (UTC)": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            "connection": connection_description,
+            "mode": mode_name,
+            "phase": args.phase,
+            "window start": start,
+            "window end": end,
+            "backup suffix": suffix,
+            "C4 threshold (L/day)": threshold_litres,
+            "C4 threshold (m3/day)": args.implausible_daily_cubic_metres,
+            "long gap threshold (days)": args.long_gap_days,
+            "recompute artefact": RECOMPUTE_TABLE,
+        }
 
         if args.verify:
-            at_old = verify(conn, start, end)
+            at_old, verify_stats = verify(conn, start, end)
+            meta.update({f"verify: {k}": v for k, v in verify_stats.items()})
+            if not args.no_report:
+                counts = case_counts(conn)
+                totals = report_cases(conn, counts, args.long_gap_days)
+                write_workbook(conn, report_path, meta, counts, totals,
+                               [] if args.skip_preflight else preflight(conn, start, end),
+                               args.long_gap_days, args.max_report_rows)
             return 1 if at_old else 0
 
-        backup(conn, suffix, start, end, args.overwrite_backup)
+        backup_stats = backup(conn, suffix, start, end, args.overwrite_backup)
         conn.commit()
+        meta.update({f"backup: {k}": v for k, v in backup_stats.items()})
+
+        preflight_rows = [] if args.skip_preflight else preflight(conn, start, end)
 
         ensure_backfill_index(conn)
 
-        stats = identify(conn, start, end)
+        identify(conn, start, end, threshold_litres)
         conn.commit()
-        exceptions = report_exceptions(conn, limit=20)
-        report_outliers(conn, args.implausible_daily_cubic_metres * 1000, limit=20)
+        counts = case_counts(conn)
+        totals = report_cases(conn, counts, args.long_gap_days)
+        log_skipped_samples(conn, limit=20)
 
         if not args.execute:
-            LOG.info("dry run — nothing written to %s. Review %s, then re-run with --execute.",
-                     WATER_TABLE, RECOMPUTE_TABLE)
-            LOG.info("dry run: %d row(s) would change, %d left as exceptions",
-                     stats["changing"], exceptions)
+            if not args.no_report:
+                write_workbook(conn, report_path, meta, counts, totals, preflight_rows,
+                               args.long_gap_days, args.max_report_rows)
+            LOG.info("dry run — nothing written to %s. Review the workbook and %s, then re-run "
+                     "with --execute.", WATER_TABLE, RECOMPUTE_TABLE)
+            LOG.info("dry run: %d row(s) would change, %d left skipped by design",
+                     totals["changing"], totals["skipped"])
             return 0
 
         if args.phase in ("water", "all"):
             apply_water(conn, start, end)
         if args.phase in ("performance", "all"):
-            apply_performance(conn, start, end)
+            drift = dim_scheme_drift(conn)
+            if drift and not args.dim_drift_use_latest:
+                LOG.error("phase 3 REFUSED: %d scheme(s) have dim_scheme rows that disagree on "
+                          "fhtc_count/house_hold_count, so the score formula has several answers "
+                          "per (scheme, date) and UPDATE ... FROM would pick one arbitrarily — "
+                          "the same replay gives different scores run to run. Phase 2 is already "
+                          "applied and is unaffected.", len(drift))
+                for tenant_id, scheme_id, dim_rows, fhtc, households in drift[:20]:
+                    LOG.error("  tenant=%s scheme=%s dim_rows=%s fhtc_count=%s house_hold_count=%s",
+                              tenant_id, scheme_id, dim_rows, fhtc, households)
+                if len(drift) > 20:
+                    LOG.error("  ... %d more; full list: %s", len(drift) - 20,
+                              "scripts/dim_scheme_fanout_diagnostics.sql")
+                LOG.error("Either repair dim_scheme_table (see "
+                          "scripts/dim_scheme_fanout_diagnostics.sql) and re-run with "
+                          "--phase performance, or pass --dim-drift-use-latest to score each "
+                          "drifted scheme from its most recently updated row.")
+                # Phase 2 has already applied at this point, so its artefact is still owed.
+                if not args.no_report:
+                    write_workbook(conn, report_path, meta, counts, totals, preflight_rows,
+                                   args.long_gap_days, args.max_report_rows)
+                return 2
+            if drift:
+                LOG.warning("phase 3: %d scheme(s) have drifted dim_scheme rows — scoring each "
+                            "from its most recently updated row "
+                            "(COALESCE(updated_at, created_at) DESC, id DESC) because "
+                            "--dim-drift-use-latest was passed", len(drift))
+            apply_performance(conn, start, end, args.dim_drift_use_latest)
 
-        at_old = verify(conn, start, end)
+        at_old, verify_stats = verify(conn, start, end)
+        meta.update({f"verify: {k}": v for k, v in verify_stats.items()})
+        if not args.no_report:
+            write_workbook(conn, report_path, meta, counts, totals, preflight_rows,
+                           args.long_gap_days, args.max_report_rows)
         LOG.info("done. Backup suffix for --rollback: %s", suffix)
         return 1 if at_old else 0
     except Exception:

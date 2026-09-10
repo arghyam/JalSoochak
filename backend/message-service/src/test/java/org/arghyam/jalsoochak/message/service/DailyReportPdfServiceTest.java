@@ -329,6 +329,21 @@ class DailyReportPdfServiceTest {
     }
 
     @Test
+    void generate_mapsImplausibleWaterSupplyByNameAndLegacyCode() throws Exception {
+        // Type 10 is written by name once analytics knows the EscalationType; older rows may still
+        // carry the numeric code, so both routes must reach the same friendly label.
+        DailyReportKpis kpis = sampleKpis();
+        kpis.setAnomaliesByType(List.of(
+                DailyReportKpis.TypeCount.builder().type("IMPLAUSIBLE_WATER_SUPPLY").count(4).build()));
+        assertThat(renderText(kpis, samplePriority())).contains("Implausible Water Supply");
+
+        DailyReportKpis legacyKpis = sampleKpis();
+        legacyKpis.setAnomaliesByType(List.of(
+                DailyReportKpis.TypeCount.builder().type("10").count(4).build()));
+        assertThat(renderText(legacyKpis, samplePriority())).contains("Implausible Water Supply");
+    }
+
+    @Test
     void generate_rendersPriorityActionRows() throws Exception {
         enableOutageSections();
         // Narrow Priority Actions cells wrap, so assert on single tokens (no internal spaces),

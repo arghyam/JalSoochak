@@ -214,7 +214,7 @@ class TelemetrySchemeReadingServiceTest {
                             .isEqualTo(HttpStatus.FORBIDDEN));
 
             verify(telemetryTenantRepository, never())
-                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong());
+                    .updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
         }
     }
 
@@ -284,8 +284,29 @@ class TelemetrySchemeReadingServiceTest {
         void writesTheCorrectedReadingAgainstTheRequestingUser() {
             service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
 
+            // An officer's correction is a manual override of the number, so the row must stop
+            // claiming its confirmed_reading is the value the AI extracted.
             verify(telemetryTenantRepository)
-                    .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L);
+                    .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("600"), 11L,
+                            RolloverResolutionService.SOURCE_MANUAL);
+        }
+
+        @Test
+        void leavesTheExistingProvenanceWhenTheCorrectionRestatesTheStoredValue() {
+            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("500"), null);
+
+            // Re-submitting the value already on the row changes nothing, so a ROLLOVER_RESOLVED or
+            // EXTERNALLY_ASSERTED marker must survive it.
+            verify(telemetryTenantRepository)
+                    .updateConfirmedReading(SCHEMA, 100L, new BigDecimal("500"), 11L, null);
+        }
+
+        @Test
+        void neverTouchesExtractedReadingWhenCorrecting() {
+            service.updateYesterdayFinalReadingBySchemeId(SCHEME_ID, PHONE, new BigDecimal("600"), null);
+
+            verify(telemetryTenantRepository, never())
+                    .updateReadingValues(anyString(), anyLong(), any(), anyLong());
         }
 
         @Test
