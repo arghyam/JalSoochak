@@ -47,6 +47,8 @@ public class SingleTenantTelemetryController {
     private static final Logger log = LoggerFactory.getLogger(SingleTenantTelemetryController.class);
     private static final String TENANT_CODE_HEADER = "X-Tenant-Code";
     private static final String API_KEY_TOKEN = "api key";
+    private static final String SCHEME_TOKEN = "scheme";
+    private static final String OPERATOR_TOKEN = "operator";
 
     private final GlificWebhookService glificWebhookService;
     private final TelemetryApiKeyService telemetryApiKeyService;
@@ -360,16 +362,33 @@ public class SingleTenantTelemetryController {
                     request.getConfirmedReading(),
                     tenantId
             );
-            log.info("PUT /api/v1/telemetry/readings updated tenantId={} response={}",
+            // SUPPLY-PLAUSIBILITY: a correction can now be refused on its value rather than on its
+            // shape, which arrives as a REJECTED response instead of an exception. Mapped exactly as
+            // the POST handler maps a rejected submission, so both endpoints refuse an implausible
+            // reading with the same status and the same error code. There is no RETRY arm here: the
+            // correction path runs no OCR, so it has no transient upstream to be unavailable.
+            boolean rejected = response == null
+                    || !response.isSuccess()
+                    || "REJECTED".equalsIgnoreCase(response.getQualityStatus());
+            log.info("PUT /api/v1/telemetry/readings updated tenantId={} status={} response={}",
                     tenantId,
+                    rejected ? "FAILED" : "SUCCESS",
                     summarizeCreateReadingResponse(response));
             logReadingSubmission(
                     "/api/v1/telemetry/readings",
                     request,
                     tenantId,
-                    "SUCCESS",
+                    rejected ? "FAILED" : "SUCCESS",
                     response != null ? response.getMessage() : "Reading updated."
             );
+            if (rejected) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                        ReadingsApiResponse.builder()
+                                .success(false)
+                                .data(toReadingsDataResponse(response, false))
+                                .build()
+                );
+            }
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
@@ -569,6 +588,22 @@ public class SingleTenantTelemetryController {
         String normalized = reason.toLowerCase();
         if (normalized.contains(API_KEY_TOKEN)) {
             return TelemetryErrorCode.INVALID_API_KEY;
+        }
+        // A 404 must not describe itself as BAD_REQUEST: the status line and the body would disagree,
+        // and an integrator reading only the body cannot tell "not found" from "malformed request".
+        // Keyed on the reason the same way the api-key check above is, and the same way
+        // GlificImageWorkflowService classifies its own failures. The operator miss deliberately maps
+        // to one code for both "no such contact" and "contact belongs to another tenant" — the two
+        // share a single reason string precisely so neither confirms the contact exists elsewhere,
+        // and a code that separated them would undo that.
+        if (HttpStatus.NOT_FOUND.equals(e.getStatusCode())) {
+            if (normalized.contains(SCHEME_TOKEN)) {
+                return TelemetryErrorCode.SCHEME_NOT_FOUND;
+            }
+            if (normalized.contains(OPERATOR_TOKEN)) {
+                return TelemetryErrorCode.OPERATOR_NOT_FOUND;
+            }
+            return TelemetryErrorCode.REQUEST_FAILED;
         }
         return TelemetryErrorCode.BAD_REQUEST;
     }

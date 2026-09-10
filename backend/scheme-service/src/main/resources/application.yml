@@ -48,6 +48,11 @@ eureka:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+    # Must equal <swagger-ui.version> in pom.xml. springdoc 2.5.0 ships
+    # springdoc.config.properties with springdoc.swagger-ui.version=5.13.0 and uses it to
+    # build the webjar resource path (AbstractSwaggerResourceResolver), so without this
+    # override every /webjars/swagger-ui/** asset 404s against the pinned webjar.
+    version: 5.32.14
   api-docs:
     path: /v3/api-docs
 
@@ -72,11 +77,3 @@ minio:
   region: ${MINIO_REGION:us-east-1}
   presigned-base-url: ${MINIO_PRESIGNED_BASE_URL:${MINIO_BASE_URL:${STORAGE_PRESIGNED_BASE_URL:}}}
   presigned-ttl-seconds: ${MINIO_PRESIGNED_TTL_SECONDS:3600}
-
-scheme:
-  activity-sync:
-    enabled: ${SCHEME_ACTIVITY_SYNC_ENABLED:true}
-    cron: ${SCHEME_ACTIVITY_SYNC_CRON:0 0 0 * * *}
-    zone: ${SCHEME_ACTIVITY_SYNC_ZONE:Asia/Kolkata}
-    inactivity-days: ${SCHEME_INACTIVITY_DAYS:30}
-    batch-size: ${SCHEME_ACTIVITY_SYNC_BATCH_SIZE:5000}

@@ -138,14 +138,18 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
                             ArgumentMatchers.eq(Number.class), ArgumentMatchers.any(Object[].class));
         }
 
+        // LENIENT-INGEST: placeholders must be created Non-Operative so they never inflate
+        // operative-scheme dashboards, and flagged is_auto_provisioned so they stay discoverable for
+        // reconciliation. The retired is_active column is deliberately absent from the insert.
         @Test
-        void getOrCreatePlaceholderSchemeInsertsInactiveAutoProvisionedRow() {
+        void getOrCreatePlaceholderSchemeInsertsNonOperativeAutoProvisionedRow() {
             onScalar("INSERT INTO", Number.class, 901L);
 
             assertThat(repository.getOrCreatePlaceholderScheme(SCHEMA, "S-1", "C-1")).isEqualTo(901L);
             assertThat(capturedInsertSql())
                     .contains("is_auto_provisioned")
-                    .contains("TRUE, FALSE");
+                    .doesNotContain("is_active")
+                    .contains("0, 0, TRUE");
         }
 
         @Test
@@ -427,6 +431,76 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
     }
 
     @Nested
+    @DisplayName("quarantine marker (SUPPLY-PLAUSIBILITY)")
+    class QuarantineMarker {
+
+        @Test
+        void applyQuarantineReasonIsNoOpOnPreMigrationSchema() {
+            onColumnExists(false);
+
+            repository.applyQuarantineReason(SCHEMA, 5L, 1);
+
+            Mockito.verify(jdbcTemplate, Mockito.never())
+                    .update(ArgumentMatchers.anyString(), ArgumentMatchers.any(Object[].class));
+        }
+
+        @Test
+        void applyQuarantineReasonIsNoOpForNullReadingId() {
+            onColumnExists(true);
+
+            repository.applyQuarantineReason(SCHEMA, null, 1);
+
+            Mockito.verify(jdbcTemplate, Mockito.never())
+                    .update(ArgumentMatchers.anyString(), ArgumentMatchers.any(Object[].class));
+        }
+
+        @Test
+        void applyQuarantineReasonWritesTheMarker() {
+            onColumnsExisting("quarantine_reason");
+
+            repository.applyQuarantineReason(SCHEMA, 5L, 1);
+
+            assertThat(capturedUpdateSql()).contains("quarantine_reason");
+            assertThat(capturedUpdateArgs()).containsExactly(1, 5L);
+        }
+
+        @Test
+        void applyQuarantineReasonClearsTheMarkerOnRelease() {
+            onColumnsExisting("quarantine_reason");
+
+            repository.applyQuarantineReason(SCHEMA, 5L, 0);
+
+            assertThat(capturedUpdateArgs()).containsExactly(0, 5L);
+        }
+
+        @Test
+        void persistFlowReadingWithTrackingCommitsTheMarkerWithTheRow() {
+            // The marker is what stops the row becoming a later baseline, so it must land with the
+            // insert rather than in a separate write that could fail on its own.
+            onColumnExists(true);
+            onScalar("INSERT INTO", Number.class, 604L);
+
+            repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
+                    0, null, null, null, 3, 1);
+
+            assertThat(allUpdateSql()).anySatisfy(sql -> assertThat(sql).contains("quarantine_reason"));
+        }
+
+        @Test
+        void persistFlowReadingWithTrackingLeavesTheColumnAtItsDefaultWhenNoReasonGiven() {
+            onColumnExists(true);
+            onScalar("INSERT INTO", Number.class, 605L);
+
+            repository.persistFlowReadingWithTracking(SCHEMA, null, 7L, 2L, READING_AT,
+                    new BigDecimal("10"), new BigDecimal("11"), "corr-1", null, "img", "reason",
+                    0, null, null, null, 3, null);
+
+            assertThat(allUpdateSql()).noneSatisfy(sql -> assertThat(sql).contains("quarantine_reason"));
+        }
+    }
+
+    @Nested
     @DisplayName("pending meter-change and issue-report records")
     class PendingRecords {
 
@@ -638,33 +712,93 @@ class TelemetryTenantRepositoryWriteTest extends AbstractTelemetryTenantReposito
             assertThat(repository.touchLatestAnomalyByTypeForToday(SCHEMA, 1L, 2L, 3)).isEqualTo(1);
         }
 
+        private TenantAnomalyRecord.TenantAnomalyRecordBuilder anomaly() {
+            return TenantAnomalyRecord.builder().userId(1L).schemeId(2L).type(3).status(0);
+        }
+
         @Test
         void createTenantAnomalyRecordWritesBothReasonAndDetailWhenAvailable() {
             onColumnsExisting("detail", "reason");
 
-            repository.createTenantAnomalyRecord(SCHEMA, 1L, 2L, 3, "Rollover", 0);
+            repository.createTenantAnomalyRecord(SCHEMA, anomaly().reason("Rollover").build());
 
             assertThat(capturedUpdateSql()).contains("reason, detail");
-            assertThat(capturedUpdateArgs()).containsExactly(1L, 2L, 3, "Rollover", "Rollover", 0);
+            assertThat(capturedUpdateArgs()).containsExactly(1L, 2L, 3, 0, "Rollover", "Rollover");
         }
 
         @Test
         void createTenantAnomalyRecordWritesDetailOnlyWhenReasonColumnAbsent() {
             onColumnsExisting("detail");
 
-            repository.createTenantAnomalyRecord(SCHEMA, 1L, 2L, 3, "Rollover", 0);
+            repository.createTenantAnomalyRecord(SCHEMA, anomaly().reason("Rollover").build());
 
-            assertThat(capturedUpdateSql()).contains("type, detail");
-            assertThat(capturedUpdateArgs()).containsExactly(1L, 2L, 3, "Rollover", 0);
+            assertThat(capturedUpdateSql()).contains("detail").doesNotContain("reason");
+            assertThat(capturedUpdateArgs()).containsExactly(1L, 2L, 3, 0, "Rollover");
         }
 
         @Test
-        void createTenantAnomalyRecordFallsBackToReasonColumn() {
+        void createTenantAnomalyRecordFallsBackToTheIdentifyingColumnsOnly() {
             onColumnExists(false);
 
-            repository.createTenantAnomalyRecord(SCHEMA, 1L, 2L, 3, "Rollover", 0);
+            repository.createTenantAnomalyRecord(SCHEMA, anomaly().reason("Rollover").build());
 
-            assertThat(capturedUpdateSql()).contains("type, reason");
+            assertThat(capturedUpdateSql()).contains("user_id, scheme_id, type, status");
+            assertThat(capturedUpdateArgs()).containsExactly(1L, 2L, 3, 0);
+        }
+
+        /**
+         * The regression this method was changed for: the structured columns were dropped on the way
+         * to the tenant schema while the Kafka event carried them, so the two anomaly stores
+         * disagreed about what value had been refused.
+         */
+        @Test
+        void createTenantAnomalyRecordWritesTheStructuredColumns() {
+            onColumnExists(true);
+
+            repository.createTenantAnomalyRecord(SCHEMA, anomaly()
+                    .reason("Correction rejected.")
+                    .overriddenReading(new BigDecimal("1100"))
+                    .previousReading(new BigDecimal("900"))
+                    .previousReadingDate(READING_AT)
+                    .aiReading(new BigDecimal("310.7"))
+                    .aiConfidencePercentage(new BigDecimal("82"))
+                    .retries(2)
+                    .consecutiveDaysOverridden(5)
+                    .build());
+
+            assertThat(capturedUpdateSql())
+                    .contains("overridden_reading")
+                    .contains("previous_reading")
+                    .contains("previous_reading_date")
+                    .contains("ai_reading")
+                    .contains("ai_confidence_percentage")
+                    .contains("retries")
+                    .contains("consecutive_days_overridden");
+            assertThat(capturedUpdateArgs()).contains(new BigDecimal("1100"), new BigDecimal("900"), READING_AT);
+        }
+
+        /**
+         * An unsupplied value is left out of the column list rather than written as NULL, so the
+         * table's {@code DEFAULT 0} still applies to the counters.
+         */
+        @Test
+        void createTenantAnomalyRecordOmitsUnsuppliedColumns() {
+            onColumnExists(true);
+
+            repository.createTenantAnomalyRecord(SCHEMA, anomaly().reason("No submission.").build());
+
+            assertThat(capturedUpdateSql())
+                    .doesNotContain("overridden_reading")
+                    .doesNotContain("previous_reading")
+                    .doesNotContain("retries");
+            assertThat(capturedUpdateArgs()).containsExactly(1L, 2L, 3, 0, "No submission.", "No submission.");
+        }
+
+        @Test
+        void createTenantAnomalyRecordRejectsAMissingNotNullField() {
+            assertThatThrownBy(() -> TenantAnomalyRecord.builder().schemeId(2L).type(3).status(0).build())
+                    .isInstanceOf(NullPointerException.class)
+                    .hasMessageContaining("userId");
         }
     }
 }

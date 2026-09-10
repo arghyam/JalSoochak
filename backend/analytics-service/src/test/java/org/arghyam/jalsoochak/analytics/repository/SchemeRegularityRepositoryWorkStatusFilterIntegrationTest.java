@@ -139,14 +139,22 @@ class SchemeRegularityRepositoryWorkStatusFilterIntegrationTest {
 
     @Test
     void schemeStatusCount_countsOnlyHandedOverScheme() {
-        SchemeRegularityRepository.SchemeStatusCount byLgd = repository.getSchemeStatusCountByLgd(100);
-        // Scheme 1 is active; Scheme 2 (active, ws=1) and Scheme 3 (inactive, ws=NULL) are excluded.
-        assertThat(byLgd.activeSchemeCount()).isEqualTo(1);
-        assertThat(byLgd.inactiveSchemeCount()).isEqualTo(0);
+        // Scheme 2 (ws=1) and Scheme 3 (ws=NULL) are excluded by the work_status filter, so every
+        // bucket of both dimensions describes Scheme 1 alone.
+        SchemeRegularityRepository.SchemeStatusBreakdown byLgd = repository.getSchemeStatusCountByLgd(100);
+        assertThat(byLgd.total()).isEqualTo(1);
+        assertThat(byLgd.workStatusCounts()).containsExactly(codeCount(HANDED_OVER, 1));
+        assertThat(byLgd.operatingStatusCounts()).containsExactly(codeCount(1, 1));
 
-        SchemeRegularityRepository.SchemeStatusCount byDept = repository.getSchemeStatusCountByDepartment(200);
-        assertThat(byDept.activeSchemeCount()).isEqualTo(1);
-        assertThat(byDept.inactiveSchemeCount()).isEqualTo(0);
+        SchemeRegularityRepository.SchemeStatusBreakdown byDept =
+                repository.getSchemeStatusCountByDepartment(200);
+        assertThat(byDept.total()).isEqualTo(1);
+        assertThat(byDept.workStatusCounts()).containsExactly(codeCount(HANDED_OVER, 1));
+        assertThat(byDept.operatingStatusCounts()).containsExactly(codeCount(1, 1));
+    }
+
+    private static SchemeRegularityRepository.SchemeStatusCodeCount codeCount(Integer code, int count) {
+        return new SchemeRegularityRepository.SchemeStatusCodeCount(code, count);
     }
 
     // ---- submission-status summary ----

@@ -43,7 +43,12 @@ import java.util.Set;
 @Order(TelemetryApiKeyAuthFilter.ORDER)
 public class TelemetryApiKeyAuthFilter extends OncePerRequestFilter {
 
-    /** Runs after {@link RequestCorrelationFilter} so rejections carry the request id in the MDC. */
+    /**
+     * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id in the MDC,
+     * and after {@link DisallowedHttpMethodFilter} (15), which means a request reaching this filter
+     * already carries one of the methods the service maps. That filter answers
+     * {@code OPTIONS /api/v1/telemetry/readings} with 405 before this one can answer 401.
+     */
     public static final int ORDER = 20;
 
     /** Request attribute carrying the tenant id resolved from a valid {@code X-Api-Key}. */

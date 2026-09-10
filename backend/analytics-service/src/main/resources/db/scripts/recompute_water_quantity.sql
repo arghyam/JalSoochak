@@ -14,13 +14,17 @@
 --   previous = the latest reading strictly BEFORE it     -- FactMeterReadingRepository.findLatestBefore
 --              with confirmed_reading > 0, ordered by
 --              reading_date DESC, reading_at DESC, id DESC
---   quantity = GREATEST(0, current - previous) * 1000    -- BfmWaterQuantityCalculator + WaterVolumeUnits
+--   quantity = ROUND(GREATEST(0, current - previous)     -- BfmWaterQuantityCalculator + WaterVolumeUnits
+--                    * 1000)
 --
 -- and the two boundary cases that caused the defects this backfill repairs:
 --
 --   no reading on the date  -> new_qty NULL. Live ingestion writes nothing at all in this case, so the
 --                              backfill must not write either. The caller reports any such row whose
 --                              stored value is non-zero as an exception instead of touching it.
+--   litres past BIGINT      -> new_qty NULL, same reasoning: live ingestion catches
+--                              WaterVolumeOutOfRangeException and records nothing for the day, so this
+--                              declines too rather than aborting the run on the ::bigint cast.
 --   no previous reading     -> 0, NOT the whole meter index. A cumulative index needs a baseline to be
 --                              a volume; without one there is no derivable supply for the day.
 --
@@ -37,7 +41,13 @@ SELECT fwq.id,
        CASE
            WHEN cur.confirmed_reading IS NULL THEN NULL
            WHEN prev.confirmed_reading IS NULL THEN 0
-           ELSE GREATEST(0, cur.confirmed_reading::bigint - prev.confirmed_reading::bigint) * 1000
+           -- Past what the BIGINT column holds (a reading around 9.2e15 m3), so there is no value to
+           -- write — exactly the case where live ingestion catches WaterVolumeOutOfRangeException and
+           -- records nothing for the day. NULL is how this file already says "not recomputable", and the
+           -- caller reports those rather than touching them. Without the guard the ::bigint cast below
+           -- would raise and abort the whole recompute over one bad reading.
+           WHEN qty.litres > 9223372036854775807 THEN NULL
+           ELSE qty.litres
        END::bigint                                         AS new_qty,
        -- Which row of a (tenant, scheme, date) group every consumer actually reads. The table has no
        -- uniqueness on that triple; ingestion and the LATEST_WATER_QUANTITY / DISTINCT ON de-duplication
@@ -67,3 +77,16 @@ LEFT JOIN LATERAL (
     ORDER BY r.reading_date DESC, r.reading_at DESC, r.id DESC
     LIMIT 1
 ) prev ON TRUE
+-- The litre value, named once so the CASE above can both range-check it and return it without
+-- restating the arithmetic. NULL whenever either side is missing; the CASE decides what that means.
+--
+-- The readings are NUMERIC (the meters carry a decimal digit), so the subtraction happens at their own
+-- precision and the result is rounded once, at the litre boundary — the same order
+-- BfmWaterQuantityCalculator and WaterVolumeUnits use. Rounding the readings first and subtracting
+-- after is what cost up to 1000 L per day. ROUND() on numeric rounds half-away-from-zero, which is the
+-- Java HALF_UP for the non-negative values GREATEST admits; it is spelled out rather than left to the
+-- implicit assignment cast into the BIGINT column, because the parity with the Java path is the point
+-- of this file.
+CROSS JOIN LATERAL (
+    SELECT ROUND(GREATEST(0, cur.confirmed_reading - prev.confirmed_reading) * 1000) AS litres
+) qty

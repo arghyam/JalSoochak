@@ -280,6 +280,108 @@ class TelemetryTenantRepositoryReadingUpdateTest extends AbstractTelemetryTenant
         }
     }
 
+    /**
+     * "A completed submission" means a reading value was recorded — that is {@code confirmed_reading > 0}
+     * and nothing else. Pairing it with {@code extracted_reading > 0} added no filtering (every row that
+     * is not a real submission — scheme-selection placeholder, location row, meter-change record, issue
+     * report — carries confirmed_reading = 0 and is already excluded) while silently hiding every row
+     * whose value was not extracted from a photo: a hand-typed manual reading, and an API submission
+     * carrying confirmed_reading. Both store the 0 sentinel in extracted_reading, so the operator's
+     * "update previous day's reading" flow could not target the days they cover.
+     */
+    @Nested
+    @DisplayName("completed-submission filter")
+    class CompletedSubmissionFilter {
+
+        private void assertCompletedFilter(Runnable call) {
+            call.run();
+            assertThat(allQuerySql()).anySatisfy(sql -> assertThat(sql)
+                    .contains("confirmed_reading > 0")
+                    .doesNotContain("extracted_reading > 0"));
+        }
+
+        @Test
+        void findLatestCompletedFlowReadingBeforeDateAcceptsRowsWithNoExtractedValue() {
+            assertCompletedFilter(() ->
+                    repository.findLatestCompletedFlowReadingBeforeDate(SCHEMA, 7L, 2L, DAY));
+        }
+
+        @Test
+        void findEarliestCompletedFlowReadingAfterDateAcceptsRowsWithNoExtractedValue() {
+            assertCompletedFilter(() ->
+                    repository.findEarliestCompletedFlowReadingAfterDate(SCHEMA, 7L, 2L, DAY));
+        }
+
+        @Test
+        void findLatestCompletedFlowReadingOnDateForUserAcceptsRowsWithNoExtractedValue() {
+            assertCompletedFilter(() ->
+                    repository.findLatestCompletedFlowReadingOnDateForUser(SCHEMA, 7L, 2L, DAY));
+        }
+
+        @Test
+        void findLatestCompletedReadingForTodayAcceptsRowsWithNoExtractedValue() {
+            assertCompletedFilter(() ->
+                    repository.findLatestCompletedReadingForToday(SCHEMA, 7L, 2L));
+        }
+
+        @Test
+        void findLatestCompletedReadingForPreviousDayAcceptsRowsWithNoExtractedValue() {
+            assertCompletedFilter(() ->
+                    repository.findLatestCompletedReadingForPreviousDay(SCHEMA, 7L, 2L));
+        }
+    }
+
+    /**
+     * The scheme-scoped finders back the officer correction API, which picks the row to correct and the
+     * rows on either side of it to recompute the daily deltas from. They are named "completed" but had
+     * no completion predicate at all, so a scheme-selection placeholder, a location row, a meter-change
+     * record or a standalone issue report — every one of them confirmed_reading = 0 — could be returned
+     * as the reading to correct, or as the previous-day baseline, in which case the whole cumulative
+     * meter value is published as a single day's consumption.
+     */
+    @Nested
+    @DisplayName("scheme-level completion filter")
+    class SchemeLevelCompletionFilter {
+
+        private void assertCompletionFilter(Runnable call) {
+            call.run();
+            assertThat(allQuerySql()).anySatisfy(sql -> assertThat(sql).contains("confirmed_reading > 0"));
+        }
+
+        @Test
+        void findLatestCompletedFlowReadingForSchemeExcludesZeroConfirmedRows() {
+            assertCompletionFilter(() -> repository.findLatestCompletedFlowReadingForScheme(SCHEMA, 7L));
+        }
+
+        @Test
+        void findLatestCompletedFlowReadingOnDateExcludesZeroConfirmedRows() {
+            assertCompletionFilter(() -> repository.findLatestCompletedFlowReadingOnDate(SCHEMA, 7L, DAY));
+        }
+
+        @Test
+        void findPreviousFlowReadingForSchemeExcludesZeroConfirmedRows() {
+            call(() -> repository.findPreviousFlowReadingForScheme(SCHEMA, 100L));
+            // Only the candidate side is filtered; the target row is addressed by id.
+            assertThat(allQuerySql()).anySatisfy(sql -> assertThat(sql).contains("fr.confirmed_reading > 0"));
+        }
+
+        @Test
+        void findLatestCompletedFlowReadingBeforeDateForSchemeExcludesZeroConfirmedRows() {
+            assertCompletionFilter(() ->
+                    repository.findLatestCompletedFlowReadingBeforeDateForScheme(SCHEMA, 7L, DAY));
+        }
+
+        @Test
+        void findEarliestCompletedFlowReadingAfterDateForSchemeExcludesZeroConfirmedRows() {
+            assertCompletionFilter(() ->
+                    repository.findEarliestCompletedFlowReadingAfterDateForScheme(SCHEMA, 7L, DAY));
+        }
+
+        private void call(Runnable r) {
+            r.run();
+        }
+    }
+
     @Nested
     @DisplayName("completed flow reading finders")
     class CompletedFlowReadingFinders {

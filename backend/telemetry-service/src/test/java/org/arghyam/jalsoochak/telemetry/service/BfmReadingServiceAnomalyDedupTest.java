@@ -5,6 +5,8 @@ import org.arghyam.jalsoochak.telemetry.channel.ReadingChannelResolver;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.FlowVisionResult;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.config.SupplyPlausibilityProperties;
+import org.arghyam.jalsoochak.telemetry.service.water.SupplyPlausibilityFixtures;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
@@ -26,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -67,7 +70,9 @@ class BfmReadingServiceAnomalyDedupTest {
                 glificOperatorContextService,
                 null,
                 readingChannelResolver,
-                new RolloverResolutionService(false, new ObjectMapper())
+                new RolloverResolutionService(false, new ObjectMapper()),
+                SupplyPlausibilityFixtures.guard(
+                        SupplyPlausibilityProperties.Mode.AUDIT, telemetryTenantRepository, tenantConfigRepository)
         );
     }
 
@@ -110,11 +115,11 @@ class BfmReadingServiceAnomalyDedupTest {
         assertEquals(correlationCaptor.getAllValues().get(0), correlationCaptor.getAllValues().get(1));
         verify(telemetryTenantRepository, times(2)).createTenantAnomalyRecord(
                 eq("tenant_up"),
-                eq(11L),
-                eq(100L),
-                eq(AnomalyConstants.TYPE_UNREADABLE_IMAGE),
-                contains("Unreadable image"),
-                eq(AnomalyConstants.STATUS_OPEN)
+                argThat(anomaly -> anomaly.userId() == 11L
+                        && anomaly.schemeId() == 100L
+                        && anomaly.type() == AnomalyConstants.TYPE_UNREADABLE_IMAGE
+                        && anomaly.reason().contains("Unreadable image")
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
         );
         verify(telemetryTenantRepository, never()).touchLatestAnomalyByTypeForToday(
                 eq("tenant_up"),
@@ -171,11 +176,11 @@ class BfmReadingServiceAnomalyDedupTest {
         assertFalse(correlationCaptor.getAllValues().get(0).isBlank());
         verify(telemetryTenantRepository, times(2)).createTenantAnomalyRecord(
                 eq("tenant_up"),
-                eq(11L),
-                eq(100L),
-                eq(AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION),
-                contains("Duplicate image submission detected"),
-                eq(AnomalyConstants.STATUS_OPEN)
+                argThat(anomaly -> anomaly.userId() == 11L
+                        && anomaly.schemeId() == 100L
+                        && anomaly.type() == AnomalyConstants.TYPE_DUPLICATE_IMAGE_SUBMISSION
+                        && anomaly.reason().contains("Duplicate image submission detected")
+                        && anomaly.status() == AnomalyConstants.STATUS_OPEN)
         );
         verify(telemetryTenantRepository, never()).touchLatestAnomalyByTypeForToday(
                 eq("tenant_up"),

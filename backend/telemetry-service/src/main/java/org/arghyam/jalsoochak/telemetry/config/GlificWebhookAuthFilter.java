@@ -51,11 +51,12 @@ import java.util.Deque;
 public class GlificWebhookAuthFilter extends OncePerRequestFilter {
 
     /**
-     * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id, and after
-     * {@link TelemetryApiKeyAuthFilter} (20) purely to keep the chain in a stable, documented order.
-     * The two gates never contend: this filter's allowlist and that filter's protected prefixes are
-     * disjoint, apart from {@code /readings/glific} and {@code /schemes}, which the API-key filter
-     * exempts precisely so the webhook token can authenticate them here.
+     * Runs after {@link RequestCorrelationFilter} (10) so rejections carry the request id,
+     * {@link DisallowedHttpMethodFilter} (15) and {@link TelemetryApiKeyAuthFilter} (20) — the last
+     * purely to keep the chain in a stable, documented order. The two credential gates never contend:
+     * this filter's allowlist and that filter's protected prefixes are disjoint, apart from
+     * {@code /readings/glific} and {@code /schemes}, which the API-key filter exempts precisely so
+     * the webhook token can authenticate them here.
      */
     public static final int ORDER = 30;
 

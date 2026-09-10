@@ -30,44 +30,25 @@ public class PublicSchemeController {
      * read. If it is ever made genuinely public, drop {@link RequiresTenantAccess} along with
      * adding the permitAll entries.
      *
-     * <p>{@code tenantCode} is the sole tenant selector — it picks the schema and is matched
-     * against the caller's own JWT by {@link RequiresTenantAccess}. {@code tenantId} is optional
-     * and carried only for callers that already hold the numeric id; when supplied it must name
-     * the same tenant, otherwise the request is rejected as malformed (400) rather than silently
-     * ignored. Omitting it is valid and changes nothing.
+     * <p>{@code tenantCode} is the only tenant selector: it picks the schema and is matched against
+     * the caller's own JWT by {@link RequiresTenantAccess}. A numeric {@code tenantId} is
+     * deliberately not accepted — it would be a second selector carrying no authority of its own,
+     * which invites callers to believe a request was scoped when only {@code tenantCode} scoped it.
+     * Endpoints that address a tenant by id instead (see
+     * {@code SchemeController#getSchemeStatuses}) authorize it through
+     * {@code SchemeSecurityEvaluator#canAccessTenantId}.
      */
     @RequiresTenantAccess
     @GetMapping("/schemes/{schemeId}")
     public ResponseEntity<SchemeDTO> getSchemeDetails(
             @PathVariable int schemeId,
-            @RequestParam String tenantCode,
-            @RequestParam(required = false) Integer tenantId
+            @RequestParam String tenantCode
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        requireTenantIdMatches(tenantId, schemaName);
         SchemeDTO dto = schemeDbRepository.findSchemeById(schemaName, schemeId);
         if (dto == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
         }
         return ResponseEntity.ok(dto);
     }
-
-    /**
-     * Rejects a {@code tenantId} that names a different tenant than the already-resolved
-     * {@code schemaName}, so the parameter cannot look enforced while being ignored.
-     *
-     * <p>A {@code null} id means "not supplied" and passes. An unknown id resolves to no schema
-     * and is therefore a mismatch. This is an input-consistency check, not an access check — the
-     * caller's entitlement to {@code schemaName} has already been settled by
-     * {@link RequiresTenantAccess}, so a contradiction here is a 400, not a 403.
-     */
-    private void requireTenantIdMatches(Integer tenantId, String schemaName) {
-        if (tenantId == null) {
-            return;
-        }
-        if (!schemaName.equals(schemeDbRepository.findSchemaNameByTenantId(tenantId))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenantId does not match tenantCode");
-        }
-    }
 }
-

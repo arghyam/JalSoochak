@@ -581,6 +581,133 @@ class TelemetryTenantRepositoryReadTest extends AbstractTelemetryTenantRepositor
         }
 
         @Test
+        void supportsQuarantineTracksColumnPresence() {
+            onColumnsExisting("quarantine_reason");
+            assertThat(repository.supportsQuarantine(SCHEMA)).isTrue();
+        }
+
+        @Test
+        void supportsQuarantineIsFalseOnPreMigrationSchema() {
+            onColumnExists(false);
+            assertThat(repository.supportsQuarantine(SCHEMA)).isFalse();
+        }
+
+        /** Registers rows for each of the four baseline lookups and runs them all. */
+        private void runEveryBaselineLookup() {
+            onQuery("confirmed_reading > 0",
+                    row("confirmed_reading", new BigDecimal("10"), "created_at", null));
+            onQuery("DISTINCT ON (reading_date)",
+                    row("reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("10")));
+            // Registered last so it wins over the "confirmed_reading > 0" rule, which the joined
+            // query's own "fr.confirmed_reading > 0" would otherwise match.
+            onQuery("JOIN tenant_as.flow_reading_table target",
+                    row("id", 5L, "correlation_id", "corr-1", "created_by", 2L,
+                            "reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("10")));
+
+            repository.findLatestConfirmedReadingSnapshot(SCHEMA, 5L, null);
+            repository.findLatestConfirmedReadingSnapshotBeforeDate(SCHEMA, 5L, LocalDate.of(2026, 3, 2), null);
+            repository.findRecentDailyConfirmedReadings(SCHEMA, 5L, null, 16);
+            repository.findPreviousFlowReadingForScheme(SCHEMA, 100L);
+        }
+
+        @Test
+        void baselineQueriesExcludeQuarantinedRowsOnAMigratedSchema() {
+            // A quarantined row is stored but is not a reading: it must not become the baseline the
+            // next day's delta is measured against, in any of the four queries that produce one.
+            onColumnsExisting("quarantine_reason");
+
+            runEveryBaselineLookup();
+
+            assertThat(allQuerySql())
+                    .filteredOn(sql -> sql.contains("flow_reading_table"))
+                    .hasSize(4)
+                    .allSatisfy(sql -> assertThat(sql).contains("quarantine_reason = 0"));
+        }
+
+        @Test
+        void findPreviousFlowReadingForSchemeFiltersTheBaselineSideOnly() {
+            // The joined lookup has two aliases. The candidate side is searched, so it takes the
+            // filter; the target is addressed by id and must stay reachable even when quarantined —
+            // a correction has to be able to resolve the very row it is releasing.
+            onColumnsExisting("quarantine_reason");
+            onQuery("JOIN tenant_as.flow_reading_table target",
+                    row("id", 5L, "correlation_id", "corr-1", "created_by", 2L,
+                            "reading_date", LocalDate.of(2026, 3, 1), "confirmed_reading", new BigDecimal("10")));
+
+            repository.findPreviousFlowReadingForScheme(SCHEMA, 100L);
+
+            assertThat(allQuerySql())
+                    .filteredOn(sql -> sql.contains("flow_reading_table"))
+                    .singleElement()
+                    .satisfies(sql -> {
+                        assertThat(sql).contains("fr.quarantine_reason = 0");
+                        assertThat(sql).doesNotContain("target.quarantine_reason");
+                    });
+        }
+
+        @Test
+        void baselineQueriesKeepTheLegacySqlOnAPreMigrationSchema() {
+            onColumnExists(false);
+
+            runEveryBaselineLookup();
+
+            assertThat(allQuerySql()).noneSatisfy(sql -> assertThat(sql).contains("quarantine_reason"));
+        }
+
+        @Test
+        void findSchemeSupplyCountsMapsTheThreeConnectionCounts() {
+            onQuery("fhtc_count", row(
+                    "fhtc_count", 120,
+                    "planned_fhtc", 150,
+                    "house_hold_count", 200));
+
+            assertThat(repository.findSchemeSupplyCounts(SCHEMA, 5L))
+                    .hasValue(new TelemetrySchemeSupplyCounts(120, 150, 200));
+        }
+
+        @Test
+        void findSchemeSupplyCountsIsEmptyForAnUnknownScheme() {
+            assertThat(repository.findSchemeSupplyCounts(SCHEMA, 5L)).isEmpty();
+            assertThat(repository.findSchemeSupplyCounts(SCHEMA, null)).isEmpty();
+        }
+
+        @Test
+        void correctionLookupsCarryTheQuarantineMarkerOnAMigratedSchema() {
+            // The marker rides along so a refused correction can name the right reason; the row must
+            // still be reachable, which is why these two queries are deliberately unfiltered.
+            onColumnsExisting("quarantine_reason");
+            onQuery("flow_reading_table", row(
+                    "id", 99L, "scheme_id", 10L, "created_by", 1L, "correlation_id", "corr-1",
+                    "extracted_reading", new BigDecimal("0"), "confirmed_reading", new BigDecimal("150"),
+                    "image_url", "", "reading_date", LocalDate.of(2026, 3, 3),
+                    "reading_time", LocalDateTime.of(2026, 3, 3, 6, 0), "channel", "BFM",
+                    "quarantine_reason", 1));
+
+            assertThat(repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
+                    .hasValueSatisfying(r -> assertThat(r.quarantineReason()).isEqualTo(1));
+            assertThat(repository.findLatestFlowReadingByOperator(SCHEMA, 1L))
+                    .hasValueSatisfying(r -> assertThat(r.quarantineReason()).isEqualTo(1));
+            assertThat(allQuerySql()).allSatisfy(sql ->
+                    assertThat(sql).doesNotContain("quarantine_reason = 0"));
+        }
+
+        @Test
+        void correctionLookupsReadNullQuarantineMarkerOnPreMigrationSchema() {
+            onColumnExists(false);
+            onQuery("flow_reading_table", row(
+                    "id", 99L, "scheme_id", 10L, "created_by", 1L, "correlation_id", "corr-1",
+                    "extracted_reading", new BigDecimal("0"), "confirmed_reading", new BigDecimal("150"),
+                    "image_url", "", "reading_date", LocalDate.of(2026, 3, 3),
+                    "reading_time", LocalDateTime.of(2026, 3, 3, 6, 0), "channel", "BFM",
+                    "quarantine_reason", null));
+
+            assertThat(repository.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
+                    .hasValueSatisfying(r -> assertThat(r.quarantineReason()).isNull());
+            assertThat(allQuerySql()).anySatisfy(sql ->
+                    assertThat(sql).contains("NULL::smallint AS quarantine_reason"));
+        }
+
+        @Test
         void findReadingByCorrelationIdAlsoMatchesFlowVisionIdWhenColumnExists() {
             onColumnsExisting("flowvision_correlation_id");
             onQuery("flow_reading_table", row("id", 5L, "correlation_id", "corr-1", "created_by", 2L));

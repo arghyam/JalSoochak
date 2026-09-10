@@ -13,6 +13,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -86,25 +87,25 @@ class FactMeterReadingRepositoryIntegrationTest {
 
     @Test
     void findLatestBefore_ignoresSameDayAndReturnsTheMostRecentEarlierReading() {
-        insertReading(SCHEME, D1, 100, "2026-01-01T08:00:00");
-        insertReading(SCHEME, D2, 140, "2026-01-02T08:00:00");
-        insertReading(SCHEME, D4, 175, "2026-01-04T08:00:00");
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
+        insertReading(SCHEME, D2, "140", "2026-01-02T08:00:00");
+        insertReading(SCHEME, D4, "175", "2026-01-04T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualTo(140);
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D2))).isEqualTo(100);
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("140");
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D2))).isEqualByComparingTo("100");
     }
 
     @Test
     void findLatestBefore_afterAGapReturnsTheLastActualReadingNotTheMissingPreviousDay() {
         // Only D1 exists; D2 and D3 have no reading at all.
-        insertReading(SCHEME, D1, 100, "2026-01-01T08:00:00");
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualTo(100);
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("100");
     }
 
     @Test
     void findLatestBefore_whenNothingPrecedesTheDate_returnsEmpty() {
-        insertReading(SCHEME, D1, 100, "2026-01-01T08:00:00");
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
 
         assertThat(repository.findLatestBefore(TENANT, SCHEME, D1)).isEmpty();
     }
@@ -113,66 +114,78 @@ class FactMeterReadingRepositoryIntegrationTest {
     void findLatestBefore_skipsZeroReadingsAsBaselines() {
         // resetLatestConfirmedReadingByPhone (telemetry-service) writes genuine 0 readings. Taking one
         // as the baseline would make the next day's delta the entire cumulative meter index.
-        insertReading(SCHEME, D1, 100, "2026-01-01T08:00:00");
-        insertReading(SCHEME, D2, 0, "2026-01-02T08:00:00");
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
+        insertReading(SCHEME, D2, "0", "2026-01-02T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualTo(100);
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("100");
+    }
+
+    @Test
+    void findLatestBefore_acceptsASubCubicMetreReadingAsABaseline() {
+        // The > 0 filter exists to skip the genuine zeros that resetLatestConfirmedReadingByPhone
+        // writes, not to skip small readings. 0.4 m3 used to round to 0 at publish time and get
+        // skipped here, silently promoting an older reading to baseline.
+        insertReading(SCHEME, D1, "0.4", "2026-01-01T08:00:00");
+
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D2)))
+                .isEqualByComparingTo("0.4");
     }
 
     @Test
     void findLatestBefore_isScopedToTheScheme() {
-        insertReading(OTHER_SCHEME, D2, 900, "2026-01-02T08:00:00");
-        insertReading(SCHEME, D1, 100, "2026-01-01T08:00:00");
+        insertReading(OTHER_SCHEME, D2, "900", "2026-01-02T08:00:00");
+        insertReading(SCHEME, D1, "100", "2026-01-01T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualTo(100);
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("100");
     }
 
     @Test
     void findLatestBefore_breaksTiesOnIdWhenTimestampsAreIdentical() {
         // A correction re-publishes with the *original* readingAt, so the corrected day holds two rows
         // with identical timestamps. The later write (highest id) is the one that counts.
-        insertReading(SCHEME, D2, 140, "2026-01-02T08:00:00");
-        insertReading(SCHEME, D2, 145, "2026-01-02T08:00:00");
+        insertReading(SCHEME, D2, "140", "2026-01-02T08:00:00");
+        insertReading(SCHEME, D2, "145", "2026-01-02T08:00:00");
 
-        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualTo(145);
+        assertThat(readingAt(repository.findLatestBefore(TENANT, SCHEME, D4))).isEqualByComparingTo("145");
     }
 
     @Test
     void findTopByReadingDate_returnsTheLastRowOfTheDayAndBreaksTiesOnId() {
-        insertReading(SCHEME, D2, 140, "2026-01-02T08:00:00");
-        insertReading(SCHEME, D2, 150, "2026-01-02T17:30:00");
+        insertReading(SCHEME, D2, "140", "2026-01-02T08:00:00");
+        insertReading(SCHEME, D2, "150", "2026-01-02T17:30:00");
         // Corrected re-publish of the 08:00 reading: same timestamp, higher id, but an earlier
         // timestamp than the 17:30 row — which must still win.
-        insertReading(SCHEME, D2, 141, "2026-01-02T08:00:00");
+        insertReading(SCHEME, D2, "141", "2026-01-02T08:00:00");
 
         Optional<FactMeterReading> latest = repository
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(TENANT, SCHEME, D2);
 
-        assertThat(readingAt(latest)).isEqualTo(150);
+        assertThat(readingAt(latest)).isEqualByComparingTo("150");
     }
 
     @Test
     void findTopByReadingDate_withIdenticalTimestampsPrefersTheLaterWrite() {
-        insertReading(SCHEME, D2, 140, "2026-01-02T08:00:00");
-        insertReading(SCHEME, D2, 141, "2026-01-02T08:00:00");
+        insertReading(SCHEME, D2, "140", "2026-01-02T08:00:00");
+        insertReading(SCHEME, D2, "141", "2026-01-02T08:00:00");
 
         Optional<FactMeterReading> latest = repository
                 .findTopByTenantIdAndSchemeIdAndReadingDateOrderByReadingAtDescIdDesc(TENANT, SCHEME, D2);
 
-        assertThat(readingAt(latest)).isEqualTo(141);
+        assertThat(readingAt(latest)).isEqualByComparingTo("141");
     }
 
-    private void insertReading(int schemeId, LocalDate readingDate, int confirmedReading, String readingAt) {
+    /** {@code confirmedReading} is text so the fixture states an exact NUMERIC rather than a double. */
+    private void insertReading(int schemeId, LocalDate readingDate, String confirmedReading, String readingAt) {
         jdbcTemplate.update("""
                 INSERT INTO analytics_schema.fact_meter_reading_table
                 (tenant_id, scheme_id, user_id, extracted_reading, confirmed_reading,
                  reading_at, reading_date, submission_status, reading_type, created_at)
                 VALUES (?, ?, 11, ?, ?, ?, ?, 1, 0, NOW())
-                """, TENANT, schemeId, confirmedReading, confirmedReading,
+                """, TENANT, schemeId, new BigDecimal(confirmedReading), new BigDecimal(confirmedReading),
                 LocalDateTime.parse(readingAt), readingDate);
     }
 
-    private static Integer readingAt(Optional<FactMeterReading> reading) {
+    private static BigDecimal readingAt(Optional<FactMeterReading> reading) {
         return reading.map(FactMeterReading::getConfirmedReading).orElse(null);
     }
 }
