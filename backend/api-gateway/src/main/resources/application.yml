@@ -124,7 +124,7 @@ spring:
         - id: tenant-service-flat
           uri: ${TENANT_SERVICE_URI:http://localhost:8081}
           predicates:
-            - Path=/api/v1/tenants/**, /api/v1/system/**, /api/v1/tenant-config/**, /api/v1/locations/**
+            - Path=/api/v1/tenants/**, /api/v1/system/**
           filters:
             - name: RequestRateLimiter
               args:
@@ -296,8 +296,6 @@ springdoc:
         url: /scheme/v3/api-docs
       - name: analytics-service
         url: /analytics/v3/api-docs
-      - name: anomaly-service
-        url: /anomaly/v3/api-docs
 
 eureka:
   client:
