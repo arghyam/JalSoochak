@@ -6,7 +6,7 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
 import org.arghyam.jalsoochak.user.repository.PublicPumpOperatorRepository;
 import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
@@ -84,7 +84,7 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
     }
 
     @Override
-    public PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
+    public PageResponseDTO<SchemeReadingComplianceRowDTO> listSchemeReadingCompliance(
             String tenantCode,
             long schemeId,
             Long pumpOperatorId,
@@ -97,16 +97,16 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
         int p = Math.max(0, page);
         int effectiveSize = clampLimit(size);
         long offset = offsetOf(p, effectiveSize);
-        long total = publicPumpOperatorRepository.countPumpOperatorsBySchemeWithCompliance(
+        long total = publicPumpOperatorRepository.countSchemeReadingCompliance(
                 schemaName,
                 schemeId,
                 pumpOperatorId,
                 startDate,
                 endDate
         );
-        List<PumpOperatorSchemeComplianceRowDTO> rows = startsPastLastRow(offset, total)
+        List<SchemeReadingComplianceRowDTO> rows = startsPastLastRow(offset, total)
                 ? List.of()
-                : publicPumpOperatorRepository.listPumpOperatorsBySchemeWithCompliance(
+                : publicPumpOperatorRepository.listSchemeReadingCompliance(
                         schemaName,
                         schemeId,
                         pumpOperatorId,

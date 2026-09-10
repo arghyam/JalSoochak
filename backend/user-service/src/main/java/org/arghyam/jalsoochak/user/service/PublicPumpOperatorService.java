@@ -4,7 +4,7 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 
@@ -27,7 +27,7 @@ public interface PublicPumpOperatorService {
 
     PageResponseDTO<PumpOperatorReadingComplianceRowDTO> listReadingCompliance(String tenantCode, int page, int size);
 
-    PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
+    PageResponseDTO<SchemeReadingComplianceRowDTO> listSchemeReadingCompliance(
             String tenantCode,
             long schemeId,
             Long pumpOperatorId,

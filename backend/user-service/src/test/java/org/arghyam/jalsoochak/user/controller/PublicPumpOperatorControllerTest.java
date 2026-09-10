@@ -8,7 +8,7 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianc
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingDetailDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
@@ -177,10 +177,10 @@ class PublicPumpOperatorControllerTest {
         @Test
         @DisplayName("returns 200 with scheme compliance rows")
         void returns200() throws Exception {
-            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
-                    PageResponseDTO.<PumpOperatorSchemeComplianceRowDTO>builder()
+            PageResponseDTO<SchemeReadingComplianceRowDTO> page =
+                    PageResponseDTO.<SchemeReadingComplianceRowDTO>builder()
                             .content(List.of()).totalElements(0L).totalPages(0).number(0).size(20).build();
-            when(publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
+            when(publicPumpOperatorService.listSchemeReadingCompliance(
                     anyString(), anyLong(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
@@ -193,10 +193,10 @@ class PublicPumpOperatorControllerTest {
         @Test
         @DisplayName("returns 200 when pumpOperatorId is missing")
         void returns200WhenPumpOperatorIdMissing() throws Exception {
-            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
-                    PageResponseDTO.<PumpOperatorSchemeComplianceRowDTO>builder()
+            PageResponseDTO<SchemeReadingComplianceRowDTO> page =
+                    PageResponseDTO.<SchemeReadingComplianceRowDTO>builder()
                             .content(List.of()).totalElements(0L).totalPages(0).number(0).size(20).build();
-            when(publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
+            when(publicPumpOperatorService.listSchemeReadingCompliance(
                     anyString(), anyLong(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
