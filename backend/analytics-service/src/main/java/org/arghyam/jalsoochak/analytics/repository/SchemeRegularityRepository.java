@@ -164,11 +164,15 @@ public class SchemeRegularityRepository {
      * token immediately after its {@code WHERE s.<...>}/{@code ON ...} predicate and routes its SQL
      * through this method. The work_status tokens are replaced <em>before</em> the water tokens so the
      * generated predicate is itself scrubbed by the M1 guard in {@link #withWaterFragments(String)}.
+     *
+     * <p>{@code {{CSR}}} renders {@link #canonicalSchemeRowOrder(String)} for that same alias, for the
+     * scheme-selection CTEs that collapse a fanned-out scheme to one row.
      */
     private String withDashboardFragments(String sql) {
         return withWaterFragments(sql
                 .replace("{{WS}}", workStatusFilter.andPredicate("s"))
-                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
+                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s"))
+                .replace("{{CSR}}", canonicalSchemeRowOrder("s")));
     }
 
     /**
@@ -283,6 +287,33 @@ public class SchemeRegularityRepository {
         return withWaterFragments(sql
                 .replace("{{WS}}", workStatusPredicate)
                 .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
+    }
+
+    /**
+     * Tie-break that reduces a scheme's {@code dim_scheme_table} rows to the one canonical row a dashboard
+     * reports on. Pair it with {@code SELECT DISTINCT ON (<alias>.scheme_id) … ORDER BY <alias>.scheme_id,}
+     * this expression.
+     *
+     * <p>Since V24 the table is unique on
+     * {@code (tenant_id, scheme_id, parent_lgd_location_id, parent_department_location_id)}, so one scheme
+     * spans one row per mapping. The scheme-level attributes on those rows — name, work_status,
+     * operating_status — describe the scheme rather than the mapping and are meant to be identical
+     * everywhere, but {@code DimensionServiceImpl} rewrites only the single row it finds by
+     * {@code findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc}, so after any status change the
+     * new value sits on that row alone. Aggregating over the raw rows therefore counts such a scheme once
+     * per distinct value, pushing the status buckets past the scheme total, and lists it once per row.
+     *
+     * <p>Mirroring the writer's own ordering keeps a read on the row it last wrote, so the dashboard shows
+     * the current status and counts the scheme exactly once. {@code id} closes the ordering for rows written
+     * in the same instant.
+     *
+     * @param alias alias of {@code dim_scheme_table}, or blank when selecting from an earlier CTE
+     */
+    private static String canonicalSchemeRowOrder(String alias) {
+        String prefix = (alias == null || alias.isBlank()) ? "" : alias + ".";
+        return prefix + "updated_at DESC NULLS LAST, "
+                + prefix + "created_at DESC NULLS LAST, "
+                + prefix + "id DESC";
     }
 
     private String resolveDashboardSortDirection(String sortDir) {
@@ -2967,23 +2998,32 @@ public class SchemeRegularityRepository {
      *
      * <p>The three grouping sets each produce a NULL for the column they do not group by, which is
      * indistinguishable from a scheme whose status code is genuinely NULL — {@code GROUPING()} tells the two
-     * apart. Each bucket keeps {@code COUNT(DISTINCT scheme_id)} rather than a plain count, matching how the
-     * dimension has always been counted: a scheme fanned out across several rows is one scheme.
+     * apart. Grouping runs over one {@link #canonicalSchemeRowOrder(String) canonical row} per scheme rather
+     * than the raw dimension rows, so each bucket is a plain {@code COUNT(*)} of schemes and both breakdowns
+     * partition the total exactly.
      *
      * @param whereClause predicate over alias {@code s}, assembled from hardcoded column names; every
      *                    caller-supplied value is bound through {@code params}
      */
     private SchemeStatusBreakdown querySchemeStatusBreakdown(String whereClause, Object... params) {
         String sql = withDashboardFragments(String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT DISTINCT ON (s.scheme_id)
+                        s.scheme_id,
+                        s.work_status,
+                        s.operating_status
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE %1$s{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
+                )
                 SELECT
-                    GROUPING(s.work_status) AS work_status_rolled_up,
-                    GROUPING(s.operating_status) AS operating_status_rolled_up,
-                    s.work_status,
-                    s.operating_status,
-                    COUNT(DISTINCT s.scheme_id)::int AS scheme_count
-                FROM analytics_schema.dim_scheme_table s
-                WHERE %1$s{{WS}}
-                GROUP BY GROUPING SETS ((s.work_status), (s.operating_status), ())
+                    GROUPING(work_status) AS work_status_rolled_up,
+                    GROUPING(operating_status) AS operating_status_rolled_up,
+                    work_status,
+                    operating_status,
+                    COUNT(*)::int AS scheme_count
+                FROM schemes_in_scope
+                GROUP BY GROUPING SETS ((work_status), (operating_status), ())
                 """, whereClause));
 
         List<StatusGroupRow> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new StatusGroupRow(
@@ -3922,7 +3962,7 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -3950,6 +3990,7 @@ public class SchemeRegularityRepository {
                         END AS immediate_parent_lgd_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4077,7 +4118,7 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH scheme_rows_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -4094,13 +4135,16 @@ public class SchemeRegularityRepository {
                         s.level_4_dept_id,
                         s.level_5_dept_id,
                         s.level_6_dept_id,
-                        s.%2$s AS supplied_lgd_location_id
+                        s.%2$s AS supplied_lgd_location_id,
+                        s.updated_at,
+                        s.created_at,
+                        s.id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT ON (scheme_id)
+                    SELECT DISTINCT ON (s.scheme_id)
                         scheme_id,
                         scheme_name,
                         operating_status,
@@ -4117,8 +4161,8 @@ public class SchemeRegularityRepository {
                         level_4_dept_id,
                         level_5_dept_id,
                         level_6_dept_id
-                    FROM scheme_rows_in_scope
-                    ORDER BY scheme_id, supplied_lgd_location_id NULLS LAST
+                    FROM scheme_rows_in_scope s
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_supplied_lgd_locations AS (
                     SELECT DISTINCT scheme_id, supplied_lgd_location_id
@@ -4262,7 +4306,7 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -4291,6 +4335,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4384,7 +4429,7 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -4412,6 +4457,7 @@ public class SchemeRegularityRepository {
                         END AS immediate_parent_department_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4539,7 +4585,7 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -4568,6 +4614,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4670,7 +4717,7 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
@@ -4699,6 +4746,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -8019,8 +8067,9 @@ public class SchemeRegularityRepository {
 
     /**
      * Scheme counts for an area, broken down along both real status dimensions. The two lists count the
-     * same schemes twice over, once per dimension, so each sums to {@code total} except where a scheme
-     * spans several dimension rows.
+     * same schemes twice over, once per dimension, so each sums to {@code total} — a scheme spanning
+     * several dimension rows is counted once, under its
+     * {@link #canonicalSchemeRowOrder(String) canonical row}'s status.
      */
     public record SchemeStatusBreakdown(
             int total,
