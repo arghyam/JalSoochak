@@ -131,7 +131,8 @@ class MultiFormatReadingControllerTest {
                 .success(false)
                 .qualityStatus("REJECTED")
                 .errorCode(TelemetryErrorCode.ABNORMAL_READING)
-                .message("Reading rejected: the implied daily supply is not plausible for this scheme.")
+                .message("Reading rejected: this reading looks unusually high for this scheme. "
+                        + "Please check the meter reading and try again.")
                 .meterReading(new BigDecimal("1100"))
                 .lastConfirmedReading(new BigDecimal("900"))
                 .build());

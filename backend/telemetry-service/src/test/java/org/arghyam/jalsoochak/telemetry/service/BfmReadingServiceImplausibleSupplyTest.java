@@ -248,7 +248,8 @@ class BfmReadingServiceImplausibleSupplyTest {
             // 75000 = the ceiling, 500 = the population, 100 = the FHTC count, 150 = the per-person
             // limit. Any of them in the body would let a caller solve for the rest.
             assertThat(response.getMessage())
-                    .isEqualTo("Reading rejected: the implied daily supply is not plausible for this scheme.")
+                    .isEqualTo("Reading rejected: this reading looks unusually high for this scheme. "
+                            + "Please check the meter reading and try again.")
                     .doesNotContain("75000", "500", "100", "150");
         }
 

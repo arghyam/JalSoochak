@@ -549,7 +549,8 @@ public class BfmReadingService {
                     // "maximum allowed: N" would let any API-key holder solve for the scheme's
                     // connection count and the per-person limit in two submissions.
                     .message(messageOverride(contactId,
-                            "Reading rejected: the implied daily supply is not plausible for this scheme."))
+                            "Reading rejected: this reading looks unusually high for this scheme. "
+                                    + "Please check the meter reading and try again."))
                     .correlationId(responseCorrelationId)
                     .meterReading(effectiveConfirmedReading)
                     .qualityConfidence(confidenceLevel)
@@ -958,7 +959,8 @@ public class BfmReadingService {
                 .success(false)
                 // THRESHOLD-DISCLOSURE: names no ceiling, population or FHTC figure, for the same
                 // reason the submission rejection does not.
-                .message("Correction rejected: the implied daily supply is not plausible for this scheme.")
+                .message("Correction rejected: this reading looks unusually high for this scheme. "
+                        + "Please check the meter reading and try again.")
                 .correlationId(reading.correlationId())
                 .meterReading(attemptedReading)
                 .qualityStatus("REJECTED")

@@ -982,7 +982,8 @@ class SingleTenantTelemetryControllerUnitTest {
                                                                 Integer tenantId) {
                 return CreateReadingResponse.builder()
                         .success(false)
-                        .message("Correction rejected: the implied daily supply is not plausible for this scheme.")
+                        .message("Correction rejected: this reading looks unusually high for this scheme. "
+                                + "Please check the meter reading and try again.")
                         .correlationId(correlationId)
                         .meterReading(confirmedReading)
                         .lastConfirmedReading(new BigDecimal("950"))
