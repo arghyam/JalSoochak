@@ -55,6 +55,9 @@ class RedisConnectionPropertiesTest {
 
     private static StandardEnvironment environmentWith(Map<String, Object> systemEnvironment) throws IOException {
         StandardEnvironment environment = new StandardEnvironment();
+        // JVM system properties outrank the environment, so a stray -DREDIS_HOST on the Maven
+        // command line would decide these assertions instead of the map under test.
+        environment.getPropertySources().remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
         environment.getPropertySources().replace(
                 StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
                 new SystemEnvironmentPropertySource(

@@ -83,8 +83,13 @@ public class RateLimiterConfig {
      *
      * <p>This holds only while nginx is the outermost proxy. Put another one in front (an ALB, a CDN)
      * and the rightmost entry becomes that proxy's address, collapsing every caller into a single
-     * bucket — the resolver would then have to skip a known number of trusted hops instead. Requests
-     * that reach the gateway's port directly, bypassing nginx, carry whatever header the caller chose.
+     * bucket — the resolver would then have to skip a known number of trusted hops instead.
+     *
+     * <p>A request arriving without passing through nginx would carry whatever header its sender
+     * chose, rightmost entry included. No such path exists: the gateway's Service is ClusterIP with
+     * no external address, so its port is reachable only from inside the cluster. Publishing it
+     * through a NodePort or LoadBalancer would reopen that, and the resolver would then have to
+     * check the peer address against the ingress network before believing the header at all.
      */
     private String clientIp(ServerWebExchange exchange) {
         String forwardedFor = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
