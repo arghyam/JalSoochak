@@ -23,6 +23,7 @@
         <spring-kafka.version>3.1.4</spring-kafka.version>
         <postgresql.version>42.7.3</postgresql.version>
         <lombok.version>1.18.32</lombok.version>
+        <swagger-ui.version>5.32.14</swagger-ui.version>
         <!-- Docker Engine 29+ enforces min API version; keep Testcontainers recent enough. -->
         <testcontainers.version>1.21.4</testcontainers.version>
         <swagger-ui.version>5.32.14</swagger-ui.version>
@@ -101,7 +102,7 @@
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.5.0</version>
+            <version>2.6.0</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
