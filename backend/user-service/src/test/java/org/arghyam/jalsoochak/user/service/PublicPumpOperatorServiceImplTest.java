@@ -6,7 +6,7 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
 import org.arghyam.jalsoochak.user.repository.PublicPumpOperatorRepository;
 import org.arghyam.jalsoochak.user.service.serviceImpl.PublicPumpOperatorServiceImpl;
@@ -203,20 +203,20 @@ class PublicPumpOperatorServiceImplTest {
     }
 
     @Nested
-    @DisplayName("listPumpOperatorsBySchemeWithCompliance")
+    @DisplayName("listSchemeReadingCompliance")
     class ListBySchemeWithCompliance {
 
         @Test
         @DisplayName("returns paginated scheme compliance rows")
         void returnsPaginatedRows() {
-            List<PumpOperatorSchemeComplianceRowDTO> rows = List.of(
-                    PumpOperatorSchemeComplianceRowDTO.builder().build()
+            List<SchemeReadingComplianceRowDTO> rows = List.of(
+                    SchemeReadingComplianceRowDTO.builder().build()
             );
-            when(repository.listPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null, 0, 20)).thenReturn(rows);
-            when(repository.countPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null)).thenReturn(1L);
+            when(repository.listSchemeReadingCompliance("tenant_mp", 5L, 9L, null, null, 0, 20)).thenReturn(rows);
+            when(repository.countSchemeReadingCompliance("tenant_mp", 5L, 9L, null, null)).thenReturn(1L);
 
-            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
-                    service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, 9L, null, null, 0, 20);
+            PageResponseDTO<SchemeReadingComplianceRowDTO> page =
+                    service.listSchemeReadingCompliance("mp", 5L, 9L, null, null, 0, 20);
 
             assertThat(page.getContent()).hasSize(1);
         }
@@ -229,15 +229,15 @@ class PublicPumpOperatorServiceImplTest {
         @Test
         @DisplayName("serves the second reading of a single operator at page 1 of size 1")
         void returnsSecondReadingOfSingleOperator() {
-            List<PumpOperatorSchemeComplianceRowDTO> secondReading = List.of(
-                    PumpOperatorSchemeComplianceRowDTO.builder().id(9L).build()
+            List<SchemeReadingComplianceRowDTO> secondReading = List.of(
+                    SchemeReadingComplianceRowDTO.builder().id(9L).build()
             );
-            when(repository.countPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null)).thenReturn(2L);
-            when(repository.listPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, 9L, null, null, 1, 1))
+            when(repository.countSchemeReadingCompliance("tenant_mp", 5L, 9L, null, null)).thenReturn(2L);
+            when(repository.listSchemeReadingCompliance("tenant_mp", 5L, 9L, null, null, 1, 1))
                     .thenReturn(secondReading);
 
-            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
-                    service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, 9L, null, null, 1, 1);
+            PageResponseDTO<SchemeReadingComplianceRowDTO> page =
+                    service.listSchemeReadingCompliance("mp", 5L, 9L, null, null, 1, 1);
 
             assertThat(page.getContent()).hasSize(1);
             assertThat(page.getTotalElements()).isEqualTo(2);
@@ -247,13 +247,13 @@ class PublicPumpOperatorServiceImplTest {
         @Test
         @DisplayName("skips the row query when the requested page starts past the last row")
         void skipsRowQueryForOutOfRangePage() {
-            when(repository.countPumpOperatorsBySchemeWithCompliance("tenant_mp", 5L, null, null, null)).thenReturn(40L);
+            when(repository.countSchemeReadingCompliance("tenant_mp", 5L, null, null, null)).thenReturn(40L);
 
-            assertThatThrownBy(() -> service.listPumpOperatorsBySchemeWithCompliance("mp", 5L, null, null, null, 999, 20))
+            assertThatThrownBy(() -> service.listSchemeReadingCompliance("mp", 5L, null, null, null, 999, 20))
                     .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("out of range");
 
-            verify(repository, never()).listPumpOperatorsBySchemeWithCompliance(
+            verify(repository, never()).listSchemeReadingCompliance(
                     anyString(), anyLong(), any(), any(), any(), anyLong(), anyInt());
         }
     }
