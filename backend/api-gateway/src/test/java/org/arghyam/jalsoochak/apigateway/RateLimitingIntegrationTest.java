@@ -14,8 +14,8 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Duration;
 
 import static org.awaitility.Awaitility.await;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end cover for the gateway's rate limiting: route arguments from application.yml, the key
@@ -53,11 +53,14 @@ class RateLimitingIntegrationTest {
     void allowsTheRoutesOwnBurstThenRejectsUntilTheBucketRefills() {
         String client = "203.0.113.10";
 
-        for (int request = 1; request <= OTP_BURST_CAPACITY; request++) {
-            assertNotEquals(TOO_MANY_REQUESTS, status(OTP_PATH, client), "request " + request + " of the burst");
-        }
-        assertEquals(TOO_MANY_REQUESTS, status(OTP_PATH, client),
-                "the OTP route must reject at its own burst capacity, not the generous default one");
+        int firstRejected = firstRejectedRequest(OTP_PATH, client);
+
+        // The bucket refills in whole seconds (the limiter's Lua script reads Redis TIME), so a burst
+        // that straddles a second boundary legitimately gains one token. Allow for that one refill
+        // and no more: the default limit would not reject until request 41.
+        assertTrue(firstRejected == OTP_BURST_CAPACITY + 1 || firstRejected == OTP_BURST_CAPACITY + 2,
+                "the OTP route must reject at its own burst capacity, not the generous default one;"
+                        + " first 429 came at request " + firstRejected);
 
         // The bucket refills at 1 token/second; a lockout that never lifts is the regression this guards.
         await().atMost(Duration.ofSeconds(10))
@@ -79,15 +82,37 @@ class RateLimitingIntegrationTest {
         String client = "203.0.113.30";
         exhaust(OTP_PATH, client);
 
-        assertEquals(TOO_MANY_REQUESTS, status(PREFIXED_OTP_PATH, client),
-                "the same endpoint reached under /user/ must not hand out a second allowance");
+        // A refill can land between the two calls and hand the shared bucket one token, so try the
+        // alias twice: a shared bucket lets at most one through, while a separate bucket would still
+        // hold its full burst and let both through.
+        int rejected = 0;
+        for (int request = 0; request < 2; request++) {
+            if (status(PREFIXED_OTP_PATH, client) == TOO_MANY_REQUESTS) {
+                rejected++;
+            }
+        }
+        assertTrue(rejected >= 1, "the same endpoint reached under /user/ must not hand out a second allowance");
     }
 
+    /**
+     * Spends the route's bucket until it answers 429. Nothing is asserted about the bucket afterwards:
+     * a whole-second refill can hand it a token at any moment.
+     */
     private void exhaust(String path, String client) {
-        for (int request = 0; request <= OTP_BURST_CAPACITY; request++) {
-            status(path, client);
+        assertTrue(firstRejectedRequest(path, client) > 0, "bucket for " + path + " should run out within its burst");
+    }
+
+    /**
+     * @return the 1-based number of the first request answered 429, or -1 if none was within the burst
+     *         plus two — room for one mid-burst refill and the request it lets through
+     */
+    private int firstRejectedRequest(String path, String client) {
+        for (int request = 1; request <= OTP_BURST_CAPACITY + 2; request++) {
+            if (status(path, client) == TOO_MANY_REQUESTS) {
+                return request;
+            }
         }
-        assertEquals(TOO_MANY_REQUESTS, status(path, client), "bucket for " + path + " should be empty");
+        return -1;
     }
 
     private int status(String path, String client) {
