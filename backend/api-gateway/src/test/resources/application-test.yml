@@ -1,4 +1,4 @@
-# Test overrides: the gateway boots with its real security chain but forwards nothing.
+# Test-profile overrides (activated by @ActiveProfiles("test"), layered on the main application.yml): the gateway boots with its real security chain but forwards nothing.
 #
 # With no routes registered, a request that clears the security chain falls through to a 404
 # instead of being proxied to a service that is not running -- so a permitted route is a fast 404

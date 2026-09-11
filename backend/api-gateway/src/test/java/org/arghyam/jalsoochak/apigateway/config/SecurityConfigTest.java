@@ -9,6 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
@@ -26,6 +27,7 @@ import static org.springframework.http.HttpStatus.UNAUTHORIZED;
  * and answers 401.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles("test")
 @DisplayName("API Gateway SecurityConfig Tests")
 class SecurityConfigTest {
 
