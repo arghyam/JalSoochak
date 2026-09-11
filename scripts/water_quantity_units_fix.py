@@ -46,11 +46,15 @@ Case classification
 Every in-window row is classified into exactly one case. The classification is evaluated
 in the order below, so the codes are mutually exclusive:
 
-  A1  no reading row on the date at all               SKIP  — nothing to derive a volume from
   A2  reading row exists, confirmed_reading IS NULL    SKIP  — unconfirmed; becomes derivable
                                                               once someone confirms it (V15
                                                               made the column nullable, so
                                                               this is genuinely reachable)
+  A3  no reading row on the date, and the stored       SKIP  — already 0. There is nothing to
+      value is already 0                                       derive AND nothing to change,
+                                                               so the repair is a no-op here.
+  A1  no reading row on the date, and the stored       SKIP  — nothing to derive a volume from
+      value is non-zero (or NULL)
   B1  first-ever reading for the scheme                apply 0
   B2  earlier readings exist, none usable as a         apply 0
       baseline (all <= 0 or NULL)
@@ -63,15 +67,29 @@ in the order below, so the codes are mutually exclusive:
   C2  a gap precedes the date (previous_date < D-1)    apply — the multi-day delta
   C1  contiguous previous day, plausible               apply — the ordinary case
 
-A1, A2 and C4 are left holding their pre-repair value, which for a historical row means
-they stay in CUBIC METRES. Skipping does not make them correct; it makes them unchanged
-and reported. Fix the underlying readings and re-run to pick them up.
+A1, A2, A3 and C4 are all left holding their pre-repair value, but they do not mean the
+same thing. A1, A2 and C4 hold a value the repair could not justify replacing, which for a
+historical row means they stay in CUBIC METRES — skipping does not make them correct, it
+makes them unchanged and reported, so fix the underlying readings and re-run to pick them
+up. A3 is the benign remainder of A1: there is no reading to derive from, but the stored
+value is already 0, so there is no wrong value to carry forward and nothing a re-run would
+ever change. It is split out precisely so it stops padding the "skipped, still in cubic
+metres" figure that a reviewer is meant to act on.
 
-Every row the repair declines to touch (A1, A2, C4) is written to an Excel workbook — the
-run artefact — together with the full case split, the pre-flight checks, and the
-future-dated rows. The applied-but-notable cases (B2, C3, long gaps, duplicates) are
-reported as counts on the Summary sheet only; they are all still queryable from
-public.fact_water_quantity_recompute by case_code / gap_days / is_latest.
+Every row the repair declines to touch AND leaves holding a value (A1, A2, C4) is written
+to an Excel workbook — the run artefact — together with the full case split, the pre-flight
+checks, and the future-dated rows. A3 is reported as a count only: listing rows that are
+already 0 and always will be adds pages to the workbook and nothing to the review. The
+applied-but-notable cases (B2, C3, long gaps, duplicates) are likewise counts on the
+Summary sheet only; all of them stay queryable from public.fact_water_quantity_recompute
+by case_code / gap_days / is_latest.
+
+Phase 3 rescores every scheme that is PRESENT in dim_scheme_table, whatever its
+operating_status. This diverges from the scheduler's own `WHERE ds.operating_status > 0`
+on purpose: operating_status describes the scheme today, while these are historical rows,
+so a scheme decommissioned since still owns performance scores the scheduler wrote against
+cubic metres. Skipping it would leave those permanently wrong. The divergence cannot invent
+anything either — phase 3 only UPDATEs rows that already exist.
 
 Phase 3 refuses to run when a scheme's dim_scheme rows disagree on
 fhtc_count/house_hold_count, because the score formula then has more than one answer per
@@ -158,10 +176,12 @@ RECOMPUTE_TABLE = "public.fact_water_quantity_recompute"
 SAFE_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # Every case the classifier can emit: code -> (skipped_by_design, one-line meaning).
-# Ordered as the SQL evaluates them, which is also the order they are reported in.
+# Listed in the order they are reported; the top-level A/B/C order matches the order the SQL
+# evaluates, with each family's sub-cases (A2/A3/A1, B2/B1) grouped rather than interleaved.
 CASE_CATALOGUE: dict[str, tuple[bool, str]] = {
     "A1": (True, "No reading row on the date at all — no derivable volume"),
     "A2": (True, "Reading row exists but confirmed_reading IS NULL — unconfirmed"),
+    "A3": (True, "No reading row on the date, but already 0 — nothing to change"),
     "B1": (False, "First-ever reading for the scheme — no baseline, correctly 0"),
     "B2": (False, "Earlier readings exist but none usable as a baseline — correctly 0"),
     "C3": (False, "current < previous (meter rollover/replacement) — clamped to 0, LOSSY"),
@@ -203,7 +223,8 @@ DETAIL_SHEETS = [
      "old_qty DESC, id",
      "SKIPPED. No reading to derive from, so these keep their pre-repair value — which for a "
      "historical row means they are still in CUBIC METRES. A2 becomes repairable once the "
-     "reading is confirmed; re-run then."),
+     "reading is confirmed; re-run then. A3 (the same situation but already holding 0) is "
+     "excluded on purpose — see the Summary sheet for its count."),
     ("C4 - Implausible",
      "case_code = 'C4'",
      "new_qty DESC, id",
@@ -217,10 +238,11 @@ DETAIL_SHEETS = [
      "neither causes nor fixes. Listed so the repair is not blamed for them."),
 ]
 
-# B2, C3, long gaps, duplicates and dim-scheme drift are deliberately NOT dumped as detail sheets:
-# every one of them is applied (or, for drift, resolved by --dim-drift-use-latest), so a reviewer
-# needs the count, not the rows. Their counts stay on the Summary sheet, and every one of them is
-# still queryable from RECOMPUTE_TABLE by case_code / gap_days / is_latest.
+# A3, B2, C3, long gaps, duplicates and dim-scheme drift are deliberately NOT dumped as detail
+# sheets. Each is either applied (B2, C3, gaps, duplicates), resolved by --dim-drift-use-latest,
+# or — for A3 — already at the value it would be repaired to, so a reviewer needs the count, not
+# the rows. Their counts stay on the Summary sheet, and every one of them is still queryable from
+# RECOMPUTE_TABLE by case_code / gap_days / is_latest.
 
 
 # --------------------------------------------------------------------------------------
@@ -394,12 +416,14 @@ def preflight(conn, start: dt.date, end: dt.date) -> list[dict]:
                  WHERE fwq.date BETWEEN %s AND %s
                    AND NOT EXISTS (
                        SELECT 1 FROM {SCHEME_TABLE} ds
-                       WHERE ds.tenant_id = fwq.tenant_id AND ds.scheme_id = fwq.scheme_id
-                         AND ds.operating_status > 0)
+                       WHERE ds.tenant_id = fwq.tenant_id AND ds.scheme_id = fwq.scheme_id)
              ) x""",
          (start, end),
-         "These schemes have water rows but no dim_scheme row with operating_status > 0, so "
-         "phase 3 leaves their performance scores computed against cubic metres."),
+         "These schemes have water rows but NO dim_scheme row at all, so the score formula has "
+         "no fhtc_count/house_hold_count to read and phase 3 leaves their performance scores "
+         "computed against cubic metres. operating_status is deliberately not part of this "
+         "check: phase 3 rescores any scheme present in dim_scheme whatever its current status, "
+         "because these are historical rows and the status describes the scheme today."),
         ("dim_scheme attribute drift",
          f"""SELECT COUNT(*) FROM (
                  SELECT tenant_id, scheme_id
@@ -523,7 +547,13 @@ def identify(conn, start: dt.date, end: dt.date, threshold_litres: int) -> None:
                                         WHERE mr.tenant_id = w.tenant_id
                                           AND mr.scheme_id = w.scheme_id
                                           AND mr.reading_date = w.date)
-                                    THEN 'A2' ELSE 'A1' END
+                                    THEN 'A2'
+                                    -- A3 before A1: no reading to derive from, but the row
+                                    -- already holds 0, so it is not carrying a cubic-metre
+                                    -- value and no future re-run would change it. NULL old_qty
+                                    -- does not match and correctly falls through to A1.
+                                    WHEN w.old_qty = 0 THEN 'A3'
+                                    ELSE 'A1' END
                            WHEN w.previous_reading IS NULL THEN
                                CASE WHEN EXISTS (
                                         SELECT 1 FROM {READING_TABLE} mr
@@ -783,12 +813,25 @@ def dim_scheme_drift(conn) -> list[tuple]:
 def apply_performance(conn, start: dt.date, end: dt.date, dim_drift_use_latest: bool) -> int:
     """Replays the daily performance score over the corrected quantities.
 
+    Scheme selection DIVERGES from the scheduler on purpose. SchemePerformanceSchedulerRepository
+    .insertDailySchemePerformanceScores filters `WHERE ds.operating_status > 0`; this replay does
+    not, and rescores every scheme present in dim_scheme_table whatever its status. The filter is
+    right for the scheduler, which scores *today* for a scheme that must be operating today, and
+    wrong here: these are historical rows, and a scheme decommissioned at any point since still
+    owns performance scores the scheduler wrote while it was operating — scores computed against
+    cubic metres, and just as wrong as everyone else's. Honouring the filter would freeze exactly
+    those rows at a value no later run could ever fix.
+
+    Dropping it cannot pull in anything that does not belong: this UPDATEs existing rows only, so
+    a (scheme, date) the scheduler never scored still gets nothing, and the only rows reachable
+    are ones the scheduler itself created back when the scheme did pass its filter. It also makes
+    the drift guard exact — dim_scheme_drift() has always examined every row of a scheme, so it
+    used to be strictly broader than the join it was protecting.
+
     dim_drift_use_latest collapses dim_scheme_table to one row per (tenant, scheme) — the most
     recently updated one — before the join, which is what makes the replay deterministic when a
-    scheme's rows disagree. Note it also changes what operating_status > 0 means: "the scheme's
-    current row says it is operating", rather than the raw scheduler's "some row of the scheme
-    says so". That is the more defensible reading of a slowly-changing dimension, but it is a
-    deliberate divergence from the scheduler, so it only happens when the flag asks for it.
+    scheme's rows disagree. With operating_status no longer read, the flag now only ever changes
+    which fhtc_count/house_hold_count the score is computed from.
 
     Updates existing rows only. The scheduler's own INSERT is guarded by NOT EXISTS, so it
     would no-op over history; and creating scores for days the scheduler never ran would
@@ -797,7 +840,8 @@ def apply_performance(conn, start: dt.date, end: dt.date, dim_drift_use_latest: 
 
     Reads the water table rather than the recompute table, so rows this run skipped still
     contribute their (unrepaired, cubic-metre) value to the day's supply — exactly as the
-    scheduler would see them. Those (scheme, date) pairs are listed in the workbook.
+    scheduler would see them. The A1/A2/C4 rows behind that are listed in the workbook; A3
+    contributes the 0 it already held, so it cannot distort a score either way.
     """
     scheme_source = f"""(
                         SELECT DISTINCT ON (tenant_id, scheme_id) *
@@ -835,7 +879,8 @@ def apply_performance(conn, start: dt.date, end: dt.date, dim_drift_use_latest: 
                     JOIN supply
                       ON supply.tenant_id = ds.tenant_id
                      AND supply.scheme_id = ds.scheme_id
-                    WHERE ds.operating_status > 0
+                    -- No operating_status filter, unlike the scheduler. See the docstring:
+                    -- the status describes the scheme now, these rows are history.
                 )
                 UPDATE {PERFORMANCE_TABLE} fp
                 SET performance_score = scores.performance_score,
@@ -856,10 +901,11 @@ def apply_performance(conn, start: dt.date, end: dt.date, dim_drift_use_latest: 
         FROM (
             SELECT DISTINCT fwq.tenant_id, fwq.scheme_id, fwq.date
             FROM {WATER_TABLE} fwq
-            JOIN {SCHEME_TABLE} ds
-              ON ds.tenant_id = fwq.tenant_id AND ds.scheme_id = fwq.scheme_id
-             AND ds.operating_status > 0
             WHERE fwq.date BETWEEN %s AND %s
+              AND EXISTS (
+                  SELECT 1 FROM {SCHEME_TABLE} ds
+                  WHERE ds.tenant_id = fwq.tenant_id AND ds.scheme_id = fwq.scheme_id
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM {PERFORMANCE_TABLE} fp
                   WHERE fp.tenant_id = fwq.tenant_id
@@ -1140,9 +1186,9 @@ def main() -> int:
                         help="rows whose delta spans more than this many days are reported "
                              "(still applied)")
     parser.add_argument("--report-path", type=Path, default=None,
-                        help="workbook path; defaults to ./water_quantity_fix_<suffix>.xlsx")
+                        help="workbook path; defaults to ./latest_prod_water_quantity_fix_<suffix>.xlsx")
     parser.add_argument("--no-report", action="store_true", help="skip the Excel workbook")
-    parser.add_argument("--max-report-rows", type=int, default=50_000,
+    parser.add_argument("--max-report-rows", type=int, default=100_000,
                         help="row cap per workbook sheet; the true count is always reported")
     parser.add_argument("--skip-preflight", action="store_true",
                         help="skip the integrity checks (they scan the reading table)")
@@ -1165,7 +1211,7 @@ def main() -> int:
     if not SAFE_SUFFIX_RE.match(suffix):
         sys.exit(f"--backup-suffix must be alphanumeric/underscore, got {suffix!r}")
     threshold_litres = args.implausible_daily_cubic_metres * 1000
-    report_path = args.report_path or Path(f"water_quantity_fix_{suffix}.xlsx")
+    report_path = args.report_path or Path(f"latest_prod_water_quantity_fix_{suffix}.xlsx")
 
     conn = psycopg2.connect(args.dsn)
     conn.autocommit = False
