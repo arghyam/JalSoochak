@@ -44,7 +44,14 @@ public class TenantStaffController {
     private final TenantStaffService tenantStaffService;
     private final WelcomeMessageService welcomeMessageService;
 
+    /**
+     * Staff directory for a tenant. Returns names, emails and phone numbers, so it is restricted
+     * to tenant administrators and pinned to the caller's own tenant — it was {@code permitAll}
+     * and let anyone read every officer's contact details for any {@code tenantCode}.
+     */
     @GetMapping("/staff")
+    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN', 'SUPER_STATE_ADMIN') "
+            + "and @userSecurity.canAccessTenant(#tenantCode, authentication)")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<TenantStaffResponseDTO>>> listStaff(
             @RequestParam String tenantCode,
             @RequestParam(defaultValue = "0") @Min(0) int page,
@@ -70,6 +77,8 @@ public class TenantStaffController {
     }
 
     @GetMapping("/staff/counts/by-role")
+    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN', 'SUPER_STATE_ADMIN') "
+            + "and @userSecurity.canAccessTenant(#tenantCode, authentication)")
     public ResponseEntity<ApiResponseDTO<List<RoleCountDTO>>> countStaffByRole(
             @RequestParam String tenantCode,
             @RequestParam(required = false) String status,

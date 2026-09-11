@@ -9,6 +9,7 @@ import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
 import org.arghyam.jalsoochak.user.repository.PersonSchemeRepository;
 import org.arghyam.jalsoochak.user.service.PersonSchemeService;
+import org.arghyam.jalsoochak.user.util.PageLimits;
 import org.arghyam.jalsoochak.user.util.TenantSchemaResolver;
 import org.springframework.stereotype.Service;
 
@@ -38,7 +39,9 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
             int size
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        int offset = page * size;
+        int p = PageLimits.clampPage(page);
+        int effectiveSize = PageLimits.clampSize(size);
+        int offset = PageLimits.offset(p, effectiveSize);
         List<PersonSchemeDetailsDTO> rows = personSchemeRepository.listSchemesByPerson(
                 schemaName,
                 personId,
@@ -46,10 +49,10 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
                 sortBy,
                 sortDir,
                 offset,
-                size
+                effectiveSize
         );
         long total = personSchemeRepository.countSchemesByPerson(schemaName, personId, schemeName);
-        return PageResponseDTO.of(rows, total, page, size);
+        return PageResponseDTO.of(rows, total, p, effectiveSize);
     }
 
     @Override
@@ -66,15 +69,17 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
             int size
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        int offset = page * size;
+        int p = PageLimits.clampPage(page);
+        int effectiveSize = PageLimits.clampSize(size);
+        int offset = PageLimits.offset(p, effectiveSize);
         List<SchemeReadingSubmissionDTO> rows = personSchemeRepository.listSchemeReadings(
                 schemaName,
                 schemeId,
                 offset,
-                size
+                effectiveSize
         );
         long total = personSchemeRepository.countSchemeReadings(schemaName, schemeId);
-        return PageResponseDTO.of(rows, total, page, size);
+        return PageResponseDTO.of(rows, total, p, effectiveSize);
     }
 
     @Override
@@ -93,7 +98,9 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
         Integer statusCode = personSchemeRepository.parseStatus(status);
-        int offset = page * size;
+        int p = PageLimits.clampPage(page);
+        int effectiveSize = PageLimits.clampSize(size);
+        int offset = PageLimits.offset(p, effectiveSize);
         List<PumpOperatorSummaryWithMetricsDTO> rows = personSchemeRepository.listPumpOperatorsByPerson(
                 schemaName,
                 personId,
@@ -105,7 +112,7 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
                 sortBy,
                 sortDir,
                 offset,
-                size
+                effectiveSize
         );
         long total = personSchemeRepository.countPumpOperatorsByPerson(
                 schemaName,
@@ -116,7 +123,7 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
                 startDate,
                 endDate
         );
-        return PageResponseDTO.of(rows, total, page, size);
+        return PageResponseDTO.of(rows, total, p, effectiveSize);
     }
 
     @Override
@@ -130,7 +137,9 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
             int size
     ) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        int offset = page * size;
+        int p = PageLimits.clampPage(page);
+        int effectiveSize = PageLimits.clampSize(size);
+        int offset = PageLimits.offset(p, effectiveSize);
         List<PumpOperatorReadingDetailDTO> rows = personSchemeRepository.listPumpOperatorReadings(
                 schemaName,
                 pumpOperatorId,
@@ -138,9 +147,9 @@ public class PersonSchemeServiceImpl implements PersonSchemeService {
                 sortBy,
                 sortDir,
                 offset,
-                size
+                effectiveSize
         );
         long total = personSchemeRepository.countPumpOperatorReadings(schemaName, pumpOperatorId, schemeName);
-        return PageResponseDTO.of(rows, total, page, size);
+        return PageResponseDTO.of(rows, total, p, effectiveSize);
     }
 }

@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.user.controller;
 
+import org.arghyam.jalsoochak.user.config.PumpOperatorAccessGuard;
 import org.arghyam.jalsoochak.user.config.properties.AppProperties;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.PersonSchemeDetailsDTO;
@@ -14,6 +15,7 @@ import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
 import org.arghyam.jalsoochak.user.service.PersonSchemeService;
 import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -57,6 +59,15 @@ class PublicPumpOperatorControllerTest {
     @MockBean
     private PersonSchemeService personSchemeService;
 
+    @MockBean
+    private PumpOperatorAccessGuard accessGuard;
+
+    @BeforeEach
+    void resolveScope() {
+        when(accessGuard.resolve(any(), any()))
+                .thenReturn(new PumpOperatorAccessGuard.CallerScope("MP", "tenant_mp", true, null));
+    }
+
     @Nested
     @DisplayName("GET /pump-operators/{id}")
     class GetPumpOperatorDetails {
@@ -69,7 +80,7 @@ class PublicPumpOperatorControllerTest {
                     .stateSchemeId("STATE-5")
                     .centerSchemeId("CENTER-5")
                     .build();
-            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(5L), any(), any())).thenReturn(dto);
+            when(publicPumpOperatorService.getPumpOperatorDetails(eq("MP"), eq(1L), eq(5L), any(), any())).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
                             .param("tenantCode", "mp")
@@ -84,7 +95,7 @@ class PublicPumpOperatorControllerTest {
         @DisplayName("returns 200 when schemeId is omitted")
         void returns200WithoutSchemeId() throws Exception {
             PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
-            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(null), any(), any())).thenReturn(dto);
+            when(publicPumpOperatorService.getPumpOperatorDetails(eq("MP"), eq(1L), eq(null), any(), any())).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
                             .param("tenantCode", "mp"))
@@ -124,7 +135,7 @@ class PublicPumpOperatorControllerTest {
         @DisplayName("returns 200 with compliance data")
         void returns200() throws Exception {
             PumpOperatorReadingComplianceDTO dto = PumpOperatorReadingComplianceDTO.builder().build();
-            when(publicPumpOperatorService.getReadingCompliance(eq("mp"), eq(1L))).thenReturn(dto);
+            when(publicPumpOperatorService.getReadingCompliance(eq("MP"), eq(1L))).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1/reading-compliance")
                             .param("tenantCode", "mp"))
@@ -143,7 +154,7 @@ class PublicPumpOperatorControllerTest {
                     .details(PumpOperatorDetailsDTO.builder().id(1L).build())
                     .readingCompliance(PumpOperatorReadingComplianceDTO.builder().build())
                     .build();
-            when(publicPumpOperatorService.getPumpOperatorDetailsWithCompliance(eq("mp"), eq(1L))).thenReturn(dto);
+            when(publicPumpOperatorService.getPumpOperatorDetailsWithCompliance(eq("MP"), eq(1L))).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1/details-with-compliance")
                             .param("tenantCode", "mp"))

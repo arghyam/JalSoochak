@@ -3,6 +3,8 @@ package org.arghyam.jalsoochak.user.controller;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import org.arghyam.jalsoochak.user.config.PumpOperatorAccessGuard;
+import org.arghyam.jalsoochak.user.config.PumpOperatorAccessGuard.CallerScope;
 import org.arghyam.jalsoochak.user.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.PersonSchemeDetailsDTO;
@@ -22,6 +24,7 @@ import org.arghyam.jalsoochak.user.service.PersonSchemeService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +36,21 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.LocalDate;
 import java.util.List;
 
+/**
+ * Pump operator and scheme reads for two audiences.
+ *
+ * <p><b>Three routes are public</b> — {@code by-uuid/{uuid}}, {@code by-scheme} and
+ * {@code by-scheme/reading-compliance} — because the anonymous village dashboard calls them. They
+ * are bounded by the mandatory scheme filter, the page limits below and
+ * {@code PublicApiEnumerationGuardFilter}, and they deliberately do not consult
+ * {@link PumpOperatorAccessGuard}: an anonymous caller has no scope to check.
+ *
+ * <p><b>Every other route needs a token and is scoped per caller.</b> Each handler resolves a
+ * {@link CallerScope} from the token and checks every object id against it; see
+ * {@link PumpOperatorAccessGuard} for the rules and for why out-of-scope ids return 404 rather
+ * than 403. On these routes {@code tenantCode} is not authoritative: for a caller with a tenant
+ * claim it must match the claim, and only global admins use it to choose a tenant.
+ */
 @RestController
 @RequestMapping("/api/v1/pumpoperator")
 @RequiredArgsConstructor
@@ -56,6 +74,7 @@ public class PublicPumpOperatorController {
 
     private final PublicPumpOperatorService publicPumpOperatorService;
     private final PersonSchemeService personSchemeService;
+    private final PumpOperatorAccessGuard accessGuard;
 
     @GetMapping("/pump-operators/{pumpOperatorId}")
     public ResponseEntity<ApiResponseDTO<PumpOperatorDetailsDTO>> getPumpOperatorDetails(
@@ -63,13 +82,20 @@ public class PublicPumpOperatorController {
             @RequestParam(required = false) Long schemeId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam String tenantCode
+            @RequestParam(required = false) String tenantCode,
+            Authentication authentication
     ) {
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requirePumpOperatorAccess(scope, pumpOperatorId);
+        if (schemeId != null) {
+            accessGuard.requireSchemeAccess(scope, schemeId);
+        }
+
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
             throw new IllegalArgumentException("startDate must be on or before endDate");
         }
         PumpOperatorDetailsDTO dto = publicPumpOperatorService.getPumpOperatorDetails(
-                tenantCode,
+                scope.tenantCode(),
                 pumpOperatorId,
                 schemeId,
                 startDate,
@@ -109,28 +135,44 @@ public class PublicPumpOperatorController {
     @GetMapping("/pump-operators/{pumpOperatorId}/reading-compliance")
     public ResponseEntity<ApiResponseDTO<PumpOperatorReadingComplianceDTO>> getReadingCompliance(
             @PathVariable long pumpOperatorId,
-            @RequestParam String tenantCode
+            @RequestParam(required = false) String tenantCode,
+            Authentication authentication
     ) {
-        PumpOperatorReadingComplianceDTO dto = publicPumpOperatorService.getReadingCompliance(tenantCode, pumpOperatorId);
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requirePumpOperatorAccess(scope, pumpOperatorId);
+
+        PumpOperatorReadingComplianceDTO dto = publicPumpOperatorService.getReadingCompliance(scope.tenantCode(), pumpOperatorId);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Reading compliance retrieved", dto));
     }
 
     @GetMapping("/pump-operators/{pumpOperatorId}/details-with-compliance")
     public ResponseEntity<ApiResponseDTO<PumpOperatorDetailsWithComplianceDTO>> getPumpOperatorDetailsWithCompliance(
             @PathVariable long pumpOperatorId,
-            @RequestParam String tenantCode
+            @RequestParam(required = false) String tenantCode,
+            Authentication authentication
     ) {
-        PumpOperatorDetailsWithComplianceDTO dto = publicPumpOperatorService.getPumpOperatorDetailsWithCompliance(tenantCode, pumpOperatorId);
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requirePumpOperatorAccess(scope, pumpOperatorId);
+
+        PumpOperatorDetailsWithComplianceDTO dto = publicPumpOperatorService.getPumpOperatorDetailsWithCompliance(scope.tenantCode(), pumpOperatorId);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Pump operator retrieved", dto));
     }
 
+    /**
+     * Every operator in the tenant, unscoped — tenant admins only. An officer's equivalent view is
+     * {@code /person/{personId}/pump-operators}, which is limited to their own assignments.
+     */
     @GetMapping("/pump-operators/reading-compliance")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorReadingComplianceRowDTO>>> listReadingCompliance(
-            @RequestParam String tenantCode,
+            @RequestParam(required = false) String tenantCode,
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
+            Authentication authentication
     ) {
-        PageResponseDTO<PumpOperatorReadingComplianceRowDTO> rows = publicPumpOperatorService.listReadingCompliance(tenantCode, page, size);
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requireTenantWideAccess(scope);
+
+        PageResponseDTO<PumpOperatorReadingComplianceRowDTO> rows = publicPumpOperatorService.listReadingCompliance(scope.tenantCode(), page, size);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Reading compliance retrieved", rows));
     }
 
@@ -217,15 +259,19 @@ public class PublicPumpOperatorController {
     @GetMapping("/pump-operators/{pumpOperatorId}/readings")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorReadingDetailDTO>>> listPumpOperatorReadings(
             @PathVariable long pumpOperatorId,
-            @RequestParam String tenantCode,
+            @RequestParam(required = false) String tenantCode,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
             @RequestParam(defaultValue = "readingAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
-            @RequestParam(required = false) String schemeName
+            @RequestParam(required = false) String schemeName,
+            Authentication authentication
     ) {
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requirePumpOperatorAccess(scope, pumpOperatorId);
+
         PageResponseDTO<PumpOperatorReadingDetailDTO> rows = personSchemeService.listPumpOperatorReadings(
-                tenantCode,
+                scope.tenantCode(),
                 pumpOperatorId,
                 schemeName,
                 sortBy,
@@ -239,10 +285,14 @@ public class PublicPumpOperatorController {
     @GetMapping("/person/{personId}/schemes/count")
     public ResponseEntity<ApiResponseDTO<SchemeCountDTO>> countSchemesByPerson(
             @PathVariable long personId,
-            @RequestParam String tenantCode,
-            @RequestParam(required = false) String schemeName
+            @RequestParam(required = false) String tenantCode,
+            @RequestParam(required = false) String schemeName,
+            Authentication authentication
     ) {
-        long total = personSchemeService.countSchemesByPerson(tenantCode, personId, schemeName);
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requirePersonAccess(scope, personId);
+
+        long total = personSchemeService.countSchemesByPerson(scope.tenantCode(), personId, schemeName);
         return ResponseEntity.ok(ApiResponseDTO.of(200, "Schemes count retrieved", SchemeCountDTO.builder()
                 .schemeCount(total)
                 .build()));
@@ -251,15 +301,19 @@ public class PublicPumpOperatorController {
     @GetMapping("/person/{personId}/schemes")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PersonSchemeDetailsDTO>>> listSchemesByPerson(
             @PathVariable long personId,
-            @RequestParam String tenantCode,
+            @RequestParam(required = false) String tenantCode,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
             @RequestParam(defaultValue = "schemeName") String sortBy,
             @RequestParam(defaultValue = "asc") String sortDir,
-            @RequestParam(required = false) String schemeName
+            @RequestParam(required = false) String schemeName,
+            Authentication authentication
     ) {
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requirePersonAccess(scope, personId);
+
         PageResponseDTO<PersonSchemeDetailsDTO> rows = personSchemeService.listSchemesByPerson(
-                tenantCode,
+                scope.tenantCode(),
                 personId,
                 schemeName,
                 sortBy,
@@ -273,7 +327,7 @@ public class PublicPumpOperatorController {
     @GetMapping("/person/{personId}/pump-operators")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorSummaryWithMetricsDTO>>> listPumpOperatorsByPerson(
             @PathVariable long personId,
-            @RequestParam String tenantCode,
+            @RequestParam(required = false) String tenantCode,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
             @RequestParam(defaultValue = "id") String sortBy,
@@ -283,14 +337,18 @@ public class PublicPumpOperatorController {
             @RequestParam(required = false) Integer durationDays,
             @RequestParam(required = false) Integer duration,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+            @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            Authentication authentication
     ) {
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requirePersonAccess(scope, personId);
+
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
             throw new IllegalArgumentException("start_date must be on or before end_date");
         }
         Integer effectiveDurationDays = duration != null ? duration : durationDays;
         PageResponseDTO<PumpOperatorSummaryWithMetricsDTO> rows = personSchemeService.listPumpOperatorsByPerson(
-                tenantCode,
+                scope.tenantCode(),
                 personId,
                 name,
                 status,
@@ -308,9 +366,13 @@ public class PublicPumpOperatorController {
     @GetMapping("/schemes/{schemeId}/details")
     public ResponseEntity<ApiResponseDTO<SchemeDetailsWithReportingDTO>> getSchemeDetails(
             @PathVariable long schemeId,
-            @RequestParam String tenantCode
+            @RequestParam(required = false) String tenantCode,
+            Authentication authentication
     ) {
-        SchemeDetailsWithReportingDTO dto = personSchemeService.getSchemeDetails(tenantCode, schemeId);
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requireSchemeAccess(scope, schemeId);
+
+        SchemeDetailsWithReportingDTO dto = personSchemeService.getSchemeDetails(scope.tenantCode(), schemeId);
         if (dto == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Scheme not found");
         }
@@ -320,12 +382,16 @@ public class PublicPumpOperatorController {
     @GetMapping("/schemes/{schemeId}/reading-submissions")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<SchemeReadingSubmissionDTO>>> listSchemeReadings(
             @PathVariable long schemeId,
-            @RequestParam String tenantCode,
+            @RequestParam(required = false) String tenantCode,
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int size,
+            Authentication authentication
     ) {
+        CallerScope scope = accessGuard.resolve(authentication, tenantCode);
+        accessGuard.requireSchemeAccess(scope, schemeId);
+
         PageResponseDTO<SchemeReadingSubmissionDTO> rows = personSchemeService.listSchemeReadings(
-                tenantCode,
+                scope.tenantCode(),
                 schemeId,
                 page,
                 size
