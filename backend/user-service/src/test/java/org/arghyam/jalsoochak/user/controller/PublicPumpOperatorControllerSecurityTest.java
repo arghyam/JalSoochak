@@ -90,7 +90,7 @@ class PublicPumpOperatorControllerSecurityTest {
         @Test
         @DisplayName("GET /pump-operators/by-scheme/reading-compliance is reachable without a token")
         void bySchemeComplianceIsPublic() throws Exception {
-            when(publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
+            when(publicPumpOperatorService.listSchemeReadingCompliance(
                     anyString(), anyLong(), any(), any(), any(), anyInt(), anyInt()))
                     .thenReturn(PageResponseDTO.of(List.of(), 0L, 0, 20));
 
