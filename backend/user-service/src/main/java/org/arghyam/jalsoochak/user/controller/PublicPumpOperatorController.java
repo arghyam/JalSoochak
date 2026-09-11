@@ -11,7 +11,7 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianc
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingDetailDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
@@ -135,7 +135,7 @@ public class PublicPumpOperatorController {
     }
 
     @GetMapping("/pump-operators/by-scheme/reading-compliance")
-    public ResponseEntity<ApiResponseDTO<PageResponseDTO<PumpOperatorSchemeComplianceRowDTO>>> listPumpOperatorsBySchemeWithCompliance(
+    public ResponseEntity<ApiResponseDTO<PageResponseDTO<SchemeReadingComplianceRowDTO>>> listSchemeReadingCompliance(
             @RequestParam String tenantCode,
             @RequestParam long schemeId,
             @RequestParam(required = false) Long pumpOperatorId,
@@ -147,8 +147,8 @@ public class PublicPumpOperatorController {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
             throw new IllegalArgumentException("startDate must be on or before endDate");
         }
-        PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> rows =
-                publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
+        PageResponseDTO<SchemeReadingComplianceRowDTO> rows =
+                publicPumpOperatorService.listSchemeReadingCompliance(
                         tenantCode,
                         schemeId,
                         pumpOperatorId,

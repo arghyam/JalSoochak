@@ -186,6 +186,12 @@ public class GlificImageWorkflowService {
                     // READING-PROVENANCE: records that this number came from the caller rather than from
                     // FlowVision. Marker only — the submission is processed exactly as before.
                     .externallyAsserted(request.getConfirmedReading() != null)
+                    // SUPPLY-PLAUSIBILITY: opt this endpoint into the implausible-daily-supply check.
+                    // Set here and nowhere else — createReading is shared with the Glific/WhatsApp
+                    // image path, which stays byte-identical because the flag defaults to false
+                    // there. A rejection inside a live WhatsApp conversation has no correction path;
+                    // an API caller gets a 400 and can resubmit.
+                    .supplyPlausibilityChecked(true)
                     .meterChangeReason(null)
                     .readingTime(readingTime)
                     .ingestionSource(lenient ? ingestionSource : null)

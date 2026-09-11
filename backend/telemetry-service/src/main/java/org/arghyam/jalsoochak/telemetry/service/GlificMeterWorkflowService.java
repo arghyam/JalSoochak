@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.telemetry.dto.requests.UpdatedPreviousReadingReque
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
 import org.arghyam.jalsoochak.telemetry.event.TelemetryEventPublisher;
+import org.arghyam.jalsoochak.telemetry.repository.TenantAnomalyRecord;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryCompletedFlowReading;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
@@ -39,8 +40,40 @@ import java.util.regex.Pattern;
 @Service
 @Slf4j
 public class GlificMeterWorkflowService {
-    private static final Pattern ISSUE_REASON_ALLOWED =
-            Pattern.compile("^[\\p{L}\\p{N}]+(?:[\\p{L}\\p{N} ]*[\\p{L}\\p{N}])?$");
+    /**
+     * Allowlist for operator-supplied free-text issue reasons.
+     *
+     * <p>{@code \p{L}}, {@code \p{N}} and {@code \p{M}} are Unicode categories, so Devanagari and
+     * every other Indic script pass while {@code <}, {@code >}, quotes, control characters and
+     * zero-width or bidi-override characters are refused.
+     *
+     * <p><strong>{@code \p{M}} is not optional.</strong> Indic vowel signs and the virama are
+     * combining marks in category {@code Mn}/{@code Mc}, not letters — "पानी" is
+     * {@code Lo Mc Lo Mc}. Without {@code \p{M}} this pattern rejects essentially all real Hindi
+     * text, which is what it did until a CWE-20 remediation added the category: Hindi-speaking
+     * operators could not file a free-text reason at all. Any future edit here must be checked
+     * against a non-Latin script, not just ASCII.
+     *
+     * <p><strong>A mark is only ever allowed after a base character.</strong> Every space-separated
+     * token must open with a letter or number, and {@code \p{M}} is admitted only from the second
+     * character of a token onwards. A combining mark carries no meaning alone — no real Indic word
+     * starts with a vowel sign or a virama — and until this was tightened {@code \p{M}} sat in the
+     * leading character class, so a reason consisting only of marks passed the allowlist and was
+     * stored to be rendered stacked over whatever text displayed it.
+     *
+     * <p>Deliberately admits <strong>no punctuation</strong> — not even a comma — which is a
+     * knowing trade-off: it keeps the rule identical across every free-text reason path, and the
+     * localised operator-facing copy at {@code GlificLocalizationService} ("Issue reason can only
+     * contain letters, numbers, and spaces.") states this rule verbatim. <strong>Widening this
+     * pattern to punctuation means rewriting that copy in every configured language</strong>; the
+     * two must change together. Combining marks need no copy change — a reader sees them as part
+     * of a letter.
+     *
+     * <p>Applied only to input that matched no configured reason — see
+     * {@link #requireStorableIssueReason}.
+     */
+    private static final Pattern ISSUE_REASON_ALLOWED = Pattern.compile(
+            "^[\\p{L}\\p{N}][\\p{L}\\p{N}\\p{M}]*(?: +[\\p{L}\\p{N}][\\p{L}\\p{N}\\p{M}]*)*$");
     private static final String DEFAULT_ISSUE_PROMPT_ENGLISH =
             "Please select your issue by typing any of the number";
     private static final String DEFAULT_ISSUE_PROMPT_HINDI =
@@ -567,6 +600,7 @@ public class GlificMeterWorkflowService {
             }
             String resolvedIssueReason = rawIssueReason;
             String selectedKey = null;
+            boolean matchedConfiguredReason = false;
             if (!templateReasons.isEmpty()) {
                 Integer index = parseSelectionIndex(rawIssueReason, templateReasons.size());
                 GlificMessageTemplatesService.TemplateOption matched = null;
@@ -584,12 +618,16 @@ public class GlificMeterWorkflowService {
                     String label = matched.labelForLanguageKey(languageKey);
                     resolvedIssueReason = (label == null || label.isBlank()) ? matched.canonicalLabel() : label;
                     selectedKey = matched.key();
+                    matchedConfiguredReason = true;
                 }
             }
             if (selectedKey == null) {
-                resolvedIssueReason = resolveSelection(rawIssueReason, reasons).orElse(rawIssueReason);
+                Optional<String> matchedReason = resolveSelection(rawIssueReason, reasons);
+                matchedConfiguredReason = matchedReason.isPresent();
+                resolvedIssueReason = matchedReason.orElse(rawIssueReason);
                 selectedKey = resolveIssueSelectionKey(rawIssueReason, resolvedIssueReason, reasons, selectionKeys);
             }
+            requireStorableIssueReason(resolvedIssueReason, matchedConfiguredReason);
             String responseSelectedKey = normalizeIssueReportSelectedKey(selectedKey);
             String anomalySelectedKey = isReasonKey(selectedKey) ? responseSelectedKey : selectedKey;
 
@@ -609,11 +647,14 @@ public class GlificMeterWorkflowService {
                         : AnomalyConstants.TYPE_NO_SUBMISSION;
                 telemetryTenantRepository.createTenantAnomalyRecord(
                         operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        anomalyType,
-                        resolvedIssueReason,
-                        AnomalyConstants.STATUS_OPEN
+                        TenantAnomalyRecord.builder()
+                                .userId(operatorWithSchema.operator().id())
+                                .schemeId(schemeId)
+                                .type(anomalyType)
+                                .reason(resolvedIssueReason)
+                                .status(AnomalyConstants.STATUS_OPEN)
+                                .retries(0)
+                                .build()
                 );
                 telemetryEventPublisher.publishAnomalyRecorded(
                         tenantId,
@@ -807,9 +848,14 @@ public class GlificMeterWorkflowService {
                 JsonNode selectedReasonNode = reasons.get(selectedIndex - 1);
                 resolvedIssueReason = selectedReasonNode.path("name").asText().trim();
                 selectedKey = selectedReasonNode.path("id").asText().trim();
+                // A configured label, so the character allowlist does not apply — but the length
+                // does: this name comes from tenant JSON and reaches analytics' VARCHAR(255).
+                requireStorableIssueReason(resolvedIssueReason, true);
             } else {
                 List<String> reasons = "hindi".equals(languageKey) ? TELEMETRY_ISSUE_REASONS_HINDI : TELEMETRY_ISSUE_REASONS;
-                resolvedIssueReason = resolveSelection(rawIssueReason, reasons).orElse(rawIssueReason);
+                Optional<String> matchedReason = resolveSelection(rawIssueReason, reasons);
+                resolvedIssueReason = matchedReason.orElse(rawIssueReason);
+                requireStorableIssueReason(resolvedIssueReason, matchedReason.isPresent());
                 selectedKey = resolveIssueSelectionKey(
                         rawIssueReason,
                         resolvedIssueReason,
@@ -910,17 +956,19 @@ public class GlificMeterWorkflowService {
 
             String correlationId = "issue-report-" + UUID.randomUUID();
             String issueReason = request.getIssueReason().trim();
-            if (!ISSUE_REASON_ALLOWED.matcher(issueReason).matches()) {
-                throw new IllegalStateException("issueReason contains invalid characters");
-            }
+            // Always free text on this endpoint — there is no menu behind /others/submitted.
+            requireStorableIssueReason(issueReason, false);
 
             telemetryTenantRepository.createTenantAnomalyRecord(
                     operatorWithSchema.schemaName(),
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    AnomalyConstants.TYPE_NO_SUBMISSION,
-                    issueReason,
-                    AnomalyConstants.STATUS_OPEN
+                    TenantAnomalyRecord.builder()
+                            .userId(operatorWithSchema.operator().id())
+                            .schemeId(schemeId)
+                            .type(AnomalyConstants.TYPE_NO_SUBMISSION)
+                            .reason(issueReason)
+                            .status(AnomalyConstants.STATUS_OPEN)
+                            .retries(0)
+                            .build()
             );
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
@@ -1168,11 +1216,20 @@ public class GlificMeterWorkflowService {
                     if (effectiveConfirmedReading.compareTo(maxAllowedReading) > 0) {
                         telemetryTenantRepository.createTenantAnomalyRecord(
                                 operatorWithSchema.schemaName(),
-                                operatorWithSchema.operator().id(),
-                                schemeId,
-                                AnomalyConstants.TYPE_OVER_WATER_SUPPLY,
-                                "Manual reading is above allowed maximum reading (" + toPlain(maxAllowedReading) + ").",
-                                AnomalyConstants.STATUS_OPEN
+                                TenantAnomalyRecord.builder()
+                                        .userId(operatorWithSchema.operator().id())
+                                        .schemeId(schemeId)
+                                        .type(AnomalyConstants.TYPE_OVER_WATER_SUPPLY)
+                                        .reason("Manual reading is above allowed maximum reading ("
+                                                + toPlain(maxAllowedReading) + ").")
+                                        .status(AnomalyConstants.STATUS_OPEN)
+                                        .aiReading(pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading)
+                                                .orElse(null))
+                                        .overriddenReading(effectiveConfirmedReading)
+                                        .retries(0)
+                                        .previousReading(previousConfirmed)
+                                        .previousReadingDate(previousConfirmedAt)
+                                        .build()
                         );
                         telemetryEventPublisher.publishAnomalyRecorded(
                                 tenantId,
@@ -1309,11 +1366,21 @@ public class GlificMeterWorkflowService {
 
             telemetryTenantRepository.createTenantAnomalyRecord(
                     operatorWithSchema.schemaName(),
-                    operatorWithSchema.operator().id(),
-                    schemeId,
-                    AnomalyConstants.TYPE_MANUAL_OVERRIDE,
-                    "Manual reading submitted as override.",
-                    AnomalyConstants.STATUS_OPEN
+                    TenantAnomalyRecord.builder()
+                            .userId(operatorWithSchema.operator().id())
+                            .schemeId(schemeId)
+                            .type(AnomalyConstants.TYPE_MANUAL_OVERRIDE)
+                            .reason("Manual reading submitted as override.")
+                            .status(AnomalyConstants.STATUS_OPEN)
+                            .aiReading(pendingOpt.map(TelemetryPendingMeterChangeRecord::extractedReading)
+                                    .orElse(null))
+                            .overriddenReading(manualReadingValue)
+                            .retries(unreadableRetryCountToday)
+                            .previousReading(previousSnapshotOpt
+                                    .map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null))
+                            .previousReadingDate(previousSnapshotOpt
+                                    .map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null))
+                            .build()
             );
             telemetryEventPublisher.publishAnomalyRecorded(
                     tenantId,
@@ -1346,11 +1413,17 @@ public class GlificMeterWorkflowService {
             if (consecutiveOverrideDays >= 5) {
                 telemetryTenantRepository.createTenantAnomalyRecord(
                         operatorWithSchema.schemaName(),
-                        operatorWithSchema.operator().id(),
-                        schemeId,
-                        AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS,
-                        "Manual overrides recorded for five or more consecutive days.",
-                        AnomalyConstants.STATUS_OPEN
+                        TenantAnomalyRecord.builder()
+                                .userId(operatorWithSchema.operator().id())
+                                .schemeId(schemeId)
+                                .type(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS)
+                                .reason("Manual overrides recorded for five or more consecutive days.")
+                                .status(AnomalyConstants.STATUS_OPEN)
+                                .retries(0)
+                                // The only anomaly that counts an override run, and so the only one
+                                // with a real value for the column named after it.
+                                .consecutiveDaysOverridden(consecutiveOverrideDays)
+                                .build()
                 );
                 for (Long recipientUserId : analyticsUserIds) {
                     telemetryEventPublisher.publishEscalationCreated(
@@ -1700,6 +1773,56 @@ public class GlificMeterWorkflowService {
     }
 
     private record WaterSupplyThreshold(double undersupplyThresholdPercent, double oversupplyThresholdPercent) {
+    }
+
+    /**
+     * The single guard every resolved issue reason passes before it is stored or published.
+     *
+     * <p>Must be called <em>after</em> reason resolution and <em>before</em> any database write or
+     * Kafka publish, so a rejected reason leaves no trace. Two rules, with deliberately different
+     * scopes — keep both here rather than splitting them, so a new resolution path cannot pick up
+     * one and miss the other:
+     *
+     * <p><strong>Length, unconditionally.</strong> {@code IssueReportRequest} caps the field the
+     * operator types, but a resolved reason need not be operator input: the template path takes a
+     * label from {@code TemplateOption}, the config paths take one from
+     * {@code findIssueReportReasons} or the {@code SUPPLY_OUTAGE_REASONS} JSON, and all three
+     * arrive from the database unmeasured. Over
+     * {@link IssueReportRequest#MAX_ISSUE_REASON_LENGTH} the value still writes fine to the
+     * {@code TEXT} columns on this side and then fails the analytics consumer's insert into
+     * {@code VARCHAR(255)} {@code fact_water_quantity_table.outage_reason} — the reason is lost
+     * where it is actually reported on, and lost asynchronously, so nothing surfaces here.
+     * Rejecting the whole submission is the point: truncating would silently corrupt a reason a
+     * tenant configured, and the tenant needs to fix the label instead.
+     *
+     * <p><strong>Characters, only for free text.</strong> {@code matchedConfiguredReason} is why
+     * this parameter exists: a reason the operator picked from the menu is constrained to the
+     * configured set already, and tenant-configured labels may legitimately contain punctuation
+     * that {@link #ISSUE_REASON_ALLOWED} forbids. Applying the allowlist unconditionally would
+     * false-reject a valid menu pick. Note this cannot be simplified to
+     * {@code reasons.contains(resolvedIssueReason)} — the template path can fall back to
+     * {@code TemplateOption.canonicalLabel()}, which is not a member of the label list.
+     *
+     * @throws IllegalStateException for an over-length reason, with a message the localiser
+     *                               deliberately does not recognise: an operator cannot fix a
+     *                               misconfigured label, so they get the caller's generic reply
+     *                               while the suppressed detail is logged for ops. For a
+     *                               disallowed character, with the message the localiser maps to
+     *                               "Issue reason can only contain letters, numbers, and spaces."
+     */
+    private static void requireStorableIssueReason(String resolvedIssueReason,
+                                                   boolean matchedConfiguredReason) {
+        if (resolvedIssueReason != null
+                && resolvedIssueReason.length() > IssueReportRequest.MAX_ISSUE_REASON_LENGTH) {
+            throw new IllegalStateException("issueReason exceeds the maximum storable length of "
+                    + IssueReportRequest.MAX_ISSUE_REASON_LENGTH + " characters");
+        }
+        if (matchedConfiguredReason) {
+            return;
+        }
+        if (!ISSUE_REASON_ALLOWED.matcher(resolvedIssueReason).matches()) {
+            throw new IllegalStateException("issueReason contains invalid characters");
+        }
     }
 
     private Optional<String> resolveSelection(String rawSelection, List<String> options) {

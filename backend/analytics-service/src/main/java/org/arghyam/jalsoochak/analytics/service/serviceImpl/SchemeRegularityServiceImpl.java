@@ -2169,11 +2169,12 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTenantInput(tenantId);
         validateLgdInput(lgdId);
 
-        // v2: v1 payloads are the retired {active,inactive}_schemes_count pair.
+        // v3: v2 counted a fanned-out scheme once per dimension row, so its buckets overshoot the total.
+        // v1 payloads are the retired {active,inactive}_schemes_count pair.
         String cacheKey = SCHEME_STATUS_COUNT_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":lgd:" + lgdId
-                + ":v2";
+                + ":v3";
         SchemeStatusBreakdownResponse cached =
                 readFromCache(cacheKey, SchemeStatusBreakdownResponse.class);
         if (cached != null) {
@@ -2594,7 +2595,9 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
         validateTopSchemeCount(limit);
         int offset = (pageNumber - 1) * limit;
 
-        // v5: v4 payloads carry the retired active/inactive counts and per-scheme statusCode/status.
+        // v6: v5 counted and listed a fanned-out scheme once per dimension row, so its status buckets
+        // overshoot totalCount and its topSchemes repeat a scheme. v4 payloads carry the retired
+        // active/inactive counts and per-scheme statusCode/status.
         String cacheKey = SCHEME_STATUS_TOP_REPORTING_CACHE_PREFIX
                 + ":tenant:" + tenantId
                 + ":parent_lgd:" + parentLgdId
@@ -2604,7 +2607,7 @@ public class SchemeRegularityServiceImpl implements SchemeRegularityService {
                 + ":end:" + endDate
                 + ":sort_by:" + Objects.toString(sortBy, "reportingRate")
                 + ":sort_dir:" + Objects.toString(sortDir, "desc")
-                + ":v5";
+                + ":v6";
         SchemeStatusAndTopReportingResponse cached =
                 readFromCache(cacheKey, SchemeStatusAndTopReportingResponse.class);
         if (cached != null) {

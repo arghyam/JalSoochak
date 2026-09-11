@@ -71,6 +71,11 @@ eureka:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+    # Must equal <swagger-ui.version> in pom.xml. springdoc 2.5.0 ships
+    # springdoc.config.properties with springdoc.swagger-ui.version=5.13.0 and uses it to
+    # build the webjar resource path (AbstractSwaggerResourceResolver), so without this
+    # override every /webjars/swagger-ui/** asset 404s against the pinned webjar.
+    version: 5.32.14
     tags-sorter: alpha
     operations-sorter: method
     # Disable client-side syntax highlighting. highlight.js' recursive

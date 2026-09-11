@@ -294,6 +294,44 @@ class GlificImageWorkflowServiceAssamTest {
     }
 
     @Test
+    void processAssamReadingOptsIntoTheSupplyPlausibilityCheck() {
+        // SUPPLY-PLAUSIBILITY: this endpoint is the only caller that turns the check on.
+        // createReading is shared with the Glific/WhatsApp image path, which must stay untouched, so
+        // the flag is an opt-in set here and nowhere else.
+        AssamReadingRequest request = AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .centreSchemeId("30244993")
+                .phoneNumber("919876543210")
+                .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                .build();
+
+        TelemetryOperatorWithSchema operatorWithSchema = new TelemetryOperatorWithSchema(
+                "tenant_assam",
+                new TelemetryOperator(11L, 22, "name", "name@example.com", "919876543210", null)
+        );
+
+        when(operatorContextService.tryResolveOperatorWithSchema("919876543210", 22))
+                .thenReturn(Optional.of(operatorWithSchema));
+        when(operatorContextService.resolveOperatorLanguage(operatorWithSchema, 22)).thenReturn("en");
+        when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
+        when(telemetryTenantRepository.findSchemeIdByCentreSchemeId("tenant_assam", "30244993"))
+                .thenReturn(Optional.of(30244993L));
+        when(telemetryTenantRepository.isOperatorMappedToScheme("tenant_assam", 11L, 30244993L)).thenReturn(true);
+        when(bfmReadingService.createReading(any(CreateReadingRequest.class), anyString(), any(),
+                anyString(), anyBoolean(), any(FlowVisionRetryMode.class)))
+                .thenReturn(CreateReadingResponse.builder().success(true).qualityStatus("CONFIRMED").build());
+
+        service.processAssamReading(request, 22);
+
+        ArgumentCaptor<CreateReadingRequest> requestCaptor = ArgumentCaptor.forClass(CreateReadingRequest.class);
+        verify(bfmReadingService).createReading(requestCaptor.capture(), anyString(), any(), anyString(),
+                anyBoolean(), any(FlowVisionRetryMode.class));
+
+        assertEquals(true, requestCaptor.getValue().isSupplyPlausibilityChecked());
+    }
+
+    @Test
     void processAssamReadingUpdatesLocationWhenGeolocationPresent() {
         AssamReadingRequest request = AssamReadingRequest.builder()
                 .readingUrl("https://example.com/meter.jpg")
