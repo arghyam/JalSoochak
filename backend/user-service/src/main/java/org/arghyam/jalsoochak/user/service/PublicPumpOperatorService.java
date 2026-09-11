@@ -21,6 +21,18 @@ public interface PublicPumpOperatorService {
             LocalDate endDate
     );
 
+    /**
+     * Operator detail keyed on the random v4 {@code uuid} rather than the sequential id — the
+     * lookup the anonymous public dashboard uses, so that operator records cannot be enumerated.
+     */
+    PumpOperatorDetailsDTO getPumpOperatorDetailsByUuid(
+            String tenantCode,
+            String uuid,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    );
+
     PumpOperatorReadingComplianceDTO getReadingCompliance(String tenantCode, long pumpOperatorId);
 
     PumpOperatorDetailsWithComplianceDTO getPumpOperatorDetailsWithCompliance(String tenantCode, long pumpOperatorId);

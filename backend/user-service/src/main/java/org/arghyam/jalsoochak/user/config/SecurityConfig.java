@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -68,18 +69,12 @@ public class SecurityConfig {
                                     "/api/v1/auth/logout",
                                     "/api/v1/auth/invites",
                                     "/api/v1/auth/invites/activate",
-                                    "/api/v1/pumpoperator/**",
-                                    "/api/v1/tenant/user/staff",
-                                    "/api/v1/tenant/user/staff/counts/by-role",
                                     "/api/v1/auth/forgot-password",
                                     "/api/v1/auth/reset-password",
                                     "/api/v1/auth/staff/otp",
                                     "/api/v1/auth/staff/otp/verify",
                                     // Public (no-auth) endpoints
                                     "/api/v1/public/**",
-                                    // Tenant staff endpoints (no-auth; tenantCode param required)
-                                    "/api/v1/tenant/staff",
-                                    "/api/v1/tenant/staff/counts/by-role",
                                     // Upload endpoint is authorized via UploadAuthService (JWT validation + role check),
                                     // not via Spring Security's JwtDecoder (which may require network access to Keycloak).
                                     "/api/v1/state-admin/pump-operators/upload",
@@ -87,6 +82,21 @@ public class SecurityConfig {
                                     "/error",
                                     "/actuator/health",
                                     "/actuator/info")
+                            .permitAll();
+
+                    // The anonymous village dashboard reaches exactly these three pump-operator
+                    // endpoints. Everything else under /api/v1/pumpoperator/** — the person-scoped
+                    // reads, the tenant-wide compliance list, {id}/readings, the scheme reads, and
+                    // the numeric-id detail route — is only ever called by the Section Officer
+                    // console, which already sends a bearer token, so it falls through to
+                    // anyRequest().authenticated() below.
+                    //
+                    // The public detail route is keyed on the operator UUID, not the sequential id:
+                    // /pump-operators/{id} stays authenticated so it cannot be walked 1..N.
+                    auth.requestMatchers(HttpMethod.GET,
+                                    "/api/v1/pumpoperator/pump-operators/by-uuid/*",
+                                    "/api/v1/pumpoperator/pump-operators/by-scheme",
+                                    "/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
                             .permitAll();
                     if (isProd) {
                         auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").authenticated();

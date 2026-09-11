@@ -17,10 +17,15 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService {
+
+    /** Rejects a malformed uuid before it reaches the database, so probing costs no query. */
+    private static final Pattern UUID_PATTERN =
+            Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
     private final PublicPumpOperatorRepository publicPumpOperatorRepository;
 
@@ -36,6 +41,31 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
         PumpOperatorDetailsDTO dto = publicPumpOperatorRepository.findPumpOperatorById(
                 schemaName,
                 pumpOperatorId,
+                schemeId,
+                startDate,
+                endDate
+        );
+        if (dto == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Pump operator not found");
+        }
+        return dto;
+    }
+
+    @Override
+    public PumpOperatorDetailsDTO getPumpOperatorDetailsByUuid(
+            String tenantCode,
+            String uuid,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        if (uuid == null || !UUID_PATTERN.matcher(uuid.trim()).matches()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid uuid format");
+        }
+        PumpOperatorDetailsDTO dto = publicPumpOperatorRepository.findPumpOperatorByUuid(
+                schemaName,
+                uuid.trim(),
                 schemeId,
                 startDate,
                 endDate
