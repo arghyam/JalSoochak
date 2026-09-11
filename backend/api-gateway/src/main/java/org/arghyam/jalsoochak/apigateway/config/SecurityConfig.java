@@ -38,18 +38,21 @@ public class SecurityConfig {
             "/api/v1/auth/reset-password",
             "/api/v1/auth/staff/otp",
             "/api/v1/auth/staff/otp/verify",
-            // Public dashboards for pump operators; no caller has a token at this point.
-            "/api/v1/pumpoperator/**",
-            // Staff lookups scoped by a tenantCode query parameter, both the flat alias and the
-            // path the gateway rewrites it to.
-            "/api/v1/tenant/staff",
-            "/api/v1/tenant/staff/counts/by-role",
-            "/api/v1/tenant/user/staff",
-            "/api/v1/tenant/user/staff/counts/by-role",
             // Authorized by UploadAuthService, which validates the JWT itself rather than through
             // the JwtDecoder (that would need network access to Keycloak).
             "/api/v1/state-admin/pump-operators/upload",
             "/api/v1/state-admin/user-scheme-mappings/upload"
+    };
+
+    /**
+     * user-service publishes exactly these three to the anonymous village dashboard, and only as GET.
+     * Every other operator route — the sequential-id detail route included — and the staff directory
+     * need a JWT.
+     */
+    private static final String[] USER_SERVICE_PUBLIC_READS = {
+            "/api/v1/pumpoperator/pump-operators/by-uuid/*",
+            "/api/v1/pumpoperator/pump-operators/by-scheme",
+            "/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance"
     };
 
     /** tenant-service publishes these as GET only: branding and locations for the login screen. */
@@ -76,7 +79,10 @@ public class SecurityConfig {
     /** message-service's welcome trigger, called by the Glific flow. */
     private static final String[] MESSAGE_SERVICE_PUBLIC = {"/api/v1/message/trigger-welcome-message"};
 
-    /** analytics-service publishes its dashboards as GET and status updates as PUT. */
+    /**
+     * analytics-service publishes its dashboards anonymously, GET only, and narrows that further to its
+     * own list of public endpoints. The list lives in the service so it has a single home.
+     */
     private static final String[] ANALYTICS_SERVICE_PUBLIC = {"/api/v1/analytics/**"};
 
     /**
@@ -104,12 +110,12 @@ public class SecurityConfig {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(auth -> auth
                         .pathMatchers(bothForms("/user", USER_SERVICE_PUBLIC)).permitAll()
+                        .pathMatchers(HttpMethod.GET, bothForms("/user", USER_SERVICE_PUBLIC_READS)).permitAll()
                         .pathMatchers(bothForms("/telemetry", TELEMETRY_SERVICE_PUBLIC)).permitAll()
                         .pathMatchers(bothForms("/scheme", SCHEME_SERVICE_PUBLIC)).permitAll()
                         .pathMatchers(bothForms("/message", MESSAGE_SERVICE_PUBLIC)).permitAll()
                         .pathMatchers(HttpMethod.GET, bothForms("/tenant", TENANT_SERVICE_PUBLIC_READS)).permitAll()
                         .pathMatchers(HttpMethod.GET, bothForms("/analytics", ANALYTICS_SERVICE_PUBLIC)).permitAll()
-                        .pathMatchers(HttpMethod.PUT, bothForms("/analytics", ANALYTICS_SERVICE_PUBLIC)).permitAll()
                         .pathMatchers(GATEWAY_PUBLIC).permitAll()
                         // Anything a service does not publish itself needs a valid JWT.
                         .anyExchange().authenticated()

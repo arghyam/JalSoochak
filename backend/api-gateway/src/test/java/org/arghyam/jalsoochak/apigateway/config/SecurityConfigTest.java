@@ -30,17 +30,13 @@ class SecurityConfigTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-            // user-service: public dashboards and staff lookups (tenantCode query param, no JWT)
-            "/api/v1/pumpoperator/pump-operators/42",
-            "/user/api/v1/pumpoperator/pump-operators/42",
-            "/api/v1/pumpoperator/schemes/7/reading-submissions",
-            "/api/v1/tenant/staff",
-            "/user/api/v1/tenant/staff",
-            "/api/v1/tenant/staff/counts/by-role",
-            "/user/api/v1/tenant/staff/counts/by-role",
-            "/api/v1/tenant/user/staff",
-            "/user/api/v1/tenant/user/staff",
-            "/api/v1/tenant/user/staff/counts/by-role",
+            // user-service: the three operator reads the anonymous village dashboard makes
+            "/api/v1/pumpoperator/pump-operators/by-uuid/3f1a9c22-5b7e-4d38-9a10-8c4b2e6f0d71",
+            "/user/api/v1/pumpoperator/pump-operators/by-uuid/3f1a9c22-5b7e-4d38-9a10-8c4b2e6f0d71",
+            "/api/v1/pumpoperator/pump-operators/by-scheme",
+            "/user/api/v1/pumpoperator/pump-operators/by-scheme",
+            "/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance",
+            "/user/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance",
             // tenant-service: branding and location lookups the login screen needs before a token exists
             "/api/v1/tenants",
             "/tenant/api/v1/tenants",
@@ -102,12 +98,25 @@ class SecurityConfigTest {
     }
 
     @Test
-    void analyticsAcceptsThePutItsOwnConfigPublishes() {
-        assertPasses(HttpMethod.PUT, "/api/v1/analytics/escalations/7/status");
+    void analyticsPublishesReadsOnly() {
+        // #471 deleted the only anonymous analytics write, PUT /escalations/{id}/status.
+        assertRequiresJwt(HttpMethod.PUT, "/api/v1/analytics/escalations/7/status");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {
+            // user-service: operator records by sequential id, officer-scoped reads and the staff
+            // directory, all anonymous until #471 left only the three reads above public
+            "/api/v1/pumpoperator/pump-operators/42",
+            "/user/api/v1/pumpoperator/pump-operators/42",
+            "/api/v1/pumpoperator/pump-operators/reading-compliance",
+            "/api/v1/pumpoperator/schemes/7/reading-submissions",
+            "/api/v1/tenant/staff",
+            "/user/api/v1/tenant/staff",
+            "/api/v1/tenant/staff/counts/by-role",
+            "/api/v1/tenant/user/staff",
+            "/user/api/v1/tenant/user/staff",
+            "/api/v1/tenant/user/staff/counts/by-role",
             "/api/v1/users",
             "/user/api/v1/users",
             "/api/v1/state-admin/pump-operators",
@@ -126,6 +135,7 @@ class SecurityConfigTest {
     @Test
     void publicReadsDoNotOpenTheMatchingWrites() {
         assertRequiresJwt(HttpMethod.POST, "/api/v1/tenants");
+        assertRequiresJwt(HttpMethod.POST, "/api/v1/pumpoperator/pump-operators/by-scheme");
         assertRequiresJwt(HttpMethod.DELETE, "/api/v1/tenants/mp");
         assertRequiresJwt(HttpMethod.POST, "/api/v1/analytics/water-supply/national");
         assertRequiresJwt(HttpMethod.DELETE, "/api/v1/analytics/escalations/7");

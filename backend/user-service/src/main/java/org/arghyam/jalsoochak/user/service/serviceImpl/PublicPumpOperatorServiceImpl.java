@@ -6,7 +6,7 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
 import org.arghyam.jalsoochak.user.repository.PublicPumpOperatorRepository;
 import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
@@ -17,10 +17,15 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService {
+
+    /** Rejects a malformed uuid before it reaches the database, so probing costs no query. */
+    private static final Pattern UUID_PATTERN =
+            Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
     private final PublicPumpOperatorRepository publicPumpOperatorRepository;
 
@@ -36,6 +41,31 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
         PumpOperatorDetailsDTO dto = publicPumpOperatorRepository.findPumpOperatorById(
                 schemaName,
                 pumpOperatorId,
+                schemeId,
+                startDate,
+                endDate
+        );
+        if (dto == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Pump operator not found");
+        }
+        return dto;
+    }
+
+    @Override
+    public PumpOperatorDetailsDTO getPumpOperatorDetailsByUuid(
+            String tenantCode,
+            String uuid,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
+        if (uuid == null || !UUID_PATTERN.matcher(uuid.trim()).matches()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid uuid format");
+        }
+        PumpOperatorDetailsDTO dto = publicPumpOperatorRepository.findPumpOperatorByUuid(
+                schemaName,
+                uuid.trim(),
                 schemeId,
                 startDate,
                 endDate
@@ -84,7 +114,7 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
     }
 
     @Override
-    public PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
+    public PageResponseDTO<SchemeReadingComplianceRowDTO> listSchemeReadingCompliance(
             String tenantCode,
             long schemeId,
             Long pumpOperatorId,
@@ -97,16 +127,16 @@ public class PublicPumpOperatorServiceImpl implements PublicPumpOperatorService 
         int p = Math.max(0, page);
         int effectiveSize = clampLimit(size);
         long offset = offsetOf(p, effectiveSize);
-        long total = publicPumpOperatorRepository.countPumpOperatorsBySchemeWithCompliance(
+        long total = publicPumpOperatorRepository.countSchemeReadingCompliance(
                 schemaName,
                 schemeId,
                 pumpOperatorId,
                 startDate,
                 endDate
         );
-        List<PumpOperatorSchemeComplianceRowDTO> rows = startsPastLastRow(offset, total)
+        List<SchemeReadingComplianceRowDTO> rows = startsPastLastRow(offset, total)
                 ? List.of()
-                : publicPumpOperatorRepository.listPumpOperatorsBySchemeWithCompliance(
+                : publicPumpOperatorRepository.listSchemeReadingCompliance(
                         schemaName,
                         schemeId,
                         pumpOperatorId,
