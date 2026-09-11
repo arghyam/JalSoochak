@@ -53,6 +53,13 @@ class RedisConnectionPropertiesTest {
                 .getProperty("spring.data.redis.timeout"));
     }
 
+    @Test
+    void aRedisOutageDoesNotMarkTheGatewayUnhealthy() throws IOException {
+        // The limiter fails open without Redis, so readiness must not hinge on it either.
+        assertEquals(Boolean.FALSE, environmentWith(Map.of())
+                .getProperty("management.health.redis.enabled", Boolean.class));
+    }
+
     private static StandardEnvironment environmentWith(Map<String, Object> systemEnvironment) throws IOException {
         StandardEnvironment environment = new StandardEnvironment();
         // JVM system properties outrank the environment, so a stray -DREDIS_HOST on the Maven

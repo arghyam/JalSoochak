@@ -309,6 +309,12 @@ eureka:
       defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
 
 management:
+  health:
+    redis:
+      # RedisRateLimiter fails open when Redis is unreachable, so traffic keeps flowing through a
+      # Redis outage. Left enabled, this indicator would still turn /actuator/health DOWN and fail
+      # the readiness probe — taking the gateway, and every service behind it, out of rotation.
+      enabled: false
   endpoints:
     web:
       exposure:
