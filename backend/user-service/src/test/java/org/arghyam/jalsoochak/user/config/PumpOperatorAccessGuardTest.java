@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.user.config;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.arghyam.jalsoochak.user.config.PumpOperatorAccessGuard.CallerScope;
 import org.arghyam.jalsoochak.user.constants.TenantStatusConstants;
 import org.arghyam.jalsoochak.user.exceptions.BadRequestException;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -60,6 +63,10 @@ class PumpOperatorAccessGuardTest {
 
     @Mock
     private PumpOperatorAccessRepository accessRepository;
+
+    /** A real registry: a mocked one would hand the guard a null counter on the failure path. */
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks
     private PumpOperatorAccessGuard guard;
@@ -286,6 +293,9 @@ class PumpOperatorAccessGuardTest {
 
             assertThatThrownBy(() -> guard.requirePumpOperatorAccess(staff, 1L))
                     .isInstanceOf(ResourceNotFoundException.class);
+            assertThat(meterRegistry.counter(PumpOperatorAccessGuard.SCOPE_CHECK_FAILURES_METRIC).count())
+                    .as("a failed lookup must be countable, not only logged")
+                    .isEqualTo(1.0);
         }
 
         @Test

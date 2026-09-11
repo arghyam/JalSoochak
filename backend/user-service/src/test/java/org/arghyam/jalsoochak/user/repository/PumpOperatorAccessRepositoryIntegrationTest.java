@@ -42,15 +42,19 @@ class PumpOperatorAccessRepositoryIntegrationTest extends AbstractPostgresIT {
     }
 
     private long insertUser(String phone, int userType, String name) {
+        return insertUser(phone, userType, name, 1, false);
+    }
+
+    private long insertUser(String phone, int userType, String name, int status, boolean deleted) {
         return jdbc.queryForObject("""
                 INSERT INTO tenant_mp.user_table
                     (tenant_id, title, title_hash, phone_number, phone_number_hash, user_type, status,
-                     email_verification_status, phone_verification_status, created_at, updated_at)
-                VALUES (1, ?, ?, ?, ?, ?, 1, true, true, NOW(), NOW())
+                     email_verification_status, phone_verification_status, created_at, updated_at, deleted_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?, true, true, NOW(), NOW(), CASE WHEN ? THEN NOW() ELSE NULL END)
                 RETURNING id
                 """, Long.class,
                 pii.encrypt(name), pii.hmac(name.trim().toLowerCase()),
-                pii.encrypt(phone), pii.hmac(phone), userType);
+                pii.encrypt(phone), pii.hmac(phone), userType, status, deleted);
     }
 
     private long insertScheme(String stateSchemeId) {
@@ -133,6 +137,42 @@ class PumpOperatorAccessRepositoryIntegrationTest extends AbstractPostgresIT {
 
             assertThat(repo.sharesActiveSchemeWith(SCHEMA, officer, 999_999L)).isFalse();
         }
+
+        @Test
+        @DisplayName("refuses an operator whose user record is soft-deleted, even with an active mapping")
+        void falseForDeletedOperator() {
+            long officer = insertUser("910000000001", SECTION_OFFICER_TYPE, "Officer One");
+            long operator = insertUser("910000000002", PUMP_OPERATOR_TYPE, "Operator One", 1, true);
+            long scheme = insertScheme("S-1");
+            mapUserToScheme(officer, scheme);
+            mapUserToScheme(operator, scheme);
+
+            assertThat(repo.sharesActiveSchemeWith(SCHEMA, officer, operator)).isFalse();
+        }
+
+        @Test
+        @DisplayName("refuses a colleague on the same scheme who is not a pump operator")
+        void falseForNonOperatorTarget() {
+            long officer = insertUser("910000000001", SECTION_OFFICER_TYPE, "Officer One");
+            long colleague = insertUser("910000000004", SECTION_OFFICER_TYPE, "Officer Two");
+            long scheme = insertScheme("S-1");
+            mapUserToScheme(officer, scheme);
+            mapUserToScheme(colleague, scheme);
+
+            assertThat(repo.sharesActiveSchemeWith(SCHEMA, officer, colleague)).isFalse();
+        }
+
+        @Test
+        @DisplayName("still allows an inactive operator, because the officer console lists them")
+        void trueForInactiveOperator() {
+            long officer = insertUser("910000000001", SECTION_OFFICER_TYPE, "Officer One");
+            long operator = insertUser("910000000002", PUMP_OPERATOR_TYPE, "Operator One", 0, false);
+            long scheme = insertScheme("S-1");
+            mapUserToScheme(officer, scheme);
+            mapUserToScheme(operator, scheme);
+
+            assertThat(repo.sharesActiveSchemeWith(SCHEMA, officer, operator)).isTrue();
+        }
     }
 
     @Nested
@@ -157,6 +197,16 @@ class PumpOperatorAccessRepositoryIntegrationTest extends AbstractPostgresIT {
             long officer = insertUser("910000000001", SECTION_OFFICER_TYPE, "Officer One");
             long scheme = insertScheme("S-1");
             mapUserToScheme(officer, scheme, 1, true);
+
+            assertThat(repo.isMappedToScheme(SCHEMA, officer, scheme)).isFalse();
+        }
+
+        @Test
+        @DisplayName("ignores an inactive assignment")
+        void falseForInactiveMapping() {
+            long officer = insertUser("910000000001", SECTION_OFFICER_TYPE, "Officer One");
+            long scheme = insertScheme("S-1");
+            mapUserToScheme(officer, scheme, 0, false);
 
             assertThat(repo.isMappedToScheme(SCHEMA, officer, scheme)).isFalse();
         }

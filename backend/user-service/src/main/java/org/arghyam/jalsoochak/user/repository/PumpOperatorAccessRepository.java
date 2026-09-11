@@ -45,9 +45,12 @@ public class PumpOperatorAccessRepository {
     }
 
     /**
-     * Returns {@code true} when {@code callerUserId} and {@code targetUserId} are both actively
-     * mapped to at least one common scheme — the condition under which an officer may read a
-     * pump operator's record.
+     * Returns {@code true} when {@code targetUserId} is a pump operator whose user record is not
+     * soft-deleted, and {@code callerUserId} and that operator are both actively mapped to at least
+     * one common scheme — the condition under which an officer may read a pump operator's record.
+     *
+     * <p>The operator's own {@code status} is deliberately not checked: the officer console lists
+     * inactive operators too, and an officer must still be able to open them.
      */
     public boolean sharesActiveSchemeWith(String schemaName, long callerUserId, long targetUserId) {
         validateSchemaName(schemaName);
@@ -63,11 +66,17 @@ public class PumpOperatorAccessRepository {
                      AND target.deleted_at IS NULL
                      AND target.status = 1
                      AND target.user_id = ?
+                    JOIN %s.user_table tu
+                      ON tu.id = target.user_id
+                     AND tu.deleted_at IS NULL
+                    JOIN common_schema.user_type_master_table ut
+                      ON ut.id = tu.user_type
+                     AND upper(COALESCE(ut.c_name, '')) = 'PUMP_OPERATOR'
                     WHERE caller.deleted_at IS NULL
                       AND caller.status = 1
                       AND caller.user_id = ?
                 )
-                """, schemaName, schemaName);
+                """, schemaName, schemaName, schemaName);
         return Boolean.TRUE.equals(
                 jdbcTemplate.queryForObject(sql, Boolean.class, targetUserId, callerUserId));
     }

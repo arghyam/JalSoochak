@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.user.config;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
@@ -28,10 +29,12 @@ import java.util.Optional;
  * across every tenant and read operator PII (CWE-284, OWASP API1). Two rules close that:
  *
  * <ol>
- *   <li><b>The tenant comes from the token, not the query string.</b> A caller carrying a
- *       {@code tenant_state_code} claim is pinned to that tenant; supplying a different
- *       {@code tenantCode} is a 403, not a silent cross-tenant read. Only global admins
- *       (SUPER_USER / SUPER_STATE_ADMIN), who carry no tenant claim, may name a tenant.</li>
+ *   <li><b>The tenant comes from the token, not the query string.</b> The token's tenant is the
+ *       first {@code TENANT_} authority, read by {@link SecurityUtils#extractTenantCode};
+ *       {@code JwtAuthConverter} grants that authority from the {@code tenant_state_code} claim.
+ *       A caller holding one is pinned to that tenant; supplying a different {@code tenantCode} is
+ *       a 403, not a silent cross-tenant read. Only global admins (SUPER_USER /
+ *       SUPER_STATE_ADMIN), who hold no {@code TENANT_} authority, may name a tenant.</li>
  *   <li><b>Every object id is checked against the caller's own scope.</b> Tenant admins see
  *       their whole tenant; a staff officer sees only the schemes mapped to them, the pump
  *       operators on those schemes, and their own person record.</li>
@@ -61,10 +64,17 @@ public class PumpOperatorAccessGuard {
     private static final String NOT_IN_SCOPE_OPERATOR = "Pump operator not found";
     private static final String NOT_IN_SCOPE_SCHEME = "Scheme not found";
 
+    /**
+     * Counts scope lookups that threw. Each one denies access, so a broken lookup otherwise just
+     * looks like officers suddenly getting 404s — this is the signal to alert on.
+     */
+    static final String SCOPE_CHECK_FAILURES_METRIC = "user.pumpoperator.scope.check.failures";
+
     private final UserSecurityEvaluator userSecurity;
     private final UserCommonRepository userCommonRepository;
     private final UserTenantRepository userTenantRepository;
     private final PumpOperatorAccessRepository accessRepository;
+    private final MeterRegistry meterRegistry;
 
     /**
      * The tenant and object scope a request is allowed to operate within.
@@ -126,7 +136,7 @@ public class PumpOperatorAccessGuard {
         String fromToken = normalize(tokenTenantCode);
 
         if (globalAdmin) {
-            // Global admins carry no tenant claim, so the query parameter is the only signal.
+            // Global admins hold no TENANT_ authority, so the query parameter is the only signal.
             String effective = requested != null ? requested : fromToken;
             if (effective == null) {
                 throw new BadRequestException("tenantCode is required");
@@ -135,7 +145,7 @@ public class PumpOperatorAccessGuard {
         }
 
         if (fromToken == null) {
-            log.warn("Pump operator API denied: caller has neither an admin role nor a tenant_state_code claim");
+            log.warn("Pump operator API denied: caller has neither an admin role nor a TENANT_ authority");
             throw new ForbiddenAccessException("Access denied for the requested tenant");
         }
         if (requested != null && !requested.equalsIgnoreCase(fromToken)) {
@@ -232,12 +242,14 @@ public class PumpOperatorAccessGuard {
 
     /**
      * Runs a scope lookup so that an infrastructure failure denies access rather than
-     * propagating a 500 that would leave the caller's scope undetermined.
+     * propagating a 500 that would leave the caller's scope undetermined. Each failure also
+     * increments {@value #SCOPE_CHECK_FAILURES_METRIC}.
      */
     private boolean safely(java.util.function.BooleanSupplier check) {
         try {
             return check.getAsBoolean();
         } catch (Exception e) {
+            meterRegistry.counter(SCOPE_CHECK_FAILURES_METRIC).increment();
             log.error("Pump operator scope check failed; denying access: {}", e.getMessage(), e);
             return false;
         }
