@@ -19,13 +19,13 @@ import org.springframework.util.StreamUtils;
  * "Outdated DOMPurify Dependency with Known Vulnerabilities" (CWE-1104), reported against
  * {@code /webjars/swagger-ui/swagger-ui-bundle.js}.
  *
- * <p>springdoc-openapi 2.5.0 pulls swagger-ui 5.13.0, which bundles DOMPurify 3.0.11 — 20 known
- * advisories, including CVE-2024-45801 and CVE-2024-47875 (HIGH, fixed in 3.1.3) and
- * CVE-2025-26791 (fixed in 3.2.4). The webjar is therefore pinned in {@code pom.xml} via
- * {@code <swagger-ui.version>}.
+ * <p>springdoc-openapi 2.6.0 pulls swagger-ui 5.17.14, which bundles DOMPurify 3.1.4 — 20 known
+ * advisories, including CVE-2025-26791 (fixed in 3.2.4). The webjar is therefore pinned in
+ * {@code pom.xml} via {@code <swagger-ui.version>} to 5.32.14, whose DOMPurify 3.4.13 carries
+ * none.
  *
- * <p>That pin is only half the fix. springdoc 2.5.0 ships a {@code springdoc.config.properties}
- * containing {@code springdoc.swagger-ui.version=5.13.0}, and
+ * <p>That pin is only half the fix. springdoc 2.6.0 ships a {@code springdoc.config.properties}
+ * containing {@code springdoc.swagger-ui.version=5.17.14}, and
  * {@code AbstractSwaggerResourceResolver} uses that value to build the versioned webjar resource
  * path. No webjars-locator is on the classpath, so it is the only thing mapping the version-less
  * URL onto the versioned directory inside the jar. If {@code application.yml} and {@code pom.xml}
@@ -34,7 +34,7 @@ import org.springframework.util.StreamUtils;
  */
 class SwaggerUiWebjarVersionTest {
 
-    /** Highest "fixed in" across the advisories affecting the previously shipped 3.0.11. */
+    /** "Fixed in" version of CVE-2025-26791, which affects the 3.1.4 springdoc resolves by default. */
     private static final int[] MIN_DOMPURIFY = {3, 2, 4};
 
     private static final Pattern BUNDLE_PATH =
@@ -57,7 +57,7 @@ class SwaggerUiWebjarVersionTest {
 
         assertThat(configured)
                 .as("springdoc.swagger-ui.version must be set in application.yml; without it "
-                        + "springdoc falls back to its built-in 5.13.0 and every asset 404s")
+                        + "springdoc falls back to its built-in 5.17.14 and every asset 404s")
                 .isNotNull();
         assertThat(webjarVersion())
                 .as("pom.xml <swagger-ui.version> and springdoc.swagger-ui.version have drifted")
