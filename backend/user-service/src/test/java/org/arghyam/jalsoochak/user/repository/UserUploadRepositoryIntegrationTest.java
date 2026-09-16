@@ -74,6 +74,66 @@ class UserUploadRepositoryIntegrationTest {
                 """, Integer.class, stateId, centreId);
     }
 
+    private int insertUserWithUuid(String uuid, String email, String phone) {
+        return jdbc.queryForObject("""
+                INSERT INTO tenant_mp.user_table
+                    (uuid, tenant_id, email, phone_number, phone_number_hash, user_type, status,
+                     email_verification_status, phone_verification_status, created_at, updated_at)
+                VALUES (?, 1, ?, ?, ?, 2, 1, true, true, NOW(), NOW())
+                RETURNING id
+                """, Integer.class,
+                uuid, email, pii.encrypt(phone), pii.hmac(phone));
+    }
+
+    // ── findUserIdByUuid ──────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("findUserIdByUuid")
+    class FindUserIdByUuid {
+
+        @Test
+        @DisplayName("finds user by Keycloak uuid")
+        void findsByUuid() {
+            int userId = insertUserWithUuid("kc-uuid-aaa", "uuid1@mp.gov", "91XXXXXXXXX7");
+            assertThat(repo.findUserIdByUuid(SCHEMA, "kc-uuid-aaa")).isEqualTo(userId);
+        }
+
+        @Test
+        @DisplayName("trims surrounding whitespace before matching")
+        void trimsInput() {
+            int userId = insertUserWithUuid("kc-uuid-bbb", "uuid2@mp.gov", "91XXXXXXXXX8");
+            assertThat(repo.findUserIdByUuid(SCHEMA, "  kc-uuid-bbb  ")).isEqualTo(userId);
+        }
+
+        @Test
+        @DisplayName("returns null for an unknown uuid")
+        void returnsNullWhenNotFound() {
+            assertThat(repo.findUserIdByUuid(SCHEMA, "kc-uuid-missing")).isNull();
+        }
+
+        @Test
+        @DisplayName("returns null for null or blank uuid")
+        void returnsNullForBlank() {
+            assertThat(repo.findUserIdByUuid(SCHEMA, null)).isNull();
+            assertThat(repo.findUserIdByUuid(SCHEMA, "   ")).isNull();
+        }
+
+        @Test
+        @DisplayName("ignores soft-deleted users")
+        void ignoresDeleted() {
+            int userId = insertUserWithUuid("kc-uuid-ccc", "uuid3@mp.gov", "91XXXXXXXXX9");
+            jdbc.update("UPDATE tenant_mp.user_table SET deleted_at = NOW() WHERE id = ?", userId);
+            assertThat(repo.findUserIdByUuid(SCHEMA, "kc-uuid-ccc")).isNull();
+        }
+
+        @Test
+        @DisplayName("rejects an invalid schema name")
+        void rejectsInvalidSchema() {
+            assertThatThrownBy(() -> repo.findUserIdByUuid("tenant_mp; DROP TABLE x", "kc-uuid-aaa"))
+                    .hasRootCauseInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
     // ── findUserIdByEmailOrPhone ──────────────────────────────────────────────
 
     @Nested

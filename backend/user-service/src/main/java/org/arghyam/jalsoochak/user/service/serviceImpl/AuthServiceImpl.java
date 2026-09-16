@@ -453,6 +453,10 @@ public class AuthServiceImpl implements AuthService {
                     .map(TenantUserRecord::title)
                     .orElse(null);
         }
+        if (name == null || name.isBlank()) {
+            // Admins with no tenant (or no matching tenant row) have their name only in Keycloak.
+            name = keycloakAdminHelper.findAdminDisplayName(user);
+        }
         TokenResponseDTO resp = buildTokenResponseEnriched(token, user.id(), user.tenantId(), tenantCode, roleName,
                 user.phoneNumber(), name);
         return new AuthResult(resp, token.refreshToken(), token.refreshExpiresIn());

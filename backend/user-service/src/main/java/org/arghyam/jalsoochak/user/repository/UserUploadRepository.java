@@ -28,6 +28,27 @@ public class UserUploadRepository {
     private final PiiEncryptionService pii;
     private static final Pattern SAFE_SCHEMA = Pattern.compile("^[a-z_][a-z0-9_]*$");
 
+    public Integer findUserIdByUuid(String schemaName, String uuid) {
+        validateSchemaName(schemaName);
+        if (uuid == null || uuid.isBlank()) {
+            return null;
+        }
+
+        String sql = String.format("""
+                SELECT id
+                FROM %s.user_table
+                WHERE deleted_at IS NULL
+                  AND uuid = ?
+                LIMIT 1
+                """, schemaName);
+
+        try {
+            return jdbcTemplate.queryForObject(sql, Integer.class, uuid.trim());
+        } catch (EmptyResultDataAccessException ex) {
+            return null;
+        }
+    }
+
     public Integer findUserIdByEmailOrPhone(String schemaName, String email, String phone) {
         validateSchemaName(schemaName);
         if ((email == null || email.isBlank()) && (phone == null || phone.isBlank())) {
