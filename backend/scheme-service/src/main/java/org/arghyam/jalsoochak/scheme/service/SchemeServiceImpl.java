@@ -218,23 +218,10 @@ public class SchemeServiceImpl implements SchemeService {
                                                                                                 int limit,
                                                                                                 String schemeName) {
         String schemaName = TenantSchemaResolver.requireSchemaNameFromTenantCode(tenantCode);
-        var auth = SecurityContextHolder.getContext().getAuthentication();
-        String phoneNumberClaim = null;
-        if (auth instanceof JwtAuthenticationToken jwtAuth) {
-            var jwt = jwtAuth.getToken();
-            phoneNumberClaim = firstNonBlank(
-                    jwt.getClaimAsString("phone_number"),
-                    firstNonBlank(jwt.getClaimAsString("phoneNumber"),
-                            firstNonBlank(jwt.getClaimAsString("phone"), jwt.getClaimAsString("mobile")))
-            );
-        }
 
         int userId = resolveCurrentUserId(schemaName);
-        String resolvedPhoneNumber = phoneNumberClaim;
-        if (resolvedPhoneNumber == null || resolvedPhoneNumber.isBlank()) {
-            String encrypted = schemeDbRepository.findUserPhoneNumberById(schemaName, userId);
-            resolvedPhoneNumber = piiEncryptionService != null ? piiEncryptionService.safeDecrypt(encrypted) : null;
-        }
+        String encrypted = schemeDbRepository.findUserPhoneNumberById(schemaName, userId);
+        String resolvedPhoneNumber = piiEncryptionService != null ? piiEncryptionService.safeDecrypt(encrypted) : null;
         int size = clampLimit(limit);
         int p = Math.max(0, page);
         int offset = p * size;
@@ -248,13 +235,6 @@ public class SchemeServiceImpl implements SchemeService {
         }
         long total = schemeDbRepository.countSchemesWithYesterdayFinalReadingForUser(schemaName, userId, schemeName);
         return PageResponseDTO.of(rows, total, p, size);
-    }
-
-    private static String firstNonBlank(String a, String b) {
-        if (a != null && !a.isBlank()) {
-            return a;
-        }
-        return b;
     }
 
     @Override
@@ -1346,19 +1326,20 @@ public class SchemeServiceImpl implements SchemeService {
                     "Not authorized to operate on this tenant");
         }
 
-        String email = jwt.getClaimAsString("email");
-        if (email == null || email.isBlank()) {
-            email = jwt.getClaimAsString("preferred_username");
-        }
-        if (email == null || email.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token missing user identity");
-        }
-        Integer userId = schemeDbRepository.findUserIdByEmail(schemaName, email);
+        // The subject is the only identity claim guaranteed to survive: user_table.uuid is
+        // overwritten with the Keycloak UUID at provisioning, so any bearer of a token matches on it.
+        String userUuid = jwt.getSubject();
+        Integer userId = (userUuid != null && !userUuid.isBlank())
+                ? schemeDbRepository.findUserIdByUuid(schemaName, userUuid)
+                : null;
         if (userId == null) {
-            // Many Keycloak setups use a preferred_username that isn't the DB email. The JWT subject is stable.
-            String userUuid = jwt.getSubject();
-            if (userUuid != null && !userUuid.isBlank()) {
-                userId = schemeDbRepository.findUserIdByUuid(schemaName, userUuid);
+            // Rows whose uuid predates Keycloak provisioning still match on the legacy email identity.
+            String email = jwt.getClaimAsString("email");
+            if (email == null || email.isBlank()) {
+                email = jwt.getClaimAsString("preferred_username");
+            }
+            if (email != null && !email.isBlank()) {
+                userId = schemeDbRepository.findUserIdByEmail(schemaName, email);
             }
         }
         if (userId == null) {
