@@ -43,6 +43,12 @@
 --     reached flow_reading_table and is invisible here.
 --   * Several readings for one scheme on one day are each measured against the same pre-day
 --     baseline — that is what the service does, not a bug in this query.
+--   * The photo columns are what the operator actually submitted: `extracted_reading` is FlowVision's
+--     OCR value and `image_url` the meter photo it read. Both are blank for a reading asserted
+--     through the API without a photo (`confirmed_reading_source = 3`), and `extracted_reading`
+--     differs from `confirmed_reading` wherever a rollover was resolved or a human corrected it —
+--     that gap is usually where an implausible jump comes from. The baseline row's pair is carried
+--     alongside so the two photos can be opened and compared.
 --   * `observation_time` is the post-V4 column name. A schema that predates V4 still calls it
 --     `reading_at`; swap the name in both places if so.
 --
@@ -87,6 +93,8 @@ readings AS (
            fr.observation_time,
            fr.confirmed_reading,
            fr.extracted_reading,
+           fr.ai_confidence_percentage,
+           NULLIF(fr.image_url, '')     AS image_url,
            fr.channel,
            fr.confirmed_reading_source,
            fr.quarantine_reason,
@@ -96,12 +104,15 @@ readings AS (
     WHERE fr.deleted_at IS NULL
       AND fr.confirmed_reading > 0
       AND fr.meter_change_reason IS NULL       -- meter swap: the delta is meaningless, check skipped
-      AND COALESCE(fr.channel, 1) = 1          -- BFM only; a null channel reads as BFM
+      AND COALESCE(fr.channel, 'BFM') = 'BFM'          -- BFM only; a null channel reads as BFM
 ),
 
 assessed AS (
     SELECT r.*,
-           b.confirmed_reading AS baseline_reading,
+           b.confirmed_reading      AS baseline_reading,
+           b.observation_time       AS baseline_observation_time,
+           b.extracted_reading      AS baseline_extracted_reading,
+           b.image_url              AS baseline_image_url,
            s.state_scheme_id,
            s.centre_scheme_id,
            s.scheme_name,
@@ -122,7 +133,10 @@ assessed AS (
     JOIN tenant_as.scheme_master_table s ON s.id = r.scheme_id
     CROSS JOIN members_per_household m
     LEFT JOIN LATERAL (
-        SELECT b.confirmed_reading
+        SELECT b.confirmed_reading,
+               b.observation_time,
+               b.extracted_reading,
+               NULLIF(b.image_url, '') AS image_url
         FROM tenant_as.flow_reading_table b
         WHERE b.scheme_id = r.scheme_id
           AND b.confirmed_reading > 0
@@ -162,6 +176,9 @@ SELECT CASE WHEN baseline_reading IS NULL                THEN 'SKIPPED_NO_BASELI
        operator_user_id                                  AS user_id,
        baseline_reading,
        confirmed_reading,
+       extracted_reading,
+       confirmed_reading - extracted_reading             AS confirmed_minus_extracted,
+       ai_confidence_percentage,
        confirmed_reading - baseline_reading              AS delta_cubic_metres,
        implied_litres,
        ceiling_litres,
@@ -177,6 +194,10 @@ SELECT CASE WHEN baseline_reading IS NULL                THEN 'SKIPPED_NO_BASELI
        population,
        confirmed_reading_source,   -- 0=as extracted, 1=rollover resolved, 2=manual, 3=API-asserted
        quarantine_reason,          -- 0=none, 1=IMPLAUSIBLE_WATER_SUPPLY (set only once live)
+       image_url,                  -- meter photo for this reading; NULL when none was submitted
+       baseline_observation_time,
+       baseline_extracted_reading,
+       baseline_image_url,         -- the photo the delta is measured against
        correlation_id
 FROM verdicts
 WHERE CASE WHEN baseline_reading IS NULL              THEN 'SKIPPED_NO_BASELINE'
