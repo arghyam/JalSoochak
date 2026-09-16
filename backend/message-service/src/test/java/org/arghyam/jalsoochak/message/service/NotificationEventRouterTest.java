@@ -1774,4 +1774,115 @@ class NotificationEventRouterTest {
         return DailyReportSendOutcome.accepted(
                 new GlificSendResult("241952654", "880557", DailyReportDeliveryMode.LINK));
     }
+
+    // ── weekly terminal log lines ────────────────────────────────────────────────
+    //
+    // The send-logging helpers are shared by both reports, and used to hard-code the daily prefix. A
+    // Section Officer now receives both, so that folded every weekly SENT into the daily total and left
+    // every weekly GENERATED with no SENT of its own to reconcile against.
+
+    @Test
+    void handleWeeklyReport_logsGeneratedAndSentUnderTheWeeklyPrefix() throws Exception {
+        stubWeeklySend(acceptedSend());
+
+        List<String> lines = captureRouterLogs(WEEKLY_SO_JSON);
+
+        assertThat(lines).filteredOn(l -> l.contains("result=SENT")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .startsWith("[Router/WEEKLY_REPORT]")
+                        .containsPattern("result=SENT role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("glificMsgId=241952654"));
+        // GENERATED and SENT have to share a prefix, or the run cannot be reconciled per report.
+        assertThat(lines).filteredOn(l -> l.contains("result=GENERATED")).singleElement()
+                .satisfies(line -> assertThat(line).startsWith("[Router/WEEKLY_REPORT]"));
+        assertThat(lines).noneMatch(l -> l.startsWith("[Router/DAILY_REPORT]"));
+    }
+
+    @Test
+    void handleWeeklyReport_logsASuppressedSendUnderTheWeeklyPrefix() throws Exception {
+        // Weekly delivery ships suppressed until the Meta templates are approved, so this is the shape
+        // of a normal run for now — and it must not read as a delivered one.
+        stubWeeklySend(DailyReportSendOutcome.accepted(
+                GlificSendResult.suppressed(DailyReportDeliveryMode.LINK)));
+
+        List<String> lines = captureRouterLogs(WEEKLY_SO_JSON);
+
+        assertThat(lines).noneMatch(l -> l.contains("result=SENT"));
+        assertThat(lines).filteredOn(l -> l.contains("result=SUPPRESSED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .startsWith("[Router/WEEKLY_REPORT]")
+                        .containsPattern("result=SUPPRESSED role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("mode=LINK"));
+    }
+
+    @Test
+    void handleWeeklyReport_logsAFailedDeliveryUnderTheWeeklyPrefixAndNamesItInTheThrow() throws Exception {
+        stubWeeklySend(DailyReportSendOutcome.failed(
+                GlificSendStage.SEND, "receiver", "Receiver does not exist"));
+
+        String failed = captureRouterLogExpectingRethrow(WEEKLY_SO_JSON, "result=FAILED_DELIVERY");
+
+        assertThat(failed)
+                .startsWith("[Router/WEEKLY_REPORT]")
+                .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
+                .contains("stage=SEND")
+                .contains("glificErrorKey=receiver");
+        // The exception reaches the Kafka container's error handler, so it has to say which report
+        // stalled the partition.
+        assertThatThrownBy(() -> router.route(WEEKLY_SO_JSON))
+                .hasRootCauseMessage("[Router/WEEKLY_REPORT] corr=corr-w"
+                        + " WhatsApp weekly report delivery failed at stage=SEND");
+    }
+
+    @Test
+    void handleWeeklyReport_recordsAnUnconfirmedDeliveryWithTheWeekItCovers() throws Exception {
+        stubWeeklySend(DailyReportSendOutcome.failed(GlificSendStage.TIMEOUT, null,
+                "Timeout on blocking read for 30000 MILLISECONDS"));
+
+        List<String> lines = captureRouterLogs(WEEKLY_SO_JSON);
+
+        assertThat(lines).noneMatch(l -> l.contains("result=FAILED_DELIVERY"));
+        assertThat(lines).filteredOn(l -> l.contains("result=DELIVERY_UNCONFIRMED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .startsWith("[Router/WEEKLY_REPORT]")
+                        .contains("stage=TIMEOUT")
+                        // The Monday the reported week opened on — a different fact from a daily
+                        // report's date, so it does not borrow that field's name.
+                        .contains("weekStart=2026-07-13")
+                        .doesNotContain("reportDate="));
+    }
+
+    /** The other half of the split: the daily lines keep the prefix and date field they always had. */
+    @Test
+    void handleDailyReport_keepsItsOwnPrefixAndDateFieldOnTheTerminalLines() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
+                anyList(), anyList())).thenReturn("daily_report_x.pdf");
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
+                .thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(GlificSendStage.TIMEOUT, null,
+                        "Timeout on blocking read for 30000 MILLISECONDS"));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).filteredOn(l -> l.contains("result=DELIVERY_UNCONFIRMED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .startsWith("[Router/DAILY_REPORT]")
+                        .contains("reportDate=")
+                        .doesNotContain("weekStart="));
+        assertThat(lines).noneMatch(l -> l.startsWith("[Router/WEEKLY_REPORT]"));
+    }
+
+    private void stubWeeklySend(DailyReportSendOutcome outcome) throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+                anyList(), anyList(), anyList(), anyList())).thenReturn("weekly.pdf");
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
+                .thenReturn("https://minio/weekly.pdf");
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(outcome);
+    }
 }

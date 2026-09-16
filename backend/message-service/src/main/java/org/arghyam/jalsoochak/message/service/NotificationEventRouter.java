@@ -955,9 +955,9 @@ public class NotificationEventRouter {
                     corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
             throw uploadEx;
         }
-        deleteLocalReport(localPath, corr, "DAILY_REPORT");
+        deleteLocalReport(localPath, corr, ReportKind.DAILY.tag());
 
-        DailyReportLogCtx logCtx = new DailyReportLogCtx(corr, role, tenantId, officerUserId);
+        ReportLogCtx logCtx = new ReportLogCtx(ReportKind.DAILY, corr, role, tenantId, officerUserId);
         DailyReportSendOutcome outcome =
                 whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType, reportDate, officerName);
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
@@ -1061,29 +1061,72 @@ public class NotificationEventRouter {
                     corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
             throw uploadEx;
         }
-        deleteLocalReport(localPath, corr, "WEEKLY_REPORT");
+        deleteLocalReport(localPath, corr, ReportKind.WEEKLY.tag());
 
+        // Tagged WEEKLY so the terminal SENT / SUPPRESSED / FAILED_DELIVERY / DELIVERY_UNCONFIRMED lines
+        // land under [Router/WEEKLY_REPORT] alongside this officer's GENERATED line, rather than under
+        // the daily prefix the shared helpers are also used by.
+        ReportLogCtx logCtx = new ReportLogCtx(ReportKind.WEEKLY, corr, role, tenantId, officerUserId);
         DailyReportSendOutcome outcome =
                 whatsAppChannel.sendWeeklyReport(contactId, minioUrl, officerUserType, weekStart, officerName);
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         if (!outcome.accepted()) {
-            reportFailedDelivery(new DailyReportLogCtx(corr, role, tenantId, officerUserId),
-                    outcome.failure(), weekStart, loggableUrl(minioUrl));
+            reportFailedDelivery(logCtx, outcome.failure(), weekStart, loggableUrl(minioUrl));
             return;
         }
-        logSendResult(new DailyReportLogCtx(corr, role, tenantId, officerUserId), outcome.result(),
-                contactId, noSupplyRows.size(), tookMs, loggableUrl(minioUrl));
+        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(minioUrl));
     }
 
     /**
-     * The four fields every {@code [Router/DAILY_REPORT]} line opens with, kept together so the
+     * Which situation report a router line is about.
+     *
+     * <p>Selects the {@code [Router/…]} prefix and the name of the date field on the terminal lines, so
+     * a weekly outcome is counted as a weekly one. The send-logging helpers below are shared by both
+     * reports and used to hard-code the daily prefix, which folded every weekly {@code SENT} into the
+     * daily total and left every weekly {@code GENERATED} with no {@code SENT} to reconcile against. A
+     * Section Officer now receives both reports, so the prefix is the only thing that can tell their
+     * lines apart.</p>
+     */
+    private enum ReportKind {
+        DAILY("reportDate"),
+        WEEKLY("weekStart");
+
+        private final String periodField;
+
+        ReportKind(String periodField) {
+            this.periodField = periodField;
+        }
+
+        /** The {@code [Router/<tag>]} prefix, and the tag {@link #deleteLocalReport} logs under. */
+        String tag() {
+            return name() + "_REPORT";
+        }
+
+        /** "daily" / "weekly", for prose inside an exception message. */
+        String label() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+
+        /**
+         * Names the date the terminal lines carry: the day a daily report covers, the Monday a weekly
+         * one opens on. Two different facts, so they do not share a field name.
+         */
+        String periodField() {
+            return periodField;
+        }
+    }
+
+    /**
+     * The fields every {@code [Router/…_REPORT]} line opens with, kept together so the
      * {@code result= role= tenant= officer=} adjacency the log-counting recipes grep for cannot drift
      * apart between the handler and the lines it delegates.
      */
-    private record DailyReportLogCtx(String corr, String role, int tenantId, long officerUserId) {}
+    private record ReportLogCtx(ReportKind kind, String corr, String role, int tenantId, long officerUserId) {}
 
     /**
-     * Logs a rejected send and decides whether the event may be retried.
+     * Logs a rejected send and decides whether the event may be retried. Shared by both reports; the
+     * {@link ReportKind} on the context picks the {@code [Router/…]} prefix and the date field name, so
+     * a weekly failure is never counted as a daily one.
      *
      * <p>Emits <strong>exactly one</strong> terminal {@code result=} line per failed send, because the
      * log-counting recipes add those tokens up: an ambiguous send that logged both
@@ -1103,33 +1146,34 @@ public class NotificationEventRouter {
      *       plausibly repair, so it rethrows for the Kafka container's retry policy.</li>
      * </ul>
      */
-    private void reportFailedDelivery(DailyReportLogCtx ctx, DailyReportSendOutcome.Failure failure,
-                                      LocalDate reportDate, String loggableUrl) {
+    private void reportFailedDelivery(ReportLogCtx ctx, DailyReportSendOutcome.Failure failure,
+                                      LocalDate period, String loggableUrl) {
+        String tag = ctx.kind().tag();
         // stage= and glificErrorKey= are appended *after* officer= on every branch below.
         if (isAmbiguousDelivery(failure.stage())) {
-            log.warn("[Router/DAILY_REPORT] corr={} result=DELIVERY_UNCONFIRMED role={} tenant={} officer={}"
-                            + " stage={} glificErrorKey={} reportDate={} (non-retryable) — Glific may already"
+            log.warn("[Router/{}] corr={} result=DELIVERY_UNCONFIRMED role={} tenant={} officer={}"
+                            + " stage={} glificErrorKey={} {}={} (non-retryable) — Glific may already"
                             + " have sent this report, so the event is not retried. Settle it against"
                             + " Glific's own delivery status for this officer; see"
                             + " GlificDeliveryReconciliationService ({})",
-                    ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
-                    failure.stage(), failure.errorKeyForLog(), reportDate, loggableUrl);
+                    tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                    failure.stage(), failure.errorKeyForLog(), ctx.kind().periodField(), period, loggableUrl);
             return;
         }
-        log.error("[Router/DAILY_REPORT] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
+        log.error("[Router/{}] corr={} result=FAILED_DELIVERY role={} tenant={} officer={}"
                         + " stage={} glificErrorKey={}",
-                ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                 failure.stage(), failure.errorKeyForLog());
         if (failure.stage() == GlificSendStage.CONFIG) {
-            log.error("[Router/DAILY_REPORT] corr={} stage=CONFIG reportDate={} (non-retryable) — the send"
+            log.error("[Router/{}] corr={} stage=CONFIG {}={} (non-retryable) — the send"
                             + " never reached Glific because our own template id, contact id or MinIO URL"
                             + " prefix is wrong. A retry cannot repair that, so the event is not redriven:"
                             + " fix the configuration, then replay this officer's report ({})",
-                    ctx.corr(), reportDate, loggableUrl);
+                    tag, ctx.corr(), ctx.kind().periodField(), period, loggableUrl);
             return;
         }
-        throw new IllegalStateException("[Router/DAILY_REPORT] corr=" + ctx.corr()
-                + " WhatsApp daily report delivery failed at stage=" + failure.stage());
+        throw new IllegalStateException("[Router/" + tag + "] corr=" + ctx.corr()
+                + " WhatsApp " + ctx.kind().label() + " report delivery failed at stage=" + failure.stage());
     }
 
     /**
@@ -1137,26 +1181,31 @@ public class NotificationEventRouter {
      * line with it. A dry-run reached no Glific mutation at all: it has no {@code GLIFIC_ACCEPTED}
      * stage, no message id and nothing for reconciliation to match, so counting it as {@code SENT}
      * reported a muted deployment as a delivering one.
+     *
+     * <p>Shared by both reports, prefixed by the context's {@link ReportKind}. {@code noSupplyRows=}
+     * carries the same count as the matching {@code result=GENERATED} line's field of that name, so the
+     * two can be lined up per officer.</p>
      */
-    private void logSendResult(DailyReportLogCtx ctx, GlificSendResult sendResult, long contactId,
-                               int priorityRows, long tookMs, String loggableUrl) {
+    private void logSendResult(ReportLogCtx ctx, GlificSendResult sendResult, long contactId,
+                               int noSupplyRows, long tookMs, String loggableUrl) {
+        String tag = ctx.kind().tag();
         if (sendResult.isSuppressed()) {
-            log.info("[Router/DAILY_REPORT] corr={} result=SUPPRESSED role={} tenant={} officer={}"
-                            + " mode={} priorityRows={} tookMs={} ({})",
-                    ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
-                    sendResult.modeForLog(), priorityRows, tookMs, loggableUrl);
+            log.info("[Router/{}] corr={} result=SUPPRESSED role={} tenant={} officer={}"
+                            + " mode={} noSupplyRows={} tookMs={} ({})",
+                    tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                    sendResult.modeForLog(), noSupplyRows, tookMs, loggableUrl);
             return;
         }
         // result=SENT means Glific ACCEPTED the send — it is not a WhatsApp delivery confirmation.
         // glificMsgId is what lets the delivery status Gupshup and Meta later report to Glific be
         // matched back to this officer; see GlificDeliveryReconciliationService. Every new field goes after officer= to preserve
         // the field adjacency the log-counting recipes rely on.
-        log.info("[Router/DAILY_REPORT] corr={} result=SENT role={} tenant={} officer={}"
+        log.info("[Router/{}] corr={} result=SENT role={} tenant={} officer={}"
                         + " stage=GLIFIC_ACCEPTED glificMsgId={} glificContactId={} mode={} templateId={}"
-                        + " priorityRows={} tookMs={} ({})",
-                ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
+                        + " noSupplyRows={} tookMs={} ({})",
+                tag, ctx.corr(), ctx.role(), ctx.tenantId(), ctx.officerUserId(),
                 sendResult.messageIdForLog(), contactId, sendResult.modeForLog(), sendResult.templateIdForLog(),
-                priorityRows, tookMs, loggableUrl);
+                noSupplyRows, tookMs, loggableUrl);
     }
 
     /**
