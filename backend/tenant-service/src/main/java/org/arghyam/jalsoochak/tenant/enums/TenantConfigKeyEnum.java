@@ -15,6 +15,8 @@ import org.arghyam.jalsoochak.tenant.dto.internal.StateITSystemConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TimeSettingsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.NudgeTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.EscalationRulesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.DailyReportTimingConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.WeeklyReportTimingConfigDTO;
 
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -124,6 +126,22 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Escalation messages are sent to field staff (Section Officer, District Officer,ExecutiveEngineer, etc.).
      */
     FIELD_STAFF_ESCALATION_RULES(ConfigType.GENERIC, EscalationRulesConfigDTO.class, false, false, true),
+
+    /**
+     * Daily Water Service Situation Report schedule (Section Officers).
+     * The report covers the same day from 00:00 up to this time.
+     * Format: { dailyReport: { schedule: { hour: 16, minute: 0 } } }
+     * Optional: an unset tenant runs on the application default rather than being incomplete.
+     */
+    DAILY_SITUATION_REPORT_TIME(ConfigType.GENERIC, DailyReportTimingConfigDTO.class, false, false, false),
+
+    /**
+     * Weekly Water Service Situation Report schedule (Section and Sub-Divisional Officers).
+     * The report always covers the last complete Monday–Sunday week before it runs.
+     * Format: { weeklyReport: { schedule: { dayOfWeek: 1, hour: 9, minute: 0 } } }
+     * Optional: an unset tenant runs on the application default rather than being incomplete.
+     */
+    WEEKLY_SITUATION_REPORT_TIME(ConfigType.GENERIC, WeeklyReportTimingConfigDTO.class, false, false, false),
 
     /**
      * Data Consolidation Time.

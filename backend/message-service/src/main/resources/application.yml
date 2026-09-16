@@ -245,12 +245,6 @@ daily-report:
     dir: ${DAILY_REPORT_DIR:/tmp/escalation-reports/} # reuses the escalation report dir by default
   dashboard-url: ${DAILY_REPORT_DASHBOARD_URL:https://jalsoochak.jjmbrain.in/staff/}
   support-phone: ${DAILY_REPORT_SUPPORT_PHONE:} # shown in the PDF footer; blank hides the line
-  sections:
-    outage-details:
-      # Priority Actions + Reasons for No Water Supply. Hidden by default; set to true to restore both
-      # sections — the remaining sections renumber automatically. analytics-service reads the same
-      # property (same env var) and skips computing their data while they are hidden, so flip both.
-      enabled: ${DAILY_REPORT_OUTAGE_SECTIONS_ENABLED:false}
   link:
     # Optional mirror of the URL prefix frozen into the approved LINK template, e.g.
     # https://jalsoochak.jjmbrain.in/minio/ (mind the trailing slash). When set it must equal
@@ -318,15 +312,20 @@ notifications:
     #
     #   DOCUMENT — the PDF as a WhatsApp document. Glific registers the MinIO URL and META
     #              DOWNLOADS IT ITSELF. Production MinIO answers Indian source addresses only, so
-    #              that download fails inside Meta with "(#131053) Media upload error — Your server
-    #              hosting media content did not respond back in time" and the officer receives an
-    #              attachment that will not open.
+    #              that download fails inside Meta
     #   LINK     — a text HSM whose "View Report" button carries the MinIO path. Meta fetches
     #              nothing; the officer's phone opens the PDF, from inside India, when they tap it.
     #              Requires an approved link template (glific.template.daily-report-*-link-id).
     #
     # Rollback is this flag plus a restart — both paths stay in the code.
-    delivery-mode: ${NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE:DOCUMENT}
+    delivery-mode: ${NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE:LINK}
+  weekly-report:
+    # Defaults to SUPPRESSED: the weekly report needs its own Meta-approved templates (the body text
+    # says "Weekly", and SO and SDO get different wording), and until those exist there is nothing to
+    # send. While suppressed the PDFs are still generated and uploaded to MinIO, so the whole pipeline
+    # can be verified end to end before delivery goes live. Set to false once the template ids below
+    # are configured — startup then refuses to proceed if they are still blank.
+    dry-run: ${NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN:false}
   sms:
     dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
 
@@ -354,6 +353,13 @@ glific:
     daily-report-so-link-id: ${GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID:}
     # Optional — falls back to the SO link template when blank.
     daily-report-sdo-link-id: ${GLIFIC_DAILY_REPORT_SDO_LINK_TEMPLATE_ID:}
+    # Weekly report templates (LINK only — the weekly report has no DOCUMENT path, because that is
+    # the one Meta has to fetch through the India-only firewall).
+    # Variables: {{1}} officer name, {{2}} week start (dd-MM-yyyy), then the button's URL suffix.
+    # Blank until the Meta templates are approved; weekly delivery stays in dry-run until then.
+    weekly-report-so-link-id: ${GLIFIC_WEEKLY_REPORT_SO_LINK_TEMPLATE_ID:}
+    # Optional — falls back to the SO weekly template when blank.
+    weekly-report-sdo-link-id: ${GLIFIC_WEEKLY_REPORT_SDO_LINK_TEMPLATE_ID:}
   flow:
     nudge-id: ${GLIFIC_NUDGE_FLOW_ID:}
     welcome-id: ${GLIFIC_WELCOME_FLOW_ID:38949}

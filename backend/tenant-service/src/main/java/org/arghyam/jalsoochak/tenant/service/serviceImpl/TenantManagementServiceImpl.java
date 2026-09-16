@@ -379,7 +379,9 @@ public class TenantManagementServiceImpl implements TenantManagementService {
         // roll back an otherwise-valid config write (e.g. SUPPORTED_LANGUAGES).
         Set<TenantConfigKeyEnum> scheduleKeys = EnumSet.of(
                 TenantConfigKeyEnum.PUMP_OPERATOR_REMINDER_NUDGE_TIME,
-                TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES);
+                TenantConfigKeyEnum.FIELD_STAFF_ESCALATION_RULES,
+                TenantConfigKeyEnum.DAILY_SITUATION_REPORT_TIME,
+                TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME);
         boolean hasScheduleKey = request.getConfigs().keySet().stream()
                 .anyMatch(scheduleKeys::contains);
         if (hasScheduleKey) {

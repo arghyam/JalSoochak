@@ -190,6 +190,30 @@ public class WhatsAppChannel implements NotificationChannel {
     }
 
     /**
+     * Sends the weekly report, mirroring {@link #sendDailyReport} — same outcome type, same failure
+     * classification, so the router treats both reports identically.
+     *
+     * @param weekStart the Monday of the reported week, template variable {{2}}
+     */
+    public DailyReportSendOutcome sendWeeklyReport(long contactId, String documentUrl, String officerUserType,
+                                                   LocalDate weekStart, String officerName) {
+        String role = (officerUserType == null || officerUserType.isBlank()) ? "UNKNOWN" : officerUserType.trim();
+        try {
+            GlificSendResult result = glificWhatsAppService.sendWeeklyReportHsm(
+                    contactId, documentUrl, role, weekStart, officerName);
+            log.info("[WHATSAPP] Weekly report HSM sent role={} glificMsgId={}", role, result.messageIdForLog());
+            log.debug("[WHATSAPP] Weekly report HSM sent role={} contactId={}", role, contactId);
+            return DailyReportSendOutcome.accepted(result);
+        } catch (Exception ex) {
+            GlificSendStage stage = stageOf(ex);
+            String errorKey = (ex instanceof GlificMutationException gme) ? gme.getErrorKey() : null;
+            log.error("[WHATSAPP] Failed weekly report delivery role={} stage={}: {}",
+                    role, stage, ex.getMessage(), ex);
+            return DailyReportSendOutcome.failed(stage, errorKey, ex.getMessage());
+        }
+    }
+
+    /**
      * Classifies a send failure so the router's terminal line — {@code result=FAILED_DELIVERY}, or
      * {@code result=DELIVERY_UNCONFIRMED} for the stages after which Glific may already hold the
      * message — says which half of the handoff broke.

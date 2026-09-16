@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.tenant.service;
 
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
+import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,9 @@ class TenantConfigServiceTest {
         ReflectionTestUtils.setField(service, "defaultLevel2Days", 7);
         ReflectionTestUtils.setField(service, "defaultLevel1OfficerType", "SECTION_OFFICER");
         ReflectionTestUtils.setField(service, "defaultLevel2OfficerType", "DISTRICT_OFFICER");
+        ReflectionTestUtils.setField(service, "defaultWeeklyReportDayOfWeek", 1);
+        ReflectionTestUtils.setField(service, "defaultWeeklyReportHour", 9);
+        ReflectionTestUtils.setField(service, "defaultWeeklyReportMinute", 0);
     }
 
     // ── getNudgeConfig ──────────────────────────────────────────────────────────
@@ -165,6 +169,63 @@ class TenantConfigServiceTest {
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────
+
+    // ── getWeeklyReportConfig ───────────────────────────────────────────────────
+
+    @Test
+    void getWeeklyReportConfig_parsesDayHourAndMinute_fromValidJson() {
+        stubWeeklyReportJson(TENANT_ID,
+                "{\"weeklyReport\":{\"schedule\":{\"dayOfWeek\":3,\"hour\":7,\"minute\":45}}}");
+
+        WeeklyReportScheduleConfig cfg = service.getWeeklyReportConfig(TENANT_ID);
+
+        assertThat(cfg.getDayOfWeek()).isEqualTo(3);
+        assertThat(cfg.getHour()).isEqualTo(7);
+        assertThat(cfg.getMinute()).isEqualTo(45);
+    }
+
+    @Test
+    void getWeeklyReportConfig_returnsDefaults_whenRowAbsent() {
+        when(jdbcTemplate.queryForObject(any(String.class), eq(String.class), eq(TENANT_ID),
+                eq("WEEKLY_SITUATION_REPORT_TIME")))
+                .thenThrow(new EmptyResultDataAccessException(1));
+
+        WeeklyReportScheduleConfig cfg = service.getWeeklyReportConfig(TENANT_ID);
+
+        assertThat(cfg.getDayOfWeek()).isEqualTo(1);
+        assertThat(cfg.getHour()).isEqualTo(9);
+        assertThat(cfg.getMinute()).isEqualTo(0);
+    }
+
+    @Test
+    void getWeeklyReportConfig_fallsBackPerField_whenJsonIsPartial() {
+        // A half-written config must not lose the fields it does carry, nor throw: the tenant keeps
+        // its configured hour and picks up defaults for the rest.
+        stubWeeklyReportJson(TENANT_ID, "{\"weeklyReport\":{\"schedule\":{\"hour\":11}}}");
+
+        WeeklyReportScheduleConfig cfg = service.getWeeklyReportConfig(TENANT_ID);
+
+        assertThat(cfg.getHour()).isEqualTo(11);
+        assertThat(cfg.getDayOfWeek()).isEqualTo(1);
+        assertThat(cfg.getMinute()).isEqualTo(0);
+    }
+
+    @Test
+    void getWeeklyReportConfig_returnsDefaults_whenJsonIsMalformed() {
+        // Degrading to defaults beats throwing: a tenant with bad config still gets its report.
+        stubWeeklyReportJson(TENANT_ID, "{not json");
+
+        WeeklyReportScheduleConfig cfg = service.getWeeklyReportConfig(TENANT_ID);
+
+        assertThat(cfg.getDayOfWeek()).isEqualTo(1);
+        assertThat(cfg.getHour()).isEqualTo(9);
+    }
+
+    private void stubWeeklyReportJson(int tenantId, String json) {
+        when(jdbcTemplate.queryForObject(any(String.class), eq(String.class), eq(tenantId),
+                eq("WEEKLY_SITUATION_REPORT_TIME")))
+                .thenReturn(json);
+    }
 
     private void stubNudgeJson(int tenantId, String json) {
         when(jdbcTemplate.queryForObject(any(String.class), eq(String.class), eq(tenantId), eq("PUMP_OPERATOR_REMINDER_NUDGE_TIME")))

@@ -109,14 +109,19 @@ logging:
   pattern:
     level: "service=${spring.application.name} %5p"
 
-# Daily Water Service Situation Report (officer daily PDF) — the KPI computation side.
-daily-report:
-  sections:
-    outage-details:
-      # Priority Actions + Reasons for No Water Supply. Hidden by default in the rendered PDF
-      # (message-service reads the same property / env var), so their two queries are skipped here
-      # rather than run for output no one sees. Flip both services together to restore the sections.
-      enabled: ${DAILY_REPORT_OUTAGE_SECTIONS_ENABLED:false}
+# Water Service Situation Reports (officer PDFs) — the KPI computation side.
+#
+# Thresholds for the weekly report. The supply-day bars differ by role on purpose, straight from the
+# two templates: a Section Officer's report asks whether a scheme ran at all during the week, an
+# SDO's asks whether it ran often enough. One consequence worth knowing before it is filed as a bug:
+# an SO's own "Schemes Supplying Water" figure is normally HIGHER than that same officer's row in
+# their SDO's performance table, even over identical schemes.
+water-reports:
+  weekly:
+    # Weekly average LPCD at or below which a scheme is listed as under-supplying.
+    low-lpcd-threshold: ${WEEKLY_REPORT_LOW_LPCD_THRESHOLD:15}
+    so-min-supply-days: ${WEEKLY_REPORT_SO_MIN_SUPPLY_DAYS:1}
+    sdo-min-supply-days: ${WEEKLY_REPORT_SDO_MIN_SUPPLY_DAYS:4}
 
 # single tenant mode is disabled by default
 analytics:

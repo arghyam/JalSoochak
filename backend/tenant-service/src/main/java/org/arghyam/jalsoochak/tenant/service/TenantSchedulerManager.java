@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.tenant.service;
 import org.arghyam.jalsoochak.tenant.config.DailyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.EscalationScheduleConfig;
 import org.arghyam.jalsoochak.tenant.config.NudgeScheduleConfig;
+import org.arghyam.jalsoochak.tenant.config.WeeklyReportScheduleConfig;
 import org.arghyam.jalsoochak.tenant.dto.response.TenantResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.TenantStatusEnum;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
@@ -19,11 +20,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 
 /**
- * Manages per-tenant scheduled jobs for nudges and escalations.
+ * Manages per-tenant scheduled jobs for nudges, escalations, and the daily and weekly water
+ * situation reports.
  *
- * <p>At startup, reads all active tenants and schedules a nudge job and an
- * escalation job for each, using the cron times from
- * {@code common_schema.tenant_config_master_table}. Missing config rows fall
+ * <p>At startup, reads all active tenants and schedules all four jobs for each, using the cron times
+ * from {@code common_schema.tenant_config_master_table}. Missing config rows fall
  * back to the application.yml defaults.</p>
  *
  * <p>Call {@link #rescheduleForTenant(int, String)} after a tenant's config
@@ -41,8 +42,11 @@ public class TenantSchedulerManager {
     private final NudgeSchedulerService nudgeSchedulerService;
     private final EscalationSchedulerService escalationSchedulerService;
     private final DailySituationReportSchedulerService dailySituationReportSchedulerService;
+    private final WeeklySituationReportSchedulerService weeklySituationReportSchedulerService;
 
     private static final String DAILY_CRON_FORMAT = "0 %d %d * * ?";
+    /** {@code sec min hour day-of-month month day-of-week} — e.g. {@code 0 0 9 ? * 1} for Monday 09:00. */
+    private static final String WEEKLY_CRON_FORMAT = "0 %d %d ? * %d";
     private static final String IST_ZONE = "Asia/Kolkata";
 
     private final ConcurrentHashMap<String, ScheduledFuture<?>> futures = new ConcurrentHashMap<>();
@@ -88,10 +92,11 @@ public class TenantSchedulerManager {
             NudgeScheduleConfig nudgeCfg = tenantConfigService.getNudgeConfig(tenantId);
             EscalationScheduleConfig escalCfg = tenantConfigService.getEscalationConfig(tenantId);
             DailyReportScheduleConfig dailyCfg = tenantConfigService.getDailyReportConfig(tenantId);
-            validateScheduleConfig(nudgeCfg, escalCfg, dailyCfg, tenantId);
+            WeeklyReportScheduleConfig weeklyCfg = tenantConfigService.getWeeklyReportConfig(tenantId);
+            validateScheduleConfig(nudgeCfg, escalCfg, dailyCfg, weeklyCfg, tenantId);
 
             cancelFutures(tenantId);
-            scheduleForTenant(tenantId, stateCode, nudgeCfg, escalCfg, dailyCfg);
+            scheduleForTenant(tenantId, stateCode, nudgeCfg, escalCfg, dailyCfg, weeklyCfg);
         }
     }
 
@@ -99,17 +104,21 @@ public class TenantSchedulerManager {
         NudgeScheduleConfig nudgeCfg = tenantConfigService.getNudgeConfig(tenantId);
         EscalationScheduleConfig escalCfg = tenantConfigService.getEscalationConfig(tenantId);
         DailyReportScheduleConfig dailyCfg = tenantConfigService.getDailyReportConfig(tenantId);
-        validateScheduleConfig(nudgeCfg, escalCfg, dailyCfg, tenantId);
-        scheduleForTenant(tenantId, stateCode, nudgeCfg, escalCfg, dailyCfg);
+        WeeklyReportScheduleConfig weeklyCfg = tenantConfigService.getWeeklyReportConfig(tenantId);
+        validateScheduleConfig(nudgeCfg, escalCfg, dailyCfg, weeklyCfg, tenantId);
+        scheduleForTenant(tenantId, stateCode, nudgeCfg, escalCfg, dailyCfg, weeklyCfg);
     }
 
     private void scheduleForTenant(int tenantId, String stateCode,
-            NudgeScheduleConfig nudgeCfg, EscalationScheduleConfig escalCfg, DailyReportScheduleConfig dailyCfg) {
+            NudgeScheduleConfig nudgeCfg, EscalationScheduleConfig escalCfg, DailyReportScheduleConfig dailyCfg,
+            WeeklyReportScheduleConfig weeklyCfg) {
         String schema = "tenant_" + stateCode.toLowerCase(java.util.Locale.ROOT);
 
         String nudgeCron = String.format(DAILY_CRON_FORMAT, nudgeCfg.getMinute(), nudgeCfg.getHour());
         String escalCron = String.format(DAILY_CRON_FORMAT, escalCfg.getMinute(), escalCfg.getHour());
         String dailyCron = String.format(DAILY_CRON_FORMAT, dailyCfg.getMinute(), dailyCfg.getHour());
+        String weeklyCron = String.format(WEEKLY_CRON_FORMAT,
+                weeklyCfg.getMinute(), weeklyCfg.getHour(), weeklyCfg.getDayOfWeek());
 
         futures.put("nudge_" + tenantId,
                 taskScheduler.schedule(
@@ -144,12 +153,23 @@ public class TenantSchedulerManager {
                         },
                         new CronTrigger(dailyCron, TimeZone.getTimeZone(IST_ZONE))));
 
-        log.info("[Scheduler] Tenant {} ({}): nudge={}, escalation={}, dailyReport={}",
-                tenantId, stateCode, nudgeCron, escalCron, dailyCron);
+        futures.put("weeklyReport_" + tenantId,
+                taskScheduler.schedule(
+                        () -> {
+                            try {
+                                weeklySituationReportSchedulerService.processWeeklyReportsForTenant(schema, tenantId);
+                            } catch (Exception e) {
+                                log.error("[Scheduler] Weekly report job failed for tenant={}: {}", tenantId, e.getMessage(), e);
+                            }
+                        },
+                        new CronTrigger(weeklyCron, TimeZone.getTimeZone(IST_ZONE))));
+
+        log.info("[Scheduler] Tenant {} ({}): nudge={}, escalation={}, dailyReport={}, weeklyReport={}",
+                tenantId, stateCode, nudgeCron, escalCron, dailyCron, weeklyCron);
     }
 
     private void validateScheduleConfig(NudgeScheduleConfig nudgeCfg, EscalationScheduleConfig escalCfg,
-            DailyReportScheduleConfig dailyCfg, int tenantId) {
+            DailyReportScheduleConfig dailyCfg, WeeklyReportScheduleConfig weeklyCfg, int tenantId) {
         if (nudgeCfg.getHour() < 0 || nudgeCfg.getHour() > 23 || nudgeCfg.getMinute() < 0 || nudgeCfg.getMinute() > 59) {
             throw new IllegalArgumentException("Invalid nudge schedule for tenantId=" + tenantId);
         }
@@ -159,10 +179,16 @@ public class TenantSchedulerManager {
         if (dailyCfg.getHour() < 0 || dailyCfg.getHour() > 23 || dailyCfg.getMinute() < 0 || dailyCfg.getMinute() > 59) {
             throw new IllegalArgumentException("Invalid daily-report schedule for tenantId=" + tenantId);
         }
+        if (weeklyCfg.getHour() < 0 || weeklyCfg.getHour() > 23
+                || weeklyCfg.getMinute() < 0 || weeklyCfg.getMinute() > 59
+                // 0-7 in the cron convention; both 0 and 7 are Sunday.
+                || weeklyCfg.getDayOfWeek() < 0 || weeklyCfg.getDayOfWeek() > 7) {
+            throw new IllegalArgumentException("Invalid weekly-report schedule for tenantId=" + tenantId);
+        }
     }
 
     private void cancelFutures(int tenantId) {
-        for (String prefix : List.of("nudge_", "escalation_", "dailyReport_")) {
+        for (String prefix : List.of("nudge_", "escalation_", "dailyReport_", "weeklyReport_")) {
             ScheduledFuture<?> f = futures.remove(prefix + tenantId);
             if (f != null) f.cancel(false);
         }

@@ -291,6 +291,16 @@ class GlificDeliveryReconciliationServiceTest {
         }
 
         @Test
+        void includesTheWeeklyTemplatesToo() {
+            // A weekly report Glific accepted but never delivered would otherwise look exactly like a
+            // quiet week — reconciliation only reports on templates it was told to watch.
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "7001");
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
+
+            assertThat(service.resolveTemplateIds()).contains(7001, 7002);
+        }
+
+        @Test
         void anExplicitTemplateIdListOverridesTheDerivedOne() {
             ReflectionTestUtils.setField(service, "templateIdsCsv", " 111 , 222 ");
 

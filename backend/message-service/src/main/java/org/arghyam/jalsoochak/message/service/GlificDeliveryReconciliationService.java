@@ -99,8 +99,8 @@ public class GlificDeliveryReconciliationService {
     @Value("${glific.status.reconcile.account-level-error-codes:9999}")
     private String accountLevelErrorCodesCsv;
 
-    // The four daily-report templates, whichever mode is live. Read here rather than passed in so the
-    // job needs no configuration of its own in the common case.
+    // Every report template, whichever mode is live. Read here rather than passed in so the job
+    // needs no configuration of its own in the common case.
     @Value("${glific.template.daily-report-so-id:}")
     private String dailyReportSoTemplateId;
 
@@ -112,6 +112,14 @@ public class GlificDeliveryReconciliationService {
 
     @Value("${glific.template.daily-report-sdo-link-id:}")
     private String dailyReportSdoLinkTemplateId;
+
+    // The weekly templates too. Without them a weekly report would be sent, accepted by Glific, and
+    // then never reconciled — so a week of undelivered reports would look exactly like a quiet week.
+    @Value("${glific.template.weekly-report-so-link-id:}")
+    private String weeklyReportSoLinkTemplateId;
+
+    @Value("${glific.template.weekly-report-sdo-link-id:}")
+    private String weeklyReportSdoLinkTemplateId;
 
     /**
      * Runs a reconciliation pass over the trailing window.
@@ -489,7 +497,8 @@ public class GlificDeliveryReconciliationService {
     Set<Integer> resolveTemplateIds() {
         Set<String> raw = templateIdsCsv == null || templateIdsCsv.isBlank()
                 ? new LinkedHashSet<>(Arrays.asList(dailyReportSoTemplateId, dailyReportSdoTemplateId,
-                        dailyReportSoLinkTemplateId, dailyReportSdoLinkTemplateId))
+                        dailyReportSoLinkTemplateId, dailyReportSdoLinkTemplateId,
+                        weeklyReportSoLinkTemplateId, weeklyReportSdoLinkTemplateId))
                 : csvToSet(templateIdsCsv);
         Set<Integer> ids = new LinkedHashSet<>();
         for (String value : raw) {

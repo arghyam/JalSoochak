@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
+import io.minio.BucketExistsArgs;
+import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.UploadObjectArgs;
 import jakarta.annotation.PostConstruct;
@@ -103,6 +105,46 @@ public class MinioStorageService {
     }
 
     /**
+     * Uploads a report PDF to a named bucket under a folder-structured object key, and returns the
+     * public URL to hand to Glific.
+     *
+     * <p>The water reports live in their own buckets ({@code daily-water-reports},
+     * {@code weekly-water-reports}) with a folder per role and per period. The bucket and the key
+     * both travel inside the WhatsApp template's URL <em>variable</em>, never its frozen prefix, so
+     * this layout needs no new Meta template approval.</p>
+     *
+     * <p>The bucket is created if absent, but <strong>anonymous read is not granted here</strong> —
+     * that is a deliberate out-of-band step ({@code mc anonymous set download <alias>/<bucket>}),
+     * because the officer's phone fetches this URL with no credentials and a bucket silently made
+     * public by application code is a bad default for a store holding PII-bearing reports.</p>
+     *
+     * @param objectKey path within the bucket, e.g. {@code SO/2026-07-19/daily_water_report_….pdf}
+     */
+    public String upload(Path localPath, String targetBucket, String objectKey) throws Exception {
+        ensureBucketExists(targetBucket);
+        log.info("[MinIO] Uploading report to {}/{}", targetBucket, objectKey);
+        minioClient.uploadObject(UploadObjectArgs.builder()
+                .bucket(targetBucket)
+                .object(objectKey)
+                .filename(localPath.toString())
+                .contentType("application/pdf")
+                .build());
+        String url = publicUrlFor(targetBucket, objectKey);
+        log.info("[MinIO] Upload complete: {}", url);
+        return url;
+    }
+
+    private void ensureBucketExists(String targetBucket) throws Exception {
+        if (minioClient.bucketExists(BucketExistsArgs.builder().bucket(targetBucket).build())) {
+            return;
+        }
+        log.info("[MinIO] Bucket '{}' does not exist — creating it. Grant anonymous read separately"
+                + " (mc anonymous set download <alias>/{}), or the report link will 403 on the"
+                + " officer's phone.", targetBucket, targetBucket);
+        minioClient.makeBucket(MakeBucketArgs.builder().bucket(targetBucket).build());
+    }
+
+    /**
      * Builds the Glific-facing URL for an uploaded object.
      *
      * <p>Trailing slashes on the configured prefix are trimmed, because {@code MINIO_BASE_URL} is
@@ -112,11 +154,35 @@ public class MinioStorageService {
      * malformed URL; today's report names contain no characters that require it.</p>
      */
     String publicUrlFor(String objectName) {
+        return publicUrlFor(bucket, objectName);
+    }
+
+    /**
+     * As {@link #publicUrlFor(String)} for an explicit bucket and a possibly folder-structured key.
+     *
+     * <p>Each path segment is encoded separately so the {@code /} separators survive — encoding the
+     * whole key would turn {@code SO/2026-07-19/file.pdf} into one literal object name containing
+     * {@code %2F}, which MinIO would serve from a different (non-existent) path.</p>
+     */
+    String publicUrlFor(String targetBucket, String objectKey) {
         String prefix = minioBaseUrl == null ? "" : minioBaseUrl.trim();
         while (prefix.endsWith("/")) {
             prefix = prefix.substring(0, prefix.length() - 1);
         }
-        return prefix + "/" + bucket + "/" + encodePathSegment(objectName);
+        return prefix + "/" + targetBucket + "/" + encodeObjectKey(objectKey);
+    }
+
+    /** Percent-encodes each segment of an object key, preserving the {@code /} separators. */
+    private static String encodeObjectKey(String objectKey) {
+        StringBuilder out = new StringBuilder(objectKey.length());
+        String[] segments = objectKey.split("/", -1);
+        for (int i = 0; i < segments.length; i++) {
+            if (i > 0) {
+                out.append('/');
+            }
+            out.append(encodePathSegment(segments[i]));
+        }
+        return out.toString();
     }
 
     /** Percent-encodes a single path segment ({@code URLEncoder} is form encoding — spaces need fixing up). */

@@ -8,8 +8,9 @@ import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
-import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
-import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
+import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
+import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
 import org.arghyam.jalsoochak.message.event.ResetPasswordEmailEvent;
 import org.arghyam.jalsoochak.message.event.WhatsAppContactRegisteredEvent;
@@ -110,6 +111,7 @@ public class NotificationEventRouter {
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
+    private final WeeklyReportPdfService weeklyReportPdfService;
     private final MinioStorageService minioStorageService;
     private final MessageTemplateService messageTemplateService;
     private final AccountEmailService accountEmailService;
@@ -121,23 +123,6 @@ public class NotificationEventRouter {
 
     @Value("${app.base-url:http://localhost:8085}")
     private String baseUrl;
-
-    /**
-     * Gates delivery of the SUB_DIVISIONAL_OFFICER daily report. Defaults to {@code true} now that the
-     * SDO layout exists (the SO report plus a per-Section-Officer Summary breakdown table). Retained as
-     * an operational kill-switch — set to {@code false} to suppress SDO reports without a redeploy.
-     */
-    @Value("${app.daily-report.sdo-enabled:true}")
-    private boolean dailyReportSdoEnabled;
-
-    /**
-     * Mirrors the same property in {@link DailyReportPdfService}, which hides the Priority Actions and
-     * Reasons for No Water Supply sections by default. While they are hidden there is nothing to enrich,
-     * so the Jal Mitra name/mobile decryption and scheme lookups behind Priority Actions are skipped
-     * rather than performed for output no one sees.
-     */
-    @Value("${daily-report.sections.outage-details.enabled:false}")
-    private boolean dailyReportOutageDetailSectionsEnabled;
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
 
@@ -173,6 +158,7 @@ public class NotificationEventRouter {
                 case "NUDGE" -> handleNudge(root);
                 case "ESCALATION" -> handleEscalation(root);
                 case "DAILY_REPORT_KPIS" -> handleDailySituationReport(root);
+            case "WEEKLY_REPORT_KPIS" -> handleWeeklySituationReport(root);
                 case "STAFF_SYNC_COMPLETED" -> handleStaffSyncCompleted(root);
                 case "UPDATE_USER_LANGUAGE" -> handleUpdateUserLanguage(root);
                 case "SEND_WELCOME_MESSAGE" -> handleSendWelcomeMessage(root);
@@ -894,10 +880,13 @@ public class NotificationEventRouter {
         log.info("[Router/DAILY_REPORT] corr={} received: tenant={} officer={} role={}",
                 corr, tenantId, officerUserId, role);
 
-        // SDO delivery is enabled by default now that the SDO layout exists; the dailyReportSdoEnabled
-        // flag remains an operational kill-switch to suppress SDO reports without a redeploy.
-        if ("SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType) && !dailyReportSdoEnabled) {
-            log.info("[Router/DAILY_REPORT] corr={} result=SKIPPED_SDO_DISABLED role={} tenant={} officer={}",
+        // The daily report is a Section Officer product now; SDOs are served by the weekly one. This
+        // still has to be checked rather than assumed: events published before the upgrade can be
+        // sitting in the topic, and an SDO's queued daily report must be dropped, not rendered into a
+        // layout that no longer describes their command.
+        if ("SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType)) {
+            log.info("[Router/DAILY_REPORT] corr={} result=SKIPPED_SDO_DAILY_RETIRED role={} tenant={} officer={}"
+                            + " — SDOs receive the weekly report instead",
                     corr, role, tenantId, officerUserId);
             return;
         }
@@ -933,16 +922,14 @@ public class NotificationEventRouter {
             return;
         }
 
-        List<DailyReportPriorityRow> priorityRows;
-        List<DailyReportSectionOfficerRow> sectionOfficerRows;
+        List<ReportSchemeRow> noSupplyRows;
+        List<ReportSchemeRow> anomalyRows;
         String filename;
         try {
-            priorityRows = dailyReportOutageDetailSectionsEnabled
-                    ? buildPriorityRows(tenantSchema, kpis, corr)
-                    : List.of();
-            sectionOfficerRows = buildSectionOfficerRows(tenantSchema, kpis, corr);
+            noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), false);
+            anomalyRows = buildAnomalyRows(tenantSchema, kpis);
             filename = dailyReportPdfService.generate(
-                    kpis, officerUserId, officerName, officerUserType, priorityRows, sectionOfficerRows);
+                    kpis, officerUserId, officerName, officerUserType, noSupplyRows, anomalyRows);
         } catch (Exception generateEx) {
             // Row lookup or PDF rendering failed: tag the outcome so it is counted like every other
             // terminal state, then rethrow so the event is still retried.
@@ -953,28 +940,23 @@ public class NotificationEventRouter {
         // The PDF now exists on disk. Logged before upload/delivery so a report that is built but never
         // delivered is still counted as generated — that gap is the signal worth spotting.
         log.info("[Router/DAILY_REPORT] corr={} result=GENERATED role={} tenant={} officer={}"
-                        + " priorityRows={} sectionOfficerRows={}",
-                corr, role, tenantId, officerUserId, priorityRows.size(), sectionOfficerRows.size());
+                        + " noSupplyRows={} anomalyRows={}",
+                corr, role, tenantId, officerUserId, noSupplyRows.size(), anomalyRows.size());
 
+        LocalDate reportDate = LocalDate.parse(kpis.getReportDate());
         java.nio.file.Path localPath = Paths.get(reportDir, filename);
         String minioUrl;
         try {
-            minioUrl = minioStorageService.upload(localPath);
+            minioUrl = minioStorageService.upload(localPath, ReportFileNaming.DAILY_BUCKET,
+                    ReportFileNaming.dailyObjectKey(officerUserType, filename, reportDate));
         } catch (Exception uploadEx) {
             log.error("[Router/DAILY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
                             + " retaining local PDF for recovery: {} — {}",
                     corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
             throw uploadEx;
         }
-        try {
-            Files.deleteIfExists(localPath);
-        } catch (Exception cleanupEx) {
-            log.warn("[Router/DAILY_REPORT] corr={} could not delete local PDF {}: {}", corr, localPath, cleanupEx.getMessage());
-        }
+        deleteLocalReport(localPath, corr, "DAILY_REPORT");
 
-        // isRenderableKpis has already confirmed reportDate is a parseable ISO date. It is the day the
-        // data covers (D-1) — the date the officer sees in the WhatsApp document name.
-        LocalDate reportDate = LocalDate.parse(kpis.getReportDate());
         DailyReportLogCtx logCtx = new DailyReportLogCtx(corr, role, tenantId, officerUserId);
         DailyReportSendOutcome outcome =
                 whatsAppChannel.sendDailyReport(contactId, minioUrl, officerUserType, reportDate, officerName);
@@ -983,7 +965,114 @@ public class NotificationEventRouter {
             reportFailedDelivery(logCtx, outcome.failure(), reportDate, loggableUrl(minioUrl));
             return;
         }
-        logSendResult(logCtx, outcome.result(), contactId, priorityRows.size(), tookMs, loggableUrl(minioUrl));
+        logSendResult(logCtx, outcome.result(), contactId, noSupplyRows.size(), tookMs, loggableUrl(minioUrl));
+    }
+
+    /**
+     * Renders and delivers the Weekly Water Service Situation Report for one officer, in whichever
+     * layout their role calls for.
+     *
+     * <p>Mirrors the daily handler's order deliberately: validate, resolve the officer, resolve the
+     * Glific contact id <em>before</em> rendering, then build → upload → send. Resolving the contact
+     * first means a dead end costs no PDF render and no MinIO upload.</p>
+     */
+    private void handleWeeklySituationReport(JsonNode root) throws Exception {
+        int tenantId = root.path("tenantId").asInt(0);
+        String tenantSchema = root.path("tenantSchema").asText("");
+        long officerUserId = root.path("officerUserId").asLong(0);
+        String officerUserType = root.path("officerUserType").asText("").trim();
+        String corr = root.path("correlationId").asText("");
+        String role = officerUserType.isEmpty() ? "UNKNOWN" : officerUserType;
+        long startNanos = System.nanoTime();
+
+        if (tenantSchema.isBlank() || !tenantSchema.matches(SCHEMA_PATTERN) || officerUserId <= 0) {
+            log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_INVALID_EVENT role={} tenant={}",
+                    corr, role, tenantId);
+            return;
+        }
+        if (!root.hasNonNull("kpis")) {
+            log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_KPIS role={} tenant={} officer={}",
+                    corr, role, tenantId, officerUserId);
+            return;
+        }
+
+        log.info("[Router/WEEKLY_REPORT] corr={} received: tenant={} officer={} role={}",
+                corr, tenantId, officerUserId, role);
+
+        WeeklyReportKpis kpis = objectMapper.treeToValue(root.path("kpis"), WeeklyReportKpis.class);
+        if (!isRenderableWeeklyKpis(kpis)) {
+            log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_MALFORMED_KPIS role={} tenant={} officer={}"
+                    + " (non-retryable)", corr, role, tenantId, officerUserId);
+            return;
+        }
+
+        OfficerContact officer = resolveOfficerContactById(tenantSchema, officerUserId);
+        if (officer.contactId() == null && (officer.phone() == null || officer.phone().isBlank())) {
+            log.warn("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_CONTACT role={} tenant={} officer={} schema={}",
+                    corr, role, tenantId, officerUserId, tenantSchema);
+            return;
+        }
+
+        String officerName = officer.name() != null ? officer.name() : "Officer";
+        long contactId = resolveContactIdOrOptIn(officer, tenantSchema, officerUserId);
+        if (contactId <= 0 && glificWhatsAppService.isWeeklyReportDeliveryEnabled()) {
+            log.error("[Router/WEEKLY_REPORT] corr={} result=SKIPPED_NO_CONTACT_ID role={} tenant={} officer={}"
+                            + " — Glific opt-in returned no contact id (non-retryable)",
+                    corr, role, tenantId, officerUserId);
+            return;
+        }
+
+        boolean sdo = "SUB_DIVISIONAL_OFFICER".equalsIgnoreCase(officerUserType);
+        List<ReportSchemeRow> noSupplyRows;
+        List<ReportSchemeRow> lowSupplyDaysRows;
+        List<ReportSchemeRow> lowLpcdRows;
+        List<WeeklyReportOfficerRow> officerRows;
+        String filename;
+        try {
+            noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), sdo);
+            // The 1-3 day band is a Section Officer section only; resolving it for an SDO would be
+            // several queries for rows nobody draws.
+            lowSupplyDaysRows = sdo ? List.of()
+                    : buildSchemeRows(tenantSchema, kpis.getLowSupplyDaysSchemeIds(), false);
+            lowLpcdRows = buildSchemeRows(tenantSchema, kpis.getLowLpcdSchemeIds(), sdo);
+            officerRows = sdo ? buildWeeklyOfficerRows(tenantSchema, kpis) : List.of();
+            filename = weeklyReportPdfService.generate(kpis, officerUserId, officerName, officerUserType,
+                    noSupplyRows, lowSupplyDaysRows, lowLpcdRows, officerRows);
+        } catch (Exception generateEx) {
+            log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_GENERATION role={} tenant={} officer={} — {}",
+                    corr, role, tenantId, officerUserId, generateEx.getMessage(), generateEx);
+            throw generateEx;
+        }
+        log.info("[Router/WEEKLY_REPORT] corr={} result=GENERATED role={} tenant={} officer={}"
+                        + " noSupplyRows={} lowDaysRows={} lowLpcdRows={} officerRows={}",
+                corr, role, tenantId, officerUserId,
+                noSupplyRows.size(), lowSupplyDaysRows.size(), lowLpcdRows.size(), officerRows.size());
+
+        LocalDate weekStart = LocalDate.parse(kpis.getWeekStart());
+        LocalDate weekEnd = LocalDate.parse(kpis.getWeekEnd());
+        java.nio.file.Path localPath = Paths.get(reportDir, filename);
+        String minioUrl;
+        try {
+            minioUrl = minioStorageService.upload(localPath, ReportFileNaming.WEEKLY_BUCKET,
+                    ReportFileNaming.weeklyObjectKey(officerUserType, filename, weekStart, weekEnd));
+        } catch (Exception uploadEx) {
+            log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_UPLOAD role={} tenant={} officer={},"
+                            + " retaining local PDF for recovery: {} — {}",
+                    corr, role, tenantId, officerUserId, localPath, uploadEx.getMessage());
+            throw uploadEx;
+        }
+        deleteLocalReport(localPath, corr, "WEEKLY_REPORT");
+
+        DailyReportSendOutcome outcome =
+                whatsAppChannel.sendWeeklyReport(contactId, minioUrl, officerUserType, weekStart, officerName);
+        long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        if (!outcome.accepted()) {
+            reportFailedDelivery(new DailyReportLogCtx(corr, role, tenantId, officerUserId),
+                    outcome.failure(), weekStart, loggableUrl(minioUrl));
+            return;
+        }
+        logSendResult(new DailyReportLogCtx(corr, role, tenantId, officerUserId), outcome.result(),
+                contactId, noSupplyRows.size(), tookMs, loggableUrl(minioUrl));
     }
 
     /**
@@ -1089,74 +1178,130 @@ public class NotificationEventRouter {
      * by looking up the scheme's name + IMIS id and its pump operators (Jal Mitras) from the
      * operational schema. Schemes that can't be resolved are still shown with the ids we have.
      */
-    private List<DailyReportPriorityRow> buildPriorityRows(String tenantSchema, DailyReportKpis kpis, String corr) {
-        List<DailyReportPriorityRow> rows = new ArrayList<>();
-        if (kpis.getPriorityActions() == null || kpis.getPriorityActions().isEmpty()) {
-            return rows;
+    /**
+     * Resolves analytics scheme ids into printable rows: scheme name, IMIS id, Jal Mitra contacts,
+     * and — for the SDO report — the owning Section Officer and the villages the scheme serves.
+     *
+     * <p>Every lookup is batched over the whole id set (three or five queries for the section, not
+     * per row): a Section Officer with two hundred schemes with no supply by 16:00 is an ordinary
+     * afternoon, and a per-row lookup would turn that into six hundred round trips.</p>
+     *
+     * <p>A scheme whose name cannot be resolved still produces a row, labelled with its id. Dropping
+     * it would silently shorten a list whose whole purpose is to be acted on.</p>
+     */
+    private List<ReportSchemeRow> buildSchemeRows(String tenantSchema, List<Integer> schemeIds, boolean withSdoDetail) {
+        if (schemeIds == null || schemeIds.isEmpty()) {
+            return List.of();
         }
-        // Batch-fetch scheme labels and pump operators for all referenced schemes up front
-        // (two queries total) rather than two per priority action, then enrich from memory.
-        Set<Integer> schemeIds = new LinkedHashSet<>();
-        for (DailyReportKpis.PriorityAction pa : kpis.getPriorityActions()) {
-            schemeIds.add(pa.getSchemeId());
-        }
-        Map<Integer, SchemeLabel> schemeLabels = resolveSchemeLabels(tenantSchema, schemeIds);
-        Map<Integer, List<OperatorContact>> operatorsByScheme = resolvePumpOperators(tenantSchema, schemeIds);
-        for (DailyReportKpis.PriorityAction pa : kpis.getPriorityActions()) {
-            SchemeLabel scheme = schemeLabels.getOrDefault(pa.getSchemeId(), new SchemeLabel(null, null));
-            List<OperatorContact> operators = operatorsByScheme.getOrDefault(pa.getSchemeId(), List.of());
-            String names = operators.stream().map(OperatorContact::name)
-                    .filter(n -> n != null && !n.isBlank()).collect(java.util.stream.Collectors.joining(", "));
-            String mobiles = operators.stream().map(OperatorContact::phone)
-                    .filter(p -> p != null && !p.isBlank()).collect(java.util.stream.Collectors.joining(", "));
-            rows.add(DailyReportPriorityRow.builder()
-                    .scheme(scheme.schemeName() != null ? scheme.schemeName() : ("#" + pa.getSchemeId()))
-                    .imisId(scheme.centreSchemeId() != null ? scheme.centreSchemeId() : "")
-                    .jalMitraNames(names)
-                    .jalMitraMobiles(mobiles)
-                    .issue(pa.getIssue() != null ? pa.getIssue() : "")
-                    .remarks(formatNoSupplyRemark(pa.getDaysNoSupply()))
+        Set<Integer> ids = new LinkedHashSet<>(schemeIds);
+        Map<Integer, SchemeLabel> labels = resolveSchemeLabels(tenantSchema, ids);
+        Map<Integer, List<OperatorContact>> operators = resolvePumpOperators(tenantSchema, ids);
+        Map<Integer, List<OperatorContact>> sectionOfficers =
+                withSdoDetail ? resolveSectionOfficers(tenantSchema, ids) : Map.of();
+        Map<Integer, List<String>> villages =
+                withSdoDetail ? resolveVillages(tenantSchema, ids) : Map.of();
+
+        List<ReportSchemeRow> rows = new ArrayList<>();
+        for (Integer schemeId : ids) {
+            SchemeLabel label = labels.getOrDefault(schemeId, new SchemeLabel(null, null));
+            rows.add(ReportSchemeRow.builder()
+                    .schemeId(schemeId)
+                    .schemeName(label.schemeName() != null ? label.schemeName() : ("#" + schemeId))
+                    .imisId(label.centreSchemeId() != null ? label.centreSchemeId() : "")
+                    .jalMitraNames(joinNames(operators.get(schemeId)))
+                    .jalMitraMobiles(joinPhones(operators.get(schemeId)))
+                    .sectionOfficerNames(joinNames(sectionOfficers.get(schemeId)))
+                    .sectionOfficerMobiles(joinPhones(sectionOfficers.get(schemeId)))
+                    .villageNames(villages.containsKey(schemeId) ? String.join(", ", villages.get(schemeId)) : "")
                     .build());
         }
-        log.debug("[Router/DAILY_REPORT] corr={} built {} priority row(s)", corr, rows.size());
         return rows;
     }
 
     /**
-     * Resolves each analytics {@code SectionOfficerSummary} (KPIs keyed by officer user id) into a
-     * printable SDO-breakdown row by looking up the Section Officer's decrypted name + mobile from the
-     * operational {@code user_table}. Returns an empty list for a non-SDO report (no summaries present).
-     * Officer order from analytics is preserved.
+     * The daily report's anomalous-submissions rows: one per (scheme, anomaly type), so a scheme with
+     * three different problems is three lines. The scheme lookups are batched once across the whole
+     * section even though a scheme may appear on several rows.
      */
-    private List<DailyReportSectionOfficerRow> buildSectionOfficerRows(String tenantSchema, DailyReportKpis kpis, String corr) {
-        List<DailyReportSectionOfficerRow> rows = new ArrayList<>();
-        if (kpis.getSectionOfficerSummaries() == null || kpis.getSectionOfficerSummaries().isEmpty()) {
-            return rows;
+    private List<ReportSchemeRow> buildAnomalyRows(String tenantSchema, DailyReportKpis kpis) {
+        List<DailyReportKpis.SchemeAnomaly> anomalies = kpis.getSchemeAnomalies();
+        if (anomalies == null || anomalies.isEmpty()) {
+            return List.of();
         }
-        Set<Long> officerIds = new LinkedHashSet<>();
-        for (DailyReportKpis.SectionOfficerSummary s : kpis.getSectionOfficerSummaries()) {
-            officerIds.add(s.getOfficerUserId());
+        List<Integer> distinctIds = anomalies.stream().map(DailyReportKpis.SchemeAnomaly::getSchemeId)
+                .distinct().toList();
+        Map<Integer, ReportSchemeRow> byScheme = new LinkedHashMap<>();
+        for (ReportSchemeRow row : buildSchemeRows(tenantSchema, distinctIds, false)) {
+            byScheme.put(row.getSchemeId(), row);
         }
-        Map<Long, OfficerContact> contacts = resolveOfficerContactsByIds(tenantSchema, officerIds);
-        for (DailyReportKpis.SectionOfficerSummary s : kpis.getSectionOfficerSummaries()) {
-            OfficerContact c = contacts.get(s.getOfficerUserId());
-            String name = (c != null && c.name() != null) ? c.name() : ("#" + s.getOfficerUserId());
-            String mobile = (c != null && c.phone() != null) ? c.phone() : "";
-            rows.add(DailyReportSectionOfficerRow.builder()
-                    .officerName(name)
-                    .officerMobile(mobile)
-                    .totalSchemes(s.getTotalSchemes())
-                    .schemesSupplying(s.getSchemesSupplying())
-                    .schemesNotSupplying(s.getSchemesNotSupplying())
-                    .avgLpcd(s.getAvgLpcd())
-                    .avgKld(s.getAvgKld())
-                    .regularSupplyPctWeek(s.getRegularSupplyPctWeek())
-                    .readingSubmissionPct(s.getReadingSubmissionPct())
-                    .anomalousCount(s.getAnomalousCount())
+
+        List<ReportSchemeRow> rows = new ArrayList<>();
+        for (DailyReportKpis.SchemeAnomaly anomaly : anomalies) {
+            ReportSchemeRow base = byScheme.get(anomaly.getSchemeId());
+            if (base == null) {
+                continue;
+            }
+            rows.add(ReportSchemeRow.builder()
+                    .schemeId(base.getSchemeId())
+                    .schemeName(base.getSchemeName())
+                    .imisId(base.getImisId())
+                    .jalMitraNames(base.getJalMitraNames())
+                    .jalMitraMobiles(base.getJalMitraMobiles())
+                    .anomalyType(AnomalyLabels.label(anomaly.getType()))
                     .build());
         }
-        log.debug("[Router/DAILY_REPORT] corr={} built {} section-officer row(s)", corr, rows.size());
         return rows;
+    }
+
+    /**
+     * Resolves each weekly {@code SectionOfficerWeekSummary} into a printable performance row by
+     * looking up the officer's decrypted name and mobile. Officer order from analytics is preserved.
+     */
+    private List<WeeklyReportOfficerRow> buildWeeklyOfficerRows(String tenantSchema, WeeklyReportKpis kpis) {
+        List<WeeklyReportKpis.SectionOfficerWeekSummary> summaries = kpis.getSectionOfficerSummaries();
+        if (summaries == null || summaries.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> officerIds = new LinkedHashSet<>();
+        for (WeeklyReportKpis.SectionOfficerWeekSummary summary : summaries) {
+            officerIds.add(summary.getOfficerUserId());
+        }
+        Map<Long, OfficerContact> contacts = resolveOfficerContactsByIds(tenantSchema, officerIds);
+
+        List<WeeklyReportOfficerRow> rows = new ArrayList<>();
+        for (WeeklyReportKpis.SectionOfficerWeekSummary summary : summaries) {
+            OfficerContact contact = contacts.get(summary.getOfficerUserId());
+            rows.add(WeeklyReportOfficerRow.builder()
+                    .officerUserId(summary.getOfficerUserId())
+                    .name(contact != null && contact.name() != null
+                            ? contact.name() : ("#" + summary.getOfficerUserId()))
+                    .mobile(contact != null && contact.phone() != null ? contact.phone() : "")
+                    .totalSchemes(summary.getTotalSchemes())
+                    .schemesSupplying(summary.getSchemesSupplying())
+                    .schemesNotSupplying(summary.getSchemesNotSupplying())
+                    .schemesLowLpcd(summary.getSchemesLowLpcd())
+                    .avgLpcd(summary.getAvgLpcd())
+                    .build());
+        }
+        return rows;
+    }
+
+    private static String joinNames(List<OperatorContact> contacts) {
+        if (contacts == null) {
+            return "";
+        }
+        return contacts.stream().map(OperatorContact::name)
+                .filter(n -> n != null && !n.isBlank())
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    private static String joinPhones(List<OperatorContact> contacts) {
+        if (contacts == null) {
+            return "";
+        }
+        return contacts.stream().map(OperatorContact::phone)
+                .filter(phone -> phone != null && !phone.isBlank())
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     /**
@@ -1188,16 +1333,6 @@ public class NotificationEventRouter {
     /** Intermediate row carrying the officer user id alongside its resolved contact, for batch grouping. */
     private record OfficerContactRow(long userId, OfficerContact contact) {}
 
-    private String formatNoSupplyRemark(Integer daysNoSupply) {
-        if (daysNoSupply == null) {
-            return "No recorded water supply";
-        }
-        if (daysNoSupply <= 0) {
-            return "No water supply today";
-        }
-        return "No water supply for past " + daysNoSupply + (daysNoSupply == 1 ? " day" : " days");
-    }
-
     /**
      * A KPI payload is renderable only when both dates are present and ISO-parseable and both
      * day-KPI blocks exist. Guarding here keeps a malformed/incomplete payload from surfacing as a
@@ -1205,10 +1340,28 @@ public class NotificationEventRouter {
      * instead it is treated as a permanent, non-retryable skip like the other checks above.
      */
     private boolean isRenderableKpis(DailyReportKpis kpis) {
-        if (kpis == null || kpis.getYesterday() == null || kpis.getPreviousDay() == null) {
-            return false;
+        // The report date is the one field with no safe default: it names the filename, the object key
+        // and the WhatsApp message. Everything else can legitimately be zero.
+        return kpis != null && isIsoDate(kpis.getReportDate());
+    }
+
+    /** A weekly payload is renderable only with both week bounds present and ISO-parseable. */
+    private boolean isRenderableWeeklyKpis(WeeklyReportKpis kpis) {
+        return kpis != null && isIsoDate(kpis.getWeekStart()) && isIsoDate(kpis.getWeekEnd());
+    }
+
+    /**
+     * Deletes the rendered PDF once it is safely in MinIO. A failure here is logged and swallowed: the
+     * upload already succeeded, so the officer's report is on its way, and the reaper sweeps whatever
+     * is left behind.
+     */
+    private void deleteLocalReport(java.nio.file.Path localPath, String corr, String tag) {
+        try {
+            Files.deleteIfExists(localPath);
+        } catch (Exception cleanupEx) {
+            log.warn("[Router/{}] corr={} could not delete local PDF {}: {}",
+                    tag, corr, localPath, cleanupEx.getMessage());
         }
-        return isIsoDate(kpis.getReportDate()) && isIsoDate(kpis.getPreviousDate());
     }
 
     private boolean isIsoDate(String value) {
@@ -1332,6 +1485,73 @@ public class NotificationEventRouter {
 
     /** Intermediate row carrying the scheme id alongside its resolved label, for batch grouping. */
     private record SchemeRow(int schemeId, SchemeLabel label) {}
+
+    /**
+     * Batch-resolves the active Section Officers mapped to each scheme, with decrypted name + phone.
+     *
+     * <p>Used only by the SDO weekly report, where a scheme row has to say <em>whose</em> scheme it is
+     * — an SDO acts through their officers rather than directly on a scheme. A scheme mapped to two
+     * Section Officers lists both; that is a data-quality condition in the mapping table, and hiding
+     * one of them would misattribute the scheme.</p>
+     */
+    @SuppressWarnings("java:S2077")
+    private Map<Integer, List<OperatorContact>> resolveSectionOfficers(String tenantSchema, Set<Integer> schemeIds) {
+        if (schemeIds.isEmpty()) {
+            return Map.of();
+        }
+        String sql = "SELECT usm.scheme_id, u.title, u.phone_number FROM " + tenantSchema + ".user_scheme_mapping_table usm "
+                + "JOIN " + tenantSchema + ".user_table u ON u.id = usm.user_id "
+                + "JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type "
+                + "WHERE usm.scheme_id IN (" + placeholders(schemeIds.size()) + ") AND UPPER(ut.c_name) = 'SECTION_OFFICER' "
+                + "AND usm.status = 1 AND u.status = 1 AND usm.deleted_at IS NULL AND u.deleted_at IS NULL "
+                + "ORDER BY usm.scheme_id, u.id";
+        List<OperatorRow> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new OperatorRow(rs.getInt("scheme_id"),
+                        new OperatorContact(
+                                piiEncryptionService.safeDecrypt(rs.getString("title")),
+                                piiEncryptionService.safeDecrypt(rs.getString("phone_number")))),
+                schemeIds.toArray());
+        Map<Integer, List<OperatorContact>> byScheme = new LinkedHashMap<>();
+        for (OperatorRow row : rows) {
+            byScheme.computeIfAbsent(row.schemeId(), k -> new ArrayList<>()).add(row.contact());
+        }
+        return byScheme;
+    }
+
+    /**
+     * Batch-resolves the village names each scheme serves.
+     *
+     * <p>There is no village table: villages are rows of {@code lgd_location_master_table} at the
+     * deepest level of the per-tenant LGD tree, reached through {@code scheme_lgd_mapping_table}. A
+     * scheme can serve several — which is exactly why the analytics scheme dimension fans out — and
+     * all of them are returned, because an officer sent to a scheme needs to know every village it
+     * covers.</p>
+     */
+    @SuppressWarnings("java:S2077")
+    private Map<Integer, List<String>> resolveVillages(String tenantSchema, Set<Integer> schemeIds) {
+        if (schemeIds.isEmpty()) {
+            return Map.of();
+        }
+        String sql = "SELECT slm.scheme_id, lgd.title FROM " + tenantSchema + ".scheme_lgd_mapping_table slm "
+                + "JOIN " + tenantSchema + ".lgd_location_master_table lgd ON lgd.id = slm.parent_lgd_id "
+                + "WHERE slm.scheme_id IN (" + placeholders(schemeIds.size()) + ") "
+                + "AND slm.deleted_at IS NULL AND lgd.deleted_at IS NULL AND lgd.status = 1 "
+                + "ORDER BY slm.scheme_id, lgd.title";
+        List<VillageRow> rows = jdbcTemplate.query(sql,
+                (rs, n) -> new VillageRow(rs.getInt("scheme_id"), rs.getString("title")),
+                schemeIds.toArray());
+        Map<Integer, List<String>> byScheme = new LinkedHashMap<>();
+        for (VillageRow row : rows) {
+            if (row.title() == null || row.title().isBlank()) {
+                continue;
+            }
+            byScheme.computeIfAbsent(row.schemeId(), k -> new ArrayList<>()).add(row.title());
+        }
+        return byScheme;
+    }
+
+    /** Intermediate row carrying the scheme id alongside one village name, for batch grouping. */
+    private record VillageRow(int schemeId, String title) {}
 
     /** Intermediate row carrying the scheme id alongside one resolved operator, for batch grouping. */
     private record OperatorRow(int schemeId, OperatorContact contact) {}

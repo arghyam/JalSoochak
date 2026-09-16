@@ -179,6 +179,24 @@ public class GlificWhatsAppService {
     private String dailyReportSdoLinkTemplateId;
 
     /**
+     * Suppresses only the Weekly Water Service Situation Report. Defaults to {@link #whatsappDryRun}.
+     *
+     * <p>Ships suppressed by default in practice, because the weekly templates need their own Meta
+     * approval and until they exist there is nothing to send. A suppressed weekly report is still
+     * generated and uploaded, so the pipeline can be verified end-to-end before delivery goes live.</p>
+     */
+    @Value("${notifications.weekly-report.dry-run:${notifications.whatsapp.dry-run:false}}")
+    private boolean weeklyReportDryRun;
+
+    /** Text HSM template id (dynamic-URL button) for the SECTION_OFFICER weekly report. */
+    @Value("${glific.template.weekly-report-so-link-id:}")
+    private String weeklyReportSoLinkTemplateId;
+
+    /** Text HSM template id (dynamic-URL button) for the SUB_DIVISIONAL_OFFICER weekly report. */
+    @Value("${glific.template.weekly-report-sdo-link-id:}")
+    private String weeklyReportSdoLinkTemplateId;
+
+    /**
      * Optional mirror of the URL prefix frozen into the approved LINK template, e.g.
      * {@code https://jalsoochak.jjmbrain.in/minio/}. When set it must match the prefix this service
      * strips off the MinIO URL to build the button's variable ({@link #mediaUrlPrefix()}); a mismatch
@@ -206,11 +224,11 @@ public class GlificWhatsAppService {
                     + " Set NOTIFICATIONS_WHATSAPP_DRY_RUN=false for production.");
             return;
         }
-        if (nudgeDryRun || escalationDryRun || dailyReportDryRun || whatsappDryRun) {
+        if (nudgeDryRun || escalationDryRun || dailyReportDryRun || weeklyReportDryRun || whatsappDryRun) {
             log.warn("[Glific] Partial DRY-RUN — nudge={}, escalation={}, daily-report={},"
-                            + " account-ops(OTP/welcome/language)={}. Contact opt-in stays live because"
-                            + " at least one delivery purpose is enabled.",
-                    nudgeDryRun, escalationDryRun, dailyReportDryRun, whatsappDryRun);
+                            + " weekly-report={}, account-ops(OTP/welcome/language)={}. Contact opt-in stays"
+                            + " live because at least one delivery purpose is enabled.",
+                    nudgeDryRun, escalationDryRun, dailyReportDryRun, weeklyReportDryRun, whatsappDryRun);
         }
         // Validate only the templates whose delivery is enabled.
         if (!nudgeDryRun && (nudgeFlowId == null || nudgeFlowId.isBlank())) {
@@ -244,7 +262,27 @@ public class GlificWhatsAppService {
                 case LINK -> validateDailyReportLinkTemplates();
             }
         }
+        if (!weeklyReportDryRun) {
+            validateWeeklyReportTemplates();
+        }
         validateMediaBaseUrl();
+    }
+
+    /**
+     * Refuses to start when weekly delivery is live without an approved template.
+     *
+     * <p>Without this the job would run every Monday, generate and upload a PDF, and then fail per
+     * message at send time — a failure discovered from the logs rather than at deploy, with officers
+     * silently receiving nothing meanwhile.</p>
+     */
+    private void validateWeeklyReportTemplates() {
+        if (isBlank(weeklyReportSoLinkTemplateId)) {
+            throw new IllegalStateException(
+                    "glific.template.weekly-report-so-link-id must be configured when weekly-report delivery"
+                    + " is enabled (set NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN=true to generate and upload the"
+                    + " reports without sending them, until the Meta template is approved)");
+        }
+        validateLinkButtonBaseUrl();
     }
 
     private void validateDailyReportDocumentTemplates() {
@@ -354,9 +392,16 @@ public class GlificWhatsAppService {
         return false;
     }
 
-    /** True only when every WhatsApp purpose is muted — no Glific call of any kind may be made. */
+    /**
+     * True only when every WhatsApp purpose is muted — no Glific call of any kind may be made.
+     *
+     * <p>Every purpose must be listed. Contact opt-in is gated on this, and opt-in is what yields the
+     * {@code receiverId} each delivery needs: omitting a live purpose here would suppress opt-in while
+     * that purpose still tried to send, producing {@code receiverId=0} and a Glific
+     * "Receiver does not exist" for every message.</p>
+     */
     private boolean isAllDryRun() {
-        return whatsappDryRun && nudgeDryRun && escalationDryRun && dailyReportDryRun;
+        return whatsappDryRun && nudgeDryRun && escalationDryRun && dailyReportDryRun && weeklyReportDryRun;
     }
 
     /**
@@ -697,6 +742,68 @@ public class GlificWhatsAppService {
             return dailyReportSdoLinkTemplateId;
         }
         return dailyReportSoLinkTemplateId;
+    }
+
+    /**
+     * Sends the Weekly Water Service Situation Report as a dynamic-URL button HSM.
+     *
+     * <p>LINK only, with no DOCUMENT counterpart: the attachment path requires Meta to fetch the PDF
+     * from our MinIO, which the India-only firewall in front of production blocks
+     * ({@code (#131053)}). The daily report keeps DOCUMENT mode for environments where that works;
+     * there is no reason to introduce the same trap for a new report.</p>
+     *
+     * <p>Parameter order is Glific's, not ours: body variables first, the button's URL suffix last.</p>
+     *
+     * @param weekStart the Monday of the reported week — template variable {{2}}
+     * @return the Glific message id, template id and mode of the accepted send; a dry run returns
+     *         {@link GlificSendResult#suppressed}
+     */
+    public GlificSendResult sendWeeklyReportHsm(Long contactId, String minioUrl, String officerUserType,
+                                                LocalDate weekStart, String officerName) {
+        if (isDryRun(weeklyReportDryRun, "sendWeeklyReportHsm")) {
+            return GlificSendResult.suppressed(DailyReportDeliveryMode.LINK);
+        }
+        requireContactId(contactId, "sendWeeklyReportHsm");
+
+        String templateId = resolveWeeklyReportLinkTemplateId(officerUserType);
+        if (isBlank(templateId)) {
+            throw new IllegalStateException(
+                    "glific.template.weekly-report-so-link-id is not configured — the weekly report cannot"
+                    + " be sent (set NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN=true to suppress it until the"
+                    + " template is approved)");
+        }
+        if (weekStart == null) {
+            throw new IllegalArgumentException(
+                    "sendWeeklyReportHsm requires the week start — it is template variable {{2}}");
+        }
+        String urlSuffix = linkSuffix(minioUrl);
+        String name = isBlank(officerName) ? "Officer" : officerName.trim();
+        String role = isBlank(officerUserType) ? "UNKNOWN" : officerUserType.trim();
+
+        JsonNode response = client.execute(NUDGE_HSM_MUTATION, Map.of(
+                "templateId", templateId,
+                "receiverId", contactId,
+                "parameters", List.of(name, weekStart.format(DOCUMENT_NAME_DATE), urlSuffix)));
+        checkErrors(response, "sendHsmMessage");
+        String messageId = extractMessageId(response, "sendHsmMessage");
+        log.info("[Glific] Weekly report HSM sent mode=LINK role={} glificMsgId={} templateId={}",
+                role, messageId, templateId);
+        log.debug("[Glific] Weekly report link HSM sent to contactId={} suffix={}", contactId, urlSuffix);
+        return new GlificSendResult(messageId, templateId, DailyReportDeliveryMode.LINK);
+    }
+
+    /** SDO→SO fallback, so a deployment with only one approved weekly template still serves both roles. */
+    private String resolveWeeklyReportLinkTemplateId(String officerUserType) {
+        if (officerUserType != null && officerUserType.trim().equalsIgnoreCase("SUB_DIVISIONAL_OFFICER")
+                && !isBlank(weeklyReportSdoLinkTemplateId)) {
+            return weeklyReportSdoLinkTemplateId;
+        }
+        return weeklyReportSoLinkTemplateId;
+    }
+
+    /** Whether weekly reports are actually delivered (as opposed to generated and suppressed). */
+    public boolean isWeeklyReportDeliveryEnabled() {
+        return !weeklyReportDryRun;
     }
 
     /**
