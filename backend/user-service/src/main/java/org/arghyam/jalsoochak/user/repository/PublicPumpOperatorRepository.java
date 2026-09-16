@@ -4,11 +4,12 @@ import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.service.PiiEncryptionService;
+import org.arghyam.jalsoochak.user.util.UserTypeLabel;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -122,6 +123,38 @@ public class PublicPumpOperatorRepository {
             LocalDate startDate,
             LocalDate endDate
     ) {
+        return findPumpOperatorBy(schemaName, "id", pumpOperatorId, schemeId, startDate, endDate);
+    }
+
+    /**
+     * Same detail query keyed on the random {@code uuid} instead of the sequential {@code id}.
+     * Used by the anonymous public route, which must not expose an enumerable identifier.
+     */
+    public PumpOperatorDetailsDTO findPumpOperatorByUuid(
+            String schemaName,
+            String uuid,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        return findPumpOperatorBy(schemaName, "uuid", uuid, schemeId, startDate, endDate);
+    }
+
+    /**
+     * @param identityColumn must be {@code id} or {@code uuid} — it is interpolated into the SQL,
+     *                       so it is checked against that closed set rather than parameterised.
+     */
+    private PumpOperatorDetailsDTO findPumpOperatorBy(
+            String schemaName,
+            String identityColumn,
+            Object identityValue,
+            Long schemeId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        if (!"id".equals(identityColumn) && !"uuid".equals(identityColumn)) {
+            throw new IllegalArgumentException("Unsupported identity column: " + identityColumn);
+        }
         validateSchemaName(schemaName);
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String schemeJoin;
@@ -251,17 +284,17 @@ public class PublicPumpOperatorRepository {
                     FROM bounds
                 ) comp ON true
                 WHERE u.deleted_at IS NULL
-                  AND u.id = ?
+                  AND u.%s = ?
                   %s
                   AND upper(COALESCE(ut.c_name, '')) = 'PUMP_OPERATOR'
                 LIMIT 1
-                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName, schemeRequiredSql);
+                """, schemaName, schemeJoin, timeColumn, schemaName, schemaName, identityColumn, schemeRequiredSql);
         try {
             params.add(startDate);
             params.add(endDate);
             params.add(startDate);
             params.add(endDate);
-            params.add(pumpOperatorId);
+            params.add(identityValue);
             return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
                 Timestamp lastTs = (Timestamp) rs.getObject("last_submission_at");
                 LocalDateTime lastSubmissionAt = lastTs == null ? null : lastTs.toLocalDateTime();
@@ -866,10 +899,82 @@ public class PublicPumpOperatorRepository {
         return total == null ? 0 : total;
     }
 
-    public List<PumpOperatorSchemeComplianceRowDTO> listPumpOperatorsBySchemeWithCompliance(
+    /**
+     * The reading set that {@link #listSchemeReadingCompliance} pages over and
+     * {@link #countSchemeReadingCompliance} totals. Both build their SQL from this single fragment so
+     * the page and its total can never disagree about which readings are in scope — a divergence would
+     * silently make the tail of the listing unreachable.
+     *
+     * <p>Rows are driven from {@code flow_reading_table}, not from the scheme's operator mappings, so a
+     * reading counts regardless of the role of whoever submitted it. The scheme mapping is joined in
+     * later ({@code submitter}) and only decorates the row, which means a submission stays visible even
+     * if the submitter's mapping to the scheme was since removed.
+     *
+     * <p>Placeholders, in order: {@code schemeId}, {@code submittedByUserId} (twice), {@code startDate},
+     * {@code endDate} — see {@link #schemeReadingsArgs}.
+     */
+    private String schemeReadingsCte(String schemaName, String timeColumn, String confirmedExpr) {
+        return String.format("""
+                scheme AS (
+                    SELECT sm.id AS scheme_id,
+                           sm.scheme_name
+                    FROM %1$s.scheme_master_table sm
+                    WHERE sm.id = ?
+                      AND sm.deleted_at IS NULL
+                ),
+                readings AS (
+                    SELECT fr.id AS reading_id,
+                           fr.created_by,
+                           fr.reading_date,
+                           fr.%2$s AS reading_at,
+                           %3$s AS confirmed_reading
+                    FROM %1$s.flow_reading_table fr
+                    JOIN scheme sc
+                      ON sc.scheme_id = fr.scheme_id
+                    JOIN %1$s.user_table u
+                      ON u.id = fr.created_by
+                     AND u.deleted_at IS NULL
+                    WHERE fr.deleted_at IS NULL
+                      AND (CAST(? AS BIGINT) IS NULL OR fr.created_by = ?)
+                      AND fr.reading_date >= COALESCE(CAST(? AS DATE), fr.reading_date)
+                      AND fr.reading_date <= LEAST(CURRENT_DATE, COALESCE(CAST(? AS DATE), CURRENT_DATE))
+                )
+                """, schemaName, timeColumn, confirmedExpr);
+    }
+
+    /** Positional arguments for the placeholders in {@link #schemeReadingsCte}. */
+    private static List<Object> schemeReadingsArgs(
+            long schemeId,
+            Long submittedByUserId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
+        List<Object> args = new ArrayList<>();
+        args.add(schemeId);
+        args.add(submittedByUserId);
+        args.add(submittedByUserId);
+        args.add(startDate);
+        args.add(endDate);
+        return args;
+    }
+
+    /**
+     * One row per reading submitted against {@code schemeId}, newest first, decorated with the
+     * submitter's reading-compliance figures.
+     *
+     * <p>Every submitter is listed, not just pump operators; {@code submittedByRole} carries the raw
+     * {@code user_type_master_table.c_name} so the caller can label the row. The figures that measure a
+     * submitter against an expected reporting window — onboarding date, active/missed/inactive days and
+     * the reporting rate — come from {@code po_window}, which admits pump operators only, so they are
+     * {@code null} for every other role: a section officer has no per-scheme reporting obligation, and
+     * deriving a rate from their account-creation date would report an arbitrarily low number.
+     * {@code submitted_days} and {@code last_submission_at} are plain counts over the requested range
+     * and are therefore populated for all roles.
+     */
+    public List<SchemeReadingComplianceRowDTO> listSchemeReadingCompliance(
             String schemaName,
             long schemeId,
-            Long pumpOperatorId,
+            Long submittedByUserId,
             LocalDate startDate,
             LocalDate endDate,
             long offset,
@@ -882,8 +987,19 @@ public class PublicPumpOperatorRepository {
         String timeColumn = resolveFlowReadingTimeColumn(schemaName);
         String confirmedExpr = resolveConfirmedReadingExpression(schemaName, "fr");
 
-        String sql = String.format("""
-                WITH latest_mapping AS (
+        String sql = "WITH " + schemeReadingsCte(schemaName, timeColumn, confirmedExpr) + String.format("""
+                ,
+                paged AS (
+                    SELECT *
+                    FROM readings
+                    ORDER BY reading_date DESC, reading_id DESC
+                    LIMIT ? OFFSET ?
+                ),
+                page_submitters AS (
+                    SELECT DISTINCT created_by
+                    FROM paged
+                ),
+                submitter AS (
                     SELECT DISTINCT ON (u.id)
                            u.id,
                            u.uuid,
@@ -892,105 +1008,84 @@ public class PublicPumpOperatorRepository {
                            u.phone_number,
                            u.status,
                            u.created_at::date AS onboarding_date,
-                           usm.status AS scheme_mapping_status,
-                           sm.id AS scheme_id,
-                           sm.scheme_name
-                    FROM %s.user_scheme_mapping_table usm
-                    JOIN %s.scheme_master_table sm
-                      ON sm.id = usm.scheme_id
-                     AND sm.deleted_at IS NULL
-                    JOIN %s.user_table u
-                      ON u.id = usm.user_id
-                     AND u.deleted_at IS NULL
-                    JOIN common_schema.user_type_master_table ut
+                           upper(ut.c_name) AS submitted_by_role,
+                           (lower(COALESCE(ut.c_name, '')) = 'pump_operator') AS is_pump_operator,
+                           usm.status AS scheme_mapping_status
+                    FROM page_submitters ps
+                    JOIN %1$s.user_table u
+                      ON u.id = ps.created_by
+                    LEFT JOIN common_schema.user_type_master_table ut
                       ON ut.id = u.user_type
-                    WHERE usm.deleted_at IS NULL
-                      AND sm.id = ?
-                      AND (CAST(? AS BIGINT) IS NULL OR u.id = ?)
-                      AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
+                    LEFT JOIN %1$s.user_scheme_mapping_table usm
+                      ON usm.user_id = u.id
+                     AND usm.scheme_id = ?
+                     AND usm.deleted_at IS NULL
                     ORDER BY u.id DESC, usm.id DESC
                 ),
-                windowed_mapping AS (
-                    SELECT l.*,
-                           GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date)) AS effective_start_date,
-                           LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE)) AS effective_end_date
-                    FROM latest_mapping l
-                    WHERE l.onboarding_date IS NOT NULL
-                      AND GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date))
-                          <= LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE))
-                ),
-                readings AS (
-                    SELECT DISTINCT ON (fr.id)
-                           fr.id AS reading_id,
-                           fr.created_by,
-                           fr.reading_date,
-                           fr.%s AS reading_at,
-                           %s AS confirmed_reading
-                    FROM %s.flow_reading_table fr
-                    JOIN windowed_mapping l
-                      ON l.id = fr.created_by
-                    WHERE fr.deleted_at IS NULL
-                      AND fr.scheme_id = ?
-                      AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
-                    ORDER BY fr.id, fr.reading_date DESC
-                ),
-                paged AS (
-                    SELECT *
-                    FROM readings
-                    ORDER BY reading_date DESC, reading_id DESC
-                    LIMIT ? OFFSET ?
-                ),
-                page_ops AS (
-                    SELECT DISTINCT created_by
-                    FROM paged
+                po_window AS (
+                    SELECT s.id,
+                           s.onboarding_date,
+                           GREATEST(s.onboarding_date, COALESCE(CAST(? AS DATE), s.onboarding_date))
+                               AS effective_start_date,
+                           LEAST(CURRENT_DATE, COALESCE(CAST(? AS DATE), CURRENT_DATE))
+                               AS effective_end_date
+                    FROM submitter s
+                    WHERE s.is_pump_operator
+                      AND s.onboarding_date IS NOT NULL
+                      AND GREATEST(s.onboarding_date, COALESCE(CAST(? AS DATE), s.onboarding_date))
+                          <= LEAST(CURRENT_DATE, COALESCE(CAST(? AS DATE), CURRENT_DATE))
                 ),
                 stats AS (
                     SELECT fr.created_by,
                            COUNT(DISTINCT fr.reading_date) AS submitted_days,
-                           MAX(fr.%s) AS last_submission_at
-                    FROM %s.flow_reading_table fr
-                    JOIN page_ops po
-                      ON po.created_by = fr.created_by
-                    JOIN windowed_mapping l
-                      ON l.id = fr.created_by
+                           MAX(fr.%2$s) AS last_submission_at
+                    FROM %1$s.flow_reading_table fr
+                    JOIN scheme sc
+                      ON sc.scheme_id = fr.scheme_id
+                    JOIN page_submitters ps
+                      ON ps.created_by = fr.created_by
                     WHERE fr.deleted_at IS NULL
-                      AND fr.scheme_id = ?
-                      AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
+                      AND fr.reading_date >= COALESCE(CAST(? AS DATE), fr.reading_date)
+                      AND fr.reading_date <= LEAST(CURRENT_DATE, COALESCE(CAST(? AS DATE), CURRENT_DATE))
                     GROUP BY fr.created_by
                 )
-                SELECT l.id,
-                       l.uuid,
-                       l.name,
-                       l.email,
-                       l.phone_number,
-                       l.status,
-                       l.scheme_id,
-                       l.scheme_name,
-                       l.scheme_mapping_status,
-                       l.onboarding_date,
+                SELECT s.id,
+                       s.uuid,
+                       s.name,
+                       s.submitted_by_role,
+                       s.email,
+                       s.phone_number,
+                       s.status,
+                       sc.scheme_id,
+                       sc.scheme_name,
+                       s.scheme_mapping_status,
+                       pw.onboarding_date,
                        CASE
-                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
-                           ELSE (l.effective_end_date - l.effective_start_date + 1)
+                           WHEN pw.id IS NULL THEN NULL
+                           ELSE (pw.effective_end_date - pw.effective_start_date + 1)
                        END AS total_active_days,
                        COALESCE(stats.submitted_days, 0) AS submitted_days,
                        CASE
-                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
-                           ELSE GREATEST((l.effective_end_date - l.effective_start_date + 1) - COALESCE(stats.submitted_days, 0), 0)
+                           WHEN pw.id IS NULL THEN NULL
+                           ELSE GREATEST((pw.effective_end_date - pw.effective_start_date + 1)
+                                         - COALESCE(stats.submitted_days, 0), 0)
                        END AS missed_submission_days,
                        CASE
-                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
-                           ELSE GREATEST((l.effective_end_date - l.effective_start_date + 1) - COALESCE(stats.submitted_days, 0), 0)
+                           WHEN pw.id IS NULL THEN NULL
+                           ELSE GREATEST((pw.effective_end_date - pw.effective_start_date + 1)
+                                         - COALESCE(stats.submitted_days, 0), 0)
                        END AS inactive_days,
                        CASE
-                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
-                           ELSE GREATEST((l.effective_end_date - l.effective_start_date + 1) - COALESCE(stats.submitted_days, 0), 0)
+                           WHEN pw.id IS NULL THEN NULL
+                           ELSE GREATEST((pw.effective_end_date - pw.effective_start_date + 1)
+                                         - COALESCE(stats.submitted_days, 0), 0)
                        END AS missing_submission_count,
                        CASE
-                           WHEN l.effective_start_date IS NULL OR l.effective_end_date IS NULL THEN NULL
-                           WHEN (l.effective_end_date - l.effective_start_date + 1) <= 0 THEN NULL
+                           WHEN pw.id IS NULL THEN NULL
+                           WHEN (pw.effective_end_date - pw.effective_start_date + 1) <= 0 THEN NULL
                            ELSE ROUND(
                                (COALESCE(stats.submitted_days, 0)::numeric * 100.0)
-                               / (l.effective_end_date - l.effective_start_date + 1),
+                               / (pw.effective_end_date - pw.effective_start_date + 1),
                                2
                            )
                        END AS reporting_rate_percent,
@@ -999,110 +1094,70 @@ public class PublicPumpOperatorRepository {
                        paged.confirmed_reading,
                        stats.last_submission_at
                 FROM paged
-                JOIN windowed_mapping l
-                  ON l.id = paged.created_by
+                JOIN submitter s
+                  ON s.id = paged.created_by
+                CROSS JOIN scheme sc
+                LEFT JOIN po_window pw
+                  ON pw.id = s.id
                 LEFT JOIN stats
-                  ON stats.created_by = l.id
+                  ON stats.created_by = s.id
                 ORDER BY paged.reading_date DESC, paged.reading_id DESC
-                """, schemaName, schemaName, schemaName, timeColumn, confirmedExpr, schemaName, timeColumn, schemaName);
+                """, schemaName, timeColumn);
 
-        record RowData(
-                Long id,
-                String uuid,
-                String name,
-                String email,
-                String phoneNumber,
-                Integer status,
-                Long schemeId,
-                String schemeName,
-                Integer schemeMappingStatus,
-                LocalDate onboardingDate,
-                Integer totalActiveDays,
-                Integer submittedDays,
-                Integer missedSubmissionDays,
-                Integer inactiveDays,
-                Integer missingSubmissionCount,
-                BigDecimal reportingRatePercent,
-                LocalDate readingDate,
-                LocalDateTime readingAt,
-                LocalDateTime lastSubmissionAt,
-                BigDecimal confirmedReading
-        ) {
-        }
+        List<Object> args = schemeReadingsArgs(schemeId, submittedByUserId, startDate, endDate);
+        args.add(limit);            // paged
+        args.add(offset);           // paged
+        args.add(schemeId);         // submitter — the mapping row to decorate with
+        args.add(startDate);        // po_window — effective_start_date
+        args.add(endDate);          // po_window — effective_end_date
+        args.add(startDate);        // po_window — the same bounds again, as its non-empty guard
+        args.add(endDate);          // po_window
+        args.add(startDate);        // stats
+        args.add(endDate);          // stats
 
-        List<RowData> rows = jdbcTemplate.query(sql, (rs, rowNum) -> {
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
             Timestamp ts = (Timestamp) rs.getObject("reading_at");
             LocalDateTime readingAt = ts == null ? null : ts.toLocalDateTime();
             Timestamp lastTs = (Timestamp) rs.getObject("last_submission_at");
             LocalDateTime lastSubmissionAt = lastTs == null ? null : lastTs.toLocalDateTime();
-            BigDecimal confirmed = (BigDecimal) rs.getObject("confirmed_reading");
-            return new RowData(
-                    rs.getLong("id"),
-                    rs.getString("uuid"),
-                    pii.safeDecrypt(rs.getString("name")),
-                    rs.getString("email"),
-                    pii.safeDecrypt(rs.getString("phone_number")),
-                    getNullableInt(rs, "status"),
-                    rs.getLong("scheme_id"),
-                    rs.getString("scheme_name"),
-                    getNullableInt(rs, "scheme_mapping_status"),
-                    rs.getObject("onboarding_date", LocalDate.class),
-                    getNullableInt(rs, "total_active_days"),
-                    getNullableInt(rs, "submitted_days"),
-                    getNullableInt(rs, "missed_submission_days"),
-                    getNullableInt(rs, "inactive_days"),
-                    getNullableInt(rs, "missing_submission_count"),
-                    (BigDecimal) rs.getObject("reporting_rate_percent"),
-                    rs.getObject("reading_date", LocalDate.class),
-                    readingAt,
-                    lastSubmissionAt,
-                    confirmed
-            );
-        }, schemeId, pumpOperatorId, pumpOperatorId, startDate, endDate, startDate, endDate, schemeId, limit, offset, schemeId);
-
-        if (rows.isEmpty()) {
-            return List.of();
-        }
-
-        List<PumpOperatorSchemeComplianceRowDTO> results = new ArrayList<>(rows.size());
-        for (RowData r : rows) {
-            results.add(PumpOperatorSchemeComplianceRowDTO.builder()
-                    .id(r.id())
-                    .uuid(r.uuid())
-                    .name(r.name())
-                    .email(r.email())
-                    .phoneNumber(r.phoneNumber())
-                    .status(mapStatus(r.status()))
-                    .schemeId(r.schemeId())
-                    .schemeName(r.schemeName())
-                    .schemeMappingStatus(r.schemeMappingStatus())
-                    .onboardingDate(r.onboardingDate())
-                    .totalActiveDays(r.totalActiveDays())
-                    .submittedDays(r.submittedDays())
-                    .missedSubmissionDays(r.missedSubmissionDays())
-                    .inactiveDays(r.inactiveDays())
-                    .missingSubmissionCount(r.missingSubmissionCount())
-                    .reportingRatePercent(r.reportingRatePercent())
-                    .readingDate(r.readingDate())
-                    .readingAt(r.readingAt())
-                    .lastSubmissionAt(r.lastSubmissionAt())
-                    .confirmedReading(r.confirmedReading())
-                    .build());
-        }
-
-        return results;
+            String role = rs.getString("submitted_by_role");
+            return SchemeReadingComplianceRowDTO.builder()
+                    .id(rs.getLong("id"))
+                    .uuid(rs.getString("uuid"))
+                    .name(pii.safeDecrypt(rs.getString("name")))
+                    .submittedByRole(role)
+                    .submittedByRoleLabel(UserTypeLabel.shortLabel(role))
+                    .email(rs.getString("email"))
+                    .phoneNumber(pii.safeDecrypt(rs.getString("phone_number")))
+                    .status(mapStatus(getNullableInt(rs, "status")))
+                    .schemeId(rs.getLong("scheme_id"))
+                    .schemeName(rs.getString("scheme_name"))
+                    .schemeMappingStatus(getNullableInt(rs, "scheme_mapping_status"))
+                    .onboardingDate(rs.getObject("onboarding_date", LocalDate.class))
+                    .totalActiveDays(getNullableInt(rs, "total_active_days"))
+                    .submittedDays(getNullableInt(rs, "submitted_days"))
+                    .missedSubmissionDays(getNullableInt(rs, "missed_submission_days"))
+                    .inactiveDays(getNullableInt(rs, "inactive_days"))
+                    .missingSubmissionCount(getNullableInt(rs, "missing_submission_count"))
+                    .reportingRatePercent((BigDecimal) rs.getObject("reporting_rate_percent"))
+                    .readingDate(rs.getObject("reading_date", LocalDate.class))
+                    .readingAt(readingAt)
+                    .lastSubmissionAt(lastSubmissionAt)
+                    .confirmedReading((BigDecimal) rs.getObject("confirmed_reading"))
+                    .build();
+        }, args.toArray());
     }
 
     /**
-     * Total for {@link #listPumpOperatorsBySchemeWithCompliance}, which paginates over readings —
-     * one row per reading, not per operator. The count is therefore over {@code fr.id} rather than
-     * the operator: counting distinct operators made an operator's every reading after the first
-     * unreachable, since the page holding it was rejected as past the end of a shorter total.
+     * Total for {@link #listSchemeReadingCompliance}, which paginates over readings — one row per
+     * reading, not per submitter. The count is therefore over readings rather than distinct submitters:
+     * counting submitters made a submitter's every reading after the first unreachable, since the page
+     * holding it was rejected as past the end of a shorter total.
      */
-    public long countPumpOperatorsBySchemeWithCompliance(
+    public long countSchemeReadingCompliance(
             String schemaName,
             long schemeId,
-            Long pumpOperatorId,
+            Long submittedByUserId,
             LocalDate startDate,
             LocalDate endDate
     ) {
@@ -1110,54 +1165,15 @@ public class PublicPumpOperatorRepository {
         if (!tableExists(schemaName, "user_scheme_mapping_table")) {
             return 0;
         }
-        String sql = String.format("""
-                WITH latest_mapping AS (
-                    SELECT DISTINCT ON (u.id)
-                           u.id,
-                           u.created_at::date AS onboarding_date
-                    FROM %s.user_scheme_mapping_table usm
-                    JOIN %s.scheme_master_table sm
-                      ON sm.id = usm.scheme_id
-                     AND sm.deleted_at IS NULL
-                    JOIN %s.user_table u
-                      ON u.id = usm.user_id
-                     AND u.deleted_at IS NULL
-                    JOIN common_schema.user_type_master_table ut
-                      ON ut.id = u.user_type
-                    WHERE usm.deleted_at IS NULL
-                      AND sm.id = ?
-                      AND (CAST(? AS BIGINT) IS NULL OR u.id = ?)
-                      AND lower(COALESCE(ut.c_name, '')) = 'pump_operator'
-                    ORDER BY u.id DESC, usm.id DESC
-                ),
-                windowed_mapping AS (
-                    SELECT l.*,
-                           GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date)) AS effective_start_date,
-                           LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE)) AS effective_end_date
-                    FROM latest_mapping l
-                    WHERE l.onboarding_date IS NOT NULL
-                      AND GREATEST(l.onboarding_date, COALESCE(?, l.onboarding_date))
-                          <= LEAST(CURRENT_DATE, COALESCE(?, CURRENT_DATE))
-                )
-                SELECT COUNT(DISTINCT fr.id)
-                FROM windowed_mapping l
-                JOIN %s.flow_reading_table fr
-                  ON fr.created_by = l.id
-                WHERE fr.deleted_at IS NULL
-                  AND fr.scheme_id = ?
-                  AND fr.reading_date BETWEEN l.effective_start_date AND l.effective_end_date
-                """, schemaName, schemaName, schemaName, schemaName);
+        String timeColumn = resolveFlowReadingTimeColumn(schemaName);
+        String confirmedExpr = resolveConfirmedReadingExpression(schemaName, "fr");
+
+        String sql = "WITH " + schemeReadingsCte(schemaName, timeColumn, confirmedExpr)
+                + "SELECT COUNT(*) FROM readings";
         Long total = jdbcTemplate.queryForObject(
                 sql,
                 Long.class,
-                schemeId,
-                pumpOperatorId,
-                pumpOperatorId,
-                startDate,
-                endDate,
-                startDate,
-                endDate,
-                schemeId
+                schemeReadingsArgs(schemeId, submittedByUserId, startDate, endDate).toArray()
         );
         return total == null ? 0 : total;
     }

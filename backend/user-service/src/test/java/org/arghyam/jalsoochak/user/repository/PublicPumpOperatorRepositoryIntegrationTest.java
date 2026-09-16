@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.user.repository;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemePumpOperatorsDTO;
 import org.arghyam.jalsoochak.user.service.PiiEncryptionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +71,18 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
                 VALUES (?, 'C-1', 'Test Scheme', 1, 1)
                 RETURNING id
                 """, Long.class, stateSchemeId);
+    }
+
+    private long insertSectionOfficer(String phone, String name) {
+        return insertUser(phone, 3, name); // SECTION_OFFICER = type id 3
+    }
+
+    private void softDeleteSchemeMapping(long userId, long schemeId) {
+        jdbc.update("""
+                UPDATE tenant_mp.user_scheme_mapping_table
+                   SET deleted_at = NOW()
+                 WHERE user_id = ? AND scheme_id = ?
+                """, userId, schemeId);
     }
 
     private void mapUserToScheme(long userId, long schemeId) {
@@ -405,16 +417,16 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
         }
     }
 
-    // ── countPumpOperatorsBySchemeWithCompliance ──────────────────────────────
+    // ── countSchemeReadingCompliance ──────────────────────────────
 
     @Nested
-    @DisplayName("countPumpOperatorsBySchemeWithCompliance")
-    class CountPumpOperatorsBySchemeWithCompliance {
+    @DisplayName("countSchemeReadingCompliance")
+    class CountSchemeReadingCompliance {
 
         @Test
         @DisplayName("returns 0 for missing schema")
         void returnsZeroForMissingSchema() {
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 1L, null, null)).isZero();
+            assertThat(repo.countSchemeReadingCompliance("tenant_xx", 1L, 1L, null, null)).isZero();
         }
 
         @Test
@@ -424,7 +436,7 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             long schemeId = insertScheme("CPC-1");
             mapUserToScheme(poId, schemeId);
 
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null)).isZero();
+            assertThat(repo.countSchemeReadingCompliance(SCHEMA, schemeId, poId, null, null)).isZero();
         }
 
         @Test
@@ -437,23 +449,40 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(2));
             insertReading(schemeId, poId, 200.0, LocalDate.now().minusDays(1));
 
-            assertThat(repo.countPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null)).isEqualTo(2);
-            assertThat(repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 100))
+            assertThat(repo.countSchemeReadingCompliance(SCHEMA, schemeId, poId, null, null)).isEqualTo(2);
+            assertThat(repo.listSchemeReadingCompliance(SCHEMA, schemeId, poId, null, null, 0, 100))
+                    .hasSize(2);
+        }
+        @Test
+        @DisplayName("counts submissions from every role, matching what the listing pages over")
+        void countsEveryRole() {
+            long poId = insertPumpOperator("919876540033", "PO Counted");
+            long soId = insertSectionOfficer("919876540034", "SO Counted");
+            backdateUserCreatedAt(poId, 10);
+            backdateUserCreatedAt(soId, 10);
+            long schemeId = insertScheme("CPC-3");
+            mapUserToScheme(poId, schemeId);
+            mapUserToScheme(soId, schemeId);
+            insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(2));
+            insertReading(schemeId, soId, 200.0, LocalDate.now().minusDays(1));
+
+            assertThat(repo.countSchemeReadingCompliance(SCHEMA, schemeId, null, null, null)).isEqualTo(2);
+            assertThat(repo.listSchemeReadingCompliance(SCHEMA, schemeId, null, null, null, 0, 100))
                     .hasSize(2);
         }
     }
 
-    // ── listPumpOperatorsBySchemeWithCompliance ───────────────────────────────
+    // ── listSchemeReadingCompliance ───────────────────────────────
 
     @Nested
-    @DisplayName("listPumpOperatorsBySchemeWithCompliance")
-    class ListPumpOperatorsBySchemeWithCompliance {
+    @DisplayName("listSchemeReadingCompliance")
+    class ListSchemeReadingCompliance {
 
         @Test
         @DisplayName("returns empty list for missing schema")
         void returnsEmptyForMissingSchema() {
-            List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance("tenant_xx", 1L, 1L, null, null, 0, 10);
+            List<SchemeReadingComplianceRowDTO> result =
+                    repo.listSchemeReadingCompliance("tenant_xx", 1L, 1L, null, null, 0, 10);
             assertThat(result).isEmpty();
         }
 
@@ -464,8 +493,8 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             long schemeId = insertScheme("LPSC-1");
             mapUserToScheme(poId, schemeId);
 
-            List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 10);
+            List<SchemeReadingComplianceRowDTO> result =
+                    repo.listSchemeReadingCompliance(SCHEMA, schemeId, poId, null, null, 0, 10);
             assertThat(result).isEmpty();
         }
 
@@ -479,8 +508,8 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(1));
             insertReading(schemeId, poId, 200.0, LocalDate.now().minusDays(2));
 
-            List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 10);
+            List<SchemeReadingComplianceRowDTO> result =
+                    repo.listSchemeReadingCompliance(SCHEMA, schemeId, poId, null, null, 0, 10);
             assertThat(result).hasSize(2);
             assertThat(result.get(0).schemeId()).isEqualTo(schemeId);
             assertThat(result.get(0).confirmedReading()).isNotNull();
@@ -497,9 +526,123 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
                 insertReading(schemeId, poId, i * 10.0, LocalDate.now().minusDays(i));
             }
 
-            List<PumpOperatorSchemeComplianceRowDTO> page =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, schemeId, poId, null, null, 0, 3);
+            List<SchemeReadingComplianceRowDTO> page =
+                    repo.listSchemeReadingCompliance(SCHEMA, schemeId, poId, null, null, 0, 3);
             assertThat(page).hasSize(3);
+        }
+
+        @Test
+        @DisplayName("lists submissions from non-pump-operators alongside the operator's own")
+        void includesNonPumpOperatorSubmissions() {
+            long poId = insertPumpOperator("919876540026", "PO Mixed Roles");
+            long soId = insertSectionOfficer("919876540027", "SO Mixed Roles");
+            backdateUserCreatedAt(poId, 10);
+            backdateUserCreatedAt(soId, 10);
+            long schemeId = insertScheme("LPSC-6");
+            mapUserToScheme(poId, schemeId);
+            mapUserToScheme(soId, schemeId);
+            insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(2));
+            insertReading(schemeId, soId, 200.0, LocalDate.now().minusDays(1));
+
+            List<SchemeReadingComplianceRowDTO> result =
+                    repo.listSchemeReadingCompliance(SCHEMA, schemeId, null, null, null, 0, 10);
+
+            assertThat(result).hasSize(2);
+            assertThat(result).extracting(SchemeReadingComplianceRowDTO::submittedByRole)
+                    .containsExactly("SECTION_OFFICER", "PUMP_OPERATOR");
+            assertThat(result).extracting(SchemeReadingComplianceRowDTO::submittedByRoleLabel)
+                    .containsExactly("SO", "PO");
+        }
+
+        @Test
+        @DisplayName("nulls the window-derived compliance figures for a non-pump-operator submitter")
+        void nullsWindowDerivedComplianceForNonPumpOperator() {
+            long soId = insertSectionOfficer("919876540028", "SO Null Compliance");
+            backdateUserCreatedAt(soId, 30);
+            long schemeId = insertScheme("LPSC-7");
+            mapUserToScheme(soId, schemeId);
+            insertReading(schemeId, soId, 100.0, LocalDate.now().minusDays(1));
+
+            SchemeReadingComplianceRowDTO row =
+                    repo.listSchemeReadingCompliance(SCHEMA, schemeId, null, null, null, 0, 10).get(0);
+
+            assertThat(row.onboardingDate()).isNull();
+            assertThat(row.totalActiveDays()).isNull();
+            assertThat(row.missedSubmissionDays()).isNull();
+            assertThat(row.inactiveDays()).isNull();
+            assertThat(row.missingSubmissionCount()).isNull();
+            assertThat(row.reportingRatePercent()).isNull();
+        }
+
+        @Test
+        @DisplayName("keeps the plain submission counts for a non-pump-operator submitter")
+        void keepsPlainCountsForNonPumpOperator() {
+            long soId = insertSectionOfficer("919876540029", "SO Plain Counts");
+            backdateUserCreatedAt(soId, 30);
+            long schemeId = insertScheme("LPSC-8");
+            mapUserToScheme(soId, schemeId);
+            insertReading(schemeId, soId, 100.0, LocalDate.now().minusDays(2));
+            insertReading(schemeId, soId, 200.0, LocalDate.now().minusDays(1));
+
+            SchemeReadingComplianceRowDTO row =
+                    repo.listSchemeReadingCompliance(SCHEMA, schemeId, null, null, null, 0, 10).get(0);
+
+            assertThat(row.submittedDays()).isEqualTo(2);
+            assertThat(row.lastSubmissionAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("still populates the window-derived figures for a pump operator")
+        void populatesWindowDerivedComplianceForPumpOperator() {
+            long poId = insertPumpOperator("919876540030", "PO Full Compliance");
+            backdateUserCreatedAt(poId, 9);
+            long schemeId = insertScheme("LPSC-9");
+            mapUserToScheme(poId, schemeId);
+            insertReading(schemeId, poId, 100.0, LocalDate.now().minusDays(1));
+
+            SchemeReadingComplianceRowDTO row =
+                    repo.listSchemeReadingCompliance(SCHEMA, schemeId, null, null, null, 0, 10).get(0);
+
+            assertThat(row.onboardingDate()).isEqualTo(LocalDate.now().minusDays(9));
+            assertThat(row.totalActiveDays()).isEqualTo(10);
+            assertThat(row.submittedDays()).isEqualTo(1);
+            assertThat(row.missedSubmissionDays()).isEqualTo(9);
+            assertThat(row.reportingRatePercent()).isEqualByComparingTo("10.00");
+        }
+
+        @Test
+        @DisplayName("keeps a submission visible after the submitter's scheme mapping is removed")
+        void keepsSubmissionAfterMappingRemoved() {
+            long soId = insertSectionOfficer("919876540031", "SO Unmapped");
+            backdateUserCreatedAt(soId, 10);
+            long schemeId = insertScheme("LPSC-10");
+            mapUserToScheme(soId, schemeId);
+            insertReading(schemeId, soId, 100.0, LocalDate.now().minusDays(1));
+            softDeleteSchemeMapping(soId, schemeId);
+
+            List<SchemeReadingComplianceRowDTO> result =
+                    repo.listSchemeReadingCompliance(SCHEMA, schemeId, null, null, null, 0, 10);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).schemeMappingStatus()).isNull();
+            assertThat(result.get(0).schemeName()).isEqualTo("Test Scheme");
+        }
+
+        @Test
+        @DisplayName("excludes readings outside the requested date range for every role")
+        void excludesReadingsOutsideRequestedRange() {
+            long soId = insertSectionOfficer("919876540032", "SO Ranged");
+            backdateUserCreatedAt(soId, 30);
+            long schemeId = insertScheme("LPSC-11");
+            mapUserToScheme(soId, schemeId);
+            insertReading(schemeId, soId, 100.0, LocalDate.now().minusDays(20));
+            insertReading(schemeId, soId, 200.0, LocalDate.now().minusDays(3));
+
+            List<SchemeReadingComplianceRowDTO> result = repo.listSchemeReadingCompliance(
+                    SCHEMA, schemeId, null, LocalDate.now().minusDays(5), LocalDate.now(), 0, 10);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).readingDate()).isEqualTo(LocalDate.now().minusDays(3));
         }
 
         @Test
@@ -512,8 +655,8 @@ class PublicPumpOperatorRepositoryIntegrationTest extends AbstractPostgresIT {
             mapUserToScheme(poId, mappedSchemeId);
             insertReading(mappedSchemeId, poId, 100.0, LocalDate.now().minusDays(1));
 
-            List<PumpOperatorSchemeComplianceRowDTO> result =
-                    repo.listPumpOperatorsBySchemeWithCompliance(SCHEMA, otherSchemeId, poId, null, null, 0, 10);
+            List<SchemeReadingComplianceRowDTO> result =
+                    repo.listSchemeReadingCompliance(SCHEMA, otherSchemeId, poId, null, null, 0, 10);
             assertThat(result).isEmpty();
         }
     }
