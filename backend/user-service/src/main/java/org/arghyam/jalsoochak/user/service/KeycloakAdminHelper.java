@@ -18,6 +18,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 @Component
@@ -79,38 +81,59 @@ public class KeycloakAdminHelper {
                 ? userCommonRepository.findTenantStateCodeById(user.tenantId()).orElse(null)
                 : null;
 
-        String firstName = null;
-        String lastName = null;
-        if (user.status() == AdminUserStatus.PENDING) {
-            // No Keycloak account exists yet — read names from the invite token metadata
-            var tokenOpt = userCommonRepository.findInviteTokenByEmail(user.email());
-            if (tokenOpt.isPresent()) {
-                firstName = metadataDecryptionHelper.parseAndDecrypt(tokenOpt.get().metadata(), "firstName");
-                lastName = metadataDecryptionHelper.parseAndDecrypt(tokenOpt.get().metadata(), "lastName");
-            }
-        } else if (user.uuid() != null) {
-            try {
-                UserRepresentation rep = keycloakProvider.getAdminInstance()
-                        .realm(keycloakProvider.getRealm())
-                        .users().get(user.uuid()).toRepresentation();
-                firstName = rep.getFirstName();
-                lastName = rep.getLastName();
-            } catch (Exception e) {
-                log.warn("Could not fetch Keycloak profile for user {}: {}", user.id(), e.getMessage());
-            }
-        }
+        String[] name = findAdminName(user);
 
         return AdminUserResponseDTO.builder()
                 .id(user.id())
                 .email(user.email())
-                .firstName(firstName)
-                .lastName(lastName)
+                .firstName(name[0])
+                .lastName(name[1])
                 .phoneNumber(user.phoneNumber())
                 .role(roleName)
                 .tenantCode(tenantCode)
                 .status(user.status().name())
                 .createdAt(user.createdAt())
                 .build();
+    }
+
+    /**
+     * Resolves an admin's first and last name, which live in Keycloak rather than in
+     * {@code tenant_admin_user_master_table}. Returns a two-element array; either element
+     * may be {@code null} when the profile is unavailable.
+     */
+    public String[] findAdminName(AdminUserRow user) {
+        if (user.status() == AdminUserStatus.PENDING) {
+            // No Keycloak account exists yet — read names from the invite token metadata
+            var tokenOpt = userCommonRepository.findInviteTokenByEmail(user.email());
+            if (tokenOpt.isPresent()) {
+                return new String[]{
+                        metadataDecryptionHelper.parseAndDecrypt(tokenOpt.get().metadata(), "firstName"),
+                        metadataDecryptionHelper.parseAndDecrypt(tokenOpt.get().metadata(), "lastName")
+                };
+            }
+        } else if (user.uuid() != null) {
+            try {
+                UserRepresentation rep = keycloakProvider.getAdminInstance()
+                        .realm(keycloakProvider.getRealm())
+                        .users().get(user.uuid()).toRepresentation();
+                return new String[]{rep.getFirstName(), rep.getLastName()};
+            } catch (Exception e) {
+                log.warn("Could not fetch Keycloak profile for user {}: {}", user.id(), e.getMessage());
+            }
+        }
+        return new String[]{null, null};
+    }
+
+    /**
+     * Joins an admin's first and last name into a display name, or returns {@code null}
+     * when neither is available.
+     */
+    public String findAdminDisplayName(AdminUserRow user) {
+        String[] name = findAdminName(user);
+        String joined = Stream.of(name[0], name[1])
+                .filter(part -> part != null && !part.isBlank())
+                .collect(Collectors.joining(" "));
+        return joined.isBlank() ? null : joined;
     }
 
     /**

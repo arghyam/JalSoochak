@@ -414,6 +414,30 @@ class AuthServiceImplTest {
         }
 
         @Test
+        @DisplayName("Should fall back to the Keycloak profile name for a tenant-less admin")
+        void refreshToken_tenantlessAdmin_usesKeycloakName() {
+            when(keycloakClient.refreshToken("valid-refresh")).thenReturn(tokenResponse());
+            when(userCommonRepository.findAdminUserByUuid("kc-uuid")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakAdminHelper.findAdminDisplayName(any(AdminUserRow.class))).thenReturn("Super Admin");
+
+            AuthResult result = authService.refreshToken("valid-refresh");
+
+            assertEquals("Super Admin", result.tokenResponse().getName());
+        }
+
+        @Test
+        @DisplayName("Should leave the name null when the Keycloak profile has none")
+        void refreshToken_tenantlessAdmin_nullNameWhenKeycloakHasNone() {
+            when(keycloakClient.refreshToken("valid-refresh")).thenReturn(tokenResponse());
+            when(userCommonRepository.findAdminUserByUuid("kc-uuid")).thenReturn(Optional.of(superUserRow()));
+            when(keycloakAdminHelper.findAdminDisplayName(any(AdminUserRow.class))).thenReturn(null);
+
+            AuthResult result = authService.refreshToken("valid-refresh");
+
+            assertNull(result.tokenResponse().getName());
+        }
+
+        @Test
         @DisplayName("Should throw AccountDeactivatedException when user is deactivated")
         void refreshToken_deactivatedUser_throwsAccountDeactivated() {
             when(keycloakClient.refreshToken("valid-refresh")).thenReturn(tokenResponse());
