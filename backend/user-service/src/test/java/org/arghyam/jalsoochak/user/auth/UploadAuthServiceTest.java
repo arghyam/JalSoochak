@@ -18,6 +18,9 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR;
@@ -131,6 +134,7 @@ class UploadAuthServiceTest {
                     .expiresAt(Instant.now().plusSeconds(300))
                     .build();
             when(jwtTokenValidator.decodeAndValidate("token")).thenReturn(jwt);
+            when(userUploadRepository.findUserIdByUuid("tenant_mp", null)).thenReturn(null);
             when(userUploadRepository.findUserIdByEmailOrPhone("tenant_mp", "admin@mp.gov", null))
                     .thenReturn(42);
 
@@ -151,6 +155,7 @@ class UploadAuthServiceTest {
                     .expiresAt(Instant.now().plusSeconds(300))
                     .build();
             when(jwtTokenValidator.decodeAndValidate("token2")).thenReturn(jwt);
+            when(userUploadRepository.findUserIdByUuid("tenant_mp", null)).thenReturn(null);
             when(userUploadRepository.findUserIdByEmailOrPhone("tenant_mp", "cadmin@mp.gov", null))
                     .thenReturn(7);
 
@@ -183,6 +188,59 @@ class UploadAuthServiceTest {
     class UserIdentity {
 
         @Test
+        @DisplayName("resolves the user id from the subject when no PII claims are present")
+        void resolvesFromSubject() {
+            Jwt jwt = Jwt.withTokenValue("token7")
+                    .header("alg", "RS256")
+                    .subject("kc-uuid-1")
+                    .claim("realm_access", Map.of("roles", List.of("STATE_ADMIN")))
+                    .issuedAt(Instant.now())
+                    .expiresAt(Instant.now().plusSeconds(300))
+                    .build();
+            when(jwtTokenValidator.decodeAndValidate("token7")).thenReturn(jwt);
+            when(userUploadRepository.findUserIdByUuid("tenant_mp", "kc-uuid-1")).thenReturn(77);
+
+            assertThat(service.requireStateAdminUserId("tenant_mp", "Bearer token7")).isEqualTo(77);
+            verify(userUploadRepository, never()).findUserIdByEmailOrPhone(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("prefers the subject over the legacy email identity")
+        void subjectWinsOverEmail() {
+            Jwt jwt = Jwt.withTokenValue("token8")
+                    .header("alg", "RS256")
+                    .subject("kc-uuid-2")
+                    .claim("email", "admin@mp.gov")
+                    .claim("realm_access", Map.of("roles", List.of("STATE_ADMIN")))
+                    .issuedAt(Instant.now())
+                    .expiresAt(Instant.now().plusSeconds(300))
+                    .build();
+            when(jwtTokenValidator.decodeAndValidate("token8")).thenReturn(jwt);
+            when(userUploadRepository.findUserIdByUuid("tenant_mp", "kc-uuid-2")).thenReturn(88);
+
+            assertThat(service.requireStateAdminUserId("tenant_mp", "Bearer token8")).isEqualTo(88);
+            verify(userUploadRepository, never()).findUserIdByEmailOrPhone(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("falls back to the legacy email identity when the subject does not resolve")
+        void fallsBackToEmailWhenSubjectUnresolved() {
+            Jwt jwt = Jwt.withTokenValue("token9")
+                    .header("alg", "RS256")
+                    .subject("kc-uuid-unknown")
+                    .claim("email", "legacy@mp.gov")
+                    .claim("realm_access", Map.of("roles", List.of("STATE_ADMIN")))
+                    .issuedAt(Instant.now())
+                    .expiresAt(Instant.now().plusSeconds(300))
+                    .build();
+            when(jwtTokenValidator.decodeAndValidate("token9")).thenReturn(jwt);
+            when(userUploadRepository.findUserIdByUuid("tenant_mp", "kc-uuid-unknown")).thenReturn(null);
+            when(userUploadRepository.findUserIdByEmailOrPhone("tenant_mp", "legacy@mp.gov", null)).thenReturn(99);
+
+            assertThat(service.requireStateAdminUserId("tenant_mp", "Bearer token9")).isEqualTo(99);
+        }
+
+        @Test
         @DisplayName("throws UNAUTHORIZED when email is null and preferred_username is null")
         void noIdentityClaims() {
             Jwt jwt = Jwt.withTokenValue("token4")
@@ -192,6 +250,8 @@ class UploadAuthServiceTest {
                     .expiresAt(Instant.now().plusSeconds(300))
                     .build();
             when(jwtTokenValidator.decodeAndValidate("token4")).thenReturn(jwt);
+            when(userUploadRepository.findUserIdByUuid("tenant_mp", null)).thenReturn(null);
+            when(userUploadRepository.findUserIdByEmailOrPhone("tenant_mp", null, null)).thenReturn(null);
 
             assertThatThrownBy(() -> service.requireStateAdminUserId("tenant_mp", "Bearer token4"))
                     .isInstanceOf(ResponseStatusException.class)
@@ -209,6 +269,7 @@ class UploadAuthServiceTest {
                     .expiresAt(Instant.now().plusSeconds(300))
                     .build();
             when(jwtTokenValidator.decodeAndValidate("token5")).thenReturn(jwt);
+            when(userUploadRepository.findUserIdByUuid("tenant_mp", null)).thenReturn(null);
             when(userUploadRepository.findUserIdByEmailOrPhone("tenant_mp", "ghost@mp.gov", null))
                     .thenReturn(null);
 
@@ -228,6 +289,7 @@ class UploadAuthServiceTest {
                     .expiresAt(Instant.now().plusSeconds(300))
                     .build();
             when(jwtTokenValidator.decodeAndValidate("token6")).thenReturn(jwt);
+            when(userUploadRepository.findUserIdByUuid("tenant_mp", null)).thenReturn(null);
             when(userUploadRepository.findUserIdByEmailOrPhone("tenant_mp", null, "adminuser"))
                     .thenReturn(55);
 
