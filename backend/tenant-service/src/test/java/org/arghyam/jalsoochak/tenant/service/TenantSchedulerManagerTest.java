@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.scheduling.support.CronTrigger;
 
+import java.time.DayOfWeek;
 import java.util.List;
 import java.util.concurrent.ScheduledFuture;
 
@@ -161,8 +162,98 @@ class TenantSchedulerManagerTest {
 
         runnableCaptor.getAllValues().get(3).run(); // weekly-report runnable
 
-        verify(weeklySituationReportSchedulerService).processWeeklyReportsForTenant("tenant_mp", 1);
+        verify(weeklySituationReportSchedulerService)
+                .processWeeklyReportsForTenant("tenant_mp", 1, DayOfWeek.MONDAY);
         verifyNoInteractions(dailySituationReportSchedulerService);
+    }
+
+    @Test
+    void loadAndScheduleAll_weeklyReportTask_reportsConfiguredWeekStartDay() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        // Fires Monday, but reports a Thursday-Wednesday week: the two settings are independent.
+        stubWeeklyConfig(1, 1, 4);
+
+        manager.loadAndScheduleAll();
+
+        ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        ArgumentCaptor<CronTrigger> triggerCaptor = ArgumentCaptor.forClass(CronTrigger.class);
+        verify(taskScheduler, times(4)).schedule(runnableCaptor.capture(), triggerCaptor.capture());
+
+        runnableCaptor.getAllValues().get(3).run();
+
+        verify(weeklySituationReportSchedulerService)
+                .processWeeklyReportsForTenant("tenant_mp", 1, DayOfWeek.THURSDAY);
+        // The cron still fires on Monday — weekStartDay must not leak into the trigger.
+        assertThat(triggerCaptor.getAllValues().get(3).toString()).contains("0 0 9 ? * 1");
+    }
+
+    @Test
+    void rescheduleForTenant_invalidWeekStartDay_doesNotCancelExistingFutures() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        manager.loadAndScheduleAll();
+
+        // 8 is out of the cron 0-7 range. It must be rejected by validation rather than reaching
+        // DayOfWeek.of, which would throw after the old futures had already been cancelled.
+        stubWeeklyConfig(1, 1, 8);
+
+        assertThatThrownBy(() -> manager.rescheduleForTenant(1, "MP"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("weekly-report");
+
+        verify(future, never()).cancel(anyBoolean());
+    }
+
+    @Test
+    void scheduleForTenant_warnsWhenCronDayAndWeekStartDayDiffer() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        stubWeeklyConfig(1, 1, 4); // fires Monday, week starts Thursday
+
+        assertThat(captureLogsOf(this::runLoadAndSchedule))
+                .anySatisfy(e -> {
+                    assertThat(e.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+                    assertThat(e.getFormattedMessage())
+                            .contains("MONDAY")
+                            .contains("THURSDAY");
+                });
+    }
+
+    @Test
+    void scheduleForTenant_doesNotWarnWhenCronDayAndWeekStartDayAreBothSunday() {
+        TenantResponseDTO t = TenantResponseDTO.builder().id(1).stateCode("MP").status(TenantStatusEnum.ACTIVE.name()).build();
+        when(tenantCommonRepository.findAll()).thenReturn(List.of(t));
+        stubConfigs(1, 8, 0, 9, 0);
+        // Cron 0 and weekStartDay 7 are the same day; comparing the raw ints would warn spuriously.
+        stubWeeklyConfig(1, 0, 7);
+
+        assertThat(captureLogsOf(this::runLoadAndSchedule))
+                .noneMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN);
+    }
+
+    private void runLoadAndSchedule() {
+        manager.loadAndScheduleAll();
+    }
+
+    /** Runs {@code action} with a list appender attached to the scheduler's logger. */
+    private List<ch.qos.logback.classic.spi.ILoggingEvent> captureLogsOf(Runnable action) {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(TenantSchedulerManager.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        return appender.list;
     }
 
     @Test
@@ -407,6 +498,14 @@ class TenantSchedulerManagerTest {
         when(tenantConfigService.getDailyReportConfig(tenantId))
                 .thenReturn(DailyReportScheduleConfig.builder().hour(16).minute(0).build());
         when(tenantConfigService.getWeeklyReportConfig(tenantId))
-                .thenReturn(WeeklyReportScheduleConfig.builder().dayOfWeek(1).hour(9).minute(0).build());
+                .thenReturn(WeeklyReportScheduleConfig.builder()
+                        .dayOfWeek(1).hour(9).minute(0).weekStartDay(1).build());
+    }
+
+    /** Stubs the weekly config alone, leaving the other three jobs on their defaults. */
+    private void stubWeeklyConfig(int tenantId, int cronDayOfWeek, int weekStartDay) {
+        when(tenantConfigService.getWeeklyReportConfig(tenantId))
+                .thenReturn(WeeklyReportScheduleConfig.builder()
+                        .dayOfWeek(cronDayOfWeek).hour(9).minute(0).weekStartDay(weekStartDay).build());
     }
 }

@@ -14,7 +14,7 @@ import java.util.List;
 import static org.arghyam.jalsoochak.analytics.service.ReportMaths.perDayRatio;
 
 /**
- * Builds the {@link WeeklyReportKpiDTO} for one officer over the last complete Monday–Sunday week,
+ * Builds the {@link WeeklyReportKpiDTO} for one officer over the week carried by the request,
  * with the week before it as the comparison column.
  *
  * <p>Both report variants are computed here; the officer's role selects only the supply-day

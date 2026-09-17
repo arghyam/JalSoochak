@@ -37,6 +37,7 @@ import org.arghyam.jalsoochak.tenant.dto.internal.ReasonListConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.SimpleConfigValueDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TenantLogoResult;
 import org.arghyam.jalsoochak.tenant.dto.internal.WaterSupplyThresholdConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.WeeklyReportTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.CreateTenantRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetTenantConfigRequestDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.UpdateTenantRequestDTO;
@@ -346,6 +347,14 @@ public class TenantManagementServiceImpl implements TenantManagementService {
                     throw new InvalidConfigValueException(
                             "Channels not supported at system level: " + invalid);
                 }
+            }
+
+            if (key == TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME) {
+                // Enforced validation for JsonNode-bound configs (bean validation does not run on
+                // treeToValue). Checked before the upsert: an out-of-range day that reached the DB would
+                // make the post-commit reschedule throw, leaving persisted config that unschedules every
+                // job for this tenant on the next startup.
+                ((WeeklyReportTimingConfigDTO) dto).validatedWeekStartDay();
             }
 
             if (key.getType() == ConfigType.GENERIC) {

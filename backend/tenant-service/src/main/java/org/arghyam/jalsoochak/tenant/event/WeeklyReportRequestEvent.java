@@ -25,10 +25,10 @@ public class WeeklyReportRequestEvent {
     private String tenantSchema;
     private Long officerUserId;
     private String officerUserType;    // SECTION_OFFICER | SUB_DIVISIONAL_OFFICER
-    private String weekStart;          // ISO-8601, Monday of the reported week
-    private String weekEnd;            // ISO-8601, Sunday of the reported week
-    private String previousWeekStart;  // ISO-8601, Monday of the comparison week
-    private String previousWeekEnd;    // ISO-8601, Sunday of the comparison week
+    private String weekStart;          // ISO-8601, first day of the reported week
+    private String weekEnd;            // ISO-8601, last day of the reported week
+    private String previousWeekStart;  // ISO-8601, first day of the comparison week
+    private String previousWeekEnd;    // ISO-8601, last day of the comparison week
     private String correlationId;      // ties one report run's logs across tenant/analytics/message
 
     /** SDO reports only: Section Officer user ids under this SDO (share ≥1 active scheme with it).

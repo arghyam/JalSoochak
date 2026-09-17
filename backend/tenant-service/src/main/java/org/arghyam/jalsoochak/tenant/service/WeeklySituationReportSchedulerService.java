@@ -27,6 +27,10 @@ import java.util.UUID;
  * daily report, both Section Officers and Sub-Divisional Officers receive this one — they get
  * different layouts, resolved downstream from {@code officerUserType}.</p>
  *
+ * <p>The reported window is the last complete week beginning on the tenant's configured
+ * {@code weekStartDay}, which the caller resolves from config and passes in. It is independent of the
+ * day the job fires on.</p>
+ *
  * <p>This service reads only officer <em>user ids</em> (no PII); PII is resolved by message-service at
  * delivery time.</p>
  */
@@ -48,8 +52,8 @@ public class WeeklySituationReportSchedulerService {
     @Value("${weekly-report.officer.user-types:SECTION_OFFICER,SUB_DIVISIONAL_OFFICER}")
     private String officerUserTypesCsv;
 
-    public void processWeeklyReportsForTenant(String schema, int tenantId) {
-        LocalDate weekEnd = lastCompletedSunday(LocalDate.now(IST));
+    public void processWeeklyReportsForTenant(String schema, int tenantId, DayOfWeek weekStartDay) {
+        LocalDate weekEnd = lastCompletedWeekEnd(LocalDate.now(IST), weekStartDay);
         LocalDate weekStart = weekEnd.minusDays(DAYS_IN_WEEK - 1L);
         LocalDate previousWeekEnd = weekEnd.minusDays(DAYS_IN_WEEK);
         LocalDate previousWeekStart = weekStart.minusDays(DAYS_IN_WEEK);
@@ -58,8 +62,10 @@ public class WeeklySituationReportSchedulerService {
         long startNanos = System.nanoTime();
         List<String> roles = officerRoles();
 
-        log.info("[WeeklyReportJob] corr={} start: tenant={} schema={} week={}..{} prevWeek={}..{} roles={}",
-                correlationId, tenantId, schema, weekStart, weekEnd, previousWeekStart, previousWeekEnd, roles);
+        log.info("[WeeklyReportJob] corr={} start: tenant={} schema={} weekStartDay={} week={}..{}"
+                        + " prevWeek={}..{} roles={}",
+                correlationId, tenantId, schema, weekStartDay, weekStart, weekEnd,
+                previousWeekStart, previousWeekEnd, roles);
 
         // Requested-count per role — the denominator the downstream GENERATED/SENT counts reconcile
         // against. LinkedHashMap keeps the configured order.
@@ -107,15 +113,21 @@ public class WeeklySituationReportSchedulerService {
     }
 
     /**
-     * The Sunday that closed the last <em>complete</em> Monday–Sunday week before {@code today}.
+     * The day that closed the last <em>complete</em> week before {@code today}, for a week running
+     * {@code weekStartDay} through the day before it. With {@code weekStartDay = MONDAY} this is the
+     * previous Sunday, the long-standing behaviour.
      *
      * <p>Derived from the run day rather than assumed to be "yesterday", because the weekly cron is
-     * per-tenant configurable and need not fire on a Monday. Run on a Monday this is yesterday; run on
-     * a Thursday it is the Sunday four days back; run on a Sunday it is the Sunday a week back, since
-     * today's week has not closed yet. The reported week therefore never includes a partial day.</p>
+     * per-tenant configurable and need not fire on the day the week starts. For a Monday–Sunday week,
+     * run on a Monday this is yesterday; run on a Thursday it is the Sunday four days back; run on a
+     * Sunday it is the Sunday a week back, since today's week has not closed yet.</p>
+     *
+     * <p>{@link TemporalAdjusters#previous} is strict — it never returns {@code today} — which is what
+     * guarantees the reported week never includes a day that is still in progress.</p>
      */
-    private static LocalDate lastCompletedSunday(LocalDate today) {
-        return today.with(TemporalAdjusters.previous(DayOfWeek.SUNDAY));
+    private static LocalDate lastCompletedWeekEnd(LocalDate today, DayOfWeek weekStartDay) {
+        // minus(1) rolls, so MONDAY yields SUNDAY.
+        return today.with(TemporalAdjusters.previous(weekStartDay.minus(1)));
     }
 
     private List<String> officerRoles() {

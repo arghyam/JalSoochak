@@ -15,8 +15,10 @@ import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import static org.arghyam.jalsoochak.message.service.ReportPdfCanvas.BLANK_LINE;
@@ -137,10 +139,25 @@ public class WeeklyReportPdfService {
         // IST, like every other date in this pipeline — a UTC "today" would print yesterday for a
         // report generated in the small hours of Monday morning.
         c.labelValueLine(11, "Date: ", LocalDate.now(REPORT_ZONE).format(HEADER));
+        // Day names are derived, not fixed: the reported week starts on the tenant's configured
+        // weekStartDay, so it is only Monday-Sunday by default.
         c.labelValueLine(11, "Reporting Period: ",
-                "Monday " + weekStart.format(RANGE) + " to Sunday " + weekEnd.format(RANGE));
+                dayName(weekStart) + " " + weekStart.format(RANGE)
+                        + " to " + dayName(weekEnd) + " " + weekEnd.format(RANGE));
         c.moveDown(BLANK_LINE);
         c.headerLinkLine(9, "Visit JalSoochak Dashboard at ", dashboardUrl, " for more insights");
+    }
+
+    /**
+     * Full English name of the weekday, e.g. {@code Thursday}.
+     *
+     * <p>The locale is pinned rather than left to the platform default: this report is English
+     * throughout, and {@code ReportPdfCanvas} replaces characters its font cannot encode with
+     * {@code ?}, so a JVM started with a non-Latin default locale would silently ship a header of
+     * question marks rather than fail.</p>
+     */
+    private static String dayName(LocalDate date) {
+        return date.getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH);
     }
 
     private void drawSummary(ReportPdfCanvas c, WeeklyReportKpis kpis, boolean sdo) throws IOException {

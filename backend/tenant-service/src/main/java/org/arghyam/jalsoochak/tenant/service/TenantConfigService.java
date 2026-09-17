@@ -71,6 +71,10 @@ public class TenantConfigService {
     @Value("${weekly-report.schedule.minute:0}")
     private int defaultWeeklyReportMinute;
 
+    /** Day the reported week begins on, same cron convention. 1 = Monday, i.e. a Monday–Sunday week. */
+    @Value("${weekly-report.week-start-day:1}")
+    private int defaultWeeklyReportWeekStartDay;
+
     public NudgeScheduleConfig getNudgeConfig(int tenantId) {
         String json = fetchConfigValue(tenantId, NUDGE_KEY);
         if (json == null) return defaultNudgeConfig();
@@ -133,23 +137,29 @@ public class TenantConfigService {
     }
 
     /**
-     * Schedule for the Weekly Water Service Situation Report (both SO and SDO), from config key
-     * {@code WEEKLY_SITUATION_REPORT_TIME}:
-     * {@code {"weeklyReport":{"schedule":{"dayOfWeek":1,"hour":9,"minute":0}}}}.
+     * Schedule and reporting window for the Weekly Water Service Situation Report (both SO and SDO),
+     * from config key {@code WEEKLY_SITUATION_REPORT_TIME}:
+     * {@code {"weeklyReport":{"schedule":{"dayOfWeek":1,"hour":9,"minute":0},"weekStartDay":1}}}.
+     *
+     * <p>{@code schedule} says when the job fires; {@code weekStartDay} — a sibling of it, not a cron
+     * field — says which seven days the report covers. Both use the cron convention 0–7.</p>
      *
      * <p>A missing row or an unparseable value degrades to the application defaults rather than
      * throwing — a tenant with bad config still gets its report on the default schedule instead of
-     * silently getting none.</p>
+     * silently getting none. Per-field too: an absent or {@code null} {@code weekStartDay} falls back
+     * to the default, while an explicit {@code 0} is honoured as Sunday.</p>
      */
     public WeeklyReportScheduleConfig getWeeklyReportConfig(int tenantId) {
         String json = fetchConfigValue(tenantId, WEEKLY_REPORT_KEY);
         if (json == null) return defaultWeeklyReportConfig();
         try {
-            JsonNode sched = objectMapper.readTree(json).path("weeklyReport").path("schedule");
+            JsonNode weekly = objectMapper.readTree(json).path("weeklyReport");
+            JsonNode sched = weekly.path("schedule");
             return WeeklyReportScheduleConfig.builder()
                     .dayOfWeek(sched.path("dayOfWeek").asInt(defaultWeeklyReportDayOfWeek))
                     .hour(sched.path("hour").asInt(defaultWeeklyReportHour))
                     .minute(sched.path("minute").asInt(defaultWeeklyReportMinute))
+                    .weekStartDay(weekly.path("weekStartDay").asInt(defaultWeeklyReportWeekStartDay))
                     .build();
         } catch (Exception e) {
             log.warn("[TenantConfig] Failed to parse weekly-report config for tenant={}: {}", tenantId, e.getMessage());
@@ -162,6 +172,7 @@ public class TenantConfigService {
                 .dayOfWeek(defaultWeeklyReportDayOfWeek)
                 .hour(defaultWeeklyReportHour)
                 .minute(defaultWeeklyReportMinute)
+                .weekStartDay(defaultWeeklyReportWeekStartDay)
                 .build();
     }
 

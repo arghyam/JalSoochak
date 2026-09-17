@@ -51,8 +51,8 @@ public class WeeklySituationReportRepository {
      * predicate, leaving the SO's own report and the SDO's own totals unnarrowed. The id is bound,
      * never concatenated; the explicit casts let PostgreSQL infer the type when the bind is null.</p>
      *
-     * @param start Monday of the week, inclusive
-     * @param end   Sunday of the week, inclusive
+     * @param start first day of the week, inclusive
+     * @param end   last day of the week, inclusive
      */
     public List<SchemeWeekSnapshot> listSchemeWeekSnapshots(
             Integer tenantId, Long userId, LocalDate start, LocalDate end, Long supervisorUserId) {

@@ -42,11 +42,19 @@ class WeeklyReportPdfServiceTest {
     }
 
     private WeeklyReportKpis kpis(int supplyingThisWeek, int supplyingLastWeek) {
+        // 2026-07-13 is a Monday and 2026-07-19 the Sunday that closes it: the default window.
+        return kpisForWeek(supplyingThisWeek, supplyingLastWeek,
+                "2026-07-13", "2026-07-19", "2026-07-06", "2026-07-12");
+    }
+
+    private WeeklyReportKpis kpisForWeek(int supplyingThisWeek, int supplyingLastWeek,
+                                         String weekStart, String weekEnd,
+                                         String previousWeekStart, String previousWeekEnd) {
         return WeeklyReportKpis.builder()
-                .weekStart("2026-07-13")
-                .weekEnd("2026-07-19")
-                .previousWeekStart("2026-07-06")
-                .previousWeekEnd("2026-07-12")
+                .weekStart(weekStart)
+                .weekEnd(weekEnd)
+                .previousWeekStart(previousWeekStart)
+                .previousWeekEnd(previousWeekEnd)
                 .week(WeeklyReportKpis.WeekKpis.builder()
                         .totalSchemes(148).schemesSupplying(supplyingThisWeek).schemesNotSupplying(6)
                         .schemesLowLpcd(4).avgLpcd(63).build())
@@ -143,6 +151,18 @@ class WeeklyReportPdfServiceTest {
             String text = render(SO, kpis(142, 140), List.of(), List.of(), List.of(), List.of());
 
             assertThat(text).contains("Monday 13-Jul-2026 to Sunday 19-Jul-2026");
+        }
+
+        @Test
+        void namesTheReportingWeekForANonMondayStartDay() throws Exception {
+            // A tenant on weekStartDay=THURSDAY reports Thu 16-Jul to Wed 22-Jul. The day names are
+            // derived from the dates, so they must follow the window rather than stay on Monday-Sunday.
+            String text = render(SO, kpisForWeek(142, 140,
+                            "2026-07-16", "2026-07-22", "2026-07-09", "2026-07-15"),
+                    List.of(), List.of(), List.of(), List.of());
+
+            assertThat(text).contains("Thursday 16-Jul-2026 to Wednesday 22-Jul-2026");
+            assertThat(text).doesNotContain("Monday 16-Jul-2026");
         }
 
         @Test

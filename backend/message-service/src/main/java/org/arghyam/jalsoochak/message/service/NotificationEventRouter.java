@@ -1114,7 +1114,7 @@ public class NotificationEventRouter {
         }
 
         /**
-         * Names the date the terminal lines carry: the day a daily report covers, the Monday a weekly
+         * Names the date the terminal lines carry: the day a daily report covers, the first day a weekly
          * one opens on. Two different facts, so they do not share a field name.
          */
         String periodField() {

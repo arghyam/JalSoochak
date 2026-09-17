@@ -301,4 +301,50 @@ class WeeklySituationReportServiceTest {
                     eq(TENANT), eq(OFFICER), eq(WEEK_START), eq(WEEK_END), isNull());
         }
     }
+
+    @Nested
+    @DisplayName("window start day")
+    class WindowStartDay {
+
+        // The reported week begins on the tenant's configured weekStartDay, so it is only
+        // Monday-Sunday by default. Nothing here may depend on which weekday the window opens on.
+        private static final LocalDate THU_START = LocalDate.of(2026, 6, 4);   // Thursday
+        private static final LocalDate WED_END = LocalDate.of(2026, 6, 10);    // Wednesday
+
+        @Test
+        void queriesTheWindowItWasGivenWithoutSnappingToMonday() {
+            service.buildReport(TENANT, OFFICER, SO, THU_START, WED_END,
+                    THU_START.minusDays(7), WED_END.minusDays(7), null);
+
+            verify(reportRepository).listSchemeWeekSnapshots(
+                    eq(TENANT), eq(OFFICER), eq(THU_START), eq(WED_END), isNull());
+        }
+
+        @Test
+        void producesTheSameKpisForAThursdayWeekAsForAMondayOne() {
+            // Same scheme data, same seven-day span, different start day: the KPI maths must not move.
+            when(reportRepository.listSchemeWeekSnapshots(TENANT, OFFICER, THU_START, WED_END, null))
+                    .thenReturn(List.of(healthy(1, 5), healthy(2, 0)));
+            givenWeek(healthy(1, 5), healthy(2, 0));
+
+            WeeklyReportKpiDTO thursdayWeek = service.buildReport(TENANT, OFFICER, SO,
+                    THU_START, WED_END, THU_START.minusDays(7), WED_END.minusDays(7), null);
+            WeeklyReportKpiDTO mondayWeek = build(SO);
+
+            assertThat(thursdayWeek.getWeek().getSchemesSupplying())
+                    .isEqualTo(mondayWeek.getWeek().getSchemesSupplying());
+            assertThat(thursdayWeek.getWeek().getAvgLpcd()).isEqualTo(mondayWeek.getWeek().getAvgLpcd());
+        }
+
+        @Test
+        void echoesTheConfiguredWindowBackIntoTheKpis() {
+            // message-service renders the PDF's reporting-period line from these, so they must be the
+            // dates the job chose rather than anything re-derived here.
+            WeeklyReportKpiDTO kpis = service.buildReport(TENANT, OFFICER, SO, THU_START, WED_END,
+                    THU_START.minusDays(7), WED_END.minusDays(7), null);
+
+            assertThat(kpis.getWeekStart()).isEqualTo(THU_START.toString());
+            assertThat(kpis.getWeekEnd()).isEqualTo(WED_END.toString());
+        }
+    }
 }

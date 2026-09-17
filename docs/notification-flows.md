@@ -3,8 +3,9 @@
 This document covers the six WhatsApp notification pipelines in JalSoochak V2: nudges, escalations, welcome messages, login OTPs, daily situation reports, and weekly situation reports.
 
 > the daily report goes to **Section Officers only**, covers **today 00:00 up to the cron time**
-> (default 16:00 IST), and the weekly report goes to **both SOs and SDOs** on Monday 09:00 IST
-> covering the previous full Mon–Sun week. Both land in their own MinIO buckets
+> (default 16:00 IST), and the weekly report goes to **both SOs and SDOs** on the tenant's configured
+> weekly cron (default Monday 09:00 IST) covering the last complete week beginning on the tenant's
+> configured `weekStartDay` (default Monday, i.e. the previous full Mon–Sun week). Both land in their own MinIO buckets
 > (`daily-water-reports`, `weekly-water-reports`) under role and period folders. All six flows share the same Kafka transport layer — events are published to `common-topic` and consumed by `message-service`, which routes them to the Glific WhatsApp API.
 
 ---

@@ -136,10 +136,20 @@ public enum TenantConfigKeyEnum implements ConfigKey {
     DAILY_SITUATION_REPORT_TIME(ConfigType.GENERIC, DailyReportTimingConfigDTO.class, false, false, false),
 
     /**
-     * Weekly Water Service Situation Report schedule (Section and Sub-Divisional Officers).
-     * The report always covers the last complete Monday–Sunday week before it runs.
-     * Format: { weeklyReport: { schedule: { dayOfWeek: 1, hour: 9, minute: 0 } } }
-     * Optional: an unset tenant runs on the application default rather than being incomplete.
+     * Weekly Water Service Situation Report schedule and window (Section and Sub-Divisional Officers).
+     * Format: { weeklyReport: { schedule: { dayOfWeek: 1, hour: 9, minute: 0 }, weekStartDay: 1 } }
+     * <p>
+     * {@code schedule} is when the job fires; {@code weekStartDay} is which seven days it reports on.
+     * Both use the cron convention 0–7, where both 0 and 7 are Sunday and 1 is Monday. The report always
+     * covers the last COMPLETE week beginning on {@code weekStartDay}, so 1 gives Monday–Sunday and 4
+     * gives Thursday–Wednesday; it never includes a day that has not finished. The two settings are
+     * independent — the scheduler warns when they differ, since the gap is how stale the data is on
+     * delivery.
+     * <p>
+     * Changing {@code weekStartDay} makes the next window overlap the one already reported, so officers
+     * may receive two reports covering some of the same days. There is no de-duplication.
+     * <p>
+     * Optional: an unset tenant runs on the application default (Monday) rather than being incomplete.
      */
     WEEKLY_SITUATION_REPORT_TIME(ConfigType.GENERIC, WeeklyReportTimingConfigDTO.class, false, false, false),
 

@@ -22,7 +22,7 @@ import java.util.List;
 @AllArgsConstructor
 public class WeeklyReportKpiDTO {
 
-    /** Reported week (Monday–Sunday, IST) and the comparison week before it. ISO-8601 strings. */
+    /** Reported week (seven days, IST) and the comparison week before it. ISO-8601 strings. */
     private String weekStart;
     private String weekEnd;
     private String previousWeekStart;

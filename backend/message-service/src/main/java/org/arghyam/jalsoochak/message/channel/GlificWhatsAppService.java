@@ -271,7 +271,7 @@ public class GlificWhatsAppService {
     /**
      * Refuses to start when weekly delivery is live without an approved template.
      *
-     * <p>Without this the job would run every Monday, generate and upload a PDF, and then fail per
+     * <p>Without this the job would run on each tenant's weekly schedule, generate and upload a PDF, and then fail per
      * message at send time — a failure discovered from the logs rather than at deploy, with officers
      * silently receiving nothing meanwhile.</p>
      */
@@ -761,7 +761,7 @@ public class GlificWhatsAppService {
      *
      * <p>Parameter order is Glific's, not ours: body variables first, the button's URL suffix last.</p>
      *
-     * @param weekStart the Monday of the reported week — template variable {{2}}
+     * @param weekStart the first day of the reported week — template variable {{2}}
      * @return the Glific message id, template id and mode of the accepted send; a dry run returns
      *         {@link GlificSendResult#suppressed}
      */

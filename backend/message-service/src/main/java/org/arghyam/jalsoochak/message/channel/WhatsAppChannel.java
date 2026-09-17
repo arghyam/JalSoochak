@@ -193,7 +193,7 @@ public class WhatsAppChannel implements NotificationChannel {
      * Sends the weekly report, mirroring {@link #sendDailyReport} — same outcome type, same failure
      * classification, so the router treats both reports identically.
      *
-     * @param weekStart the Monday of the reported week, template variable {{2}}
+     * @param weekStart the first day of the reported week, template variable {{2}}
      */
     public DailyReportSendOutcome sendWeeklyReport(long contactId, String documentUrl, String officerUserType,
                                                    LocalDate weekStart, String officerName) {

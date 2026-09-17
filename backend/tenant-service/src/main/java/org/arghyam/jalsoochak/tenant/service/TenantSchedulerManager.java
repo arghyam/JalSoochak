@@ -14,6 +14,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Component;
 
+import java.time.DayOfWeek;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
@@ -120,6 +121,18 @@ public class TenantSchedulerManager {
         String weeklyCron = String.format(WEEKLY_CRON_FORMAT,
                 weeklyCfg.getMinute(), weeklyCfg.getHour(), weeklyCfg.getDayOfWeek());
 
+        // Safe: validateScheduleConfig has already range-checked both fields.
+        DayOfWeek weekStartDay = weeklyCfg.getWeekStartDayOfWeek();
+        DayOfWeek weeklyCronDay = WeeklyReportScheduleConfig.toDayOfWeek(weeklyCfg.getDayOfWeek());
+        // Compare the converted days, not the raw ints: cron 0 and 7 are both Sunday, and comparing
+        // ints would warn about a tenant whose two settings actually agree.
+        if (weeklyCronDay != weekStartDay) {
+            log.warn("[Scheduler] Tenant {} ({}): weekly report fires on {} but the reported week starts on"
+                            + " {} and ends on {} — its newest data will be {} day(s) old on delivery",
+                    tenantId, stateCode, weeklyCronDay, weekStartDay, weekStartDay.minus(1),
+                    daysBetweenForward(weekStartDay.minus(1), weeklyCronDay));
+        }
+
         futures.put("nudge_" + tenantId,
                 taskScheduler.schedule(
                         () -> {
@@ -157,15 +170,27 @@ public class TenantSchedulerManager {
                 taskScheduler.schedule(
                         () -> {
                             try {
-                                weeklySituationReportSchedulerService.processWeeklyReportsForTenant(schema, tenantId);
+                                weeklySituationReportSchedulerService.processWeeklyReportsForTenant(
+                                        schema, tenantId, weekStartDay);
                             } catch (Exception e) {
                                 log.error("[Scheduler] Weekly report job failed for tenant={}: {}", tenantId, e.getMessage(), e);
                             }
                         },
                         new CronTrigger(weeklyCron, TimeZone.getTimeZone(IST_ZONE))));
 
-        log.info("[Scheduler] Tenant {} ({}): nudge={}, escalation={}, dailyReport={}, weeklyReport={}",
-                tenantId, stateCode, nudgeCron, escalCron, dailyCron, weeklyCron);
+        log.info("[Scheduler] Tenant {} ({}): nudge={}, escalation={}, dailyReport={}, weeklyReport={}"
+                        + " (week {}..{})",
+                tenantId, stateCode, nudgeCron, escalCron, dailyCron, weeklyCron,
+                weekStartDay, weekStartDay.minus(1));
+    }
+
+    /**
+     * Whole days from {@code from} forward to {@code to} on the weekly cycle, counting a full 7 when
+     * the two are the same day. Used only to say how stale the data will be in the mismatch warning.
+     */
+    private static int daysBetweenForward(DayOfWeek from, DayOfWeek to) {
+        int diff = to.getValue() - from.getValue();
+        return diff <= 0 ? diff + 7 : diff;
     }
 
     private void validateScheduleConfig(NudgeScheduleConfig nudgeCfg, EscalationScheduleConfig escalCfg,
@@ -181,8 +206,12 @@ public class TenantSchedulerManager {
         }
         if (weeklyCfg.getHour() < 0 || weeklyCfg.getHour() > 23
                 || weeklyCfg.getMinute() < 0 || weeklyCfg.getMinute() > 59
-                // 0-7 in the cron convention; both 0 and 7 are Sunday.
-                || weeklyCfg.getDayOfWeek() < 0 || weeklyCfg.getDayOfWeek() > 7) {
+                // 0-7 in the cron convention; both 0 and 7 are Sunday. weekStartDay must be range-checked
+                // here and not left to WeeklyReportScheduleConfig.toDayOfWeek: that throws, and a throw
+                // from inside scheduleForTenant lands after cancelFutures, leaving the tenant with no
+                // jobs at all. Validating first keeps a bad value from unscheduling anything.
+                || weeklyCfg.getDayOfWeek() < 0 || weeklyCfg.getDayOfWeek() > 7
+                || weeklyCfg.getWeekStartDay() < 0 || weeklyCfg.getWeekStartDay() > 7) {
             throw new IllegalArgumentException("Invalid weekly-report schedule for tenantId=" + tenantId);
         }
     }
