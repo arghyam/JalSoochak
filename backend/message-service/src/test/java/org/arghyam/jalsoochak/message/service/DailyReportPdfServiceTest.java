@@ -83,8 +83,8 @@ class DailyReportPdfServiceTest {
      */
     private String render(DailyReportKpis kpis, List<ReportSchemeRow> noSupply, List<ReportSchemeRow> anomalies)
             throws IOException {
-        String filename = service.generate(kpis, 21343L, "Binod Nimoli", "SECTION_OFFICER", noSupply, anomalies);
-        try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+        Path pdf = service.generate(kpis, 21343L, "Binod Nimoli", "SECTION_OFFICER", noSupply, anomalies);
+        try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
             return new PDFTextStripper().getText(doc).replaceAll("\\s+", " ");
         }
     }
@@ -95,20 +95,63 @@ class DailyReportPdfServiceTest {
 
         @Test
         void namesTheFileByRoleOfficerIdAndDate() throws Exception {
-            String filename = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
                     List.of(), List.of());
 
-            assertThat(filename).isEqualTo("daily_water_report_SECTION_OFFICER_21343_2026-07-19.pdf");
+            assertThat(pdf.getFileName().toString())
+                    .isEqualTo("daily_water_report_SECTION_OFFICER_21343_2026-07-19.pdf");
         }
 
         @Test
         void usesTheOfficerIdNotTheNameSoTwoOfficersCannotCollide() throws Exception {
             // A shared bucket plus a name-based filename would let one officer's report overwrite
             // another's — handing the second officer the first one's scheme list and Jal Mitra phones.
-            String first = service.generate(sampleKpis(), 1L, "R Kumar", "SECTION_OFFICER", List.of(), List.of());
-            String second = service.generate(sampleKpis(), 2L, "R Kumar", "SECTION_OFFICER", List.of(), List.of());
+            Path first = service.generate(sampleKpis(), 1L, "R Kumar", "SECTION_OFFICER", List.of(), List.of());
+            Path second = service.generate(sampleKpis(), 2L, "R Kumar", "SECTION_OFFICER", List.of(), List.of());
 
             assertThat(first).isNotEqualTo(second);
+        }
+
+        @Test
+        void returnsThePathThePdfWasActuallyWrittenTo() throws Exception {
+            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+                    List.of(), List.of());
+
+            // The caller uploads this path verbatim. It used to rebuild it from escalation.report.dir,
+            // which is a different property from the daily-report.report.dir written to here.
+            assertThat(pdf).exists().hasParent(tempDir);
+        }
+    }
+
+    @Nested
+    @DisplayName("cell wrapping")
+    class CellWrapping {
+
+        /** Far wider than any column in either layout, at any of the font sizes they use. */
+        private static final String OVERSIZED = "Bhagwanpurkalanjhansikhurdmajragarhiparganatehsilblockvillagescheme";
+
+        @Test
+        void breaksAnOversizedWordThatStartsACell() throws Exception {
+            String text = render(sampleKpis(),
+                    List.of(ReportSchemeRow.builder().schemeId(1).schemeName(OVERSIZED).imisId("98767")
+                            .jalMitraNames("Ramesh").jalMitraMobiles("919000000001").build()),
+                    List.of());
+
+            assertThat(text).doesNotContain(OVERSIZED);
+        }
+
+        @Test
+        void breaksAnOversizedWordThatFollowsOtherTextInTheSameCell() throws Exception {
+            // The wrap check used to fire only for a word that began a line, so an over-wide token
+            // arriving after a short one was pushed onto a fresh line and left un-split — printing
+            // straight through the table border and over the neighbouring column.
+            String text = render(sampleKpis(),
+                    List.of(ReportSchemeRow.builder().schemeId(1).schemeName("Rampur " + OVERSIZED)
+                            .imisId("98767").jalMitraNames("Ramesh").jalMitraMobiles("919000000001").build()),
+                    List.of());
+
+            assertThat(text).doesNotContain(OVERSIZED);
+            assertThat(text).contains("Rampur");
         }
     }
 
@@ -156,10 +199,10 @@ class DailyReportPdfServiceTest {
         void embedsTheDashboardLinkAsARealAnnotation() throws Exception {
             // WhatsApp's PDF viewer does not auto-detect bare URLs, so without the annotation the link
             // is dead on exactly the path every officer uses.
-            String filename = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
                     List.of(), List.of());
 
-            try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
                 List<PDAnnotation> annotations = doc.getPage(0).getAnnotations();
                 assertThat(annotations).anySatisfy(a -> {
                     assertThat(a).isInstanceOf(PDAnnotationLink.class);
@@ -268,10 +311,10 @@ class DailyReportPdfServiceTest {
                         .jalMitraMobiles("9190000" + String.format("%05d", i)).build());
             }
 
-            String filename = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+            Path pdf = service.generate(sampleKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
                     many, List.of());
 
-            try (PDDocument doc = Loader.loadPDF(tempDir.resolve(filename).toFile())) {
+            try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
                 assertThat(doc.getNumberOfPages()).isGreaterThan(1);
                 String text = new PDFTextStripper().getText(doc).replaceAll("\\s+", " ");
                 assertThat(text).contains("Scheme 1");

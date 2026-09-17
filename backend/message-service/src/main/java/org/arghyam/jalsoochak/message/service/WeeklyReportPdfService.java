@@ -71,16 +71,22 @@ public class WeeklyReportPdfService {
             Set.of(KPI_NOT_SUPPLYING, KPI_NOT_SUPPLYING_SDO, KPI_LOW_LPCD);
 
     /**
-     * Generates the report PDF and returns the filename (not the full path).
+     * Generates the report PDF and returns the path it was written to.
+     *
+     * <p>The resolved path, not just the filename: {@code weekly-report.report.dir} falls back
+     * through {@code daily-report.report.dir} to {@code escalation.report.dir}, so a caller that
+     * rebuilds the path from a property of its own picks the wrong directory the moment any of them
+     * is set — which {@code DAILY_REPORT_DIR} already is in several environments. Handing back the
+     * path this method actually saved to leaves nothing to re-derive.</p>
      *
      * @param officerUserType SECTION_OFFICER or SUB_DIVISIONAL_OFFICER — selects the layout
      * @param officerRows     SDO only: the per-Section-Officer performance rows
      */
-    public String generate(WeeklyReportKpis kpis, long officerUserId, String officerName, String officerUserType,
-                           List<ReportSchemeRow> noSupplyRows,
-                           List<ReportSchemeRow> lowSupplyDaysRows,
-                           List<ReportSchemeRow> lowLpcdRows,
-                           List<WeeklyReportOfficerRow> officerRows) throws IOException {
+    public Path generate(WeeklyReportKpis kpis, long officerUserId, String officerName, String officerUserType,
+                         List<ReportSchemeRow> noSupplyRows,
+                         List<ReportSchemeRow> lowSupplyDaysRows,
+                         List<ReportSchemeRow> lowLpcdRows,
+                         List<WeeklyReportOfficerRow> officerRows) throws IOException {
         ensureReportDirExists();
 
         LocalDate weekStart = LocalDate.parse(kpis.getWeekStart(), ISO);
@@ -117,7 +123,7 @@ public class WeeklyReportPdfService {
         log.info("[WeeklyReportPdf] Generated {} (role={} noSupply={} lowDays={} lowLpcd={} officers={})",
                 filename, officerUserType, noSupplyRows.size(), lowSupplyDaysRows.size(), lowLpcdRows.size(),
                 officerRows != null ? officerRows.size() : 0);
-        return filename;
+        return filePath;
     }
 
     private void drawHeader(ReportPdfCanvas c, String officerName, boolean sdo,

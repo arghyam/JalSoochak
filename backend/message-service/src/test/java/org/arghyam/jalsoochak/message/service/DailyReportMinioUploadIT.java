@@ -71,9 +71,9 @@ class DailyReportMinioUploadIT {
                         .jalMitraNames("Ramesh Kumar").jalMitraMobiles("919000000001").build());
 
         LocalDate reportDate = LocalDate.of(2026, 7, 19);
-        String filename = pdfService.generate(dailyKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
+        Path localPdf = pdfService.generate(dailyKpis(), 21343L, "Binod Nimoli", "SECTION_OFFICER",
                 noSupply, List.of());
-        Path localPdf = tempDir.resolve(filename);
+        String filename = localPdf.getFileName().toString();
         assertThat(localPdf.toFile()).exists();
 
         String objectKey = ReportFileNaming.dailyObjectKey("SECTION_OFFICER", filename, reportDate);
@@ -96,9 +96,9 @@ class DailyReportMinioUploadIT {
 
         LocalDate weekStart = LocalDate.of(2026, 7, 13);
         LocalDate weekEnd = LocalDate.of(2026, 7, 19);
-        String filename = pdfService.generate(weeklyKpis(), 5521L, "Bharat Sharma", "SUB_DIVISIONAL_OFFICER",
+        Path localPdf = pdfService.generate(weeklyKpis(), 5521L, "Bharat Sharma", "SUB_DIVISIONAL_OFFICER",
                 List.of(), List.of(), List.of(), List.of());
-        Path localPdf = tempDir.resolve(filename);
+        String filename = localPdf.getFileName().toString();
         assertThat(localPdf.toFile()).exists();
 
         String objectKey = ReportFileNaming.weeklyObjectKey("SUB_DIVISIONAL_OFFICER", filename, weekStart, weekEnd);

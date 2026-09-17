@@ -56,15 +56,20 @@ public class DailyReportPdfService {
     private static final Set<String> NO_TREND_KPIS = Set.of();
 
     /**
-     * Generates the report PDF and returns the filename (not the full path).
+     * Generates the report PDF and returns the path it was written to.
+     *
+     * <p>The resolved path, not just the filename: this service writes to
+     * {@code daily-report.report.dir} ({@code DAILY_REPORT_DIR}), which a caller rebuilding the path
+     * from {@code escalation.report.dir} does not see. Handing back the path leaves nothing to
+     * re-derive and no way for the two to drift.</p>
      *
      * @param officerUserId the filename discriminator. Deliberately the id and not the officer's
      *                      name: names collide, and the reports share one MinIO bucket, so a
      *                      collision would expose one officer's report to another.
      */
-    public String generate(DailyReportKpis kpis, long officerUserId, String officerName, String officerUserType,
-                           List<ReportSchemeRow> noSupplyRows,
-                           List<ReportSchemeRow> anomalyRows) throws IOException {
+    public Path generate(DailyReportKpis kpis, long officerUserId, String officerName, String officerUserType,
+                         List<ReportSchemeRow> noSupplyRows,
+                         List<ReportSchemeRow> anomalyRows) throws IOException {
         ensureReportDirExists();
 
         LocalDate reportDate = LocalDate.parse(kpis.getReportDate(), ISO);
@@ -88,7 +93,7 @@ public class DailyReportPdfService {
 
         log.info("[DailyReportPdf] Generated {} ({} no-supply rows, {} anomaly rows)",
                 filename, noSupplyRows.size(), anomalyRows.size());
-        return filename;
+        return filePath;
     }
 
     private void drawHeader(ReportPdfCanvas c, DailyReportKpis kpis, String officerName, LocalDate reportDate)

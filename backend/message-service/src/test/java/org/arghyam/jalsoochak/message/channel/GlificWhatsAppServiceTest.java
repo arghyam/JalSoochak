@@ -980,6 +980,39 @@ class GlificWhatsAppServiceTest {
             assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
         }
 
+        @Test
+        void validateTemplates_failsFast_whenOnlyTheWeeklyReportIsLiveButMediaBaseUrlIsInternal() {
+            // The weekly report is LINK-only, so Meta never downloads the file — but the same prefix
+            // is what the officer's phone opens and what is frozen into the approved template. The
+            // gate used to consult only the daily and escalation flags, so a weekly-only deployment
+            // started happily and delivered buttons that lead nowhere.
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "77");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://192.168.20.143:9000");
+
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("minio.base-url")
+                    .hasMessageContaining("MINIO_BASE_URL");
+        }
+
+        @Test
+        void validateTemplates_passes_whenOnlyTheWeeklyReportIsLiveAndTheBaseUrlIsPublic() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "77");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+
+            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+        }
+
         /** A localhost MinIO is normal for local and CI runs, where nothing is delivered. */
         @Test
         void validateTemplates_toleratesAnInternalBaseUrl_whenNoDocumentIsEverSent() {
@@ -987,6 +1020,7 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "nudgeDryRun", true);
             ReflectionTestUtils.setField(service, "escalationDryRun", true);
             ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
             ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://localhost:9000");
 
             assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();

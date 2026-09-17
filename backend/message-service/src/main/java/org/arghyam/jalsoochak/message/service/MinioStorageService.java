@@ -4,6 +4,7 @@ import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.UploadObjectArgs;
+import io.minio.errors.ErrorResponseException;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.util.PublicUrlValidator;
@@ -32,6 +33,13 @@ import java.nio.file.Path;
 @Service
 @Slf4j
 public class MinioStorageService {
+
+    /**
+     * S3 error code returned to whichever caller loses a concurrent {@code makeBucket} race. Distinct
+     * from {@code BucketAlreadyExists}, which means the name is taken by a <em>different</em> account
+     * — that one is a real failure and is left to propagate.
+     */
+    private static final String BUCKET_ALREADY_OWNED_BY_YOU = "BucketAlreadyOwnedByYou";
 
     private final MinioClient minioClient;
 
@@ -134,6 +142,15 @@ public class MinioStorageService {
         return url;
     }
 
+    /**
+     * Creates the target bucket if it is absent.
+     *
+     * <p>The exists-then-create pair is not atomic, and the report jobs upload one PDF per officer
+     * concurrently: on the first run after a bucket is added, several uploads see it missing and all
+     * of them call {@code makeBucket}. One wins and the losers get {@code BucketAlreadyOwnedByYou},
+     * which is this method's desired end state, not a failure — treating it as one failed those
+     * officers' reports for no reason. Any other error still propagates.</p>
+     */
     private void ensureBucketExists(String targetBucket) throws Exception {
         if (minioClient.bucketExists(BucketExistsArgs.builder().bucket(targetBucket).build())) {
             return;
@@ -141,7 +158,20 @@ public class MinioStorageService {
         log.info("[MinIO] Bucket '{}' does not exist — creating it. Grant anonymous read separately"
                 + " (mc anonymous set download <alias>/{}), or the report link will 403 on the"
                 + " officer's phone.", targetBucket, targetBucket);
-        minioClient.makeBucket(MakeBucketArgs.builder().bucket(targetBucket).build());
+        try {
+            minioClient.makeBucket(MakeBucketArgs.builder().bucket(targetBucket).build());
+        } catch (ErrorResponseException e) {
+            if (!isAlreadyOwned(e)) {
+                throw e;
+            }
+            log.debug("[MinIO] Bucket '{}' was created concurrently — continuing.", targetBucket);
+        }
+    }
+
+    /** True when {@code makeBucket} lost a race with another upload that created the same bucket. */
+    private static boolean isAlreadyOwned(ErrorResponseException e) {
+        return e.errorResponse() != null
+                && BUCKET_ALREADY_OWNED_BY_YOU.equals(e.errorResponse().code());
     }
 
     /**

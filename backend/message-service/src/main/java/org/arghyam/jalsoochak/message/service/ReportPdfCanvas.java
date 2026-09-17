@@ -369,14 +369,22 @@ public final class ReportPdfCanvas implements AutoCloseable {
         }
         StringBuilder line = new StringBuilder();
         for (String word : paragraph.split(" ")) {
+            // A single word wider than the cell has to be broken mid-word or it overflows the border.
+            // Checked before the wrap decision, because the over-wide word may well arrive mid-line (a
+            // long URL or a run-together village name after a short one): pushing it onto a fresh line
+            // and carrying on would leave it un-split and spilling over the table border, which is how
+            // it used to escape — the old check only fired when the word happened to start a line.
+            if (textWidth(f, fontSize, word) > maxWidth) {
+                if (line.length() > 0) {
+                    out.add(line.toString());
+                    line = new StringBuilder();
+                }
+                hardSplit(f, fontSize, word, maxWidth, out);
+                continue;
+            }
             String candidate = line.length() == 0 ? word : line + " " + word;
             if (textWidth(f, fontSize, candidate) <= maxWidth || line.length() == 0) {
-                // A single word wider than the cell has to be broken mid-word or it overflows the border.
-                if (line.length() == 0 && textWidth(f, fontSize, word) > maxWidth) {
-                    hardSplit(f, fontSize, word, maxWidth, out);
-                } else {
-                    line = new StringBuilder(candidate);
-                }
+                line = new StringBuilder(candidate);
             } else {
                 out.add(line.toString());
                 line = new StringBuilder(word);

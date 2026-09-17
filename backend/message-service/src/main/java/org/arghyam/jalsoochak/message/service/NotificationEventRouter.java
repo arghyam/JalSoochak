@@ -924,11 +924,11 @@ public class NotificationEventRouter {
 
         List<ReportSchemeRow> noSupplyRows;
         List<ReportSchemeRow> anomalyRows;
-        String filename;
+        java.nio.file.Path localPath;
         try {
             noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), false);
             anomalyRows = buildAnomalyRows(tenantSchema, kpis);
-            filename = dailyReportPdfService.generate(
+            localPath = dailyReportPdfService.generate(
                     kpis, officerUserId, officerName, officerUserType, noSupplyRows, anomalyRows);
         } catch (Exception generateEx) {
             // Row lookup or PDF rendering failed: tag the outcome so it is counted like every other
@@ -944,7 +944,10 @@ public class NotificationEventRouter {
                 corr, role, tenantId, officerUserId, noSupplyRows.size(), anomalyRows.size());
 
         LocalDate reportDate = LocalDate.parse(kpis.getReportDate());
-        java.nio.file.Path localPath = Paths.get(reportDir, filename);
+        // The path the PDF service actually wrote to, not one rebuilt from escalation.report.dir: the
+        // daily report has its own DAILY_REPORT_DIR, and re-deriving the path sent the upload looking
+        // in the wrong directory in any environment that set it.
+        String filename = localPath.getFileName().toString();
         String minioUrl;
         try {
             minioUrl = minioStorageService.upload(localPath, ReportFileNaming.DAILY_BUCKET,
@@ -1027,7 +1030,7 @@ public class NotificationEventRouter {
         List<ReportSchemeRow> lowSupplyDaysRows;
         List<ReportSchemeRow> lowLpcdRows;
         List<WeeklyReportOfficerRow> officerRows;
-        String filename;
+        java.nio.file.Path localPath;
         try {
             noSupplyRows = buildSchemeRows(tenantSchema, kpis.getNoSupplySchemeIds(), sdo);
             // The 1-3 day band is a Section Officer section only; resolving it for an SDO would be
@@ -1036,7 +1039,7 @@ public class NotificationEventRouter {
                     : buildSchemeRows(tenantSchema, kpis.getLowSupplyDaysSchemeIds(), false);
             lowLpcdRows = buildSchemeRows(tenantSchema, kpis.getLowLpcdSchemeIds(), sdo);
             officerRows = sdo ? buildWeeklyOfficerRows(tenantSchema, kpis) : List.of();
-            filename = weeklyReportPdfService.generate(kpis, officerUserId, officerName, officerUserType,
+            localPath = weeklyReportPdfService.generate(kpis, officerUserId, officerName, officerUserType,
                     noSupplyRows, lowSupplyDaysRows, lowLpcdRows, officerRows);
         } catch (Exception generateEx) {
             log.error("[Router/WEEKLY_REPORT] corr={} result=FAILED_GENERATION role={} tenant={} officer={} — {}",
@@ -1050,7 +1053,10 @@ public class NotificationEventRouter {
 
         LocalDate weekStart = LocalDate.parse(kpis.getWeekStart());
         LocalDate weekEnd = LocalDate.parse(kpis.getWeekEnd());
-        java.nio.file.Path localPath = Paths.get(reportDir, filename);
+        // As for the daily report: the weekly PDF's directory resolves through
+        // weekly-report.report.dir → daily-report.report.dir → escalation.report.dir, so only the
+        // service that wrote the file knows where it landed.
+        String filename = localPath.getFileName().toString();
         String minioUrl;
         try {
             minioUrl = minioStorageService.upload(localPath, ReportFileNaming.WEEKLY_BUCKET,

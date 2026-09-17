@@ -1171,7 +1171,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
                 .thenReturn(acceptedSend());
@@ -1247,7 +1247,7 @@ class NotificationEventRouterTest {
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500024");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
         when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
@@ -1355,7 +1355,7 @@ class NotificationEventRouterTest {
             };
         });
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("f.pdf");
+                .thenReturn(Path.of("f.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/f.pdf");
         when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
                 .thenReturn(acceptedSend());
@@ -1389,7 +1389,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(acceptedSend());
@@ -1414,7 +1414,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(acceptedSend());
@@ -1433,7 +1433,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(DailyReportSendOutcome.failed(
@@ -1458,7 +1458,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(DailyReportSendOutcome.failed(
@@ -1486,7 +1486,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(DailyReportSendOutcome.accepted(
@@ -1513,7 +1513,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(DailyReportSendOutcome.failed(
@@ -1541,7 +1541,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(DailyReportSendOutcome.failed(GlificSendStage.SEND_NO_MESSAGE_ID, null,
@@ -1561,7 +1561,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
                 .thenReturn(DailyReportSendOutcome.failed(
@@ -1671,7 +1671,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
-                anyList(), anyList(), anyList(), anyList())).thenReturn("weekly.pdf");
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
                 .thenReturn("https://minio/weekly.pdf");
         when(whatsAppChannel.sendWeeklyReport(12345L, "https://minio/weekly.pdf", "SECTION_OFFICER",
@@ -1693,7 +1693,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), anyList())).thenReturn("weekly.pdf");
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
                 .thenReturn("https://minio/weekly.pdf");
         when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
@@ -1712,7 +1712,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(999L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("SDO Kumar");
         when(weeklyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"),
-                anyList(), anyList(), anyList(), anyList())).thenReturn("weekly_sdo.pdf");
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly_sdo.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
                 .thenReturn("https://minio/weekly_sdo.pdf");
         when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
@@ -1761,7 +1761,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), anyList())).thenReturn("weekly.pdf");
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
                 .thenThrow(new IllegalStateException("MinIO down"));
 
@@ -1858,7 +1858,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
-                anyList(), anyList())).thenReturn("daily_report_x.pdf");
+                anyList(), anyList())).thenReturn(Path.of("daily_report_x.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
                 .thenReturn("https://minio/daily_report_x.pdf");
         when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
@@ -1879,7 +1879,7 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), anyList())).thenReturn("weekly.pdf");
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
         when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
                 .thenReturn("https://minio/weekly.pdf");
         when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))

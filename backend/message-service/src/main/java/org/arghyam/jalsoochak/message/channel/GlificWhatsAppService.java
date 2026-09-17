@@ -345,15 +345,22 @@ public class GlificWhatsAppService {
     }
 
     /**
-     * Refuses to start when a document-sending purpose is live but {@code minio.base-url} is an
-     * address Meta cannot reach. Both the escalation and the daily report attach a MinIO PDF, and a
-     * wrong prefix here is invisible on our side: the upload succeeds, {@code createMessageMedia}
-     * returns a media id, the send is accepted, and only the recipient discovers the document will
-     * not open. Failing at startup keeps that from reaching officers at all.
+     * Refuses to start when a purpose that hands out a MinIO URL is live but {@code minio.base-url}
+     * is an address the recipient cannot reach. The escalation and the daily report attach a MinIO
+     * PDF, and a wrong prefix here is invisible on our side: the upload succeeds,
+     * {@code createMessageMedia} returns a media id, the send is accepted, and only the recipient
+     * discovers the document will not open. Failing at startup keeps that from reaching officers at
+     * all.
+     *
+     * <p>The weekly report counts too, even though it is LINK-only and Meta never downloads the
+     * file: the same prefix is what the officer's phone opens and what is frozen into the approved
+     * template. Leaving it out meant a deployment that sends only weekly reports — daily and
+     * escalations muted — started happily with an internal prefix and delivered buttons that lead
+     * nowhere.</p>
      */
     private void validateMediaBaseUrl() {
-        boolean sendsDocuments = !dailyReportDryRun || !escalationDryRun;
-        if (!sendsDocuments) {
+        boolean handsOutMinioUrls = !dailyReportDryRun || !escalationDryRun || !weeklyReportDryRun;
+        if (!handsOutMinioUrls) {
             return;
         }
         String reason = PublicUrlValidator.unreachableReason(mediaBaseUrl);
