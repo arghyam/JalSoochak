@@ -1,6 +1,9 @@
 package org.arghyam.jalsoochak.telemetry.channel;
 
+import java.util.Arrays;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Reading-submission channel (a.k.a. communication / meter channel) that a user
@@ -75,5 +78,43 @@ public enum ReadingChannel {
             return MAN;
         }
         return DEFAULT;
+    }
+
+    /**
+     * Whether a caller actually declared a channel. Null and blank both read as "not declared", so a
+     * field left out and a field sent empty behave the same: the channel is resolved from the
+     * operator's stored preference as before.
+     */
+    public static boolean isDeclared(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    /**
+     * Strict counterpart to {@link #fromChannelValue(String)}, for a channel supplied by an API
+     * caller. Accepts only the canonical short codes (trimmed, case-insensitive) and returns
+     * {@link Optional#empty()} for everything else, including null/blank.
+     *
+     * <p><b>Why not reuse {@code fromChannelValue}.</b> That method is deliberately tolerant and maps
+     * anything it does not recognise to BFM, because it parses free-form values already written to
+     * {@code user_channel_preference}. It therefore cannot report an unsupported value — a typo would
+     * be processed as a bulk-flow-meter reading. A caller declaring a channel from a published list
+     * gets the strict reading instead, so the mistake surfaces as an error rather than as a wrong
+     * water volume.
+     */
+    public static Optional<ReadingChannel> parseStrict(String value) {
+        if (!isDeclared(value)) {
+            return Optional.empty();
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return Arrays.stream(values())
+                .filter(channel -> channel.name().equals(normalized))
+                .findFirst();
+    }
+
+    /** The accepted codes, in declaration order, for error messages and API documentation. */
+    public static String allowedValues() {
+        return Arrays.stream(values())
+                .map(Enum::name)
+                .collect(Collectors.joining(", "));
     }
 }

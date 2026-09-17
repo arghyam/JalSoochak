@@ -50,4 +50,19 @@ class TelemetryErrorCodeTest {
                 .doesNotContainIgnoringCase("population")
                 .doesNotContainIgnoringCase("threshold");
     }
+
+    @Test
+    @DisplayName("CHANNEL_NOT_SUPPORTED serializes to its stable wire value")
+    void channelNotSupportedSerializes() throws Exception {
+        assertThat(objectMapper.writeValueAsString(TelemetryErrorCode.CHANNEL_NOT_SUPPORTED))
+                .isEqualTo("\"CHANNEL_NOT_SUPPORTED\"");
+    }
+
+    @Test
+    @DisplayName("CHANNEL_NOT_SUPPORTED carries no ERR_ prefix")
+    void channelNotSupportedFollowsTheUnprefixedConvention() {
+        // Every code on this API is bare UPPER_SNAKE_CASE. A prefixed one would be the only
+        // exception and would break callers that branch on the documented set.
+        assertThat(TelemetryErrorCode.CHANNEL_NOT_SUPPORTED.code()).doesNotStartWith("ERR_");
+    }
 }
