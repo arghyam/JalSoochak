@@ -26,7 +26,8 @@ class CanonicalReadingRequestMapperTest {
                   "state_scheme_id": "30178236",
                   "center_scheme_id": "30244993",
                   "phone_number": "91XXXXXXXXXX",
-                  "reading_date_time": "2026-04-23T07:38:22.031Z"
+                  "reading_date_time": "2026-04-23T07:38:22.031Z",
+                  "channel": "PDU"
                 }
                 """;
 
@@ -40,6 +41,7 @@ class CanonicalReadingRequestMapperTest {
         assertEquals("30244993", request.getCentreSchemeId());
         assertEquals("91XXXXXXXXXX", request.getPhoneNumber());
         assertNotNull(request.getReadingDateTime());
+        assertEquals("PDU", request.getChannel());
     }
 
     @Test
@@ -69,5 +71,22 @@ class CanonicalReadingRequestMapperTest {
     @Test
     void formatIsCanonical() {
         assertEquals("canonical", mapper.format());
+    }
+
+    @Test
+    void channelIsCarriedThroughVerbatimForTheControllerToValidate() {
+        // The mapper does not validate — it only translates a state's wire format. Whatever it
+        // produces is checked by the controller against the canonical codes, so every format is
+        // held to the same rule.
+        AssamReadingRequest request = mapper.map(objectMapper.createObjectNode().put("channel", " pdu "));
+
+        assertEquals(" pdu ", request.getChannel());
+    }
+
+    @Test
+    void channelIsNullWhenTheSubmissionOmitsIt() {
+        AssamReadingRequest request = mapper.map(objectMapper.createObjectNode().put("state_scheme_id", "30178236"));
+
+        assertNull(request.getChannel());
     }
 }

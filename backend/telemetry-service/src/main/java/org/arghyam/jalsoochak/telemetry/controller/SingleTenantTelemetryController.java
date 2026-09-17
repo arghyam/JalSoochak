@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.telemetry.controller;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.config.OpenApiConfig;
 import org.arghyam.jalsoochak.telemetry.config.TelemetryApiKeyAuthFilter;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
@@ -189,6 +190,28 @@ public class SingleTenantTelemetryController {
             log.info("POST /api/v1/telemetry/readings API key accepted tenantId={} request={}",
                     tenantId,
                     summarizeAssamReadingRequest(request));
+
+            // Checked here rather than with a Bean Validation constraint: every @Valid failure on
+            // this endpoint is funnelled into VALIDATION_FAILED, and a caller needs to tell an
+            // unsupported channel apart from a malformed payload. After the API key, so an
+            // unauthenticated caller cannot probe the field to learn which channels exist.
+            if (ReadingChannel.isUnsupportedDeclaration(request.getChannel())) {
+                String message = ReadingChannel.unsupportedDeclarationMessage();
+                log.info("POST /api/v1/telemetry/readings rejected tenantId={} reason=\"unsupported channel\" request={}",
+                        tenantId,
+                        summarizeAssamReadingRequest(request));
+                logReadingSubmission("/api/v1/telemetry/readings", request, tenantId, "FAILED", message);
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                        ReadingsApiResponse.builder()
+                                .success(false)
+                                .data(ReadingsDataResponse.builder()
+                                        .qualityStatus("REJECTED")
+                                        .errorCode(TelemetryErrorCode.CHANNEL_NOT_SUPPORTED)
+                                        .message(message)
+                                        .build())
+                                .build()
+                );
+            }
 
             log.info("POST /api/v1/telemetry/readings processing tenantId={} request={}",
                     tenantId,

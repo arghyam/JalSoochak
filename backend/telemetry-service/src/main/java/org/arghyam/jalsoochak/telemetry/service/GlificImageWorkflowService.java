@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
@@ -198,6 +199,10 @@ public class GlificImageWorkflowService {
                     .submittedStateSchemeId(lenient ? request.getStateSchemeId() : null)
                     .submittedCentreSchemeId(lenient ? request.getCentreSchemeId() : null)
                     .submittedPhoneHash(lenient ? context.submittedPhoneHash() : null)
+                    // An unsupported value never reaches here — the controller rejects it with
+                    // CHANNEL_NOT_SUPPORTED — so an empty parse means the submission simply did not
+                    // declare a channel, and the stored preference decides as before.
+                    .declaredChannel(ReadingChannel.parseStrict(request.getChannel()).orElse(null))
                     .build();
 
             if (lenient) {

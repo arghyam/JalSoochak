@@ -403,7 +403,14 @@ public class BfmReadingService {
         // are cumulative m3 indices, so the delta is meaningless on any other channel. There are no
         // early returns between the old position and this one, so the resolver runs in exactly the
         // cases it ran in before.
-        ReadingChannel resolvedChannel = readingChannelResolver.resolve(tenantId, contactId);
+        //
+        // A channel declared on the submission wins over the operator's stored preference: the
+        // submitting system knows the equipment behind this particular reading, whereas the
+        // preference is a default picked once in a WhatsApp conversation. Null means nothing was
+        // declared, which keeps the preference lookup — and so every existing caller — unchanged.
+        ReadingChannel resolvedChannel = request.getDeclaredChannel() != null
+                ? request.getDeclaredChannel()
+                : readingChannelResolver.resolve(tenantId, contactId);
         Integer channel = resolvedChannel.getCode();
 
         // A pre-V40 tenant is skipped entirely rather than checked: storing a quarantined row it has

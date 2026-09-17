@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.response.CreateReadingResponse;
 import org.arghyam.jalsoochak.telemetry.dto.response.ReadingsApiResponse;
@@ -116,6 +117,16 @@ public class MultiFormatReadingController {
                     safeFormat, tenantId, sanitize(message));
             return reject(HttpStatus.BAD_REQUEST, TelemetryErrorCode.VALIDATION_FAILED,
                     message.isBlank() ? "Validation failed" : message);
+        }
+
+        // Checked after the shared constraints so both ingestion endpoints agree on precedence: on
+        // the canonical endpoint @Valid runs before the method body, so a structurally invalid
+        // payload never reaches this point there either.
+        if (ReadingChannel.isUnsupportedDeclaration(request.getChannel())) {
+            log.info("POST /api/v1/telemetry/readings/formats/{} rejected tenantId={} reason=\"unsupported channel\"",
+                    safeFormat, tenantId);
+            return reject(HttpStatus.BAD_REQUEST, TelemetryErrorCode.CHANNEL_NOT_SUPPORTED,
+                    ReadingChannel.unsupportedDeclarationMessage());
         }
 
         try {

@@ -42,6 +42,13 @@ public enum TelemetryErrorCode {
     /** Missing or invalid API key (HTTP 401), or a 400 whose reason references the API key. */
     INVALID_API_KEY("INVALID_API_KEY"),
 
+    /**
+     * The submission declared a {@code channel} that is not one of the supported reading channels
+     * (BFM, ELM, PDU, IOT, MAN). Rejected rather than defaulted, so a mistyped channel cannot be
+     * processed with another channel's arithmetic.
+     */
+    CHANNEL_NOT_SUPPORTED("CHANNEL_NOT_SUPPORTED"),
+
     /** Unclassified server-side failure while processing the reading. */
     PROCESSING_FAILED("PROCESSING_FAILED"),
 
