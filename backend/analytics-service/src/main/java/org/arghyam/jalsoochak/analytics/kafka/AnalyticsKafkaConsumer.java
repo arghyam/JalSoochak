@@ -20,9 +20,13 @@ import org.arghyam.jalsoochak.analytics.dto.event.WaterSupplyThresholdUpdatedEve
 import org.arghyam.jalsoochak.analytics.dto.event.AnomalyEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.DailyReportRequestEvent;
 import org.arghyam.jalsoochak.analytics.dto.event.DailyReportKpisEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WeeklyReportRequestEvent;
+import org.arghyam.jalsoochak.analytics.dto.event.WeeklyReportKpisEvent;
 import org.arghyam.jalsoochak.analytics.dto.DailyReportKpiDTO;
+import org.arghyam.jalsoochak.analytics.dto.WeeklyReportKpiDTO;
 import org.arghyam.jalsoochak.analytics.service.DimensionService;
 import org.arghyam.jalsoochak.analytics.service.DailySituationReportService;
+import org.arghyam.jalsoochak.analytics.service.WeeklySituationReportService;
 import org.arghyam.jalsoochak.analytics.service.FactService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,6 +36,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 
 @Component
@@ -45,6 +50,7 @@ public class AnalyticsKafkaConsumer {
     private final DimensionService dimensionService;
     private final FactService factService;
     private final DailySituationReportService dailySituationReportService;
+    private final WeeklySituationReportService weeklySituationReportService;
     private final KafkaProducer kafkaProducer;
 
     @KafkaListener(topics = "tenant-service-topic", groupId = "${spring.kafka.consumer.group-id}")
@@ -201,6 +207,7 @@ public class AnalyticsKafkaConsumer {
                     factService.ingestTenantEscalation(event);
                 }
                 case "DAILY_REPORT_REQUEST" -> handleDailyReportRequest(message);
+                case "WEEKLY_REPORT_REQUEST" -> handleWeeklyReportRequest(message);
                 default -> log.debug("[analytics] Ignoring common-topic event type: {}", eventType);
             }
         } catch (Exception e) {
@@ -243,14 +250,15 @@ public class AnalyticsKafkaConsumer {
             return;
         }
 
+        LocalDateTime cutoffIst = parseCutoff(request.getCutoffIst(), request.getCorrelationId());
+
         String corr = request.getCorrelationId();
         long startNanos = System.nanoTime();
-        log.info("[analytics/DAILY_REPORT_REQUEST] corr={} received: tenant={} officer={} role={} date={}",
-                corr, request.getTenantId(), request.getOfficerUserId(), role, reportDate);
+        log.info("[analytics/DAILY_REPORT_REQUEST] corr={} received: tenant={} officer={} role={} date={} cutoff={}",
+                corr, request.getTenantId(), request.getOfficerUserId(), role, reportDate, cutoffIst);
 
         DailyReportKpiDTO kpis = dailySituationReportService.buildReport(
-                request.getTenantId(), request.getOfficerUserId(), reportDate,
-                request.getSubordinateOfficerUserIds());
+                request.getTenantId(), request.getOfficerUserId(), reportDate, cutoffIst);
 
         DailyReportKpisEvent kpisEvent = DailyReportKpisEvent.builder()
                 .eventType("DAILY_REPORT_KPIS")
@@ -266,13 +274,103 @@ public class AnalyticsKafkaConsumer {
 
         long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
         log.info("[analytics/DAILY_REPORT_REQUEST] corr={} result=COMPUTED role={} tenant={} officer={} date={} "
-                        + "totalSchemes={} supplyingY={} reasons={} anomalies={} priorityActions={} tookMs={}",
+                        + "totalSchemes={} supplying={} noSupply={} anomalies={} tookMs={}",
                 corr, role, request.getTenantId(), request.getOfficerUserId(), reportDate,
                 kpis.getTotalSchemes(),
-                kpis.getYesterday() != null ? kpis.getYesterday().getSchemesSupplying() : 0,
-                kpis.getReasonsForNoSupply() != null ? kpis.getReasonsForNoSupply().size() : 0,
-                kpis.getAnomaliesByType() != null ? kpis.getAnomaliesByType().size() : 0,
-                kpis.getPriorityActions() != null ? kpis.getPriorityActions().size() : 0,
+                kpis.getSchemesSupplying(),
+                kpis.getNoSupplySchemeIds() != null ? kpis.getNoSupplySchemeIds().size() : 0,
+                kpis.getAnomalousCount(),
+                tookMs);
+    }
+
+    /**
+     * Parses the report's data-window cut-off. A malformed or absent value is not fatal: the report
+     * still covers the whole day, which is what a rebuild of a past day wants anyway. Failing the
+     * whole report over it would cost the officer their report to save an hour's precision.
+     */
+    private LocalDateTime parseCutoff(String cutoffIst, String corr) {
+        if (cutoffIst == null || cutoffIst.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(cutoffIst);
+        } catch (DateTimeParseException e) {
+            log.warn("[analytics/DAILY_REPORT_REQUEST] corr={} malformed cutoffIst '{}' — covering the whole day",
+                    corr, cutoffIst);
+            return null;
+        }
+    }
+
+    /**
+     * Computes the Weekly Water Service Situation Report KPIs for one officer and publishes a
+     * {@code WEEKLY_REPORT_KPIS} event back to {@code common-topic} for message-service to render.
+     * Both Section Officers and Sub-Divisional Officers receive this report; the role travels on the
+     * event and selects the layout downstream and the supply-day bar here.
+     */
+    private void handleWeeklyReportRequest(String message) throws Exception {
+        WeeklyReportRequestEvent request = objectMapper.readValue(message, WeeklyReportRequestEvent.class);
+        String officerUserType = request.getOfficerUserType() == null
+                ? null : request.getOfficerUserType().trim();
+        String role = (officerUserType == null || officerUserType.isEmpty()) ? "UNKNOWN" : officerUserType;
+        if (request.getTenantId() == null || request.getOfficerUserId() == null
+                || request.getTenantSchema() == null || request.getTenantSchema().isBlank()
+                || officerUserType == null || officerUserType.isEmpty()) {
+            log.warn("[analytics/WEEKLY_REPORT_REQUEST] corr={} result=SKIPPED_INVALID_EVENT role={} — missing"
+                            + " required field (tenantId/officerUserId/tenantSchema/officerUserType)",
+                    request.getCorrelationId(), role);
+            return;
+        }
+
+        LocalDate weekStart;
+        LocalDate weekEnd;
+        LocalDate previousWeekStart;
+        LocalDate previousWeekEnd;
+        try {
+            weekStart = LocalDate.parse(request.getWeekStart());
+            weekEnd = LocalDate.parse(request.getWeekEnd());
+            previousWeekStart = LocalDate.parse(request.getPreviousWeekStart());
+            previousWeekEnd = LocalDate.parse(request.getPreviousWeekEnd());
+        } catch (NullPointerException | DateTimeParseException e) {
+            // Unlike the daily cut-off, the week bounds have no safe fallback: guessing them would
+            // deliver a report covering days the officer was never told about.
+            log.warn("[analytics/WEEKLY_REPORT_REQUEST] corr={} result=SKIPPED_INVALID_EVENT role={} — malformed"
+                            + " week range '{}'..'{}' / '{}'..'{}' (non-retryable)",
+                    request.getCorrelationId(), role, request.getWeekStart(), request.getWeekEnd(),
+                    request.getPreviousWeekStart(), request.getPreviousWeekEnd());
+            return;
+        }
+
+        String corr = request.getCorrelationId();
+        long startNanos = System.nanoTime();
+        log.info("[analytics/WEEKLY_REPORT_REQUEST] corr={} received: tenant={} officer={} role={} week={}..{}",
+                corr, request.getTenantId(), request.getOfficerUserId(), role, weekStart, weekEnd);
+
+        WeeklyReportKpiDTO kpis = weeklySituationReportService.buildReport(
+                request.getTenantId(), request.getOfficerUserId(), officerUserType,
+                weekStart, weekEnd, previousWeekStart, previousWeekEnd,
+                request.getSubordinateOfficerUserIds());
+
+        WeeklyReportKpisEvent kpisEvent = WeeklyReportKpisEvent.builder()
+                .eventType("WEEKLY_REPORT_KPIS")
+                .tenantId(request.getTenantId())
+                .tenantSchema(request.getTenantSchema())
+                .officerUserId(request.getOfficerUserId())
+                .officerUserType(officerUserType)
+                .correlationId(corr)
+                .kpis(kpis)
+                .build();
+
+        kafkaProducer.publishJson(COMMON_TOPIC, kpisEvent);
+
+        long tookMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        log.info("[analytics/WEEKLY_REPORT_REQUEST] corr={} result=COMPUTED role={} tenant={} officer={} "
+                        + "week={}..{} totalSchemes={} supplying={} noSupply={} lowLpcd={} officers={} tookMs={}",
+                corr, role, request.getTenantId(), request.getOfficerUserId(), weekStart, weekEnd,
+                kpis.getWeek() != null ? kpis.getWeek().getTotalSchemes() : 0,
+                kpis.getWeek() != null ? kpis.getWeek().getSchemesSupplying() : 0,
+                kpis.getNoSupplySchemeIds() != null ? kpis.getNoSupplySchemeIds().size() : 0,
+                kpis.getLowLpcdSchemeIds() != null ? kpis.getLowLpcdSchemeIds().size() : 0,
+                kpis.getSectionOfficerSummaries() != null ? kpis.getSectionOfficerSummaries().size() : 0,
                 tookMs);
     }
 

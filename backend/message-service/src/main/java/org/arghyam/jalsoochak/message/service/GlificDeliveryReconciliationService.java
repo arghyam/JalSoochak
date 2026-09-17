@@ -15,18 +15,21 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
- * Asks Glific what actually happened to the daily reports we sent, and writes the answer to the log.
+ * Asks Glific what actually happened to the situation reports we sent, and writes the answer to the
+ * log. Both the daily and the weekly report are covered, each labelled with {@code report=}.
  *
  * <p>{@code result=SENT} only ever meant "Glific accepted our API call". Gupshup and Meta act after
  * that call returns and report delivery status back to Glific alone, so a report sent to a number with
@@ -38,16 +41,17 @@ import java.util.stream.Collectors;
  * <ol>
  *   <li>For each {@code bspStatus} of interest, count then page the window
  *       ({@link GlificDeliveryStatusService}).</li>
- *   <li>Discard anything that is not an outbound HSM on one of our daily-report templates —
+ *   <li>Discard anything that is not an outbound HSM on one of our report templates —
  *       {@code MessageFilter} cannot do this server-side.</li>
+ *   <li>Label each survivor {@code DAILY} or {@code WEEKLY} from its template id.</li>
  *   <li>Resolve each remaining Glific contact id to an officer, one batched query per tenant.</li>
- *   <li>Tally by role and by failure code; log.</li>
+ *   <li>Tally by role, by report and by failure code; log.</li>
  * </ol>
  *
  * <h2>Rolling window, not a fixed hour</h2>
- * <p>The daily-report cron is configurable per tenant via
- * {@code common_schema.tenant_config_master_table} key {@code DAILY_SITUATION_REPORT_TIME}, so no
- * single hour is correct for every tenant. A look-back window covers them all.</p>
+ * <p>Both crons are configurable per tenant via {@code common_schema.tenant_config_master_table} keys
+ * {@code DAILY_SITUATION_REPORT_TIME} and {@code WEEKLY_SITUATION_REPORT_TIME}, so no single hour is
+ * correct for every tenant. A look-back window covers them all.</p>
  *
  * <h2>Privacy</h2>
  * <p>Every line carries ids and statuses only. Names and phone numbers are never read, let alone
@@ -68,6 +72,18 @@ public class GlificDeliveryReconciliationService {
 
     private static final String SCHEMA_PATTERN = "^[a-z0-9_]+$";
     private static final String UNKNOWN_ROLE = "UNKNOWN";
+
+    /**
+     * Which report a matched message carries, resolved from its Glific template id.
+     *
+     * <p>Both reports go out on the same Glific account, and a Section Officer receives both, so
+     * without this every {@code [GlificStatus]} line and every per-role tally silently mixed them:
+     * {@code deliveredByRole={SECTION_OFFICER=271}} was daily plus weekly, and a week in which no
+     * weekly report was delivered at all was invisible behind the daily traffic. {@code UNKNOWN} is for
+     * an id supplied only through the {@code template-ids} override, where nothing says which report it
+     * belongs to — labelled rather than guessed, since guessing "daily" is what produced the mixing.</p>
+     */
+    enum ReportKind { DAILY, WEEKLY, UNKNOWN }
 
     private final GlificDeliveryStatusService glificDeliveryStatusService;
     private final JdbcTemplate jdbcTemplate;
@@ -99,8 +115,8 @@ public class GlificDeliveryReconciliationService {
     @Value("${glific.status.reconcile.account-level-error-codes:9999}")
     private String accountLevelErrorCodesCsv;
 
-    // The four daily-report templates, whichever mode is live. Read here rather than passed in so the
-    // job needs no configuration of its own in the common case.
+    // Every report template, whichever mode is live. Read here rather than passed in so the job
+    // needs no configuration of its own in the common case.
     @Value("${glific.template.daily-report-so-id:}")
     private String dailyReportSoTemplateId;
 
@@ -112,6 +128,14 @@ public class GlificDeliveryReconciliationService {
 
     @Value("${glific.template.daily-report-sdo-link-id:}")
     private String dailyReportSdoLinkTemplateId;
+
+    // The weekly templates too. Without them a weekly report would be sent, accepted by Glific, and
+    // then never reconciled — so a week of undelivered reports would look exactly like a quiet week.
+    @Value("${glific.template.weekly-report-so-link-id:}")
+    private String weeklyReportSoLinkTemplateId;
+
+    @Value("${glific.template.weekly-report-sdo-link-id:}")
+    private String weeklyReportSdoLinkTemplateId;
 
     /**
      * Runs a reconciliation pass over the trailing window.
@@ -135,15 +159,26 @@ public class GlificDeliveryReconciliationService {
      */
     public void reconcile(Instant from, Instant to) {
         long startNanos = System.nanoTime();
-        Set<Integer> templateIds = resolveTemplateIds();
-        if (templateIds.isEmpty()) {
-            log.warn("[GlificStatus] No daily-report template ids configured — every message in the window"
+        TemplateKinds templates = resolveTemplateKinds();
+        if (!templates.conflicts().isEmpty()) {
+            log.error("[GlificStatus] Template id(s) {} are configured for more than one report. Every"
+                            + " delivery on such an id would be filed under whichever property happened to"
+                            + " be read first, so neither the daily nor the weekly tally can be trusted."
+                            + " Fix the glific.template.daily-report-* / glific.template.weekly-report-*"
+                            + " properties so each id names one report. Skipping this pass.",
+                    templates.conflicts());
+            return;
+        }
+        Map<Integer, ReportKind> templateKinds = templates.kinds();
+        if (templateKinds.isEmpty()) {
+            log.warn("[GlificStatus] No report template ids configured — every message in the window"
                     + " would be discarded. Set GLIFIC_STATUS_RECONCILE_TEMPLATE_IDS or the"
-                    + " glific.template.daily-report-* properties. Skipping this pass.");
+                    + " glific.template.daily-report-* / glific.template.weekly-report-* properties."
+                    + " Skipping this pass.");
             return;
         }
 
-        WindowScan scan = scanWindow(from, to, templateIds);
+        WindowScan scan = scanWindow(from, to, templateKinds);
         // A window with nothing of ours in it still emits a summaryTotal, in the same shape as a busy
         // one. A silent pass is indistinguishable from a broken job, and a differently-shaped line
         // would break whatever parses these.
@@ -154,18 +189,19 @@ public class GlificDeliveryReconciliationService {
         int unmappedContacts = 0;
 
         for (GlificMessageStatus message : scan.matched()) {
+            ReportKind report = templateKinds.getOrDefault(message.templateId(), ReportKind.UNKNOWN);
             OfficerRef officer = message.receiverContactId() == null
                     ? null
                     : officersByContactId.get(message.receiverContactId());
             if (officer == null) {
                 unmappedContacts++;
-                logUnmapped(message);
+                logUnmapped(message, report);
                 continue;
             }
             Tally tenantTally = byTenant.computeIfAbsent(officer.tenantKey(), k -> new Tally());
-            record(tenantTally, officer, message);
-            record(total, officer, message);
-            logMessage(officer, message);
+            record(tenantTally, officer, message, report);
+            record(total, officer, message, report);
+            logMessage(officer, message, report);
         }
 
         byTenant.forEach((tenantKey, tally) -> {
@@ -182,7 +218,7 @@ public class GlificDeliveryReconciliationService {
     /**
      * What one pass pulled from Glific.
      *
-     * @param matched                 outbound HSMs on one of our daily-report templates
+     * @param matched                 outbound HSMs on one of our daily- or weekly-report templates
      * @param windowScanned           every message returned across the statuses we query — the sanity
      *                                total that makes a pathological window visible. Not the whole
      *                                window: {@code RECEIVED} and {@code DELETED} are never fetched
@@ -201,7 +237,7 @@ public class GlificDeliveryReconciliationService {
                               int discardedOtherTemplates, int discardedAccountLevel,
                               Map<String, Integer> accountLevelFailures) {}
 
-    private WindowScan scanWindow(Instant from, Instant to, Set<Integer> templateIds) {
+    private WindowScan scanWindow(Instant from, Instant to, Map<Integer, ReportKind> templateKinds) {
         List<GlificMessageStatus> matched = new ArrayList<>();
         Map<String, Integer> accountLevel = new TreeMap<>();
         Set<String> accountLevelCodes = csvToSet(accountLevelErrorCodesCsv);
@@ -230,7 +266,7 @@ public class GlificDeliveryReconciliationService {
                 }
                 if (!message.isOutboundHsm()) {
                     discardedInbound++;
-                } else if (message.templateId() == null || !templateIds.contains(message.templateId())) {
+                } else if (message.templateId() == null || !templateKinds.containsKey(message.templateId())) {
                     discardedOtherTemplates++;
                 } else {
                     matched.add(message);
@@ -351,29 +387,49 @@ public class GlificDeliveryReconciliationService {
 
     // ── Tallying ───────────────────────────────────────────────────────────────
 
-    /** One failed delivery, kept so the per-role/per-code officer lists can be grouped at log time. */
-    private record FailedEntry(String role, long officerUserId, String code) {}
+    /** One failed delivery, kept so the per-report/per-role/per-code officer lists can be grouped at log time. */
+    private record FailedEntry(ReportKind report, String role, long officerUserId, String code) {}
 
+    /**
+     * The {@code …ByReport} maps mirror the {@code …ByRole} ones exactly, one level up. Kept as separate
+     * maps rather than a combined {@code report|role} key so every existing {@code …ByRole} field keeps
+     * the shape whatever reads these lines already expects.
+     */
     private static final class Tally {
         private final Map<String, Integer> deliveredByRole = new TreeMap<>();
         private final Map<String, Integer> readByRole = new TreeMap<>();
         private final Map<String, Integer> failedByRole = new TreeMap<>();
         private final Map<String, Integer> failedByCode = new TreeMap<>();
+        private final Map<String, Integer> matchedByReport = new TreeMap<>();
+        private final Map<String, Integer> deliveredByReport = new TreeMap<>();
+        private final Map<String, Integer> readByReport = new TreeMap<>();
+        private final Map<String, Integer> failedByReport = new TreeMap<>();
         private final List<FailedEntry> failures = new ArrayList<>();
         private int matched;
         private int pending;
         private int unknownStatus;
     }
 
-    private static void record(Tally tally, OfficerRef officer, GlificMessageStatus message) {
+    private static void record(Tally tally, OfficerRef officer, GlificMessageStatus message,
+                               ReportKind report) {
         tally.matched++;
+        String reportKey = report.name();
+        tally.matchedByReport.merge(reportKey, 1, Integer::sum);
         switch (message.outcome()) {
-            case DELIVERED -> tally.deliveredByRole.merge(officer.role(), 1, Integer::sum);
-            case READ -> tally.readByRole.merge(officer.role(), 1, Integer::sum);
+            case DELIVERED -> {
+                tally.deliveredByRole.merge(officer.role(), 1, Integer::sum);
+                tally.deliveredByReport.merge(reportKey, 1, Integer::sum);
+            }
+            case READ -> {
+                tally.readByRole.merge(officer.role(), 1, Integer::sum);
+                tally.readByReport.merge(reportKey, 1, Integer::sum);
+            }
             case DELIVERY_FAILED -> {
                 tally.failedByRole.merge(officer.role(), 1, Integer::sum);
                 tally.failedByCode.merge(message.failureKey(), 1, Integer::sum);
-                tally.failures.add(new FailedEntry(officer.role(), officer.officerUserId(), message.failureKey()));
+                tally.failedByReport.merge(reportKey, 1, Integer::sum);
+                tally.failures.add(new FailedEntry(report, officer.role(), officer.officerUserId(),
+                        message.failureKey()));
             }
             case PENDING -> tally.pending++;
             default -> tally.unknownStatus++;
@@ -384,25 +440,27 @@ public class GlificDeliveryReconciliationService {
 
     /**
      * One line per message. {@code result=} and {@code role=} are adjacent, and {@code tenant=} and
-     * {@code officer=} follow in that order.
+     * {@code officer=} follow in that order; {@code report=} is appended <em>after</em> {@code officer=}
+     * so it names which report arrived without disturbing that adjacency.
      */
-    private void logMessage(OfficerRef officer, GlificMessageStatus message) {
+    private void logMessage(OfficerRef officer, GlificMessageStatus message, ReportKind report) {
         if (message.outcome() == GlificDeliveryOutcome.DELIVERY_FAILED) {
             // Redacted again at the point of logging, even though GlificDeliveryStatusService already
             // redacts what it extracts. The reason text originates with Gupshup and is the one field
             // here that can carry a phone number; a second pass costs nothing and means a future code
             // path that builds a GlificMessageStatus some other way cannot leak one through this line.
-            log.warn("[GlificStatus] result=DELIVERY_FAILED role={} tenant={} officer={} glificMsgId={}"
-                            + " glificContactId={} templateId={} bspStatus={} errorCode={} reason=\"{}\"",
-                    officer.role(), officer.tenantId(), officer.officerUserId(), message.messageId(),
+            log.warn("[GlificStatus] result=DELIVERY_FAILED role={} tenant={} officer={} report={}"
+                            + " glificMsgId={} glificContactId={} templateId={} bspStatus={} errorCode={}"
+                            + " reason=\"{}\"",
+                    officer.role(), officer.tenantId(), officer.officerUserId(), report, message.messageId(),
                     message.receiverContactId(), message.templateId(), message.bspStatus(),
                     message.errorCode() == null ? "-" : message.errorCode(),
                     message.errorReason() == null ? "" : PhoneRedactor.redact(message.errorReason()));
             return;
         }
-        log.info("[GlificStatus] result={} role={} tenant={} officer={} glificMsgId={} glificContactId={}"
-                        + " templateId={} bspStatus={}",
-                message.outcome(), officer.role(), officer.tenantId(), officer.officerUserId(),
+        log.info("[GlificStatus] result={} role={} tenant={} officer={} report={} glificMsgId={}"
+                        + " glificContactId={} templateId={} bspStatus={}",
+                message.outcome(), officer.role(), officer.tenantId(), officer.officerUserId(), report,
                 message.messageId(), message.receiverContactId(), message.templateId(), message.bspStatus());
     }
 
@@ -410,36 +468,42 @@ public class GlificDeliveryReconciliationService {
      * A message on one of our templates whose recipient matches no officer in any tenant. Logged rather
      * than dropped: it usually means a stale {@code whatsapp_connection_id}, which is worth fixing.
      */
-    private void logUnmapped(GlificMessageStatus message) {
-        log.warn("[GlificStatus] result=UNMAPPED_CONTACT glificMsgId={} glificContactId={} templateId={}"
-                        + " bspStatus={} — no officer in any active tenant has this"
+    private void logUnmapped(GlificMessageStatus message, ReportKind report) {
+        log.warn("[GlificStatus] result=UNMAPPED_CONTACT report={} glificMsgId={} glificContactId={}"
+                        + " templateId={} bspStatus={} — no officer in any active tenant has this"
                         + " whatsapp_connection_id",
-                message.messageId(), message.receiverContactId(), message.templateId(), message.bspStatus());
+                report, message.messageId(), message.receiverContactId(), message.templateId(),
+                message.bspStatus());
     }
 
     private void logTenantSummary(Instant from, Instant to, String tenantKey, Tally tally) {
         log.info("[GlificStatus] summary: window={}→{} tenant={} matched={} deliveredByRole={}"
-                        + " readByRole={} failedByRole={} failedByCode={} pending={} unknownStatus={}",
+                        + " readByRole={} failedByRole={} failedByCode={} matchedByReport={}"
+                        + " deliveredByReport={} readByReport={} failedByReport={} pending={}"
+                        + " unknownStatus={}",
                 from, to, tenantIdOf(tenantKey), tally.matched, tally.deliveredByRole, tally.readByRole,
-                tally.failedByRole, tally.failedByCode, tally.pending, tally.unknownStatus);
+                tally.failedByRole, tally.failedByCode, tally.matchedByReport, tally.deliveredByReport,
+                tally.readByReport, tally.failedByReport, tally.pending, tally.unknownStatus);
     }
 
     /**
-     * The officer ids behind each failure, grouped by role and code.
+     * The officer ids behind each failure, grouped by report, role and code. Grouped by report as well
+     * as role because an officer who received their daily report but not their weekly one is a
+     * different problem from one who received neither, and a combined list cannot say which.
      */
     private void logFailedOfficers(Instant from, Instant to, String tenantKey, Tally tally) {
         if (tally.failures.isEmpty()) {
             return;
         }
         Map<String, List<Long>> grouped = tally.failures.stream().collect(Collectors.groupingBy(
-                f -> f.role() + "|" + f.code(),
+                f -> f.report() + "|" + f.role() + "|" + f.code(),
                 TreeMap::new,
                 Collectors.mapping(FailedEntry::officerUserId, Collectors.toList())));
         grouped.forEach((key, officers) -> {
-            String[] parts = key.split("\\|", 2);
-            log.warn("[GlificStatus] failedOfficers: window={}→{} tenant={} role={} errorCode={} count={}"
-                            + " officers={}",
-                    from, to, tenantIdOf(tenantKey), parts[0], parts[1], officers.size(), officers);
+            String[] parts = key.split("\\|", 3);
+            log.warn("[GlificStatus] failedOfficers: window={}→{} tenant={} report={} role={} errorCode={}"
+                            + " count={} officers={}",
+                    from, to, tenantIdOf(tenantKey), parts[0], parts[1], parts[2], officers.size(), officers);
         });
     }
 
@@ -448,10 +512,12 @@ public class GlificDeliveryReconciliationService {
         log.info("[GlificStatus] summaryTotal: window={}→{} tenants={} matched={} windowScanned={}"
                         + " discardedInbound={} discardedOtherTemplates={} discardedAccountLevel={}"
                         + " unmappedContacts={} deliveredByRole={} readByRole={} failedByRole={}"
-                        + " failedByCode={} pending={} unknownStatus={} tookMs={}",
+                        + " failedByCode={} matchedByReport={} deliveredByReport={} readByReport={}"
+                        + " failedByReport={} pending={} unknownStatus={} tookMs={}",
                 from, to, tenants, total.matched, scan.windowScanned(), scan.discardedInbound(),
                 scan.discardedOtherTemplates(), scan.discardedAccountLevel(), unmappedContacts,
                 total.deliveredByRole, total.readByRole, total.failedByRole, total.failedByCode,
+                total.matchedByReport, total.deliveredByReport, total.readByReport, total.failedByReport,
                 total.pending, total.unknownStatus, tookMs);
     }
 
@@ -481,28 +547,81 @@ public class GlificDeliveryReconciliationService {
     // ── Configuration helpers ──────────────────────────────────────────────────
 
     /**
-     * The template ids that mark a message as a daily report: the explicit override when set, otherwise
-     * every configured daily-report template across both delivery modes. Both modes are included
-     * deliberately — a window can straddle a DOCUMENT→LINK switch, and the SDO ids fall back to the SO
-     * ones at send time, so over-including costs nothing while under-including loses messages.
+     * The template ids that mark a message as one of our reports: the explicit override when set,
+     * otherwise every configured daily-report template across both delivery modes plus both weekly
+     * ones. Both daily modes are included deliberately — a window can straddle a DOCUMENT→LINK switch,
+     * and the SDO ids fall back to the SO ones at send time, so over-including costs nothing while
+     * under-including loses messages.
      */
     Set<Integer> resolveTemplateIds() {
-        Set<String> raw = templateIdsCsv == null || templateIdsCsv.isBlank()
-                ? new LinkedHashSet<>(Arrays.asList(dailyReportSoTemplateId, dailyReportSdoTemplateId,
-                        dailyReportSoLinkTemplateId, dailyReportSdoLinkTemplateId))
-                : csvToSet(templateIdsCsv);
-        Set<Integer> ids = new LinkedHashSet<>();
-        for (String value : raw) {
-            if (value == null || value.isBlank()) {
-                continue;
-            }
-            try {
-                ids.add(Integer.parseInt(value.trim()));
-            } catch (NumberFormatException e) {
-                log.warn("[GlificStatus] Ignoring non-numeric daily-report template id '{}'", value);
-            }
+        return resolveTemplateKinds().kinds().keySet();
+    }
+
+    /**
+     * The template ids to watch, each labelled with the report it carries, alongside every id the
+     * configuration claims for more than one report.
+     *
+     * @param kinds     the ids that carry an unambiguous label, which is what lets a delivery be counted
+     *                  as daily or weekly; without it both land in one undifferentiated tally
+     * @param conflicts ids claimed by both reports, mapped to the reports claiming them. An entry here
+     *                  has no correct label to give, so the pass refuses to run rather than publish
+     *                  per-report numbers that are wrong for one of the two
+     */
+    record TemplateKinds(Map<Integer, ReportKind> kinds, Map<Integer, Set<ReportKind>> conflicts) {}
+
+    TemplateKinds resolveTemplateKinds() {
+        Map<Integer, ReportKind> byTypedProperty = new LinkedHashMap<>();
+        Map<Integer, Set<ReportKind>> conflicts = new TreeMap<>();
+        putTemplateIds(byTypedProperty, conflicts, ReportKind.DAILY, dailyReportSoTemplateId,
+                dailyReportSdoTemplateId, dailyReportSoLinkTemplateId, dailyReportSdoLinkTemplateId);
+        putTemplateIds(byTypedProperty, conflicts, ReportKind.WEEKLY, weeklyReportSoLinkTemplateId,
+                weeklyReportSdoLinkTemplateId);
+        if (templateIdsCsv == null || templateIdsCsv.isBlank()) {
+            return new TemplateKinds(byTypedProperty, conflicts);
         }
-        return ids;
+        // The override decides *which* ids are watched, but the typed properties still say what each one
+        // is wherever they name it: an override exists to add an id the properties missed, not to
+        // relabel the ones they already carry. Anything they do not name stays UNKNOWN.
+        Map<Integer, ReportKind> overridden = new LinkedHashMap<>();
+        for (String value : csvToSet(templateIdsCsv)) {
+            parseTemplateId(value).ifPresent(id ->
+                    overridden.put(id, byTypedProperty.getOrDefault(id, ReportKind.UNKNOWN)));
+        }
+        // Conflicts travel with the override rather than being dropped by it. An override that lists a
+        // conflicting id would otherwise hand back the first-wins label the properties disagreed about;
+        // one that omits it would hide a pair of properties still pointing at the same template, which
+        // the send path reads too.
+        return new TemplateKinds(overridden, conflicts);
+    }
+
+    private void putTemplateIds(Map<Integer, ReportKind> target, Map<Integer, Set<ReportKind>> conflicts,
+                                ReportKind kind, String... values) {
+        for (String value : values) {
+            parseTemplateId(value).ifPresent(id -> {
+                ReportKind existing = target.putIfAbsent(id, kind);
+                // Repeating an id within one report is ordinary — the SDO ids fall back to the SO ones —
+                // but an id both reports claim cannot answer "which report was this?", and property order
+                // answers it wrongly half the time. Recorded so the caller can refuse the pass instead.
+                if (existing != null && existing != kind) {
+                    Set<ReportKind> claimedBy =
+                            conflicts.computeIfAbsent(id, k -> EnumSet.noneOf(ReportKind.class));
+                    claimedBy.add(existing);
+                    claimedBy.add(kind);
+                }
+            });
+        }
+    }
+
+    private Optional<Integer> parseTemplateId(String value) {
+        if (value == null || value.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Integer.parseInt(value.trim()));
+        } catch (NumberFormatException e) {
+            log.warn("[GlificStatus] Ignoring non-numeric report template id '{}'", value);
+            return Optional.empty();
+        }
     }
 
     private static Set<String> csvToSet(String csv) {

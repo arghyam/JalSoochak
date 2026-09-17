@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.arghyam.jalsoochak.analytics.helper.DashboardWorkStatusFilter;
 import org.arghyam.jalsoochak.analytics.helper.RegularityThresholdFilter;
+import org.arghyam.jalsoochak.analytics.helper.WaterSqlFragments;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -90,70 +91,19 @@ public class SchemeRegularityRepository {
     }
 
     private static final int NOT_SUBMITTED_STATUS = SubmissionStatus.NOT_SUBMITTED.getCode();
-    private static final int SUBMITTED_STATUS = SubmissionStatus.SUBMITTED.getCode();
     private static final int EXPORT_FETCH_SIZE = 1_000;
 
     /**
-     * De-duplicated water source: the latest fact_water_quantity row per (tenant_id, scheme_id, date).
-     *
-     * <p>{@code fact_water_quantity_table} has no uniqueness constraint on (tenant_id, scheme_id, date).
-     * Ingestion keeps the "current" row for a day via find-latest-and-update, ordered by
-     * {@code updated_at DESC, id DESC} (see {@code FactServiceImpl#ingestWaterQuantity} /
-     * {@code FactWaterQuantityRepository}). Prod data currently has no duplicates, but should a stray
-     * duplicate ever be written (e.g. a concurrent replay), summing every row would double-count that
-     * day's volume. Every per-day water aggregation therefore reads through this {@code DISTINCT ON}
-     * de-duplication, mirroring the {@code scheme_fhtc_totals} DISTINCT ON pattern already used in this
-     * repository. Injected into query text via the {@code {{LWQ}}} token (aliased {@code f} by callers)
-     * so existing {@code ?} placeholder positions are unaffected.</p>
-     */
-    private static final String LATEST_WATER_QUANTITY = """
-            (SELECT DISTINCT ON (fwq.tenant_id, fwq.scheme_id, fwq.date) fwq.*
-                     FROM analytics_schema.fact_water_quantity_table fwq
-                     ORDER BY fwq.tenant_id, fwq.scheme_id, fwq.date, fwq.updated_at DESC, fwq.id DESC)""";
-
-    /**
-     * Canonical "water supplied" volume over the de-duplicated water source (alias {@code f}): sums the
-     * per-day delta for SUBMITTED rows (or legacy direct-event rows whose status is NULL) with a positive
-     * delta, excluding NOT_SUBMITTED/outage days. Single definition shared by every dashboard/region
-     * aggregation so they cannot drift. Injected via the {@code {{SWS}}} token; callers append their own
-     * {@code AS <column>} alias.
-     */
-    private static final String SUPPLIED_WATER_QUANTITY_SUM = String.format(
-            "COALESCE(SUM(CASE WHEN (f.submission_status = %d OR f.submission_status IS NULL) "
-                    + "AND f.water_quantity > 0 THEN f.water_quantity ELSE 0 END), 0)::bigint",
-            SUBMITTED_STATUS);
-
-    /**
-     * Canonical "did the scheme supply water on this day" predicate over the de-duplicated water source
-     * (alias {@code f}). Uses the same qualifying condition as {@link #SUPPLIED_WATER_QUANTITY_SUM}
-     * ({@code (submission_status = SUBMITTED OR NULL) AND water_quantity > 0}), so a "supply day" for
-     * scheme-regularity is exactly a day that contributes positive supplied volume — NOT_SUBMITTED/outage
-     * days never count even when they carry a positive {@code water_quantity}. Scheme regularity is the
-     * fraction of days a scheme actually supplied water; it is measured off {@code fact_water_quantity_table}
-     * (this token) rather than the presence of a meter reading. Injected via the {@code {{SWD}}} token as a
-     * boolean; callers place it in a {@code WHERE}/{@code AND} over a {@code {{LWQ}}} source aliased
-     * {@code f} and count {@code DISTINCT f.date}. Reading-submission-rate, critical and continuous metrics
-     * intentionally keep their own reading-based definitions and do not use this token.
-     */
-    private static final String SUPPLIED_WATER_DAY = String.format(
-            "((f.submission_status = %d OR f.submission_status IS NULL) AND f.water_quantity > 0)",
-            SUBMITTED_STATUS);
-
-    /**
      * Applies the shared {@code {{LWQ}}} / {@code {{SWS}}} / {@code {{SWD}}} water token substitutions to a
-     * built SQL string, then fails fast (M1) if any {@code {{...}}} token remains unreplaced — a mismatched
-     * or misspelled token would otherwise silently produce a syntactically invalid or, worse, an unfiltered
-     * query. All fragment substitution funnels through here, so this is the single guard.
+     * built SQL string, then fails fast (M1) if any {@code {{...}}} token remains unreplaced.
+     *
+     * <p>The fragments themselves live in {@link WaterSqlFragments}, shared with the officer situation
+     * reports so a report and a dashboard cannot disagree about whether a scheme supplied water on a
+     * given day. Reading-submission-rate, critical and continuous metrics intentionally keep their own
+     * reading-based definitions and do not use these tokens.</p>
      */
     private static String withWaterFragments(String sql) {
-        String out = sql
-                .replace("{{SWS}}", SUPPLIED_WATER_QUANTITY_SUM)
-                .replace("{{SWD}}", SUPPLIED_WATER_DAY)
-                .replace("{{LWQ}}", LATEST_WATER_QUANTITY);
-        if (out.contains("{{")) {
-            throw new IllegalStateException("Unreplaced SQL token in query: " + out);
-        }
-        return out;
+        return WaterSqlFragments.withWaterFragments(sql);
     }
 
     /**
