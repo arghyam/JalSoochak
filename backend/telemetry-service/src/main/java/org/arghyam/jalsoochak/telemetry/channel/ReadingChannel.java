@@ -111,6 +111,24 @@ public enum ReadingChannel {
                 .findFirst();
     }
 
+    /**
+     * Whether a caller declared a channel that is not one of the canonical codes. A channel that was
+     * not declared at all is not "unsupported" — it simply leaves the channel to be resolved from the
+     * operator's stored preference.
+     */
+    public static boolean isUnsupportedDeclaration(String value) {
+        return isDeclared(value) && parseStrict(value).isEmpty();
+    }
+
+    /**
+     * The message returned with {@code CHANNEL_NOT_SUPPORTED}. Shared by every ingestion endpoint so
+     * they cannot drift, and deliberately free of the submitted value: echoing caller input back into
+     * a response body is how reflected content reaches a consumer that renders it.
+     */
+    public static String unsupportedDeclarationMessage() {
+        return "Unsupported channel. Allowed values are: " + allowedValues();
+    }
+
     /** The accepted codes, in declaration order, for error messages and API documentation. */
     public static String allowedValues() {
         return Arrays.stream(values())

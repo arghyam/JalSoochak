@@ -87,4 +87,20 @@ class ReadingChannelTest {
     void allowedValues_listsEveryCanonicalCode() {
         assertThat(ReadingChannel.allowedValues()).isEqualTo("BFM, ELM, PDU, IOT, MAN");
     }
+
+    @Test
+    void isUnsupportedDeclaration_onlyForADeclaredValueOutsideTheCanonicalSet() {
+        assertThat(ReadingChannel.isUnsupportedDeclaration("BFMX")).isTrue();
+        assertThat(ReadingChannel.isUnsupportedDeclaration("Electric Meter")).isTrue();
+        assertThat(ReadingChannel.isUnsupportedDeclaration("pdu")).isFalse();
+        // Not declared is not unsupported — it falls back to the stored preference.
+        assertThat(ReadingChannel.isUnsupportedDeclaration(null)).isFalse();
+        assertThat(ReadingChannel.isUnsupportedDeclaration("   ")).isFalse();
+    }
+
+    @Test
+    void unsupportedDeclarationMessage_namesTheAllowedSetAndNothingTheCallerSent() {
+        assertThat(ReadingChannel.unsupportedDeclarationMessage())
+                .isEqualTo("Unsupported channel. Allowed values are: BFM, ELM, PDU, IOT, MAN");
+    }
 }

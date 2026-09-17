@@ -1063,6 +1063,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean rejected;
+        private int processAssamReadingCount;
 
         private StubGlificWebhookService() {
             this(false);
@@ -1075,6 +1076,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         @Override
         public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+            processAssamReadingCount++;
             if (rejected) {
                 return CreateReadingResponse.builder()
                         .success(false)
@@ -1223,5 +1225,104 @@ class SingleTenantTelemetryControllerUnitTest {
         private boolean resetWasCalled() {
             return resetCalled;
         }
+    }
+
+    @Test
+    void assamReadingsRejectsAnUnsupportedChannel() {
+        StubGlificWebhookService webhook = new StubGlificWebhookService();
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                webhook,
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response =
+                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("BFMX"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertFalse(response.getBody().isSuccess());
+        assertEquals(TelemetryErrorCode.CHANNEL_NOT_SUPPORTED, response.getBody().getData().getErrorCode());
+        assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
+        // The allowed set is published in the message so an integrator can fix the call without
+        // going back to the specification.
+        assertTrue(response.getBody().getData().getMessage().contains("BFM, ELM, PDU, IOT, MAN"));
+        // Refused before any processing: nothing is stored, nothing is published.
+        assertEquals(0, webhook.processAssamReadingCount);
+    }
+
+    @Test
+    void assamReadingsDoNotEchoTheRejectedChannelBack() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response =
+                controller.receiveAssamReading("js_valid_key", null,
+                        assamReadingWithChannel("<script>alert(1)</script>"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertFalse(response.getBody().getData().getMessage().contains("script"));
+    }
+
+    @Test
+    void assamReadingsAcceptADeclaredChannelInAnyCase() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response =
+                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("  pdu  "));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+    }
+
+    @Test
+    void assamReadingsAcceptASubmissionThatDeclaresNoChannel() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        assertEquals(HttpStatus.OK,
+                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel(null))
+                        .getStatusCode());
+        assertEquals(HttpStatus.OK,
+                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("   "))
+                        .getStatusCode());
+    }
+
+    @Test
+    void assamReadingsCheckTheApiKeyBeforeTheChannel() {
+        // An unauthenticated caller must not learn which channels exist by probing the field.
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.empty()),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response =
+                controller.receiveAssamReading("js_invalid_key", null, assamReadingWithChannel("BFMX"));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.INVALID_API_KEY, response.getBody().getData().getErrorCode());
+    }
+
+    private static AssamReadingRequest assamReadingWithChannel(String channel) {
+        return AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
+                .phoneNumber("919999999999")
+                .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                .channel(channel)
+                .build();
     }
 }
