@@ -141,11 +141,11 @@ public class DailyReportPdfService {
     private void drawNoSupplySection(ReportPdfCanvas c, List<ReportSchemeRow> rows) throws IOException {
         c.sectionTitle("2. Scheme with No Water Supply");
 
-        // The IMIS column is sized so the "Scheme_imis_id" header fits on one line: any narrower and
-        // it hard-splits mid-word, which reads as a rendering fault rather than a heading.
+        // The IMIS column is sized so the "Scheme IMIS Id" header fits on one line: any narrower and
+        // it wraps, which costs a row of height on every page the table spills onto.
         float[] cols = {CONTENT_WIDTH * 0.21f, CONTENT_WIDTH * 0.33f,
                 CONTENT_WIDTH * 0.26f, CONTENT_WIDTH * 0.20f};
-        String[] header = {"Scheme_imis_id", "Scheme Name", "Jal Mitra Name", "Mobile No."};
+        String[] header = {"Scheme IMIS Id", "Scheme Name", "Jal Mitra Name", "Mobile No."};
 
         c.drawTable(cols, header, schemeRows(rows, false), 9f, 9.5f);
     }
@@ -155,7 +155,7 @@ public class DailyReportPdfService {
 
         float[] cols = {CONTENT_WIDTH * 0.20f, CONTENT_WIDTH * 0.20f, CONTENT_WIDTH * 0.23f,
                 CONTENT_WIDTH * 0.20f, CONTENT_WIDTH * 0.17f};
-        String[] header = {"Scheme_imis_id", "Scheme Name", "Type of Anomaly in Submission",
+        String[] header = {"Scheme IMIS Id", "Scheme Name", "Type of Anomaly in Submission",
                 "Jal Mitra Name", "Mobile No."};
 
         c.drawTable(cols, header, schemeRows(rows, true), 9f, 9.5f);

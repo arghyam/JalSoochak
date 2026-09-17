@@ -76,6 +76,9 @@ public final class ReportPdfCanvas implements AutoCloseable {
     private PDPage page;
     private float y;
 
+    /** Whether a section title has already been drawn — the gap goes *between* sections, not above the first. */
+    private boolean sectionDrawn;
+
     /**
      * @param negativeKpiLabels first-column labels whose trend colouring is inverted (an up arrow is
      *                          drawn red). Pass an empty set for a report with no trend column.
@@ -197,6 +200,14 @@ public final class ReportPdfCanvas implements AutoCloseable {
     // ---- text blocks ---------------------------------------------------------
 
     public void sectionTitle(String title) throws IOException {
+        // One blank line between consecutive sections, so a title reads as the start of a new block
+        // rather than a caption on the table it sits under. Not above the first section: the header
+        // block already ends with a gap of its own. Applied before ensureSpace, so a title pushed onto
+        // a fresh page drops the gap instead of carrying it down from the previous page's bottom.
+        if (sectionDrawn) {
+            moveDown(BLANK_LINE);
+        }
+        sectionDrawn = true;
         ensureSpace(40);
         y -= 18;
         text(bold, 13, MARGIN, y, title);
