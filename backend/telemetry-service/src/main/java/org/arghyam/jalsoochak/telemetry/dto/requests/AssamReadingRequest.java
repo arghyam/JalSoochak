@@ -45,6 +45,18 @@ public class AssamReadingRequest {
     @JsonProperty("phone_number")
     private String phoneNumber;
 
+    /**
+     * Optional reading channel declared by the submitting system: one of the canonical codes
+     * (BFM, ELM, PDU, IOT, MAN), case-insensitive. Kept as raw text so the controller can answer an
+     * unsupported value with {@code CHANNEL_NOT_SUPPORTED} rather than letting bean validation
+     * flatten it into a generic failure.
+     *
+     * <p>Null or blank means "not declared", which leaves the channel to be resolved from the
+     * operator's stored preference exactly as before.
+     */
+    @JsonProperty("channel")
+    private String channel;
+
     @JsonProperty("reading_date_time")
     private OffsetDateTime readingDateTime;
 
