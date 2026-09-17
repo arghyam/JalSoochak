@@ -1,11 +1,11 @@
 # Notification Flows
 
-This document covers the four WhatsApp notification pipelines in JalSoochak V2: nudges, escalations, welcome messages, and login OTPs.
+This document covers the six WhatsApp notification pipelines in JalSoochak V2: nudges, escalations, welcome messages, login OTPs, daily situation reports, and weekly situation reports.
 
 > the daily report goes to **Section Officers only**, covers **today 00:00 up to the cron time**
 > (default 16:00 IST), and the weekly report goes to **both SOs and SDOs** on Monday 09:00 IST
 > covering the previous full Mon–Sun week. Both land in their own MinIO buckets
-> (`daily-water-reports`, `weekly-water-reports`) under role and period folders. All four flows share the same Kafka transport layer — events are published to `common-topic` and consumed by `message-service`, which routes them to the Glific WhatsApp API.
+> (`daily-water-reports`, `weekly-water-reports`) under role and period folders. All six flows share the same Kafka transport layer — events are published to `common-topic` and consumed by `message-service`, which routes them to the Glific WhatsApp API.
 
 ---
 

@@ -367,11 +367,66 @@ class GlificDeliveryReconciliationServiceTest {
             ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880559");
             ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "990102");
 
-            assertThat(service.resolveTemplateKinds())
+            assertThat(service.resolveTemplateKinds().kinds())
                     .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
                     .containsEntry(880559, GlificDeliveryReconciliationService.ReportKind.DAILY)
                     .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY)
                     .containsEntry(990102, GlificDeliveryReconciliationService.ReportKind.WEEKLY);
+        }
+
+        /**
+         * The SDO ids fall back to the SO ones at send time, so the same id under both properties of one
+         * report is ordinary configuration — not the ambiguity that stops a pass.
+         */
+        @Test
+        void theSameIdUnderTwoPropertiesOfOneReportIsNotAConflict() {
+            ReflectionTestUtils.setField(service, "dailyReportSdoTemplateId",
+                    String.valueOf(DAILY_REPORT_TEMPLATE));
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId",
+                    String.valueOf(WEEKLY_REPORT_TEMPLATE));
+
+            assertThat(service.resolveTemplateKinds().conflicts()).isEmpty();
+            assertThat(service.resolveTemplateKinds().kinds())
+                    .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
+                    .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY);
+        }
+
+        /**
+         * An id claimed by both reports has no right label: every delivery on it lands under whichever
+         * property was read first, so one of the two per-report tallies is wrong and nothing in the
+         * output says which. The pass refuses rather than publish that.
+         */
+        @Test
+        void refusesToRunWhenOneTemplateIdIsClaimedByBothReports() {
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId",
+                    String.valueOf(DAILY_REPORT_TEMPLATE));
+
+            service.reconcile(from, to);
+
+            verifyNoInteractions(glificDeliveryStatusService);
+            assertThat(logLines()).anyMatch(l -> l.contains("configured for more than one report")
+                    && l.contains(String.valueOf(DAILY_REPORT_TEMPLATE))
+                    && l.contains("DAILY")
+                    && l.contains("WEEKLY"));
+            assertThat(logLines()).noneMatch(l -> l.contains("summaryTotal:"));
+        }
+
+        /**
+         * The override picks which ids are watched, not what they mean. Leaving the ambiguous id out of
+         * it must not turn the conflict into a pass that quietly keeps the first-wins label.
+         */
+        @Test
+        void anOverrideDoesNotMaskAConflict() {
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId",
+                    String.valueOf(DAILY_REPORT_TEMPLATE));
+            ReflectionTestUtils.setField(service, "templateIdsCsv", "111");
+
+            assertThat(service.resolveTemplateKinds().conflicts()).containsKey(DAILY_REPORT_TEMPLATE);
+
+            service.reconcile(from, to);
+
+            verifyNoInteractions(glificDeliveryStatusService);
+            assertThat(logLines()).anyMatch(l -> l.contains("configured for more than one report"));
         }
 
         @Test
@@ -390,7 +445,7 @@ class GlificDeliveryReconciliationServiceTest {
             ReflectionTestUtils.setField(service, "templateIdsCsv",
                     DAILY_REPORT_TEMPLATE + "," + WEEKLY_REPORT_TEMPLATE + ",111");
 
-            assertThat(service.resolveTemplateKinds())
+            assertThat(service.resolveTemplateKinds().kinds())
                     .containsEntry(DAILY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.DAILY)
                     .containsEntry(WEEKLY_REPORT_TEMPLATE, GlificDeliveryReconciliationService.ReportKind.WEEKLY)
                     .containsEntry(111, GlificDeliveryReconciliationService.ReportKind.UNKNOWN);

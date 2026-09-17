@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -158,7 +159,17 @@ public class GlificDeliveryReconciliationService {
      */
     public void reconcile(Instant from, Instant to) {
         long startNanos = System.nanoTime();
-        Map<Integer, ReportKind> templateKinds = resolveTemplateKinds();
+        TemplateKinds templates = resolveTemplateKinds();
+        if (!templates.conflicts().isEmpty()) {
+            log.error("[GlificStatus] Template id(s) {} are configured for more than one report. Every"
+                            + " delivery on such an id would be filed under whichever property happened to"
+                            + " be read first, so neither the daily nor the weekly tally can be trusted."
+                            + " Fix the glific.template.daily-report-* / glific.template.weekly-report-*"
+                            + " properties so each id names one report. Skipping this pass.",
+                    templates.conflicts());
+            return;
+        }
+        Map<Integer, ReportKind> templateKinds = templates.kinds();
         if (templateKinds.isEmpty()) {
             log.warn("[GlificStatus] No report template ids configured — every message in the window"
                     + " would be discarded. Set GLIFIC_STATUS_RECONCILE_TEMPLATE_IDS or the"
@@ -543,21 +554,30 @@ public class GlificDeliveryReconciliationService {
      * under-including loses messages.
      */
     Set<Integer> resolveTemplateIds() {
-        return resolveTemplateKinds().keySet();
+        return resolveTemplateKinds().kinds().keySet();
     }
 
     /**
-     * The same template ids, each labelled with the report it carries. The label is what lets a delivery
-     * be counted as daily or weekly; without it both land in one undifferentiated tally.
+     * The template ids to watch, each labelled with the report it carries, alongside every id the
+     * configuration claims for more than one report.
+     *
+     * @param kinds     the ids that carry an unambiguous label, which is what lets a delivery be counted
+     *                  as daily or weekly; without it both land in one undifferentiated tally
+     * @param conflicts ids claimed by both reports, mapped to the reports claiming them. An entry here
+     *                  has no correct label to give, so the pass refuses to run rather than publish
+     *                  per-report numbers that are wrong for one of the two
      */
-    Map<Integer, ReportKind> resolveTemplateKinds() {
+    record TemplateKinds(Map<Integer, ReportKind> kinds, Map<Integer, Set<ReportKind>> conflicts) {}
+
+    TemplateKinds resolveTemplateKinds() {
         Map<Integer, ReportKind> byTypedProperty = new LinkedHashMap<>();
-        putTemplateIds(byTypedProperty, ReportKind.DAILY, dailyReportSoTemplateId, dailyReportSdoTemplateId,
-                dailyReportSoLinkTemplateId, dailyReportSdoLinkTemplateId);
-        putTemplateIds(byTypedProperty, ReportKind.WEEKLY, weeklyReportSoLinkTemplateId,
+        Map<Integer, Set<ReportKind>> conflicts = new TreeMap<>();
+        putTemplateIds(byTypedProperty, conflicts, ReportKind.DAILY, dailyReportSoTemplateId,
+                dailyReportSdoTemplateId, dailyReportSoLinkTemplateId, dailyReportSdoLinkTemplateId);
+        putTemplateIds(byTypedProperty, conflicts, ReportKind.WEEKLY, weeklyReportSoLinkTemplateId,
                 weeklyReportSdoLinkTemplateId);
         if (templateIdsCsv == null || templateIdsCsv.isBlank()) {
-            return byTypedProperty;
+            return new TemplateKinds(byTypedProperty, conflicts);
         }
         // The override decides *which* ids are watched, but the typed properties still say what each one
         // is wherever they name it: an override exists to add an id the properties missed, not to
@@ -567,14 +587,28 @@ public class GlificDeliveryReconciliationService {
             parseTemplateId(value).ifPresent(id ->
                     overridden.put(id, byTypedProperty.getOrDefault(id, ReportKind.UNKNOWN)));
         }
-        return overridden;
+        // Conflicts travel with the override rather than being dropped by it. An override that lists a
+        // conflicting id would otherwise hand back the first-wins label the properties disagreed about;
+        // one that omits it would hide a pair of properties still pointing at the same template, which
+        // the send path reads too.
+        return new TemplateKinds(overridden, conflicts);
     }
 
-    private void putTemplateIds(Map<Integer, ReportKind> target, ReportKind kind, String... values) {
+    private void putTemplateIds(Map<Integer, ReportKind> target, Map<Integer, Set<ReportKind>> conflicts,
+                                ReportKind kind, String... values) {
         for (String value : values) {
-            // putIfAbsent: an id configured for both reports keeps the first label rather than flipping
-            // with property order. That is a misconfiguration, not something to resolve silently here.
-            parseTemplateId(value).ifPresent(id -> target.putIfAbsent(id, kind));
+            parseTemplateId(value).ifPresent(id -> {
+                ReportKind existing = target.putIfAbsent(id, kind);
+                // Repeating an id within one report is ordinary — the SDO ids fall back to the SO ones —
+                // but an id both reports claim cannot answer "which report was this?", and property order
+                // answers it wrongly half the time. Recorded so the caller can refuse the pass instead.
+                if (existing != null && existing != kind) {
+                    Set<ReportKind> claimedBy =
+                            conflicts.computeIfAbsent(id, k -> EnumSet.noneOf(ReportKind.class));
+                    claimedBy.add(existing);
+                    claimedBy.add(kind);
+                }
+            });
         }
     }
 
