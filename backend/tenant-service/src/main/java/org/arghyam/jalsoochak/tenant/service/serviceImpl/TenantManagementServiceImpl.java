@@ -351,10 +351,13 @@ public class TenantManagementServiceImpl implements TenantManagementService {
 
             if (key == TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME) {
                 // Enforced validation for JsonNode-bound configs (bean validation does not run on
-                // treeToValue). Checked before the upsert: an out-of-range day that reached the DB would
+                // treeToValue). Checked before the upsert: an out-of-range value that reached the DB would
                 // make the post-commit reschedule throw, leaving persisted config that unschedules every
-                // job for this tenant on the next startup.
-                ((WeeklyReportTimingConfigDTO) dto).validatedWeekStartDay();
+                // job for this tenant on the next startup. The cron fields carry the same risk as
+                // weekStartDay — validateScheduleConfig rejects all four alike — so both are checked.
+                WeeklyReportTimingConfigDTO weeklyDto = (WeeklyReportTimingConfigDTO) dto;
+                weeklyDto.validatedWeekStartDay();
+                weeklyDto.validateSchedule();
             }
 
             if (key.getType() == ConfigType.GENERIC) {

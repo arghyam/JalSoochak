@@ -1749,6 +1749,27 @@ class NotificationEventRouterTest {
     }
 
     @Test
+    void handleWeeklyReport_skipsAnEventWithAnUnusableComparisonWeekRange() {
+        // The summary table parses the comparison bounds for its column header, so a malformed one
+        // throws mid-render. Skipping here keeps that a permanent skip rather than a retry loop.
+        router.route(WEEKLY_SO_JSON.replace("\"previousWeekStart\":\"2026-07-06\"",
+                "\"previousWeekStart\":\"06-07-2026\""));
+
+        verifyNoInteractions(weeklyReportPdfService);
+    }
+
+    @Test
+    void handleWeeklyReport_skipsAnEventMissingTheComparisonWeekRange() {
+        router.route("""
+                {"eventType":"WEEKLY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+                 "officerUserId":500,"officerUserType":"SECTION_OFFICER",
+                 "kpis":{"weekStart":"2026-07-13","weekEnd":"2026-07-19"}}
+                """);
+
+        verifyNoInteractions(weeklyReportPdfService);
+    }
+
+    @Test
     void handleWeeklyReport_skipsAnEventWithAnInjectableSchemaName() {
         router.route(WEEKLY_SO_JSON.replace("tenant_mp", "tenant_mp; DROP TABLE user_table"));
 

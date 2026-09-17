@@ -55,6 +55,38 @@ public final class WeeklyReportTimingConfigDTO implements ConfigValueDTO {
         return value;
     }
 
+    /**
+     * Range-checks the three cron fields the weekly schedule actually uses, for the same reason as
+     * {@link #validatedWeekStartDay()}.
+     *
+     * <p>{@code TenantSchedulerManager.validateScheduleConfig} rejects an out-of-range hour, minute or
+     * dayOfWeek exactly as it rejects an out-of-range weekStartDay — so a value that commits here
+     * survives the write, then throws on every later {@code scheduleForTenant}, leaving the tenant with
+     * no nudge, escalation, daily-report or weekly-report job from the next startup onwards.</p>
+     *
+     * <p>Null-tolerant throughout: an absent {@code weeklyReport}, {@code schedule} or individual field
+     * means "use the application default" and is left for {@code TenantConfigService} to fill in.</p>
+     *
+     * @throws InvalidConfigValueException if an explicitly supplied field is out of range
+     */
+    public void validateSchedule() {
+        ScheduleConfigDTO schedule = weeklyReport == null ? null : weeklyReport.getSchedule();
+        if (schedule == null) {
+            return;
+        }
+        checkRange(schedule.getDayOfWeek(), 0, 7,
+                "dayOfWeek", "(must be between 0 and 7, where both 0 and 7 mean Sunday)");
+        checkRange(schedule.getHour(), 0, 23, "hour", "(must be between 0 and 23)");
+        checkRange(schedule.getMinute(), 0, 59, "minute", "(must be between 0 and 59)");
+    }
+
+    private static void checkRange(Integer value, int min, int max, String field, String bounds) {
+        if (value != null && (value < min || value > max)) {
+            throw new InvalidConfigValueException(
+                    "Invalid " + field + " '" + value + "' in WEEKLY_SITUATION_REPORT_TIME " + bounds);
+        }
+    }
+
     @Data
     @Builder
     @AllArgsConstructor

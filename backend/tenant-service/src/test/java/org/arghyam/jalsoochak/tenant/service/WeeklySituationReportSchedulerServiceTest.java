@@ -91,6 +91,30 @@ class WeeklySituationReportSchedulerServiceTest {
     }
 
     @Test
+    @DisplayName("a role repeated in the CSV publishes one request per officer, not two")
+    void deduplicatesRepeatedRolesInTheConfiguredCsv() {
+        ReflectionTestUtils.setField(service, "officerUserTypesCsv",
+                "SECTION_OFFICER, SECTION_OFFICER ,SUB_DIVISIONAL_OFFICER");
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
+                .thenReturn(List.of(11L));
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
+                .thenReturn(List.of(20L));
+        when(nudgeRepository.findSubordinateSectionOfficerIds(SCHEMA, 20L)).thenReturn(List.of(11L));
+
+        service.processWeeklyReportsForTenant(SCHEMA, TENANT, DayOfWeek.MONDAY);
+
+        // Two events, not three: a duplicate would mean a second PDF and a second WhatsApp message
+        // landing on a real officer.
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaProducer, times(2)).publishJson(eq("common-topic"), captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(e -> ((WeeklyReportRequestEvent) e).getOfficerUserId())
+                .containsExactlyInAnyOrder(11L, 20L);
+        verify(nudgeRepository, times(1))
+                .findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER");
+    }
+
+    @Test
     @DisplayName("reports a complete Monday-to-Sunday week that has already ended")
     void coversTheLastCompleteWeek() {
         WeeklyReportRequestEvent event = publishOneAndCapture(DayOfWeek.MONDAY);
@@ -163,7 +187,7 @@ class WeeklySituationReportSchedulerServiceTest {
     }
 
     @Test
-    @DisplayName("per-role counts sum to the total when a role is listed twice")
+    @DisplayName("the summary log reconciles with the de-duplicated request count")
     void perRoleRequestedCountsSumToTotal() {
         ReflectionTestUtils.setField(service, "officerUserTypesCsv", "SECTION_OFFICER,SECTION_OFFICER");
         when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
@@ -182,10 +206,12 @@ class WeeklySituationReportSchedulerServiceTest {
             appender.stop();
         }
 
-        verify(kafkaProducer, times(4)).publishJson(eq("common-topic"), any());
+        // The repeated role collapses to one pass, so the denominator the downstream GENERATED/SENT
+        // counts reconcile against is the two officers that were actually messaged.
+        verify(kafkaProducer, times(2)).publishJson(eq("common-topic"), any());
         assertThat(appender.list).anySatisfy(event -> assertThat(event.getFormattedMessage())
-                .contains("requested=4")
-                .contains("requestedByRole={SECTION_OFFICER=4}"));
+                .contains("requested=2")
+                .contains("requestedByRole={SECTION_OFFICER=2}"));
     }
 
     @Test

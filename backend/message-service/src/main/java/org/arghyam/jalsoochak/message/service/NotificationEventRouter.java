@@ -1400,9 +1400,15 @@ public class NotificationEventRouter {
         return kpis != null && isIsoDate(kpis.getReportDate());
     }
 
-    /** A weekly payload is renderable only with both week bounds present and ISO-parseable. */
+    /**
+     * A weekly payload is renderable only with all four week bounds present and ISO-parseable. The
+     * comparison week's bounds count too: the PDF's summary table parses them for its column header, so
+     * a malformed one throws {@link DateTimeParseException} mid-render just as the current week's would.
+     */
     private boolean isRenderableWeeklyKpis(WeeklyReportKpis kpis) {
-        return kpis != null && isIsoDate(kpis.getWeekStart()) && isIsoDate(kpis.getWeekEnd());
+        return kpis != null
+                && isIsoDate(kpis.getWeekStart()) && isIsoDate(kpis.getWeekEnd())
+                && isIsoDate(kpis.getPreviousWeekStart()) && isIsoDate(kpis.getPreviousWeekEnd());
     }
 
     /**

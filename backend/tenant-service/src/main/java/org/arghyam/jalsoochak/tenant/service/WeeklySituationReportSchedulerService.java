@@ -73,8 +73,8 @@ public class WeeklySituationReportSchedulerService {
         int count = 0;
         for (String role : roles) {
             List<Long> officerIds = nudgeRepository.findDistinctOfficerUserIdsByUserType(schema, role);
-            // Merge rather than put: a role listed twice in the CSV is published twice, so the
-            // per-role total must add up to `count` instead of being overwritten by the last pass.
+            // officerRoles() de-duplicates, so merge and put are equivalent here; merge keeps the
+            // total honest if the loop ever gains a second source of roles.
             requestedByRole.merge(role, officerIds.size(), Integer::sum);
             log.info("[WeeklyReportJob] corr={} result=REQUESTED role={} tenant={} officers={}",
                     correlationId, role, tenantId, officerIds.size());
@@ -130,10 +130,16 @@ public class WeeklySituationReportSchedulerService {
         return today.with(TemporalAdjusters.previous(weekStartDay.minus(1)));
     }
 
+    /**
+     * The configured roles, trimmed, blanks dropped and de-duplicated in configured order. A role
+     * repeated in the CSV would otherwise publish a second identical request per officer — a duplicate
+     * PDF and a duplicate WhatsApp message to a real officer.
+     */
     private List<String> officerRoles() {
         return Arrays.stream(officerUserTypesCsv.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
+                .distinct()
                 .toList();
     }
 }

@@ -961,6 +961,75 @@ class TenantManagementServiceImplTest {
         }
 
         @Test
+        @DisplayName("Rejects an out-of-range schedule hour before it reaches the database")
+        void testSetTenantConfigs_weeklyReport_rejectsOutOfRangeScheduleHour() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME, objectMapper.readTree(
+                    "{\"weeklyReport\":{\"schedule\":{\"dayOfWeek\":1,\"hour\":31,\"minute\":0},\"weekStartDay\":1}}"));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            // The cron fields carry the same risk as weekStartDay: validateScheduleConfig rejects an
+            // out-of-range hour, so a persisted one leaves the tenant with no jobs from next startup.
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("Rejects an out-of-range schedule dayOfWeek before it reaches the database")
+        void testSetTenantConfigs_weeklyReport_rejectsOutOfRangeScheduleDayOfWeek() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME, objectMapper.readTree(
+                    "{\"weeklyReport\":{\"schedule\":{\"dayOfWeek\":8,\"hour\":9,\"minute\":0},\"weekStartDay\":1}}"));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+            assertThrows(InvalidConfigValueException.class,
+                    () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            verify(tenantCommonRepository, never()).upsertConfig(anyInt(), anyString(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("An omitted schedule still writes: missing fields mean the application default")
+        void testSetTenantConfigs_weeklyReport_allowsAnOmittedSchedule() throws Exception {
+            Integer tenantId = 1;
+            TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN")
+                    .status(TenantStatusEnum.ACTIVE.name()).build();
+            Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+            configs.put(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME, objectMapper.readTree(
+                    "{\"weeklyReport\":{\"weekStartDay\":1}}"));
+            SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+            when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+            when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+            when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+            when(tenantCommonRepository.upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME.name()), anyString(), eq(100)))
+                    .thenAnswer(inv -> Optional.of(ConfigDTO.builder()
+                            .configKey(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME.name())
+                            .configValue(inv.getArgument(2))
+                            .build()));
+
+            tenantManagementService.setTenantConfigs(tenantId, request);
+
+            verify(tenantCommonRepository).upsertConfig(eq(tenantId),
+                    eq(TenantConfigKeyEnum.WEEKLY_SITUATION_REPORT_TIME.name()), anyString(), eq(100));
+        }
+
+        @Test
         @DisplayName("Should throw exception when config upsert fails")
         void testSetTenantConfigs_UpsertFailed() throws Exception {
             // Arrange

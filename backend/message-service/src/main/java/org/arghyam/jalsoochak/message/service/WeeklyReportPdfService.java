@@ -52,8 +52,12 @@ public class WeeklyReportPdfService {
     private String supportPhone;
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE;
-    private static final DateTimeFormatter HEADER = DateTimeFormatter.ofPattern("dd MMMM yyyy");
-    private static final DateTimeFormatter RANGE = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
+    // Locale pinned for the same reason as dayName(): MMMM/MMM resolve month names from the JVM default
+    // locale, and ReportPdfCanvas renders characters its font cannot encode as '?'.
+    private static final DateTimeFormatter HEADER =
+            DateTimeFormatter.ofPattern("dd MMMM yyyy", Locale.ENGLISH);
+    private static final DateTimeFormatter RANGE =
+            DateTimeFormatter.ofPattern("dd-MMM-yyyy", Locale.ENGLISH);
 
     private static final String SDO_ROLE = "SUB_DIVISIONAL_OFFICER";
     /** The platform reports on IST days throughout; the generation date must agree. */

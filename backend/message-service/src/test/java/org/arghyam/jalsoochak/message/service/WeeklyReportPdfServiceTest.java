@@ -15,7 +15,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -267,6 +269,25 @@ class WeeklyReportPdfServiceTest {
             // so a bare contains("—") passed however the trend cell was rendered.
             assertThat(text).contains("Total Schemes 148 148 —");
         }
+    }
+
+    @Test
+    void formatsDatesInEnglishWhateverTheJvmDefaultLocaleIs() throws Exception {
+        // Asserted on the formatters themselves, not on rendered output: they are static finals that
+        // capture the default locale once at class-init, so a Locale.setDefault in a test would come
+        // too late to prove anything. Month names reach a PDF font that renders what it cannot encode
+        // as '?', so a JVM started with e.g. hi-IN would otherwise ship a header of question marks.
+        assertThat(formatterLocale("HEADER")).isEqualTo(Locale.ENGLISH);
+        assertThat(formatterLocale("RANGE")).isEqualTo(Locale.ENGLISH);
+
+        // And the output those formatters actually produce.
+        String text = render(SO, kpis(142, 140), List.of(), List.of(), List.of(), List.of());
+        assertThat(text).contains("Monday 13-Jul-2026 to Sunday 19-Jul-2026");
+    }
+
+    private static Locale formatterLocale(String fieldName) {
+        return ((DateTimeFormatter) ReflectionTestUtils.getField(WeeklyReportPdfService.class, fieldName))
+                .getLocale();
     }
 
     @Test
