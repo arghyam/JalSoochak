@@ -271,6 +271,18 @@ The tables below list every endpoint that changed across all services. If your f
 > endpoints (`/readings`, `/readings/formats/{format}`, `/schemes/{id}/yesterday-final-reading`),
 > which share the same `/api/v1/telemetry` prefix.
 
+### Partner ingestion — the optional `channel` parameter
+
+`POST /api/v1/telemetry/readings` and `POST /api/v1/telemetry/readings/formats/{format}` accept an
+optional `channel` on the request body: `BFM`, `ELM`, `PDU`, `IOT` or `MAN`, case-insensitive, blank
+treated as absent. It names the equipment the reading came from and overrides the submitting
+operator's stored channel preference; omitted, the preference decides and falls back to `BFM`, which
+is what every caller did before the field existed.
+
+An unsupported value returns `400` with `errorCode: CHANNEL_NOT_SUPPORTED`. `PUT /readings` and
+`PATCH /schemes/{id}/yesterday-final-reading` do not take it — a correction keeps the channel
+recorded when the reading was first submitted.
+
 | Method | Endpoint                                          | Description |
 |--------|---------------------------------------------------|-------------|
 | POST | `/api/v1/telemetry/readings/glific`               | Receive the generic Glific webhook payload for image-based meter readings |
