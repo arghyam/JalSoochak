@@ -77,7 +77,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
                 schemeRegularityService.getOutageReasonSchemeCountByLgd(tenantId, lgdId, startDate, endDate);
                 // Warm-cache: non-submission reason distribution (overall + child regions) under this state (last 30 days).
                 schemeRegularityService.getNonSubmissionReasonSchemeCountByLgd(tenantId, lgdId, startDate, endDate);
-                // Warm-cache: schemes dashboard (active/inactive counts + top schemes by reporting rate) for this state (last 30 days).
+                // Warm-cache: schemes dashboard (work/operating status breakdowns + top schemes by reporting rate) for this state (last 30 days).
                 schemeRegularityService.getSchemeStatusAndTopReportingByLgd(
                         tenantId, lgdId, startDate, endDate, 1, null, null, null);
                 // Warm the common paginated view (page 1, default count).
@@ -93,7 +93,7 @@ public class LgdStateWarmCacheTask implements AnalyticsScheduledTask {
                 schemeRegularityService.getPeriodicOutageReasonSchemeCountByLgdId(tenantId, lgdId, startDate, endDate, scale);
                 // Warm-cache: submission status summary (scheme count + compliant/anomalous submissions) for this state (last 30 days).
                 schemeRegularityService.getSubmissionStatusSummaryByLgd(tenantId, lgdId, startDate, endDate);
-                // Warm-cache: scheme status counts (active/inactive) for this state (not date-ranged).
+                // Warm-cache: scheme counts by work status and operating status for this state (not date-ranged).
                 schemeRegularityService.getSchemeStatusCountByLgd(tenantId, lgdId);
 
                 // water-supply requires tenant_id + parent_lgd_id for child scope

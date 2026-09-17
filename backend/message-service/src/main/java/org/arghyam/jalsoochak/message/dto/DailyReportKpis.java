@@ -10,7 +10,11 @@ import java.util.List;
 
 /**
  * Daily Water Service Situation Report KPI payload, as received from analytics-service inside the
- * {@code DAILY_REPORT_KPIS} event. Mirrors {@code analytics-service}'s {@code DailyReportKpiDTO}.
+ * {@code DAILY_REPORT_KPIS} event. Mirrors analytics-service's {@code DailyReportKpiDTO}.
+ *
+ * <p>Carries no PII: the scheme ids in {@link #noSupplySchemeIds} and {@link #schemeAnomalies} are
+ * resolved to names, IMIS ids and Jal Mitra contacts here, from the operational schema, at render
+ * time.</p>
  */
 @Data
 @Builder
@@ -19,90 +23,41 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DailyReportKpis {
 
+    /** The day the report covers (today, IST). */
     private String reportDate;
-    private String previousDate;
+
+    /** ISO-8601 local date-time (IST) the window closed at; rendered into the Reporting Period line. */
+    private String cutoffIst;
+
     private int totalSchemes;
-    private DayKpis yesterday;
-    private DayKpis previousDay;
-    private List<ReasonCount> reasonsForNoSupply;
-    private List<TypeCount> anomaliesByType;
-    private List<PriorityAction> priorityActions;
+    private int schemesSupplying;
+    private int schemesNotSupplying;
 
-    /**
-     * SDO-only Summary breakdown — one row per Section Officer under the SDO (report day only).
-     * Present only for a SUB_DIVISIONAL_OFFICER report; null/empty otherwise. Officer name + mobile are
-     * resolved by message-service from the operational {@code user_table} at render time.
-     */
-    private List<SectionOfficerSummary> sectionOfficerSummaries;
+    private long householdsWithSupply;
+    private double householdsWithSupplyPct;
+    private long householdsWithoutSupply;
+    private double householdsWithoutSupplyPct;
+    private long totalHouseholds;
 
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class DayKpis {
-        private int schemesSupplying;
-        private int schemesNotSupplying;
-        private double avgLpcd;
-        private double avgMld;
-        private double regularSupplyPctWeek;
-        private double readingSubmissionPct;
-        private int anomalousCount;
-    }
+    /** Litres per capita per day across only the schemes that supplied water. */
+    private double avgLpcd;
+
+    private int anomalousCount;
+
+    /** Section 2 — schemes that had not supplied water by the cut-off. */
+    private List<Integer> noSupplySchemeIds;
+
+    /** Section 3 — one entry per (scheme, anomaly type) raised during the window. */
+    private List<SchemeAnomaly> schemeAnomalies;
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class ReasonCount {
-        private String reason;
-        private int count;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class TypeCount {
-        private String type;
-        private int count;
-    }
-
-    /**
-     * Section 2 — one Priority Actions entry as computed by analytics. Scheme name / IMIS id /
-     * pump operators are resolved in message-service (operational schema + PII) at render time.
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class PriorityAction {
+    public static class SchemeAnomaly {
         private int schemeId;
-        private String issue;
-        private Integer daysNoSupply;
-    }
-
-    /**
-     * SDO Summary breakdown row for one Section Officer (report day only). Officer name + mobile are
-     * resolved by message-service from the operational {@code user_table} using {@link #officerUserId}.
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class SectionOfficerSummary {
-        private long officerUserId;
-        private int totalSchemes;
-        private int schemesSupplying;
-        private int schemesNotSupplying;
-        private double avgLpcd;
-        private double avgMld;
-        private double regularSupplyPctWeek;
-        private double readingSubmissionPct;
-        private int anomalousCount;
+        /** Anomaly enum NAME, or the numeric code as a string on pre-migration rows. */
+        private String type;
     }
 }

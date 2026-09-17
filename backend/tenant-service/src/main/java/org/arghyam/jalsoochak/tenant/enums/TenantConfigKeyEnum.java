@@ -15,6 +15,8 @@ import org.arghyam.jalsoochak.tenant.dto.internal.StateITSystemConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.TimeSettingsConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.NudgeTimingConfigDTO;
 import org.arghyam.jalsoochak.tenant.dto.internal.EscalationRulesConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.DailyReportTimingConfigDTO;
+import org.arghyam.jalsoochak.tenant.dto.internal.WeeklyReportTimingConfigDTO;
 
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -124,6 +126,32 @@ public enum TenantConfigKeyEnum implements ConfigKey {
      * Escalation messages are sent to field staff (Section Officer, District Officer,ExecutiveEngineer, etc.).
      */
     FIELD_STAFF_ESCALATION_RULES(ConfigType.GENERIC, EscalationRulesConfigDTO.class, false, false, true),
+
+    /**
+     * Daily Water Service Situation Report schedule (Section Officers).
+     * The report covers the same day from 00:00 up to this time.
+     * Format: { dailyReport: { schedule: { hour: 16, minute: 0 } } }
+     * Optional: an unset tenant runs on the application default rather than being incomplete.
+     */
+    DAILY_SITUATION_REPORT_TIME(ConfigType.GENERIC, DailyReportTimingConfigDTO.class, false, false, false),
+
+    /**
+     * Weekly Water Service Situation Report schedule and window (Section and Sub-Divisional Officers).
+     * Format: { weeklyReport: { schedule: { dayOfWeek: 1, hour: 9, minute: 0 }, weekStartDay: 1 } }
+     * <p>
+     * {@code schedule} is when the job fires; {@code weekStartDay} is which seven days it reports on.
+     * Both use the cron convention 0–7, where both 0 and 7 are Sunday and 1 is Monday. The report always
+     * covers the last COMPLETE week beginning on {@code weekStartDay}, so 1 gives Monday–Sunday and 4
+     * gives Thursday–Wednesday; it never includes a day that has not finished. The two settings are
+     * independent — the scheduler warns when they differ, since the gap is how stale the data is on
+     * delivery.
+     * <p>
+     * Changing {@code weekStartDay} makes the next window overlap the one already reported, so officers
+     * may receive two reports covering some of the same days. There is no de-duplication.
+     * <p>
+     * Optional: an unset tenant runs on the application default (Monday) rather than being incomplete.
+     */
+    WEEKLY_SITUATION_REPORT_TIME(ConfigType.GENERIC, WeeklyReportTimingConfigDTO.class, false, false, false),
 
     /**
      * Data Consolidation Time.

@@ -1,13 +1,16 @@
 package org.arghyam.jalsoochak.telemetry.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
+@Slf4j
 public class GlificLocalizationService {
     private static final Pattern SUBMITTED_PREVIOUS_PATTERN = Pattern.compile(
             "(?i)submitted\\s+reading:\\s*([^\\.]+)\\.\\s*previous\\s+reading:\\s*([^\\.]+)\\.?"
@@ -57,6 +60,23 @@ public class GlificLocalizationService {
         }
     }
 
+    /**
+     * Turns an exception into text that is safe to show an operator or return to an API caller.
+     *
+     * <p>ERROR-DISCLOSURE: this used to end with {@code return localizeMessage(message.trim(), ...)} —
+     * anything the rule list did not recognise was handed to the user verbatim. Every caller catches
+     * {@code Exception}, so that path was reachable by far more than the business validations it was
+     * written for: a {@code DataAccessException} would put SQL text and schema names such as
+     * {@code tenant_as} into a WhatsApp reply, and messages like {@code "Missing required column …"},
+     * {@code "Tenant not found for schema …"}, {@code "PII_ENCRYPTION_KEY must decode to exactly 32
+     * bytes"} or {@code "No operator found for contactId 91XXXXXXXXXX"} (a phone number echoed back)
+     * were all one unmapped throw away from the user.
+     *
+     * <p>It is now an allowlist: only a message matched by {@link #USER_FACING_RULES} is shown, and
+     * everything else becomes the caller's own context-specific {@code fallback}. Adding a new
+     * user-facing message therefore means adding a rule — the safe default is not to disclose.
+     * Suppressions are logged so an over-eager fallback is visible in ops rather than silent.
+     */
     public String resolveUserFacingErrorMessage(Exception e, String fallback, String languageKey) {
         if (e == null) {
             return localizeMessage(fallback, languageKey);
@@ -67,69 +87,143 @@ public class GlificLocalizationService {
         }
 
         String normalized = message.trim().toLowerCase(Locale.ROOT);
-        if (normalized.contains("duplicate image")) {
-            return localizeMessage("Duplicate image submission detected. Please submit a new image.", languageKey);
-        }
+
+        // The one message we pass through: our own code composes it, and it carries the operator's own
+        // submitted value and their scheme's previous reading — which the Hindi localizer also parses.
         if (normalized.contains("less than previous")) {
             return localizeMessage(message.trim(), languageKey);
         }
-        if (normalized.contains("manualreading is required")) {
-            return localizeMessage("manualReading is required.", languageKey);
+
+        for (UserFacingRule rule : USER_FACING_RULES) {
+            if (normalized.contains(rule.match())) {
+                return localizeMessage(rule.safeMessage(), languageKey);
+            }
         }
-        if (normalized.contains("manualreading must be numeric")) {
-            return localizeMessage("Manual Reading must be numeric value", languageKey);
-        }
-        if (normalized.contains("manualreading must be greater than zero")) {
-            return localizeMessage("manualReading must be greater than zero.", languageKey);
-        }
-        if (normalized.contains("language selection is required")) {
-            return localizeMessage("Language selection is required. Please choose one of the listed options.", languageKey);
-        }
-        if (normalized.contains("invalid language selection")) {
-            return localizeMessage("Invalid language selection. Please restart the process", languageKey);
-        }
-        if (normalized.contains("no language options configured")) {
-            return localizeMessage("Language options are not configured for this tenant.", languageKey);
-        }
-        if (normalized.contains("channel selection is required")) {
-            return localizeMessage("Channel selection is required. Please choose one of the listed options.", languageKey);
-        }
-        if (normalized.contains("invalid channel selection")) {
-            return localizeMessage("Invalid channel selection. Please restart the process", languageKey);
-        }
-        if (normalized.contains("no channel options configured")) {
-            return localizeMessage("Channel options are not configured for this tenant.", languageKey);
-        }
-        if (normalized.contains("selected channel is no longer available")) {
-            return localizeMessage("Selected channel is no longer available. Please make sure you have a channel selected.", languageKey);
-        }
-        if (normalized.contains("item selection is required")) {
-            return localizeMessage("Item selection is required. Please choose one of the listed options.", languageKey);
-        }
-        if (normalized.contains("invalid item selection")) {
-            return localizeMessage("Invalid item selection. Please choose a valid option from the list.", languageKey);
-        }
-        if (normalized.contains("no item options configured")) {
-            return localizeMessage("Item options are not configured for this tenant.", languageKey);
-        }
-        if (normalized.contains("operator is not mapped to any scheme")) {
-            return localizeMessage("No scheme is mapped to this operator.", languageKey);
-        }
-        if (normalized.contains("operator could not be resolved")) {
-            return localizeMessage("Operator could not be resolved for this contact.", languageKey);
-        }
-        if (normalized.contains("invalid media")) {
-            return localizeMessage("Invalid media. Please submit a clear meter image.", languageKey);
-        }
-        if (normalized.contains("failed to download image")) {
-            return localizeMessage("Image could not be processed. Please try again", languageKey);
-        }
-        if (normalized.contains("issuereason contains invalid characters")) {
-            return localizeMessage("Issue reason can only contain letters, numbers, and spaces.", languageKey);
-        }
-        return localizeMessage(message.trim(), languageKey);
+
+        // Deny by default. The exception itself is already logged with its stack trace by the caller;
+        // this line names the message that was withheld so a missing rule is easy to spot and add.
+        log.info("error_message_suppressed exceptionType={} message=\"{}\"",
+                e.getClass().getSimpleName(), sanitizeForLog(message));
+        return localizeMessage(fallback, languageKey);
     }
 
+    /** A recognised, safe-to-disclose error: {@code match} is compared against the lower-cased message. */
+    private record UserFacingRule(String match, String safeMessage) {
+    }
+
+    private static UserFacingRule rule(String match, String safeMessage) {
+        return new UserFacingRule(match, safeMessage);
+    }
+
+    /**
+     * ERROR-DISCLOSURE: the allowlist, in order — the first match wins, so a more specific phrase must
+     * come before a phrase it contains. Two such pairs exist and are marked below.
+     *
+     * <p>Every entry is a message our own code throws deliberately for the user's benefit. Nothing here
+     * names a config key, column, schema, tenant, phone number, threshold or internal component.
+     */
+    private static final List<UserFacingRule> USER_FACING_RULES = List.of(
+            rule("duplicate image", "Duplicate image submission detected. Please submit a new image."),
+
+            // ── Manual reading. MUST precede the generic "reading …" rules: the string
+            // "manualreading is required" contains "reading is required". ─────────────────────────────
+            rule("manualreading is required", "manualReading is required."),
+            rule("manualreading must be numeric", "Manual Reading must be numeric value"),
+            rule("manualreading must be greater than zero", "manualReading must be greater than zero."),
+
+            // ── Reading values ──────────────────────────────────────────────────────────────────────
+            rule("reading is required", "Reading is required."),
+            rule("reading must be numeric", "Reading must be a numeric value."),
+            rule("reading must be greater than zero", "Reading must be greater than zero."),
+            rule("confirmedreading must be a non-negative number", "Reading must be a non-negative number."),
+            rule("either readingvalue or readingurl must be provided",
+                    "A meter image or a reading value is required."),
+
+            // ── Selections ──────────────────────────────────────────────────────────────────────────
+            rule("language selection is required",
+                    "Language selection is required. Please choose one of the listed options."),
+            rule("invalid language selection", "Invalid language selection. Please restart the process"),
+            rule("no language options configured", "Language options are not configured for this tenant."),
+            rule("channel selection is required",
+                    "Channel selection is required. Please choose one of the listed options."),
+            rule("invalid channel selection", "Invalid channel selection. Please restart the process"),
+            rule("no channel options configured", "Channel options are not configured for this tenant."),
+            rule("selected channel is no longer available",
+                    "Selected channel is no longer available. Please make sure you have a channel selected."),
+            rule("item selection is required",
+                    "Item selection is required. Please choose one of the listed options."),
+            rule("invalid item selection", "Invalid item selection. Please choose a valid option from the list."),
+            rule("no item options configured", "Item options are not configured for this tenant."),
+            rule("scheme selection is required",
+                    "Scheme selection is required. Please choose one of the listed options."),
+            rule("invalid scheme selection", "Invalid scheme selection. Please choose a valid option from the list."),
+            rule("meter change reason selection is required",
+                    "Meter change reason is required. Please choose one of the listed options."),
+            rule("invalid meter change reason selection",
+                    "Invalid meter change reason. Please choose a valid option from the list."),
+            // Config keys are named in the thrown text; the reply says only that it is not set up.
+            rule("meter_change_reasons config", "Meter change reasons are not configured for this tenant."),
+            rule("supply_outage_reasons config", "Submission reasons are not configured for this tenant."),
+
+            // ── Scheme / operator resolution. "scheme not found for the provided state or centre
+            // scheme id" MUST precede the generic "scheme not found". ────────────────────────────────
+            rule("scheme not found for the provided state or centre scheme id",
+                    "Scheme not found for the provided state or centre scheme id"),
+            rule("no operator is mapped to the submitted scheme and no phone number was provided",
+                    "No operator is mapped to the submitted scheme and no phone number was provided"),
+            rule("operator is not mapped to any scheme", "No scheme is mapped to this operator."),
+            rule("operator is not mapped to the provided state or centre scheme",
+                    "Operator is not mapped to the provided state or centre scheme"),
+            rule("operator does not belong to the specified scheme",
+                    "Operator is not mapped to the selected scheme."),
+            rule("scheme not found", "Scheme not found."),
+            rule("not authorized for this scheme", "Not authorized for this scheme."),
+            rule("schemeid must be a positive integer", "Scheme id must be a positive integer."),
+
+            // Catches "No operator found for contactId 91XXXXXXXXXX", which echoed the phone number back.
+            rule("no operator found", "Operator could not be resolved for this contact."),
+            rule("operator not found", "Operator could not be resolved for this contact."),
+            rule("operator could not be resolved", "Operator could not be resolved for this contact."),
+            rule("user not found", "Operator could not be resolved for this contact."),
+            // Also covers "Operator tenant could not be resolved".
+            rule("tenant could not be resolved", "Operator could not be resolved for this contact."),
+
+            // ── Contact / request identity ──────────────────────────────────────────────────────────
+            rule("contactid is required", "Contact could not be identified. Please restart the process."),
+            rule("contactid must be provided", "Contact could not be identified. Please restart the process."),
+            rule("phonenumber is required", "Phone number is required."),
+            rule("phonenumber must be provided", "Phone number is required."),
+            rule("correlationid must be provided", "Request reference is missing. Please restart the process."),
+
+            // ── Media ───────────────────────────────────────────────────────────────────────────────
+            rule("invalid media", "Invalid media. Please submit a clear meter image."),
+            rule("failed to download image", "Image could not be processed. Please try again"),
+
+            // ── Issue report ────────────────────────────────────────────────────────────────────────
+            rule("issuereason contains invalid characters",
+                    "Issue reason can only contain letters, numbers, and spaces."),
+            rule("issuereason is required", "Issue reason is required."),
+
+            // ── Location. One reply for every shape of bad geolocation. ─────────────────────────────
+            rule("latitude is required", "Location could not be saved. Please share a valid location."),
+            rule("longitude is required", "Location could not be saved. Please share a valid location."),
+            rule("latitude must be between", "Location could not be saved. Please share a valid location."),
+            rule("longitude must be between", "Location could not be saved. Please share a valid location."),
+            rule("geolocation", "Location could not be saved. Please share a valid location."),
+
+            // ── Readings lookup ─────────────────────────────────────────────────────────────────────
+            // Deliberately the same answer for "unknown contact" and "contact in another tenant".
+            rule("no reading found for operator", "No reading found for operator"),
+            rule("reading not found", "Reading not found."),
+            rule("target reading date is missing", "Target reading date is missing."),
+
+            rule("invalid api key", "Invalid API key")
+    );
+
+    /** Keeps a withheld message on one log line; it is server-side only and never returned. */
+    private static String sanitizeForLog(String message) {
+        return message.replace('\n', ' ').replace('\r', ' ').trim();
+    }
     public String localizeMessage(String message, String languageKey) {
         if (message == null || message.isBlank()) {
             return message;

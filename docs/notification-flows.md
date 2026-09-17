@@ -1,6 +1,12 @@
 # Notification Flows
 
-This document covers the four WhatsApp notification pipelines in JalSoochak V2: nudges, escalations, welcome messages, and login OTPs. All four flows share the same Kafka transport layer — events are published to `common-topic` and consumed by `message-service`, which routes them to the Glific WhatsApp API.
+This document covers the six WhatsApp notification pipelines in JalSoochak V2: nudges, escalations, welcome messages, login OTPs, daily situation reports, and weekly situation reports.
+
+> the daily report goes to **Section Officers only**, covers **today 00:00 up to the cron time**
+> (default 16:00 IST), and the weekly report goes to **both SOs and SDOs** on the tenant's configured
+> weekly cron (default Monday 09:00 IST) covering the last complete week beginning on the tenant's
+> configured `weekStartDay` (default Monday, i.e. the previous full Mon–Sun week). Both land in their own MinIO buckets
+> (`daily-water-reports`, `weekly-water-reports`) under role and period folders. All six flows share the same Kafka transport layer — events are published to `common-topic` and consumed by `message-service`, which routes them to the Glific WhatsApp API.
 
 ---
 
@@ -94,10 +100,21 @@ Operators who have neither a phone nor a stored `whatsapp_connection_id` are sil
 4. This triggers `GlificWhatsAppService.startNudgeFlow`, which executes the `startContactFlow` GraphQL mutation:
 
    ```graphql
-   mutation startContactFlow($flowId: ID!, $contactId: ID!, $defaultResults: Json!) {
-     startContactFlow(flowId: $flowId, contactId: $contactId, defaultResults: $defaultResults) {
+   mutation startContactFlow(
+     $flowId: ID!
+     $contactId: ID!
+     $defaultResults: Json!
+   ) {
+     startContactFlow(
+       flowId: $flowId
+       contactId: $contactId
+       defaultResults: $defaultResults
+     ) {
        success
-       errors { key message }
+       errors {
+         key
+         message
+       }
      }
    }
    ```
@@ -195,6 +212,7 @@ Same `TenantSchedulerManager` as nudges, but a separate cron schedule (`escalati
    - Step 2 (`createAndSendMessage` GraphQL mutation): sends the HSM with `templateId`, `receiverId`, `isHsm=true`, and the `mediaId` from Step 1 as the document header attachment. The params list is empty because the body text is baked into the template.
 
 **Config required**:
+
 - `glific.template.escalation-id`: Glific template ID for the document HSM.
 - `minio.*`: endpoint, access key, secret key, bucket, base URL.
 - `app.base-url`: publicly reachable URL; a warning is logged at startup if it resolves to localhost.
@@ -294,15 +312,31 @@ Either `glific_id` or `officerPhoneNumber` must be present. If both are provided
 3. This invokes `GlificWhatsAppService.sendLoginOtpHsm`, which sends a `sendHsmMessage` mutation:
 
    ```graphql
-   mutation sendHsmMessage($templateId: ID!, $receiverId: ID!, $parameters: [String]) {
-     sendHsmMessage(templateId: $templateId, receiverId: $receiverId, parameters: $parameters) {
-       message { id body isHSM }
-       errors { key message }
+   mutation sendHsmMessage(
+     $templateId: ID!
+     $receiverId: ID!
+     $parameters: [String]
+   ) {
+     sendHsmMessage(
+       templateId: $templateId
+       receiverId: $receiverId
+       parameters: $parameters
+     ) {
+       message {
+         id
+         body
+         isHSM
+       }
+       errors {
+         key
+         message
+       }
      }
    }
    ```
 
    `parameters[0]` = OTP string (template variable `{{1}}`).
+
 4. On failure, throws `IllegalStateException` so the Kafka container applies its retry/back-off policy.
 
 **Config required** (`glific.template.login-otp-id`): the Glific HSM template ID for OTP delivery. The service fails to start if this is blank.
@@ -313,26 +347,49 @@ Either `glific_id` or `officerPhoneNumber` must be present. If both are provided
 
 All Glific and storage properties can be overridden via environment variables.
 
-| Property | Env var | Required | Description |
-|---|---|---|---|
-| `glific.auth-url` | `GLIFIC_AUTH_URL` | No | Defaults to `https://api.arghyam.glific.com/api/v1/session` |
-| `glific.username` | `GLIFIC_USERNAME` | Yes | Glific login phone |
-| `glific.password` | `GLIFIC_PASSWORD` | Yes | Glific login password |
-| `glific.api-url` | `GLIFIC_API_URL` | Yes | GraphQL endpoint |
-| `glific.flow.nudge-id` | `GLIFIC_FLOW_NUDGE_ID` | Yes | Glific flow ID for the nudge interactive flow |
-| `glific.flow.welcome-id` | `GLIFIC_FLOW_WELCOME_ID` | Yes | Glific flow ID for the welcome onboarding flow |
-| `glific.template.escalation-id` | `GLIFIC_ESCALATION_TEMPLATE_ID` | Yes | Glific HSM template ID for escalation document |
-| `glific.template.login-otp-id` | `GLIFIC_LOGIN_OTP_TEMPLATE_ID` | Yes | Glific HSM template ID for login OTP |
-| `glific.request-interval-ms` | — | No | Min ms between Glific API calls (default: 500) |
-| `minio.endpoint` | `MINIO_ENDPOINT` | Yes | **Internal** MinIO URL this service uploads to |
-| `minio.access-key` | `MINIO_ACCESS_KEY` | Yes | MinIO access key |
-| `minio.secret-key` | `MINIO_SECRET_KEY` | Yes | MinIO secret key |
-| `minio.bucket` | `MINIO_BUCKET` | No | Bucket name (default: `escalation-reports`) |
-| `minio.base-url` | `MINIO_BASE_URL` | No | **Public** prefix of the URL handed to Glific — Meta downloads it from the public internet. Prod: `https://jalsoochak.jjmbrain.in/minio` |
+| Property                                            | Env var                                             | Required                          | Description                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------- | --------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `glific.auth-url`                                   | `GLIFIC_AUTH_URL`                                   | No                                | Defaults to `https://api.arghyam.glific.com/api/v1/session`                                                                                                                                                                                                                                                                                                       |
+| `glific.username`                                   | `GLIFIC_USERNAME`                                   | Yes                               | Glific login phone                                                                                                                                                                                                                                                                                                                                                |
+| `glific.password`                                   | `GLIFIC_PASSWORD`                                   | Yes                               | Glific login password                                                                                                                                                                                                                                                                                                                                             |
+| `glific.api-url`                                    | `GLIFIC_API_URL`                                    | Yes                               | GraphQL endpoint                                                                                                                                                                                                                                                                                                                                                  |
+| `glific.flow.nudge-id`                              | `GLIFIC_FLOW_NUDGE_ID`                              | Yes                               | Glific flow ID for the nudge interactive flow                                                                                                                                                                                                                                                                                                                     |
+| `glific.flow.welcome-id`                            | `GLIFIC_FLOW_WELCOME_ID`                            | Yes                               | Glific flow ID for the welcome onboarding flow                                                                                                                                                                                                                                                                                                                    |
+| `glific.template.escalation-id`                     | `GLIFIC_ESCALATION_TEMPLATE_ID`                     | Yes                               | Glific HSM template ID for escalation document                                                                                                                                                                                                                                                                                                                    |
+| `glific.template.login-otp-id`                      | `GLIFIC_LOGIN_OTP_TEMPLATE_ID`                      | Yes                               | Glific HSM template ID for login OTP                                                                                                                                                                                                                                                                                                                              |
+| `glific.request-interval-ms`                        | —                                                   | No                                | Min ms between Glific API calls (default: 500)                                                                                                                                                                                                                                                                                                                    |
+| `minio.endpoint`                                    | `MINIO_ENDPOINT`                                    | Yes                               | **Internal** MinIO URL this service uploads to                                                                                                                                                                                                                                                                                                                    |
+| `minio.access-key`                                  | `MINIO_ACCESS_KEY`                                  | Yes                               | MinIO access key                                                                                                                                                                                                                                                                                                                                                  |
+| `minio.secret-key`                                  | `MINIO_SECRET_KEY`                                  | Yes                               | MinIO secret key                                                                                                                                                                                                                                                                                                                                                  |
+| `minio.bucket`                                      | `MINIO_BUCKET`                                      | No                                | Bucket name (default: `escalation-reports`)                                                                                                                                                                                                                                                                                                                       |
+| `minio.base-url`                                    | `MINIO_BASE_URL`                                    | No                                | **Public** prefix of the URL handed to Glific — Meta downloads it from the public internet. Prod: `https://jalsoochak.jjmbrain.in/minio`                                                                                                                                                                                                                          |
+| `app.base-url`                                      | `APP_BASE_URL`                                      | No                                | Public URL of message-service itself                                                                                                                                                                                                                                                                                                                              |
+| `escalation.report.dir`                             | —                                                   | No                                | Local PDF output directory (default: `/tmp/escalation-reports/`)                                                                                                                                                                                                                                                                                                  |
+| `notifications.whatsapp.dry-run`                    | `NOTIFICATIONS_WHATSAPP_DRY_RUN`                    | No                                | Master WhatsApp guard. Set `true` to suppress the shared account Glific calls (login OTP, welcome flow, language update). Every purpose flag below defaults to this value when its own flag is unset, so `true` still mutes everything                                                                                                                            |
+| `notifications.nudge.dry-run`                       | `NOTIFICATIONS_NUDGE_DRY_RUN`                       | No                                | Set `true` to suppress only operator nudges (defaults to `notifications.whatsapp.dry-run`)                                                                                                                                                                                                                                                                        |
+| `notifications.escalation.dry-run`                  | `NOTIFICATIONS_ESCALATION_DRY_RUN`                  | No                                | Set `true` to suppress only officer (SO/SDO) escalation documents (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver escalations while nudges stay muted                                                                                                                                                                                      |
+| `notifications.weekly-report.dry-run`               | `NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN`               | No                                | Defaults to `true`: the weekly report needs its own Meta-approved templates, and until they exist there is nothing to send. While suppressed the PDFs are still generated and uploaded, so the pipeline is verifiable end to end. Startup refuses to proceed if this is `false` while the template id below is blank                                              |
+| `glific.template.weekly-report-so-link-id`          | `GLIFIC_WEEKLY_REPORT_SO_LINK_TEMPLATE_ID`          | Only when weekly delivery is live | SECTION_OFFICER weekly template (LINK only — the weekly report has no DOCUMENT path)                                                                                                                                                                                                                                                                              |
+| `glific.template.weekly-report-sdo-link-id`         | `GLIFIC_WEEKLY_REPORT_SDO_LINK_TEMPLATE_ID`         | No                                | SUB_DIVISIONAL_OFFICER weekly template; falls back to the SO one when blank                                                                                                                                                                                                                                                                                       |
+| `notifications.daily-report.dry-run`                | `NOTIFICATIONS_DAILY_REPORT_DRY_RUN`                | No                                | Set `true` to suppress only the officer Daily Water Service Situation Report (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver daily reports while everything else stays muted. A suppressed report is logged as `result=SUPPRESSED`, never as `result=SENT`                                                                                 |
+| `notifications.daily-report.delivery-mode`          | `NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE`          | No                                | `DOCUMENT` (default) sends the report as a PDF attachment, which Meta downloads from `minio.base-url` itself. `LINK` sends a text HSM whose "View Report" button carries the MinIO path, so Meta fetches nothing and the officer's phone opens the PDF — the way past the India-only firewall that makes the attachment fail with `(#131053)`. See the note below |
+| `glific.template.daily-report-so-link-id`           | `GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID`           | Only in `LINK` mode               | SECTION_OFFICER link template. Startup fails without it when daily reports are live and the mode is `LINK`                                                                                                                                                                                                                                                        |
+| `glific.template.daily-report-sdo-link-id`          | `GLIFIC_DAILY_REPORT_SDO_LINK_TEMPLATE_ID`          | No                                | SUB_DIVISIONAL_OFFICER link template; falls back to the SO link template when blank                                                                                                                                                                                                                                                                               |
+| `daily-report.link.button-base-url`                 | `DAILY_REPORT_LINK_BUTTON_BASE_URL`                 | No                                | Mirror of the URL prefix frozen into the approved link template, e.g. `https://jalsoochak.jjmbrain.in/minio/`. When set it must equal `minio.base-url` + `/` or startup fails                                                                                                                                                                                     |
+| `notifications.sms.dry-run`                         | `NOTIFICATIONS_SMS_DRY_RUN`                         | No                                | Set `true` to suppress SMSCountry OTP delivery (login OTPs will not reach users)                                                                                                                                                                                                                                                                                  |
+| `glific.status.reconcile.enabled`                   | `GLIFIC_STATUS_RECONCILE_ENABLED`                   | No                                | Default `false`. Turns on the daily-report delivery-status reconciliation — see the note below                                                                                                                                                                                                                                                                    |
+| `glific.status.reconcile.interval-ms`               | `GLIFIC_STATUS_RECONCILE_INTERVAL_MS`               | No                                | Default `1800000` (30 min) between passes                                                                                                                                                                                                                                                                                                                         |
+| `glific.status.reconcile.initial-delay-ms`          | `GLIFIC_STATUS_RECONCILE_INITIAL_DELAY_MS`          | No                                | Default `600000` (10 min) after startup                                                                                                                                                                                                                                                                                                                           |
+| `glific.status.reconcile.window-hours`              | `GLIFIC_STATUS_RECONCILE_WINDOW_HOURS`              | No                                | Default `6`. Rolling look-back, **not** a fixed hour — the daily-report cron is per-tenant configurable, so no single hour suits every tenant. Keep it tight: a wide window costs pages of unrelated traffic                                                                                                                                                      |
+| `glific.status.reconcile.page-size`                 | `GLIFIC_STATUS_RECONCILE_PAGE_SIZE`                 | No                                | Default `250` messages per Glific page                                                                                                                                                                                                                                                                                                                            |
+| `glific.status.reconcile.max-pages`                 | `GLIFIC_STATUS_RECONCILE_MAX_PAGES`                 | No                                | Default `40`. Hard stop per status so a pathological window cannot consume the whole Glific throttle budget. Hitting it logs a `WARN` — truncated results would silently under-report delivery                                                                                                                                                                    |
+| `glific.status.reconcile.date-column`               | `GLIFIC_STATUS_RECONCILE_DATE_COLUMN`               | No                                | Default `inserted_at`, the column Glific's `dateRange` filters on. `updated_at` moves on every status change and would let a message drift out of its send window                                                                                                                                                                                                 |
+| `glific.status.reconcile.template-ids`              | `GLIFIC_STATUS_RECONCILE_TEMPLATE_IDS`              | No                                | Blank = derive from the `glific.template.daily-report-*` ids. `MessageFilter` has no `templateId`, so daily reports are separated from nudges/OTPs **client-side** against this list                                                                                                                                                                              |
+| `glific.status.reconcile.account-level-error-codes` | `GLIFIC_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES` | No                                | Default `9999` ("low balance"). Codes that are properties of the Gupshup **account**, not of a recipient — reported on their own `ACCOUNT-LEVEL FAILURE` line and excluded from every per-officer and per-tenant tally, rather than counted as N officer failures                                                                                                 |
 
 > **`minio.endpoint` and `minio.base-url` are different addresses.** The endpoint is where this
 > service uploads (internal is correct). The base URL is what Glific registers and Meta fetches from
-> its own network, so it must be publicly reachable *and* anonymously readable. An internal value
+> its own network, so it must be publicly reachable _and_ anonymously readable. An internal value
 > uploads fine, returns a Glific media id, and then fails inside Meta with
 > `(#131053) Media upload error … blocked by a destination filter` — the officer receives a document
 > that will not open, and nothing on our side reports a failure.
@@ -344,28 +401,40 @@ All Glific and storage properties can be overridden via environment variables.
 > verify from outside the network with
 > `curl -sSI https://jalsoochak.jjmbrain.in/minio/escalation-reports/<file>.pdf` before enabling
 > delivery — a public hostname with a private bucket trades Meta's 403 for MinIO's.
-| `app.base-url` | `APP_BASE_URL` | No | Public URL of message-service itself |
-| `notifications.whatsapp.dry-run` | `NOTIFICATIONS_WHATSAPP_DRY_RUN` | No | Master WhatsApp guard. Set `true` to suppress the shared account Glific calls (login OTP, welcome flow, language update). Every purpose flag below defaults to this value when its own flag is unset, so `true` still mutes everything |
-| `notifications.nudge.dry-run` | `NOTIFICATIONS_NUDGE_DRY_RUN` | No | Set `true` to suppress only operator nudges (defaults to `notifications.whatsapp.dry-run`) |
-| `notifications.escalation.dry-run` | `NOTIFICATIONS_ESCALATION_DRY_RUN` | No | Set `true` to suppress only officer (SO/SDO) escalation documents (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver escalations while nudges stay muted |
-| `notifications.daily-report.dry-run` | `NOTIFICATIONS_DAILY_REPORT_DRY_RUN` | No | Set `true` to suppress only the officer Daily Water Service Situation Report (defaults to `notifications.whatsapp.dry-run`). Set `false` to deliver daily reports while everything else stays muted |
-| `notifications.sms.dry-run` | `NOTIFICATIONS_SMS_DRY_RUN` | No | Set `true` to suppress SMSCountry OTP delivery (login OTPs will not reach users) |
+
+> **Delivery-status reconciliation.** `result=SENT` only means Glific _accepted_ our API call; Gupshup
+> and Meta act afterwards and report delivery status back to Glific alone. A report sent to a number
+> with no WhatsApp account is therefore counted as sent exactly like one that arrived.
+> `GlificDeliveryReconciliationService` polls Glific on a rolling window, maps each recipient back to
+> an officer via `user_table.whatsapp_connection_id`, and logs per-message, per-tenant and
+> platform-wide lines under the `[GlificStatus]` prefix — including the officer ids behind every
+> failure, grouped by error code. Off by default because each pass shares the 500 ms Glific throttle
+> with live sends.
+
+> **Daily report `LINK` mode.** The link template's button URL is a fixed prefix plus a variable Meta
+> appends to it, e.g. `https://jalsoochak.jjmbrain.in/minio/{{1}}` with
+> `{{1}} = escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf`. The prefix is frozen
+> at template approval, so it must equal `minio.base-url` + `/`, and **staging and production need
+> their own approved template** (different hosts). The bucket travels inside the variable, so renaming
+> the bucket stays a configuration change. Body variables are `{{1}}` officer name and `{{2}}` report
+> date (`dd-MM-yyyy`, the day the data covers), with the URL suffix passed last —
+> `parameters = [name, date, suffix]`. `MINIO_BASE_URL` must still be publicly reachable and
+> anonymously readable in this mode: it is what the officer's phone opens.
 
 > **Contact opt-in is not gated by `notifications.whatsapp.dry-run`.** `optinContact` sends the
 > recipient nothing — it registers the contact and returns the Glific contact id that every delivery
 > needs as its `receiverId`. Gating it on the master flag meant a configuration like
 > `NOTIFICATIONS_WHATSAPP_DRY_RUN=true` + `NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false` sent reports with
 > `receiverId=0`, which Glific rejects as `Receiver does not exist`. Opt-in is therefore suppressed
-> only when *every* purpose above is muted — which a lone `NOTIFICATIONS_WHATSAPP_DRY_RUN=true` still
+> only when _every_ purpose above is muted — which a lone `NOTIFICATIONS_WHATSAPP_DRY_RUN=true` still
 > does, since each purpose flag defaults to it.
-| `escalation.report.dir` | — | No | Local PDF output directory (default: `/tmp/escalation-reports/`) |
 
 ---
 
 ## Dead-Letter Topics
 
-| Topic | Published by | Consumed by |
-|---|---|---|
+| Topic                 | Published by    | Consumed by                      |
+| --------------------- | --------------- | -------------------------------- |
 | `welcome-message-dlt` | message-service | External ops/monitoring consumer |
 
 The DLT is not consumed by message-service itself — doing so would create an unbounded retry loop. Each record carries a deterministic `retryId` (UUID v3) for idempotent replay. Configure alerting (e.g., Kafka consumer-lag alerts) on this topic to detect delivery failures.

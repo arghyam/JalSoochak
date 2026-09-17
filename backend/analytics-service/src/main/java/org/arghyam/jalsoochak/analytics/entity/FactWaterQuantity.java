@@ -35,8 +35,13 @@ public class FactWaterQuantity {
     @Column(name = "user_id")
     private Integer userId;
 
+    /**
+     * The day's supplied volume in <strong>litres</strong> (BIGINT since V45) — the unit every consumer
+     * of this column already assumes. Writers convert from the meter's native m&sup3; through
+     * {@link org.arghyam.jalsoochak.analytics.service.water.WaterVolumeUnits}.
+     */
     @Column(name = "water_quantity", nullable = false)
-    private Integer waterQuantity;
+    private Long waterQuantity;
 
     @Column(nullable = false)
     private LocalDate date;

@@ -4,6 +4,7 @@ import org.arghyam.jalsoochak.analytics.enums.PeriodScale;
 import org.arghyam.jalsoochak.analytics.enums.SubmissionStatus;
 import org.arghyam.jalsoochak.analytics.helper.DashboardWorkStatusFilter;
 import org.arghyam.jalsoochak.analytics.helper.RegularityThresholdFilter;
+import org.arghyam.jalsoochak.analytics.helper.WaterSqlFragments;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -17,10 +18,13 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 @Repository
 public class SchemeRegularityRepository {
@@ -87,70 +91,19 @@ public class SchemeRegularityRepository {
     }
 
     private static final int NOT_SUBMITTED_STATUS = SubmissionStatus.NOT_SUBMITTED.getCode();
-    private static final int SUBMITTED_STATUS = SubmissionStatus.SUBMITTED.getCode();
     private static final int EXPORT_FETCH_SIZE = 1_000;
 
     /**
-     * De-duplicated water source: the latest fact_water_quantity row per (tenant_id, scheme_id, date).
-     *
-     * <p>{@code fact_water_quantity_table} has no uniqueness constraint on (tenant_id, scheme_id, date).
-     * Ingestion keeps the "current" row for a day via find-latest-and-update, ordered by
-     * {@code updated_at DESC, id DESC} (see {@code FactServiceImpl#ingestWaterQuantity} /
-     * {@code FactWaterQuantityRepository}). Prod data currently has no duplicates, but should a stray
-     * duplicate ever be written (e.g. a concurrent replay), summing every row would double-count that
-     * day's volume. Every per-day water aggregation therefore reads through this {@code DISTINCT ON}
-     * de-duplication, mirroring the {@code scheme_fhtc_totals} DISTINCT ON pattern already used in this
-     * repository. Injected into query text via the {@code {{LWQ}}} token (aliased {@code f} by callers)
-     * so existing {@code ?} placeholder positions are unaffected.</p>
-     */
-    private static final String LATEST_WATER_QUANTITY = """
-            (SELECT DISTINCT ON (fwq.tenant_id, fwq.scheme_id, fwq.date) fwq.*
-                     FROM analytics_schema.fact_water_quantity_table fwq
-                     ORDER BY fwq.tenant_id, fwq.scheme_id, fwq.date, fwq.updated_at DESC, fwq.id DESC)""";
-
-    /**
-     * Canonical "water supplied" volume over the de-duplicated water source (alias {@code f}): sums the
-     * per-day delta for SUBMITTED rows (or legacy direct-event rows whose status is NULL) with a positive
-     * delta, excluding NOT_SUBMITTED/outage days. Single definition shared by every dashboard/region
-     * aggregation so they cannot drift. Injected via the {@code {{SWS}}} token; callers append their own
-     * {@code AS <column>} alias.
-     */
-    private static final String SUPPLIED_WATER_QUANTITY_SUM = String.format(
-            "COALESCE(SUM(CASE WHEN (f.submission_status = %d OR f.submission_status IS NULL) "
-                    + "AND f.water_quantity > 0 THEN f.water_quantity ELSE 0 END), 0)::bigint",
-            SUBMITTED_STATUS);
-
-    /**
-     * Canonical "did the scheme supply water on this day" predicate over the de-duplicated water source
-     * (alias {@code f}). Uses the same qualifying condition as {@link #SUPPLIED_WATER_QUANTITY_SUM}
-     * ({@code (submission_status = SUBMITTED OR NULL) AND water_quantity > 0}), so a "supply day" for
-     * scheme-regularity is exactly a day that contributes positive supplied volume — NOT_SUBMITTED/outage
-     * days never count even when they carry a positive {@code water_quantity}. Scheme regularity is the
-     * fraction of days a scheme actually supplied water; it is measured off {@code fact_water_quantity_table}
-     * (this token) rather than the presence of a meter reading. Injected via the {@code {{SWD}}} token as a
-     * boolean; callers place it in a {@code WHERE}/{@code AND} over a {@code {{LWQ}}} source aliased
-     * {@code f} and count {@code DISTINCT f.date}. Reading-submission-rate, critical and continuous metrics
-     * intentionally keep their own reading-based definitions and do not use this token.
-     */
-    private static final String SUPPLIED_WATER_DAY = String.format(
-            "((f.submission_status = %d OR f.submission_status IS NULL) AND f.water_quantity > 0)",
-            SUBMITTED_STATUS);
-
-    /**
      * Applies the shared {@code {{LWQ}}} / {@code {{SWS}}} / {@code {{SWD}}} water token substitutions to a
-     * built SQL string, then fails fast (M1) if any {@code {{...}}} token remains unreplaced — a mismatched
-     * or misspelled token would otherwise silently produce a syntactically invalid or, worse, an unfiltered
-     * query. All fragment substitution funnels through here, so this is the single guard.
+     * built SQL string, then fails fast (M1) if any {@code {{...}}} token remains unreplaced.
+     *
+     * <p>The fragments themselves live in {@link WaterSqlFragments}, shared with the officer situation
+     * reports so a report and a dashboard cannot disagree about whether a scheme supplied water on a
+     * given day. Reading-submission-rate, critical and continuous metrics intentionally keep their own
+     * reading-based definitions and do not use these tokens.</p>
      */
     private static String withWaterFragments(String sql) {
-        String out = sql
-                .replace("{{SWS}}", SUPPLIED_WATER_QUANTITY_SUM)
-                .replace("{{SWD}}", SUPPLIED_WATER_DAY)
-                .replace("{{LWQ}}", LATEST_WATER_QUANTITY);
-        if (out.contains("{{")) {
-            throw new IllegalStateException("Unreplaced SQL token in query: " + out);
-        }
-        return out;
+        return WaterSqlFragments.withWaterFragments(sql);
     }
 
     /**
@@ -161,11 +114,15 @@ public class SchemeRegularityRepository {
      * token immediately after its {@code WHERE s.<...>}/{@code ON ...} predicate and routes its SQL
      * through this method. The work_status tokens are replaced <em>before</em> the water tokens so the
      * generated predicate is itself scrubbed by the M1 guard in {@link #withWaterFragments(String)}.
+     *
+     * <p>{@code {{CSR}}} renders {@link #canonicalSchemeRowOrder(String)} for that same alias, for the
+     * scheme-selection CTEs that collapse a fanned-out scheme to one row.
      */
     private String withDashboardFragments(String sql) {
         return withWaterFragments(sql
                 .replace("{{WS}}", workStatusFilter.andPredicate("s"))
-                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
+                .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s"))
+                .replace("{{CSR}}", canonicalSchemeRowOrder("s")));
     }
 
     /**
@@ -282,6 +239,33 @@ public class SchemeRegularityRepository {
                 .replace("{{NWS}}", workStatusFilter.andNationalPredicate("s")));
     }
 
+    /**
+     * Tie-break that reduces a scheme's {@code dim_scheme_table} rows to the one canonical row a dashboard
+     * reports on. Pair it with {@code SELECT DISTINCT ON (<alias>.scheme_id) … ORDER BY <alias>.scheme_id,}
+     * this expression.
+     *
+     * <p>Since V24 the table is unique on
+     * {@code (tenant_id, scheme_id, parent_lgd_location_id, parent_department_location_id)}, so one scheme
+     * spans one row per mapping. The scheme-level attributes on those rows — name, work_status,
+     * operating_status — describe the scheme rather than the mapping and are meant to be identical
+     * everywhere, but {@code DimensionServiceImpl} rewrites only the single row it finds by
+     * {@code findTopByTenantIdAndSchemeIdOrderByUpdatedAtDescCreatedAtDesc}, so after any status change the
+     * new value sits on that row alone. Aggregating over the raw rows therefore counts such a scheme once
+     * per distinct value, pushing the status buckets past the scheme total, and lists it once per row.
+     *
+     * <p>Mirroring the writer's own ordering keeps a read on the row it last wrote, so the dashboard shows
+     * the current status and counts the scheme exactly once. {@code id} closes the ordering for rows written
+     * in the same instant.
+     *
+     * @param alias alias of {@code dim_scheme_table}, or blank when selecting from an earlier CTE
+     */
+    private static String canonicalSchemeRowOrder(String alias) {
+        String prefix = (alias == null || alias.isBlank()) ? "" : alias + ".";
+        return prefix + "updated_at DESC NULLS LAST, "
+                + prefix + "created_at DESC NULLS LAST, "
+                + prefix + "id DESC";
+    }
+
     private String resolveDashboardSortDirection(String sortDir) {
         if (sortDir == null || sortDir.isBlank()) {
             return "DESC";
@@ -313,6 +297,7 @@ public class SchemeRegularityRepository {
                 rs.getInt("scheme_id"),
                 rs.getString("scheme_name"),
                 (Integer) rs.getObject("operating_status"),
+                (Integer) rs.getObject("work_status"),
                 rs.getInt("submission_days"),
                 rs.getLong("total_water_supplied"),
                 (Integer) rs.getObject("immediate_parent_lgd_id"),
@@ -2920,94 +2905,114 @@ public class SchemeRegularityRepository {
                 tenantId);
     }
 
-    public SchemeStatusCount getSchemeStatusCountByLgd(Integer lgdId) {
+    public SchemeStatusBreakdown getSchemeStatusCountByLgd(Integer lgdId) {
         Integer lgdLevel = getLgdLevel(lgdId);
         if (lgdLevel == null) {
             throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
         }
-        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
-
-        String sql = withDashboardFragments(String.format("""
-                SELECT
-                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
-                FROM analytics_schema.dim_scheme_table s
-                WHERE s.%1$s = ?{{WS}}
-                """, schemeLgdColumn));
-
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId);
-        int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
-        int inactiveSchemeCount = result.get("inactive_scheme_count") instanceof Number value ? value.intValue() : 0;
-
-        return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
+        return querySchemeStatusBreakdown(
+                String.format("s.%1$s = ?", resolveSchemeLgdColumn(lgdLevel)), lgdId);
     }
 
-    public SchemeStatusCount getSchemeStatusCountByLgd(Integer tenantId, Integer lgdId) {
+    public SchemeStatusBreakdown getSchemeStatusCountByLgd(Integer tenantId, Integer lgdId) {
         Integer lgdLevel = getLgdLevelForTenant(tenantId, lgdId);
         if (lgdLevel == null) {
             throw new IllegalArgumentException("lgd_id not found in dim_lgd_location_table: " + lgdId);
         }
-        String schemeLgdColumn = resolveSchemeLgdColumn(lgdLevel);
-
-        String sql = withDashboardFragments(String.format("""
-                SELECT
-                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
-                FROM analytics_schema.dim_scheme_table s
-                WHERE s.%1$s = ?
-                  AND s.tenant_id = ?{{WS}}
-                """, schemeLgdColumn));
-
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, lgdId, tenantId);
-        int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
-        int inactiveSchemeCount = result.get("inactive_scheme_count") instanceof Number value ? value.intValue() : 0;
-
-        return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
+        return querySchemeStatusBreakdown(
+                String.format("s.%1$s = ? AND s.tenant_id = ?", resolveSchemeLgdColumn(lgdLevel)), lgdId, tenantId);
     }
 
-    public SchemeStatusCount getSchemeStatusCountByDepartment(Integer departmentId) {
+    public SchemeStatusBreakdown getSchemeStatusCountByDepartment(Integer departmentId) {
         Integer departmentLevel = getDepartmentLevel(departmentId);
         if (departmentLevel == null) {
             throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
         }
-        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
-
-        String sql = withDashboardFragments(String.format("""
-                SELECT
-                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
-                FROM analytics_schema.dim_scheme_table s
-                WHERE s.%1$s = ?{{WS}}
-                """, schemeDepartmentColumn));
-
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId);
-        int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
-        int inactiveSchemeCount = result.get("inactive_scheme_count") instanceof Number value ? value.intValue() : 0;
-
-        return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
+        return querySchemeStatusBreakdown(
+                String.format("s.%1$s = ?", resolveSchemeDepartmentColumn(departmentLevel)), departmentId);
     }
 
-    public SchemeStatusCount getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId) {
+    public SchemeStatusBreakdown getSchemeStatusCountByDepartment(Integer tenantId, Integer departmentId) {
         Integer departmentLevel = getDepartmentLevelForTenant(tenantId, departmentId);
         if (departmentLevel == null) {
             throw new IllegalArgumentException("department_id not found in dim_department_location_table: " + departmentId);
         }
-        String schemeDepartmentColumn = resolveSchemeDepartmentColumn(departmentLevel);
+        return querySchemeStatusBreakdown(
+                String.format("s.%1$s = ? AND s.tenant_id = ?", resolveSchemeDepartmentColumn(departmentLevel)),
+                departmentId, tenantId);
+    }
 
+    /**
+     * Counts schemes in scope broken down by {@code work_status} and by {@code operating_status}, plus the
+     * overall total, in a single pass.
+     *
+     * <p>The three grouping sets each produce a NULL for the column they do not group by, which is
+     * indistinguishable from a scheme whose status code is genuinely NULL — {@code GROUPING()} tells the two
+     * apart. Grouping runs over one {@link #canonicalSchemeRowOrder(String) canonical row} per scheme rather
+     * than the raw dimension rows, so each bucket is a plain {@code COUNT(*)} of schemes and both breakdowns
+     * partition the total exactly.
+     *
+     * @param whereClause predicate over alias {@code s}, assembled from hardcoded column names; every
+     *                    caller-supplied value is bound through {@code params}
+     */
+    private SchemeStatusBreakdown querySchemeStatusBreakdown(String whereClause, Object... params) {
         String sql = withDashboardFragments(String.format("""
+                WITH schemes_in_scope AS (
+                    SELECT DISTINCT ON (s.scheme_id)
+                        s.scheme_id,
+                        s.work_status,
+                        s.operating_status
+                    FROM analytics_schema.dim_scheme_table s
+                    WHERE %1$s{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
+                )
                 SELECT
-                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status > 0)::int AS active_scheme_count,
-                    COUNT(DISTINCT s.scheme_id) FILTER (WHERE s.operating_status = 0)::int AS inactive_scheme_count
-                FROM analytics_schema.dim_scheme_table s
-                WHERE s.%1$s = ?
-                  AND s.tenant_id = ?{{WS}}
-                """, schemeDepartmentColumn));
+                    GROUPING(work_status) AS work_status_rolled_up,
+                    GROUPING(operating_status) AS operating_status_rolled_up,
+                    work_status,
+                    operating_status,
+                    COUNT(*)::int AS scheme_count
+                FROM schemes_in_scope
+                GROUP BY GROUPING SETS ((work_status), (operating_status), ())
+                """, whereClause));
 
-        Map<String, Object> result = jdbcTemplate.queryForMap(sql, departmentId, tenantId);
-        int activeSchemeCount = result.get("active_scheme_count") instanceof Number value ? value.intValue() : 0;
-        int inactiveSchemeCount = result.get("inactive_scheme_count") instanceof Number value ? value.intValue() : 0;
+        List<StatusGroupRow> rows = jdbcTemplate.query(sql, (rs, rowNum) -> new StatusGroupRow(
+                rs.getInt("work_status_rolled_up") == 0,
+                rs.getInt("operating_status_rolled_up") == 0,
+                (Integer) rs.getObject("work_status"),
+                (Integer) rs.getObject("operating_status"),
+                rs.getInt("scheme_count")), params);
 
-        return new SchemeStatusCount(activeSchemeCount, inactiveSchemeCount);
+        int total = rows.stream()
+                .filter(row -> !row.groupedByWorkStatus() && !row.groupedByOperatingStatus())
+                .mapToInt(StatusGroupRow::schemeCount)
+                .findFirst()
+                .orElse(0);
+
+        return new SchemeStatusBreakdown(
+                total,
+                statusCounts(rows, StatusGroupRow::groupedByWorkStatus, StatusGroupRow::workStatus),
+                statusCounts(rows, StatusGroupRow::groupedByOperatingStatus, StatusGroupRow::operatingStatus));
+    }
+
+    /** Grouping-set output arrives unordered; sort by code so the payload is stable, unknown codes last. */
+    private static List<SchemeStatusCodeCount> statusCounts(
+            List<StatusGroupRow> rows,
+            Predicate<StatusGroupRow> belongsToDimension,
+            Function<StatusGroupRow, Integer> code) {
+        return rows.stream()
+                .filter(belongsToDimension)
+                .map(row -> new SchemeStatusCodeCount(code.apply(row), row.schemeCount()))
+                .sorted(Comparator.comparing(SchemeStatusCodeCount::code, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    private record StatusGroupRow(
+            boolean groupedByWorkStatus,
+            boolean groupedByOperatingStatus,
+            Integer workStatus,
+            Integer operatingStatus,
+            int schemeCount) {
     }
 
     public long getCriticalSchemeCountByLgd(Integer tenantId, Integer lgdId, LocalDate cutoffDate) {
@@ -3907,10 +3912,11 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
+                        s.work_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -3934,6 +3940,7 @@ public class SchemeRegularityRepository {
                         END AS immediate_parent_lgd_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -3959,6 +3966,7 @@ public class SchemeRegularityRepository {
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
+                    ss.work_status AS work_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     ss.immediate_parent_lgd_id,
@@ -4004,6 +4012,7 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
                         (Integer) rs.getObject("operating_status"),
+                        (Integer) rs.getObject("work_status"),
                         rs.getInt("submission_days"),
                         rs.getLong("total_water_supplied"),
                         (Integer) rs.getObject("immediate_parent_lgd_id"),
@@ -4059,10 +4068,11 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH scheme_rows_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
+                        s.work_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -4075,16 +4085,20 @@ public class SchemeRegularityRepository {
                         s.level_4_dept_id,
                         s.level_5_dept_id,
                         s.level_6_dept_id,
-                        s.%2$s AS supplied_lgd_location_id
+                        s.%2$s AS supplied_lgd_location_id,
+                        s.updated_at,
+                        s.created_at,
+                        s.id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
                 ),
                 schemes_in_scope AS (
-                    SELECT DISTINCT ON (scheme_id)
+                    SELECT DISTINCT ON (s.scheme_id)
                         scheme_id,
                         scheme_name,
                         operating_status,
+                        work_status,
                         level_1_lgd_id,
                         level_2_lgd_id,
                         level_3_lgd_id,
@@ -4097,8 +4111,8 @@ public class SchemeRegularityRepository {
                         level_4_dept_id,
                         level_5_dept_id,
                         level_6_dept_id
-                    FROM scheme_rows_in_scope
-                    ORDER BY scheme_id, supplied_lgd_location_id NULLS LAST
+                    FROM scheme_rows_in_scope s
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_supplied_lgd_locations AS (
                     SELECT DISTINCT scheme_id, supplied_lgd_location_id
@@ -4163,6 +4177,7 @@ public class SchemeRegularityRepository {
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
+                    ss.work_status AS work_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     fsl.supplied_lgd_location_id AS immediate_parent_lgd_id,
@@ -4241,10 +4256,11 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
+                        s.work_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -4269,6 +4285,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4296,6 +4313,7 @@ public class SchemeRegularityRepository {
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
+                    ss.work_status AS work_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     ss.immediate_parent_lgd_id,
@@ -4361,10 +4379,11 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
+                        s.work_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -4388,6 +4407,7 @@ public class SchemeRegularityRepository {
                         END AS immediate_parent_department_id
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4413,6 +4433,7 @@ public class SchemeRegularityRepository {
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
+                    ss.work_status AS work_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     NULL::int AS immediate_parent_lgd_id,
@@ -4458,6 +4479,7 @@ public class SchemeRegularityRepository {
                         rs.getInt("scheme_id"),
                         rs.getString("scheme_name"),
                         (Integer) rs.getObject("operating_status"),
+                        (Integer) rs.getObject("work_status"),
                         rs.getInt("submission_days"),
                         rs.getLong("total_water_supplied"),
                         (Integer) rs.getObject("immediate_parent_lgd_id"),
@@ -4513,10 +4535,11 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
+                        s.work_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -4541,6 +4564,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4568,6 +4592,7 @@ public class SchemeRegularityRepository {
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
+                    ss.work_status AS work_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     NULL::int AS immediate_parent_lgd_id,
@@ -4642,10 +4667,11 @@ public class SchemeRegularityRepository {
 
         String sql = withDashboardFragments(String.format("""
                 WITH schemes_in_scope AS (
-                    SELECT DISTINCT
+                    SELECT DISTINCT ON (s.scheme_id)
                         s.scheme_id,
                         s.scheme_name,
                         s.operating_status,
+                        s.work_status,
                         s.level_1_lgd_id,
                         s.level_2_lgd_id,
                         s.level_3_lgd_id,
@@ -4670,6 +4696,7 @@ public class SchemeRegularityRepository {
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
+                    ORDER BY s.scheme_id, {{CSR}}
                 ),
                 scheme_submission_days AS (
                     SELECT
@@ -4697,6 +4724,7 @@ public class SchemeRegularityRepository {
                     ss.scheme_id,
                     ss.scheme_name,
                     ss.operating_status AS operating_status,
+                    ss.work_status AS work_status,
                     COALESCE(sd.submission_days, 0)::int AS submission_days,
                     COALESCE(sw.total_water_supplied, 0)::bigint AS total_water_supplied,
                     NULL::int AS immediate_parent_lgd_id,
@@ -4767,7 +4795,8 @@ public class SchemeRegularityRepository {
                         s.scheme_name,
                         s.state_scheme_id,
                         s.centre_scheme_id,
-                        s.operating_status AS operating_status
+                        s.operating_status AS operating_status,
+                        s.work_status AS work_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?{{WS}}
                 ),
@@ -4800,6 +4829,7 @@ public class SchemeRegularityRepository {
                     ss.state_scheme_id,
                     ss.centre_scheme_id,
                     ss.operating_status,
+                    ss.work_status,
                     COALESCE(sup.supply_days, 0)::int AS supply_days,
                     COALESCE(sub.submission_days, 0)::int AS submission_days,
                     %2$s AS is_regular
@@ -4821,6 +4851,7 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
+                        (Integer) rs.getObject("work_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days"),
                         rs.getBoolean("is_regular")),
@@ -4846,7 +4877,8 @@ public class SchemeRegularityRepository {
                         s.scheme_name,
                         s.state_scheme_id,
                         s.centre_scheme_id,
-                        s.operating_status AS operating_status
+                        s.operating_status AS operating_status,
+                        s.work_status AS work_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
@@ -4882,6 +4914,7 @@ public class SchemeRegularityRepository {
                     ss.state_scheme_id,
                     ss.centre_scheme_id,
                     ss.operating_status,
+                    ss.work_status,
                     COALESCE(sup.supply_days, 0)::int AS supply_days,
                     COALESCE(sub.submission_days, 0)::int AS submission_days,
                     %2$s AS is_regular
@@ -4904,6 +4937,7 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
+                        (Integer) rs.getObject("work_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days"),
                         rs.getBoolean("is_regular")),
@@ -4934,7 +4968,8 @@ public class SchemeRegularityRepository {
                         s.scheme_name,
                         s.state_scheme_id,
                         s.centre_scheme_id,
-                        s.operating_status AS operating_status
+                        s.operating_status AS operating_status,
+                        s.work_status AS work_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?{{WS}}
                 ),
@@ -4967,6 +5002,7 @@ public class SchemeRegularityRepository {
                     ss.state_scheme_id,
                     ss.centre_scheme_id,
                     ss.operating_status,
+                    ss.work_status,
                     COALESCE(sup.supply_days, 0)::int AS supply_days,
                     COALESCE(sub.submission_days, 0)::int AS submission_days,
                     %2$s AS is_regular
@@ -4988,6 +5024,7 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
+                        (Integer) rs.getObject("work_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days"),
                         rs.getBoolean("is_regular")),
@@ -5014,7 +5051,8 @@ public class SchemeRegularityRepository {
                         s.scheme_name,
                         s.state_scheme_id,
                         s.centre_scheme_id,
-                        s.operating_status AS operating_status
+                        s.operating_status AS operating_status,
+                        s.work_status AS work_status
                     FROM analytics_schema.dim_scheme_table s
                     WHERE s.%1$s = ?
                       AND s.tenant_id = ?{{WS}}
@@ -5050,6 +5088,7 @@ public class SchemeRegularityRepository {
                     ss.state_scheme_id,
                     ss.centre_scheme_id,
                     ss.operating_status,
+                    ss.work_status,
                     COALESCE(sup.supply_days, 0)::int AS supply_days,
                     COALESCE(sub.submission_days, 0)::int AS submission_days,
                     %2$s AS is_regular
@@ -5072,6 +5111,7 @@ public class SchemeRegularityRepository {
                         (Integer) rs.getObject("state_scheme_id"),
                         (Integer) rs.getObject("centre_scheme_id"),
                         (Integer) rs.getObject("operating_status"),
+                        (Integer) rs.getObject("work_status"),
                         rs.getInt("supply_days"),
                         rs.getInt("submission_days"),
                         rs.getBoolean("is_regular")),
@@ -7971,7 +8011,20 @@ public class SchemeRegularityRepository {
             Integer schemeCount) {
     }
 
-    public record SchemeStatusCount(Integer activeSchemeCount, Integer inactiveSchemeCount) {
+    /** One bucket of a status breakdown. {@code code} is null for schemes with no status recorded. */
+    public record SchemeStatusCodeCount(Integer code, int count) {
+    }
+
+    /**
+     * Scheme counts for an area, broken down along both real status dimensions. The two lists count the
+     * same schemes twice over, once per dimension, so each sums to {@code total} — a scheme spanning
+     * several dimension rows is counted once, under its
+     * {@link #canonicalSchemeRowOrder(String) canonical row}'s status.
+     */
+    public record SchemeStatusBreakdown(
+            int total,
+            List<SchemeStatusCodeCount> workStatusCounts,
+            List<SchemeStatusCodeCount> operatingStatusCounts) {
     }
 
     public record CriticalSchemeRow(
@@ -7990,6 +8043,7 @@ public class SchemeRegularityRepository {
             Integer schemeId,
             String schemeName,
             Integer operatingStatus,
+            Integer workStatus,
             Integer submissionDays,
             Long totalWaterSupplied,
             Integer immediateParentLgdId,
@@ -8029,6 +8083,7 @@ public class SchemeRegularityRepository {
             Integer stateSchemeId,
             Integer centreSchemeId,
             Integer operatingStatus,
+            Integer workStatus,
             Integer supplyDays,
             Integer submissionDays,
             Boolean isRegular) {

@@ -69,8 +69,14 @@ public interface SchemePerformanceSchedulerRepository extends JpaRepository<Fact
             ) supply
               ON supply.tenant_id = ds.tenant_id
              AND supply.scheme_id = ds.scheme_id
-            WHERE ds.operating_status > 0
-              AND NOT EXISTS (
+            -- Every scheme in the dimension is scored, deliberately. This once carried
+            -- `WHERE ds.operating_status > 0`, a leftover of the retired active/inactive binary: it
+            -- skipped Non-Operative schemes, which are precisely the ones that supply no water and
+            -- score 0.0. With no row written they fell out of the AVG in
+            -- SchemeRegularityRepository's performance-score queries entirely, inflating the average
+            -- by hiding the failures. Scope is the read side's job -- those queries already apply the
+            -- {{WS}} work-status policy -- so do not reintroduce a filter here.
+            WHERE NOT EXISTS (
                   SELECT 1
                   FROM analytics_schema.fact_scheme_performance_table fp
                   WHERE fp.scheme_id = ds.scheme_id

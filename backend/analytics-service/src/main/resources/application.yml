@@ -71,6 +71,11 @@ eureka:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+    # Must equal <swagger-ui.version> in pom.xml. springdoc 2.5.0 ships
+    # springdoc.config.properties with springdoc.swagger-ui.version=5.13.0 and uses it to
+    # build the webjar resource path (AbstractSwaggerResourceResolver), so without this
+    # override every /webjars/swagger-ui/** asset 404s against the pinned webjar.
+    version: 5.32.14
     tags-sorter: alpha
     operations-sorter: method
     # Disable client-side syntax highlighting. highlight.js' recursive
@@ -104,14 +109,19 @@ logging:
   pattern:
     level: "service=${spring.application.name} %5p"
 
-# Daily Water Service Situation Report (officer daily PDF) — the KPI computation side.
-daily-report:
-  sections:
-    outage-details:
-      # Priority Actions + Reasons for No Water Supply. Hidden by default in the rendered PDF
-      # (message-service reads the same property / env var), so their two queries are skipped here
-      # rather than run for output no one sees. Flip both services together to restore the sections.
-      enabled: ${DAILY_REPORT_OUTAGE_SECTIONS_ENABLED:false}
+# Water Service Situation Reports (officer PDFs) — the KPI computation side.
+#
+# Thresholds for the weekly report. The supply-day bars differ by role on purpose, straight from the
+# two templates: a Section Officer's report asks whether a scheme ran at all during the week, an
+# SDO's asks whether it ran often enough. One consequence worth knowing before it is filed as a bug:
+# an SO's own "Schemes Supplying Water" figure is normally HIGHER than that same officer's row in
+# their SDO's performance table, even over identical schemes.
+water-reports:
+  weekly:
+    # Weekly average LPCD at or below which a scheme is listed as under-supplying.
+    low-lpcd-threshold: ${WEEKLY_REPORT_LOW_LPCD_THRESHOLD:15}
+    so-min-supply-days: ${WEEKLY_REPORT_SO_MIN_SUPPLY_DAYS:1}
+    sdo-min-supply-days: ${WEEKLY_REPORT_SDO_MIN_SUPPLY_DAYS:4}
 
 # single tenant mode is disabled by default
 analytics:
@@ -147,6 +157,14 @@ analytics:
       # days (inclusive of the requested day). Not per-tenant configurable.
       single-day-lookback-days: ${ANALYTICS_DASHBOARD_REGULARITY_SINGLE_DAY_LOOKBACK_DAYS:30}
 
+  water-quantity:
+    # fact_water_quantity_table.water_quantity is stored in LITRES; meters read in cubic metres, so
+    # ingestion multiplies by 1000. A daily volume above this many m3 cannot be real for a single
+    # scheme (100,000 m3 = 100 MLD) and almost certainly means a misread or replaced meter. Such rows
+    # are logged at WARN and counted (water_quantity.implausible) but stored as derived — never
+    # clamped, which would fabricate a plausible number and hide the bad reading.
+    implausible-daily-cubic-metres: ${ANALYTICS_WATER_QUANTITY_IMPLAUSIBLE_DAILY_CUBIC_METRES:100000}
+
   scheduler:
     common:
       cron: ${ANALYTICS_SCHEDULER_CRON:0 0 0 * * *}
@@ -154,7 +172,8 @@ analytics:
     national-dashboard:
       lookback-days: ${ANALYTICS_NATIONAL_DASHBOARD_LOOKBACK_DAYS:30}
     scheme-status:
-      inactive-after-days: ${ANALYTICS_SCHEME_STATUS_INACTIVE_AFTER_DAYS:30}
+      # Age after which a scheme with no confirmed meter reading is reported as "critical" by
+      # GET /analytics/critical-schemes. Computed live per request; stores nothing.
       critical-after-days: ${ANALYTICS_SCHEME_STATUS_CRITICAL_AFTER_DAYS:30}
 
     dim-date-backfill:

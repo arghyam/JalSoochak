@@ -2,242 +2,267 @@ package org.arghyam.jalsoochak.analytics.service;
 
 import org.arghyam.jalsoochak.analytics.dto.DailyReportKpiDTO;
 import org.arghyam.jalsoochak.analytics.repository.DailySituationReportRepository;
-import org.arghyam.jalsoochak.analytics.repository.SchemeRegularityRepository;
+import org.arghyam.jalsoochak.analytics.repository.DailySituationReportRepository.SchemeAnomaly;
+import org.arghyam.jalsoochak.analytics.repository.DailySituationReportRepository.SchemeDaySnapshot;
+import org.arghyam.jalsoochak.analytics.repository.TenantPopulationRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link DailySituationReportService} — verifies the KPI assembly math
- * (MLD, LPCD, percentages, trend inputs), the SDO breakdown's scheme scoping, and the outage-section
- * toggle, using mocked repositories.
+ * Unit tests for the daily report's arithmetic: the counts, the household split, the LPCD basis, and
+ * the IST→UTC window handed to the anomaly queries.
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class DailySituationReportServiceTest {
 
     @Mock
     private DailySituationReportRepository reportRepository;
 
     @Mock
-    private SchemeRegularityRepository schemeRegularityRepository;
+    private TenantPopulationRepository tenantPopulationRepository;
+
+    @InjectMocks
+    private DailySituationReportService service;
 
     private static final int TENANT = 1;
     private static final long OFFICER = 500L;
-    private static final LocalDate REPORT_DATE = LocalDate.of(2026, 7, 7);
-    private static final LocalDate PREV_DATE = LocalDate.of(2026, 7, 6);
+    private static final LocalDate DAY = LocalDate.of(2026, 6, 10);
+    private static final LocalDateTime CUTOFF = DAY.atTime(16, 0);
 
-    /**
-     * The service under test. The outage sections (Priority Actions + Reasons for No Water Supply) are
-     * hidden in the report by default, so their data is only computed when the flag is on.
-     */
-    private DailySituationReportService serviceWithOutageSections(boolean enabled) {
-        return new DailySituationReportService(reportRepository, schemeRegularityRepository, enabled);
+    @BeforeEach
+    void setUp() {
+        when(tenantPopulationRepository.personsPerHousehold(anyInt())).thenReturn(5);
+        when(reportRepository.listAnomaliesByScheme(anyInt(), anyLong(), any(), any())).thenReturn(List.of());
+        when(reportRepository.countAnomalies(anyInt(), anyLong(), any(), any())).thenReturn(0);
+        when(reportRepository.sumWaterSuppliedOnDay(anyInt(), anyLong(), any())).thenReturn(0L);
     }
 
-    /** Mirrors {@code DailySituationReportService.istDayStartUtc}: IST day start expressed UTC-naive. */
-    private static LocalDateTime istDayStartUtc(LocalDate day) {
-        return day.atStartOfDay(ZoneId.of("Asia/Kolkata"))
-                .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+    private void givenSchemes(SchemeDaySnapshot... schemes) {
+        when(reportRepository.listSchemeDaySnapshots(TENANT, OFFICER, DAY)).thenReturn(List.of(schemes));
+    }
+
+    private DailyReportKpiDTO build() {
+        return service.buildReport(TENANT, OFFICER, DAY, CUTOFF);
+    }
+
+    @Nested
+    @DisplayName("scheme counts")
+    class SchemeCounts {
+
+        @Test
+        void countsSupplyingAndNotSupplying() {
+            givenSchemes(
+                    new SchemeDaySnapshot(1, 100, true),
+                    new SchemeDaySnapshot(2, 100, false),
+                    new SchemeDaySnapshot(3, 100, false));
+
+            DailyReportKpiDTO kpis = build();
+
+            assertThat(kpis.getTotalSchemes()).isEqualTo(3);
+            assertThat(kpis.getSchemesSupplying()).isEqualTo(1);
+            assertThat(kpis.getSchemesNotSupplying()).isEqualTo(2);
+        }
+
+        @Test
+        void listsExactlyTheSchemesThatDidNotSupply() {
+            givenSchemes(
+                    new SchemeDaySnapshot(1, 100, true),
+                    new SchemeDaySnapshot(2, 100, false),
+                    new SchemeDaySnapshot(3, 100, false));
+
+            // The count and the list must come from the same rows, or the report contradicts itself.
+            DailyReportKpiDTO kpis = build();
+
+            assertThat(kpis.getNoSupplySchemeIds()).containsExactly(2, 3);
+            assertThat(kpis.getNoSupplySchemeIds()).hasSize(kpis.getSchemesNotSupplying());
+        }
+
+        @Test
+        void reportsZeroesForAnOfficerWithNoSchemes() {
+            givenSchemes();
+
+            DailyReportKpiDTO kpis = build();
+
+            assertThat(kpis.getTotalSchemes()).isZero();
+            assertThat(kpis.getSchemesSupplying()).isZero();
+            assertThat(kpis.getAvgLpcd()).isZero();
+            assertThat(kpis.getHouseholdsWithSupplyPct()).isZero();
+            assertThat(kpis.getNoSupplySchemeIds()).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("household split")
+    class Households {
+
+        @Test
+        void splitsHouseholdsByWhetherTheirSchemeSupplied() {
+            givenSchemes(
+                    new SchemeDaySnapshot(1, 300, true),
+                    new SchemeDaySnapshot(2, 100, false));
+
+            DailyReportKpiDTO kpis = build();
+
+            assertThat(kpis.getTotalHouseholds()).isEqualTo(400L);
+            assertThat(kpis.getHouseholdsWithSupply()).isEqualTo(300L);
+            assertThat(kpis.getHouseholdsWithoutSupply()).isEqualTo(100L);
+            assertThat(kpis.getHouseholdsWithSupplyPct()).isEqualTo(75.0);
+            assertThat(kpis.getHouseholdsWithoutSupplyPct()).isEqualTo(25.0);
+        }
+
+        @Test
+        void roundsEachPercentageFromItsOwnCount() {
+            // 1/3 and 2/3 both round up at one decimal place. Deriving the second as 100 - 33.3 would
+            // print 66.7 and 33.3 summing to 100.0 only by luck; each is computed independently.
+            givenSchemes(
+                    new SchemeDaySnapshot(1, 100, true),
+                    new SchemeDaySnapshot(2, 100, false),
+                    new SchemeDaySnapshot(3, 100, false));
+
+            DailyReportKpiDTO kpis = build();
+
+            assertThat(kpis.getHouseholdsWithSupplyPct()).isEqualTo(33.3);
+            assertThat(kpis.getHouseholdsWithoutSupplyPct()).isEqualTo(66.7);
+        }
+
+        @Test
+        void reportsZeroPercentWhenNoSchemeHasConnections() {
+            givenSchemes(new SchemeDaySnapshot(1, 0, true));
+
+            DailyReportKpiDTO kpis = build();
+
+            assertThat(kpis.getTotalHouseholds()).isZero();
+            assertThat(kpis.getHouseholdsWithSupplyPct()).isZero();
+            assertThat(kpis.getHouseholdsWithoutSupplyPct()).isZero();
+        }
+    }
+
+    @Nested
+    @DisplayName("average LPCD")
+    class Lpcd {
+
+        @Test
+        void dividesByThePopulationOfSupplyingSchemesOnly() {
+            // Per the template footnote. 300 households supplied × 5 people = 1500; 300000 L / 1500 =
+            // 200 LPCD. Over the full 400 households (2000 people) it would read 150 — a different
+            // question, and not the one the template asks.
+            givenSchemes(
+                    new SchemeDaySnapshot(1, 300, true),
+                    new SchemeDaySnapshot(2, 100, false));
+            when(reportRepository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY)).thenReturn(300_000L);
+
+            assertThat(build().getAvgLpcd()).isEqualTo(200.0);
+        }
+
+        @Test
+        void usesTheTenantHouseholdSize() {
+            givenSchemes(new SchemeDaySnapshot(1, 100, true));
+            when(tenantPopulationRepository.personsPerHousehold(TENANT)).thenReturn(4);
+            when(reportRepository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY)).thenReturn(40_000L);
+
+            assertThat(build().getAvgLpcd()).isEqualTo(100.0);
+        }
+
+        @Test
+        void reportsZeroWhenNoSchemeSupplied() {
+            // Denominator is zero, not the full population: no division, and no report-breaking error.
+            givenSchemes(new SchemeDaySnapshot(1, 100, false));
+            when(reportRepository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY)).thenReturn(0L);
+
+            assertThat(build().getAvgLpcd()).isZero();
+        }
+
+        @Test
+        void roundsToOneDecimalPlace() {
+            givenSchemes(new SchemeDaySnapshot(1, 100, true));
+            when(reportRepository.sumWaterSuppliedOnDay(TENANT, OFFICER, DAY)).thenReturn(25_678L);
+
+            // 25678 / 500 = 51.356
+            assertThat(build().getAvgLpcd()).isEqualTo(51.4);
+        }
+    }
+
+    @Nested
+    @DisplayName("anomaly window")
+    class AnomalyWindow {
+
+        @Test
+        void convertsTheIstWindowToTheUtcInstantsAnomaliesAreStoredIn() {
+            givenSchemes(new SchemeDaySnapshot(1, 100, true));
+
+            build();
+
+            ArgumentCaptor<LocalDateTime> from = ArgumentCaptor.forClass(LocalDateTime.class);
+            ArgumentCaptor<LocalDateTime> to = ArgumentCaptor.forClass(LocalDateTime.class);
+            verify(reportRepository).countAnomalies(eq(TENANT), eq(OFFICER), from.capture(), to.capture());
+
+            // IST is UTC+5:30, so 00:00 IST is 18:30 UTC the previous day and the 16:00 cut-off is 10:30 UTC.
+            assertThat(from.getValue()).isEqualTo(DAY.minusDays(1).atTime(18, 30));
+            assertThat(to.getValue()).isEqualTo(DAY.atTime(10, 30));
+        }
+
+        @Test
+        void coversTheWholeDayWhenNoCutoffIsGiven() {
+            givenSchemes(new SchemeDaySnapshot(1, 100, true));
+
+            service.buildReport(TENANT, OFFICER, DAY, null);
+
+            ArgumentCaptor<LocalDateTime> to = ArgumentCaptor.forClass(LocalDateTime.class);
+            verify(reportRepository).countAnomalies(eq(TENANT), eq(OFFICER), any(), to.capture());
+
+            assertThat(to.getValue()).isEqualTo(DAY.atTime(18, 30));
+        }
+
+        @Test
+        void carriesThePerSchemeAnomalyRows() {
+            givenSchemes(new SchemeDaySnapshot(1, 100, true));
+            when(reportRepository.listAnomaliesByScheme(anyInt(), anyLong(), any(), any()))
+                    .thenReturn(List.of(new SchemeAnomaly(1, "UNREADABLE_IMAGE"),
+                            new SchemeAnomaly(1, "5")));
+            when(reportRepository.countAnomalies(anyInt(), anyLong(), any(), any())).thenReturn(7);
+
+            DailyReportKpiDTO kpis = build();
+
+            assertThat(kpis.getAnomalousCount()).isEqualTo(7);
+            assertThat(kpis.getSchemeAnomalies())
+                    .extracting(DailyReportKpiDTO.SchemeAnomaly::getSchemeId,
+                            DailyReportKpiDTO.SchemeAnomaly::getType)
+                    .containsExactly(org.assertj.core.groups.Tuple.tuple(1, "UNREADABLE_IMAGE"),
+                            org.assertj.core.groups.Tuple.tuple(1, "5"));
+        }
     }
 
     @Test
-    void buildReport_computesKpisForBothDays() {
-        when(schemeRegularityRepository.getSchemeCountByUser(TENANT, (int) OFFICER, null)).thenReturn(10);
-        when(reportRepository.populationServed(TENANT, OFFICER, null)).thenReturn(1000L);
+    void reportsTheWindowItActuallyApplied() {
+        // The PDF renders its "Reporting Period" line from this, so it must be the cut-off used rather
+        // than a hard-coded 16:00.
+        givenSchemes(new SchemeDaySnapshot(1, 100, true));
 
-        // Yesterday (D-1)
-        when(reportRepository.countSchemesSupplyingOnDay(TENANT, OFFICER, REPORT_DATE, null)).thenReturn(8);
-        when(reportRepository.countSchemesSubmittingOnDay(TENANT, OFFICER, REPORT_DATE, null)).thenReturn(9);
-        when(reportRepository.sumWaterSuppliedOnDay(TENANT, OFFICER, REPORT_DATE, null)).thenReturn(500_000L);
-        when(reportRepository.sumSupplyDaysInRange(TENANT, OFFICER, REPORT_DATE.minusDays(6), REPORT_DATE, null))
-                .thenReturn(50);
+        DailyReportKpiDTO kpis = service.buildReport(TENANT, OFFICER, DAY, DAY.atTime(17, 30));
 
-        // Previous day (D-2)
-        when(reportRepository.countSchemesSupplyingOnDay(TENANT, OFFICER, PREV_DATE, null)).thenReturn(7);
-        when(reportRepository.countSchemesSubmittingOnDay(TENANT, OFFICER, PREV_DATE, null)).thenReturn(8);
-        when(reportRepository.sumWaterSuppliedOnDay(TENANT, OFFICER, PREV_DATE, null)).thenReturn(400_000L);
-        when(reportRepository.sumSupplyDaysInRange(TENANT, OFFICER, PREV_DATE.minusDays(6), PREV_DATE, null))
-                .thenReturn(49);
-
-        // Anomalies: reportDate window has [5:3,4:1]; previous window empty.
-        when(reportRepository.countAnomaliesByType(eq(TENANT), eq(OFFICER),
-                eq(istDayStartUtc(REPORT_DATE)), eq(istDayStartUtc(REPORT_DATE.plusDays(1))), isNull()))
-                .thenReturn(List.of(
-                        DailyReportKpiDTO.TypeCount.builder().type("5").count(3).build(),
-                        DailyReportKpiDTO.TypeCount.builder().type("4").count(1).build()));
-        when(reportRepository.countAnomaliesByType(eq(TENANT), eq(OFFICER),
-                eq(istDayStartUtc(PREV_DATE)), eq(istDayStartUtc(PREV_DATE.plusDays(1))), isNull()))
-                .thenReturn(List.of());
-
-        when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(TENANT, (int) OFFICER, REPORT_DATE, REPORT_DATE))
-                .thenReturn(List.of(new SchemeRegularityRepository.OutageReasonSchemeCount("PUMP_FAILURE", 2)));
-
-        DailyReportKpiDTO dto = serviceWithOutageSections(true).buildReport(TENANT, OFFICER, REPORT_DATE);
-
-        assertThat(dto.getReportDate()).isEqualTo("2026-07-07");
-        assertThat(dto.getPreviousDate()).isEqualTo("2026-07-06");
-        assertThat(dto.getTotalSchemes()).isEqualTo(10);
-
-        DailyReportKpiDTO.DayKpis y = dto.getYesterday();
-        assertThat(y.getSchemesSupplying()).isEqualTo(8);
-        assertThat(y.getSchemesNotSupplying()).isEqualTo(2);
-        assertThat(y.getAvgMld()).isCloseTo(0.5, within(0.001));       // 500000 / 1e6
-        assertThat(y.getAvgLpcd()).isCloseTo(500.0, within(0.001));    // 500000 / 1000
-        assertThat(y.getReadingSubmissionPct()).isCloseTo(90.0, within(0.001)); // 9/10
-        assertThat(y.getRegularSupplyPctWeek()).isCloseTo(71.4, within(0.05));  // 50/(10*7)
-        assertThat(y.getAnomalousCount()).isEqualTo(4);
-
-        DailyReportKpiDTO.DayKpis p = dto.getPreviousDay();
-        assertThat(p.getSchemesSupplying()).isEqualTo(7);
-        assertThat(p.getAnomalousCount()).isEqualTo(0);
-
-        assertThat(dto.getReasonsForNoSupply()).singleElement()
-                .satisfies(r -> {
-                    assertThat(r.getReason()).isEqualTo("PUMP_FAILURE");
-                    assertThat(r.getCount()).isEqualTo(2);
-                });
-        assertThat(dto.getAnomaliesByType()).hasSize(2);
-    }
-
-    @Test
-    void buildReport_handlesZeroPopulationAndZeroSchemesWithoutDivideByZero() {
-        when(schemeRegularityRepository.getSchemeCountByUser(TENANT, (int) OFFICER, null)).thenReturn(0);
-        when(reportRepository.populationServed(TENANT, OFFICER, null)).thenReturn(0L);
-        when(reportRepository.countAnomaliesByType(any(), any(), any(), any(), any())).thenReturn(List.of());
-        when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(any(), any(), any(), any()))
-                .thenReturn(List.of());
-
-        DailyReportKpiDTO dto = serviceWithOutageSections(true).buildReport(TENANT, OFFICER, REPORT_DATE);
-
-        assertThat(dto.getYesterday().getAvgLpcd()).isZero();
-        assertThat(dto.getYesterday().getRegularSupplyPctWeek()).isZero();
-        assertThat(dto.getYesterday().getReadingSubmissionPct()).isZero();
-    }
-
-    @Test
-    void buildReport_withSubordinates_populatesSectionOfficerSummaries() {
-        long so1 = 601L;
-        long so2 = 602L;
-        // Main SDO report scaffolding (values irrelevant to this assertion). The SDO's own
-        // buildReport still runs, so stub the officer-scoped calls it shares with buildOfficerSummary.
-        when(reportRepository.countAnomaliesByType(any(), any(), any(), any(), any())).thenReturn(List.of());
-        when(schemeRegularityRepository.getSchemeCountByUser(TENANT, (int) OFFICER, null)).thenReturn(10);
-        when(reportRepository.populationServed(TENANT, OFFICER, null)).thenReturn(1_000L);
-        when(reportRepository.countSchemesSupplyingOnDay(TENANT, OFFICER, REPORT_DATE, null)).thenReturn(8);
-        when(reportRepository.countSchemesSupplyingOnDay(TENANT, OFFICER, PREV_DATE, null)).thenReturn(7);
-
-        // Per-SO Summary inputs (report day only), each scoped to the schemes shared with the SDO.
-        when(schemeRegularityRepository.getSchemeCountByUser(TENANT, (int) so1, OFFICER)).thenReturn(154);
-        when(reportRepository.populationServed(TENANT, so1, OFFICER)).thenReturn(1_000L);
-        when(reportRepository.countSchemesSupplyingOnDay(TENANT, so1, REPORT_DATE, OFFICER)).thenReturn(148);
-        when(schemeRegularityRepository.getSchemeCountByUser(TENANT, (int) so2, OFFICER)).thenReturn(90);
-        when(reportRepository.populationServed(TENANT, so2, OFFICER)).thenReturn(500L);
-        when(reportRepository.countSchemesSupplyingOnDay(TENANT, so2, REPORT_DATE, OFFICER)).thenReturn(80);
-
-        DailyReportKpiDTO dto = serviceWithOutageSections(false)
-                .buildReport(TENANT, OFFICER, REPORT_DATE, List.of(so1, so2));
-
-        assertThat(dto.getSectionOfficerSummaries()).hasSize(2);
-        assertThat(dto.getSectionOfficerSummaries())
-                .anySatisfy(s -> {
-                    assertThat(s.getOfficerUserId()).isEqualTo(so1);
-                    assertThat(s.getTotalSchemes()).isEqualTo(154);
-                    assertThat(s.getSchemesSupplying()).isEqualTo(148);
-                    assertThat(s.getSchemesNotSupplying()).isEqualTo(6);
-                })
-                .anySatisfy(s -> {
-                    assertThat(s.getOfficerUserId()).isEqualTo(so2);
-                    assertThat(s.getSchemesNotSupplying()).isEqualTo(10);
-                });
-    }
-
-    @Test
-    void buildReport_sectionOfficerRows_areScopedToSchemesSharedWithTheSdo() {
-        // Subordinate Section Officers are derived from schemes they share with the SDO, so their
-        // breakdown rows must exclude schemes mapped to them but not to this SDO — every per-SO query
-        // is issued with the SDO's user id as the supervisor. The SDO's own Summary stays unscoped.
-        long so = 601L;
-        when(reportRepository.countAnomaliesByType(any(), any(), any(), any(), any())).thenReturn(List.of());
-
-        serviceWithOutageSections(false).buildReport(TENANT, OFFICER, REPORT_DATE, List.of(so));
-
-        verify(schemeRegularityRepository).getSchemeCountByUser(TENANT, (int) so, OFFICER);
-        verify(reportRepository).populationServed(TENANT, so, OFFICER);
-        verify(reportRepository).countSchemesSupplyingOnDay(TENANT, so, REPORT_DATE, OFFICER);
-        verify(reportRepository).countSchemesSubmittingOnDay(TENANT, so, REPORT_DATE, OFFICER);
-        verify(reportRepository).sumWaterSuppliedOnDay(TENANT, so, REPORT_DATE, OFFICER);
-        verify(reportRepository).sumSupplyDaysInRange(TENANT, so, REPORT_DATE.minusDays(6), REPORT_DATE, OFFICER);
-        verify(reportRepository).countAnomaliesByType(eq(TENANT), eq(so), any(), any(), eq(OFFICER));
-
-        // The SDO's own numbers cover all of the SDO's schemes — no supervisor above them.
-        verify(schemeRegularityRepository).getSchemeCountByUser(TENANT, (int) OFFICER, null);
-        verify(reportRepository).populationServed(TENANT, OFFICER, null);
-        verify(reportRepository).countSchemesSupplyingOnDay(TENANT, OFFICER, REPORT_DATE, null);
-    }
-
-    @Test
-    void buildReport_withoutSubordinates_hasEmptySectionOfficerSummaries() {
-        when(reportRepository.countAnomaliesByType(any(), any(), any(), any(), any())).thenReturn(List.of());
-        when(schemeRegularityRepository.getOutageReasonSchemeCountByUser(any(), any(), any(), any()))
-                .thenReturn(List.of());
-
-        DailyReportKpiDTO dto = serviceWithOutageSections(true).buildReport(TENANT, OFFICER, REPORT_DATE);
-
-        assertThat(dto.getSectionOfficerSummaries()).isEmpty();
-    }
-
-    @Test
-    void buildReport_populatesPriorityActionsWithDaysNoSupply() {
-        when(reportRepository.listNoSupplyByScheme(TENANT, OFFICER, REPORT_DATE, null)).thenReturn(List.of(
-                new DailySituationReportRepository.NoSupplyScheme(7, "Pump Failure", LocalDate.of(2026, 7, 2)),
-                new DailySituationReportRepository.NoSupplyScheme(9, "Pipeline Break", null)));
-
-        DailyReportKpiDTO dto = serviceWithOutageSections(true).buildReport(TENANT, OFFICER, REPORT_DATE);
-
-        assertThat(dto.getPriorityActions()).hasSize(2);
-        assertThat(dto.getPriorityActions())
-                .anySatisfy(pa -> {
-                    assertThat(pa.getSchemeId()).isEqualTo(7);
-                    assertThat(pa.getIssue()).isEqualTo("Pump Failure");
-                    assertThat(pa.getDaysNoSupply()).isEqualTo(5);   // 2026-07-07 − 2026-07-02
-                })
-                .anySatisfy(pa -> {
-                    assertThat(pa.getSchemeId()).isEqualTo(9);
-                    assertThat(pa.getIssue()).isEqualTo("Pipeline Break");
-                    assertThat(pa.getDaysNoSupply()).isNull();       // never supplied
-                });
-    }
-
-    @Test
-    void buildReport_withOutageSectionsDisabled_skipsTheirQueriesEntirely() {
-        // Both sections are hidden in the PDF by default, so their data must not be computed at all —
-        // not merely dropped downstream.
-        when(reportRepository.countAnomaliesByType(any(), any(), any(), any(), any())).thenReturn(List.of());
-
-        DailyReportKpiDTO dto = serviceWithOutageSections(false).buildReport(TENANT, OFFICER, REPORT_DATE);
-
-        assertThat(dto.getPriorityActions()).isEmpty();
-        assertThat(dto.getReasonsForNoSupply()).isEmpty();
-        verify(reportRepository, never()).listNoSupplyByScheme(any(), any(), any(), any());
-        verify(schemeRegularityRepository, never()).getOutageReasonSchemeCountByUser(any(), any(), any(), any());
-        // The anomaly section is unaffected by the toggle.
-        verify(reportRepository, org.mockito.Mockito.atLeastOnce())
-                .countAnomaliesByType(any(), any(), any(), any(), any());
+        assertThat(kpis.getReportDate()).isEqualTo("2026-06-10");
+        assertThat(kpis.getCutoffIst()).isEqualTo("2026-06-10T17:30");
     }
 }

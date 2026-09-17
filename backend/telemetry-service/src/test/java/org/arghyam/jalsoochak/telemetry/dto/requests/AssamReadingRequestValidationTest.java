@@ -1,9 +1,8 @@
 package org.arghyam.jalsoochak.telemetry.dto.requests;
 
 import jakarta.validation.ConstraintViolation;
-import jakarta.validation.Validation;
 import jakarta.validation.Validator;
-import jakarta.validation.ValidatorFactory;
+import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -15,8 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AssamReadingRequestValidationTest {
 
-    private static final ValidatorFactory VALIDATOR_FACTORY = Validation.buildDefaultValidatorFactory();
-    private static final Validator VALIDATOR = VALIDATOR_FACTORY.getValidator();
+    // The reading-url constraint takes its policy through the constructor, so it needs the same
+    // factory wiring the container provides — see ReadingUrlTestValidation.
+    private static final Validator VALIDATOR = ReadingUrlTestValidation.validator();
 
     @Test
     void validationPassesWhenOnlyStateSchemeIdProvided() {

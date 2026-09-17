@@ -2,8 +2,10 @@ package org.arghyam.jalsoochak.telemetry.service;
 
 import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.telemetry.dto.response.IntroResponse;
+import org.arghyam.jalsoochak.telemetry.repository.LanguageCatalogRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -21,6 +23,12 @@ public class WelcomeMessageService {
     private final GlificLocalizationService localizationService;
     private final TenantConfigRepository tenantConfigRepository;
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
+
+    // Optional data-driven catalog (V36). When present it supplies locale codes for languages not in
+    // the hardcoded switch below, so a new language needs only a DB row. Non-constructor field so the
+    // Lombok @RequiredArgsConstructor signature (and its callers/tests) stay unchanged.
+    @Autowired(required = false)
+    private LanguageCatalogRepository languageCatalogRepository;
 
     public IntroResponse triggerWelcomeMessage(String phoneNumber, boolean isSingleTenant) {
         if (phoneNumber == null || phoneNumber.isBlank()) {
@@ -150,8 +158,15 @@ public class WelcomeMessageService {
         return NON_ALNUM.matcher(lower).replaceAll("_").replaceAll("^_+|_+$", "");
     }
 
-    private String mapToLocaleCode(String normalizedKey, String normalizedRaw) {
+    // Package-private for unit testing of the resolution/fallback logic.
+    String mapToLocaleCode(String normalizedKey, String normalizedRaw) {
         String key = !normalizedKey.isBlank() ? normalizedKey : normalizedRaw;
+        if (languageCatalogRepository != null) {
+            String fromCatalog = languageCatalogRepository.findLocaleCodeByAlias(key).orElse(null);
+            if (fromCatalog != null && !fromCatalog.isBlank()) {
+                return fromCatalog;
+            }
+        }
         return switch (key) {
             case "english", "en" -> "en";
             case "hindi", "hi" -> "hi";

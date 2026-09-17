@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.analytics.service.water;
 import org.arghyam.jalsoochak.analytics.enums.ReadingChannel;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,9 +21,11 @@ class WaterQuantityCalculatorRegistryTest {
         }
 
         @Override
-        public int calculate(WaterQuantityContext context) {
+        public long calculate(WaterQuantityContext context) {
             // Distinct from BFM: the reading itself is the day's quantity.
-            return context.currentReading() != null ? Math.max(0, context.currentReading()) : 0;
+            return context.currentReading() != null
+                    ? context.currentReading().max(BigDecimal.ZERO).longValue()
+                    : 0L;
         }
     }
 

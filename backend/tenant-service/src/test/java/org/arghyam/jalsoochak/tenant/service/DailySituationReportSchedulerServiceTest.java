@@ -10,11 +10,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.util.ReflectionUtils;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -24,7 +28,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link DailySituationReportSchedulerService}. Verifies officer enumeration by role
- * and one {@code DAILY_REPORT_REQUEST} per officer (covering the previous IST day).
+ * and one {@code DAILY_REPORT_REQUEST} per officer, covering the current IST day up to the run
+ * instant.
  */
 @ExtendWith(MockitoExtension.class)
 class DailySituationReportSchedulerServiceTest {
@@ -61,7 +66,8 @@ class DailySituationReportSchedulerServiceTest {
         verify(kafkaProducer, org.mockito.Mockito.times(3)).publishJson(eq("common-topic"), captor.capture());
 
         List<Object> events = captor.getAllValues();
-        String expectedDate = LocalDate.now(ZoneId.of("Asia/Kolkata")).minusDays(1).toString();
+        // The report covers TODAY so far, not yesterday — officers act on it the same afternoon.
+        String expectedDate = LocalDate.now(ZoneId.of("Asia/Kolkata")).toString();
 
         assertThat(events).allSatisfy(e -> {
             DailyReportRequestEvent event = (DailyReportRequestEvent) e;
@@ -113,6 +119,37 @@ class DailySituationReportSchedulerServiceTest {
         assertThat(appender.list).anySatisfy(event -> assertThat(event.getFormattedMessage())
                 .contains("requested=4")
                 .contains("requestedByRole={SECTION_OFFICER=4}"));
+    }
+
+    @Test
+    void carriesACutoffOnTheReportDateSoAReplayReproducesTheNumbers() {
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SECTION_OFFICER"))
+                .thenReturn(List.of(11L));
+        when(nudgeRepository.findDistinctOfficerUserIdsByUserType(SCHEMA, "SUB_DIVISIONAL_OFFICER"))
+                .thenReturn(List.of());
+
+        service.processDailyReportsForTenant(SCHEMA, TENANT);
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaProducer).publishJson(eq("common-topic"), captor.capture());
+        DailyReportRequestEvent event = (DailyReportRequestEvent) captor.getValue();
+
+        assertThat(event.getCutoffIst()).isNotNull();
+        LocalDateTime cutoff = LocalDateTime.parse(event.getCutoffIst());
+        // The cut-off closes the window the report date opens, so it must land on that same IST day.
+        assertThat(cutoff.toLocalDate()).isEqualTo(LocalDate.parse(event.getReportDate()));
+        assertThat(cutoff).isBeforeOrEqualTo(LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
+    }
+
+    @Test
+    void defaultsToSectionOfficersOnly() {
+        // SDOs moved to the weekly report. The default matters on its own: a deployment that sets no
+        // DAILY_REPORT_OFFICER_USER_TYPES must not keep sending SDOs a daily report.
+        Value annotation = (Value) Objects.requireNonNull(
+                        ReflectionUtils.findField(DailySituationReportSchedulerService.class, "officerUserTypesCsv"))
+                .getAnnotation(Value.class);
+
+        assertThat(annotation.value()).isEqualTo("${daily-report.officer.user-types:SECTION_OFFICER}");
     }
 
     @Test

@@ -55,8 +55,27 @@ The current anomaly type constants in `telemetry-service` are:
 - `7` - `LOW_WATER_SUPPLY`
 - `8` - `OVER_WATER_SUPPLY`
 - `9` - `NO_SUBMISSION`
+- `10` - `IMPLAUSIBLE_WATER_SUPPLY`
 
 Source: `telemetry-service` `AnomalyConstants`.
+
+`10` is distinct from `8`: `OVER_WATER_SUPPLY` means "above the tenant's configured tolerance over
+the norm", while `IMPLAUSIBLE_WATER_SUPPLY` means "more than this scheme's connected population could
+physically consume". Its wire-facing rejection code is the deliberately vaguer `ABNORMAL_READING`,
+which discloses no threshold.
+
+A type-10 anomaly does not by itself mean the day is missing from analytics — that depends on which
+of three situations produced it, and the anomaly's `reason` text says which:
+
+- **A quarantined submission.** The reading is stored but **withheld from the warehouse**, so the
+  scheme shows as non-reporting and the operator as absent for that day.
+- **A correction refused over an already-published reading** (runbook case B). Nothing is written and
+  the published value stands, so the day *is* counted. The anomaly records the refused attempt only.
+- **A correction refused over a quarantined reading** (runbook case C). The day is still missing, for
+  the same reason the original submission was withheld.
+
+See [implausible-water-supply-runbook.md](implausible-water-supply-runbook.md) §5 before treating
+such a gap as a pipeline fault, or a type-10 anomaly as evidence of one.
 
 ---
 
@@ -106,7 +125,8 @@ If the submitted reading is below the configured minimum threshold derived from 
 
 - `<tenant_schema>.anomaly_table`
 
-The row typically includes:
+The row carries the same structured detail as the `ANOMALY_RECORDED` event published beside it,
+so the tenant row and the `analytics_schema` row agree on what happened:
 
 - `user_id`
 - `scheme_id`
@@ -114,6 +134,23 @@ The row typically includes:
 - `reason`
 - `status`
 - `created_at`
+- `ai_reading`
+- `ai_confidence_percentage`
+- `overridden_reading`
+- `retries`
+- `previous_reading`
+- `previous_reading_date`
+- `consecutive_days_overridden`
+
+The structured columns are written only when the flow has a value for them and the tenant schema
+has the column — a schema that predates V8 still takes the insert, under whichever of `reason` or
+`detail` it has. `correlation_id` has no tenant column, and the tenant `uuid` is database-generated
+rather than derived from the event's, so the two rows are matched on
+`(user_id, scheme_id, type, created_at)` rather than by key.
+
+`consecutive_days_overridden` counts an override run and is filled only by the
+`CONSECUTIVE_OVERRIDE_5_DAYS` anomaly. It is not the event's `consecutive_days_missed`, which is a
+different metric and has no tenant column.
 
 ---
 

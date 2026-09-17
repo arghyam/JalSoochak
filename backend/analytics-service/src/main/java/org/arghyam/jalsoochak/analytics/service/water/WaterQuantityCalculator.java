@@ -22,8 +22,14 @@ public interface WaterQuantityCalculator {
      * {@link WaterQuantityContext}. The calculator owns the interpretation of the
      * context's reading values for its channel (see {@link WaterQuantityContext}).
      *
+     * <p>The return value is in <strong>litres</strong>, the unit
+     * {@code fact_water_quantity_table.water_quantity} is denominated in — regardless of the unit the
+     * channel's readings are expressed in. Each calculator normalises its own channel's unit on the
+     * way out; BFM does so through {@link WaterVolumeUnits}. It is {@code long} because a m&sup3;
+     * delta multiplied into litres does not reliably fit an {@code int}.
+     *
      * @param context the reading inputs (readings, scheme identifiers, channel)
-     * @return the water quantity to persist (never negative)
+     * @return the water quantity to persist, in litres (never negative)
      */
-    int calculate(WaterQuantityContext context);
+    long calculate(WaterQuantityContext context);
 }

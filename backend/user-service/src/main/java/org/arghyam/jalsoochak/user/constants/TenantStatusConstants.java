@@ -11,11 +11,11 @@ package org.arghyam.jalsoochak.user.constants;
  *
  * <p>Tenant Status Access Rules:
  * <ul>
- *   <li>INACTIVE (0): System Users only; data retained for compliance</li>
+ *   <li>INACTIVE (0): Super User only; State Admin blocked; data retained for compliance</li>
  *   <li>ONBOARDED (1): System Users only</li>
  *   <li>CONFIGURED (2): System Users only</li>
  *   <li>ACTIVE (3): All users (System, Staff, Public APIs)</li>
- *   <li>SUSPENDED (4): System Users only; access blocked for business users</li>
+ *   <li>SUSPENDED (4): Super User only; State Admin and business users blocked</li>
  *   <li>DEGRADED (5): All users (with known issues)</li>
  *   <li>ARCHIVED (6): Super User only; State Admin blocked</li>
  *   <li>REGISTERED (7): Pre-seeded tenant, not yet onboarded; no schema; hidden from all access</li>

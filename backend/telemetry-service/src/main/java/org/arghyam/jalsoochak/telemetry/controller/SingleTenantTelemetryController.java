@@ -1,6 +1,10 @@
 package org.arghyam.jalsoochak.telemetry.controller;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
+import org.arghyam.jalsoochak.telemetry.config.OpenApiConfig;
+import org.arghyam.jalsoochak.telemetry.config.TelemetryApiKeyAuthFilter;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.ResetLatestReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.UpdateReadingRequest;
@@ -23,6 +27,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,11 +42,14 @@ import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 
 @RestController
 @RequestMapping("/api/v1/telemetry")
+@SecurityRequirement(name = OpenApiConfig.API_KEY_SCHEME)
 public class SingleTenantTelemetryController {
 
     private static final Logger log = LoggerFactory.getLogger(SingleTenantTelemetryController.class);
     private static final String TENANT_CODE_HEADER = "X-Tenant-Code";
     private static final String API_KEY_TOKEN = "api key";
+    private static final String SCHEME_TOKEN = "scheme";
+    private static final String OPERATOR_TOKEN = "operator";
 
     private final GlificWebhookService glificWebhookService;
     private final TelemetryApiKeyService telemetryApiKeyService;
@@ -68,12 +76,24 @@ public class SingleTenantTelemetryController {
         this.telemetrySubmissionAuditService = telemetrySubmissionAuditService;
     }
 
+    /**
+     * External correction of a prior day's final reading.
+     *
+     * <p>Documented as an API-key route but shipped without any key check, and it picked its tenant
+     * from the unauthenticated {@code X-Tenant-Code} header — so an anonymous caller could name any
+     * tenant and overwrite a submitted reading. Same defect class as {@code /readings/reset-latest};
+     * fixed the same way: the key is required, and the tenant comes from the key rather than from a
+     * header the caller controls.
+     */
     @PatchMapping(
             value = "/schemes/{schemeId}/yesterday-final-reading",
             consumes = "application/json",
             produces = "application/json"
     )
     public ResponseEntity<UpdateYesterdayFinalReadingBySchemeResponse> updateYesterdayFinalReadingByScheme(
+            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
+            @RequestAttribute(name = TelemetryApiKeyAuthFilter.TENANT_ID_ATTRIBUTE, required = false)
+            Integer authenticatedTenantId,
             @PathVariable Long schemeId,
             @RequestParam(value = "date", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
@@ -90,11 +110,16 @@ public class SingleTenantTelemetryController {
         }
         log.info("PATCH /api/v1/telemetry/schemes/{}/yesterday-final-reading phone={}", schemeId, masked);
         try {
+            // Authenticated before anything else. The tenant comes from the API key — via the filter
+            // attribute, or resolved here as defence in depth — never from the X-Tenant-Code header
+            // the caller controls.
+            Integer tenantId = requireAuthenticatedTenant(apiKey, authenticatedTenantId);
             UpdateYesterdayFinalReadingBySchemeResponse response = telemetrySchemeReadingService.updateYesterdayFinalReadingBySchemeId(
                     schemeId,
                     request.getPhoneNumber(),
                     request.getReading(),
-                    date
+                    date,
+                    tenantId
             );
             logReadingSubmission(
                     "/api/v1/telemetry/schemes/{schemeId}/yesterday-final-reading",
@@ -165,6 +190,28 @@ public class SingleTenantTelemetryController {
             log.info("POST /api/v1/telemetry/readings API key accepted tenantId={} request={}",
                     tenantId,
                     summarizeAssamReadingRequest(request));
+
+            // Checked here rather than with a Bean Validation constraint: every @Valid failure on
+            // this endpoint is funnelled into VALIDATION_FAILED, and a caller needs to tell an
+            // unsupported channel apart from a malformed payload. After the API key, so an
+            // unauthenticated caller cannot probe the field to learn which channels exist.
+            if (ReadingChannel.isUnsupportedDeclaration(request.getChannel())) {
+                String message = ReadingChannel.unsupportedDeclarationMessage();
+                log.info("POST /api/v1/telemetry/readings rejected tenantId={} reason=\"unsupported channel\" request={}",
+                        tenantId,
+                        summarizeAssamReadingRequest(request));
+                logReadingSubmission("/api/v1/telemetry/readings", request, tenantId, "FAILED", message);
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                        ReadingsApiResponse.builder()
+                                .success(false)
+                                .data(ReadingsDataResponse.builder()
+                                        .qualityStatus("REJECTED")
+                                        .errorCode(TelemetryErrorCode.CHANNEL_NOT_SUPPORTED)
+                                        .message(message)
+                                        .build())
+                                .build()
+                );
+            }
 
             log.info("POST /api/v1/telemetry/readings processing tenantId={} request={}",
                     tenantId,
@@ -338,16 +385,33 @@ public class SingleTenantTelemetryController {
                     request.getConfirmedReading(),
                     tenantId
             );
-            log.info("PUT /api/v1/telemetry/readings updated tenantId={} response={}",
+            // SUPPLY-PLAUSIBILITY: a correction can now be refused on its value rather than on its
+            // shape, which arrives as a REJECTED response instead of an exception. Mapped exactly as
+            // the POST handler maps a rejected submission, so both endpoints refuse an implausible
+            // reading with the same status and the same error code. There is no RETRY arm here: the
+            // correction path runs no OCR, so it has no transient upstream to be unavailable.
+            boolean rejected = response == null
+                    || !response.isSuccess()
+                    || "REJECTED".equalsIgnoreCase(response.getQualityStatus());
+            log.info("PUT /api/v1/telemetry/readings updated tenantId={} status={} response={}",
                     tenantId,
+                    rejected ? "FAILED" : "SUCCESS",
                     summarizeCreateReadingResponse(response));
             logReadingSubmission(
                     "/api/v1/telemetry/readings",
                     request,
                     tenantId,
-                    "SUCCESS",
+                    rejected ? "FAILED" : "SUCCESS",
                     response != null ? response.getMessage() : "Reading updated."
             );
+            if (rejected) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                        ReadingsApiResponse.builder()
+                                .success(false)
+                                .data(toReadingsDataResponse(response, false))
+                                .build()
+                );
+            }
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
@@ -403,6 +467,17 @@ public class SingleTenantTelemetryController {
         }
     }
 
+    /**
+     * Destructive: zeroes the operator's latest confirmed reading, addressed by a phone number.
+     *
+     * <p>This handler shipped without the {@code X-Api-Key} check that its sibling {@code /readings}
+     * routes carry, leaving an unauthenticated caller able to destroy any operator's latest reading
+     * given only their phone number (CWE-287). Authentication is now enforced twice over: by
+     * {@link TelemetryApiKeyAuthFilter}, which covers the whole {@code /readings/**} prefix so a route
+     * cannot be added unprotected, and here, so the handler is safe even if it is ever remapped or
+     * reached without the filter. The resolved tenant then scopes <em>which</em> operator may be
+     * reset, and every attempt — accepted or refused — is written to the audit log.
+     */
     @PostMapping(
             value = "/readings/reset-latest",
             consumes = "application/json",
@@ -410,14 +485,21 @@ public class SingleTenantTelemetryController {
     )
     public ResponseEntity<ReadingsApiResponse> resetLatestReading(
             @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
+            @RequestAttribute(name = TelemetryApiKeyAuthFilter.TENANT_ID_ATTRIBUTE, required = false)
+            Integer authenticatedTenantId,
             @RequestBody @Valid ResetLatestReadingRequest request
     ) {
+        String contactId = request != null ? request.getContactId() : null;
+        Integer tenantId = null;
         try {
-            if (request.getContactId() == null || request.getContactId().isBlank()) {
+            tenantId = requireAuthenticatedTenant(apiKey, authenticatedTenantId);
+
+            if (contactId == null || contactId.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contactId must be provided");
             }
 
-            CreateReadingResponse response = bfmReadingService.resetLatestConfirmedReadingByPhone(request.getContactId());
+            CreateReadingResponse response = bfmReadingService.resetLatestConfirmedReadingByPhone(contactId, tenantId);
+            logReadingReset(contactId, tenantId, "SUCCESS", response, null);
             return ResponseEntity.ok(
                     ReadingsApiResponse.builder()
                             .success(true)
@@ -425,6 +507,8 @@ public class SingleTenantTelemetryController {
                             .build()
             );
         } catch (ResponseStatusException e) {
+            logReadingReset(contactId, tenantId, "REJECTED", null,
+                    e.getStatusCode() + " " + sanitizeLogMessage(e.getReason()));
             return ResponseEntity.status(e.getStatusCode()).body(
                     ReadingsApiResponse.builder()
                             .success(false)
@@ -437,6 +521,7 @@ public class SingleTenantTelemetryController {
             );
         } catch (Exception e) {
             log.error("Error resetting latest reading: {}", e.getMessage(), e);
+            logReadingReset(contactId, tenantId, "FAILED", null, sanitizeLogMessage(e.getMessage()));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                     ReadingsApiResponse.builder()
                             .success(false)
@@ -448,6 +533,47 @@ public class SingleTenantTelemetryController {
                             .build()
             );
         }
+    }
+
+    /**
+     * Resolves the tenant the caller authenticated as, or rejects with 401.
+     *
+     * <p>Prefers the tenant {@link TelemetryApiKeyAuthFilter} already resolved for this request so the
+     * key is hashed and looked up once; falls back to resolving the header directly, which is what
+     * happens when a handler is exercised without the filter in front of it.
+     */
+    private Integer requireAuthenticatedTenant(String apiKey, Integer authenticatedTenantId) {
+        if (authenticatedTenantId != null) {
+            return authenticatedTenantId;
+        }
+        if (telemetryApiKeyService == null) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "API key service not configured");
+        }
+        return telemetryApiKeyService.resolveTenantIdFromRawApiKey(apiKey)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid API key"));
+    }
+
+    /**
+     * Audit trail for the reset route. Every attempt is recorded — including the ones refused at the
+     * door — so a caller sweeping contactIds shows up as a run of {@code reading_reset status=REJECTED}
+     * lines rather than as silence. {@code previousReading} is the value the reset destroyed: the
+     * update overwrites the only copy, so the log is the record of what was there.
+     */
+    private void logReadingReset(String contactId,
+                                 Integer tenantId,
+                                 String status,
+                                 CreateReadingResponse response,
+                                 String reason) {
+        log.atLevel("SUCCESS".equals(status) ? org.slf4j.event.Level.INFO : org.slf4j.event.Level.WARN)
+                .log("reading_reset api=/api/v1/telemetry/readings/reset-latest status={} tenantId={} phone={} "
+                                + "correlationId={} previousReading={} newReading={} reason=\"{}\"",
+                        status,
+                        tenantId,
+                        maskPhone(contactId),
+                        response != null ? sanitizeLogValue(response.getCorrelationId()) : "n/a",
+                        response != null ? response.getLastConfirmedReading() : null,
+                        response != null ? response.getMeterReading() : null,
+                        sanitizeLogMessage(reason));
     }
 
     private ReadingsDataResponse toReadingsDataResponse(CreateReadingResponse response, boolean includeCorrelationId) {
@@ -485,6 +611,22 @@ public class SingleTenantTelemetryController {
         String normalized = reason.toLowerCase();
         if (normalized.contains(API_KEY_TOKEN)) {
             return TelemetryErrorCode.INVALID_API_KEY;
+        }
+        // A 404 must not describe itself as BAD_REQUEST: the status line and the body would disagree,
+        // and an integrator reading only the body cannot tell "not found" from "malformed request".
+        // Keyed on the reason the same way the api-key check above is, and the same way
+        // GlificImageWorkflowService classifies its own failures. The operator miss deliberately maps
+        // to one code for both "no such contact" and "contact belongs to another tenant" — the two
+        // share a single reason string precisely so neither confirms the contact exists elsewhere,
+        // and a code that separated them would undo that.
+        if (HttpStatus.NOT_FOUND.equals(e.getStatusCode())) {
+            if (normalized.contains(SCHEME_TOKEN)) {
+                return TelemetryErrorCode.SCHEME_NOT_FOUND;
+            }
+            if (normalized.contains(OPERATOR_TOKEN)) {
+                return TelemetryErrorCode.OPERATOR_NOT_FOUND;
+            }
+            return TelemetryErrorCode.REQUEST_FAILED;
         }
         return TelemetryErrorCode.BAD_REQUEST;
     }

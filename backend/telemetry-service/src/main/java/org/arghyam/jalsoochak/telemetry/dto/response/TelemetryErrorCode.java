@@ -42,6 +42,13 @@ public enum TelemetryErrorCode {
     /** Missing or invalid API key (HTTP 401), or a 400 whose reason references the API key. */
     INVALID_API_KEY("INVALID_API_KEY"),
 
+    /**
+     * The submission declared a {@code channel} that is not one of the supported reading channels
+     * (BFM, ELM, PDU, IOT, MAN). Rejected rather than defaulted, so a mistyped channel cannot be
+     * processed with another channel's arithmetic.
+     */
+    CHANNEL_NOT_SUPPORTED("CHANNEL_NOT_SUPPORTED"),
+
     /** Unclassified server-side failure while processing the reading. */
     PROCESSING_FAILED("PROCESSING_FAILED"),
 
@@ -61,7 +68,21 @@ public enum TelemetryErrorCode {
     BAD_REQUEST("BAD_REQUEST"),
 
     /** Fallback used when the failure could not be classified (e.g. null/blank reason). */
-    REQUEST_FAILED("REQUEST_FAILED");
+    REQUEST_FAILED("REQUEST_FAILED"),
+
+    /**
+     * The reading is not usable: the daily volume it implies is not plausible for the scheme that
+     * produced it.
+     *
+     * <p><b>Deliberately vaguer than the anomaly it comes from.</b> Internally the same rejection is
+     * {@code AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY} / {@code EscalationType
+     * .IMPLAUSIBLE_WATER_SUPPLY}, which names the condition for the staff reading it on a dashboard.
+     * On the wire it must not: naming it after water supply tells a caller the rejection is
+     * volume-derived, and the accompanying message must never echo the ceiling — an API-key holder
+     * could otherwise solve for the scheme's connection count and the per-person limit in two
+     * submissions. The numbers stay in the anomaly row, the Kafka event and the server log.
+     */
+    ABNORMAL_READING("ABNORMAL_READING");
 
     private final String code;
 

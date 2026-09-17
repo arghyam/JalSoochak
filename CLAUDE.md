@@ -79,6 +79,20 @@ The system uses **schema-per-tenant** multi-tenancy in PostgreSQL:
 
 Flyway migrations run automatically on service startup. Migration files live in `backend/database/`.
 
+### Single Tenant Mode (`SINGLE_TENANT_MODE`)
+
+Defaults to `false`. Bound as `app.single-tenant-mode` in tenant/user/scheme, but
+`analytics.single-tenant-mode` in analytics — same env var, different prefix.
+
+When on: user/scheme `JwtAuthConverter` expands `SUPER_STATE_ADMIN` → `SUPER_USER` +
+`STATE_ADMIN`; `createTenant` refuses a second tenant; analytics national endpoints return 403.
+
+**Startup invariant:** tenant/user/scheme each refuse to boot if more than one tenant is ACTIVE
+(`status = 3`), or if the tenant table is unreadable — see `SingleTenantModeStartupValidator` in
+each `config/` package. All three check independently, since login and the role expansion live
+outside tenant-service. DEGRADED tenants are loginable but only WARN. A `@SpringBootTest` with the
+flag on needs ≤1 ACTIVE tenant or `@MockBean` on the validator.
+
 ### Service Communication
 
 - **Synchronous:** HTTP/REST via Netflix Eureka service discovery
@@ -143,6 +157,20 @@ Message text is fetched from `common_schema.tenant_config_master_table` using th
 - Required env vars: `GLIFIC_API_URL`, `GLIFIC_API_KEY`, `GLIFIC_NUDGE_TEMPLATE_ID`,
   `GLIFIC_ESCALATION_TEMPLATE_ID`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`,
   `MINIO_BUCKET`, `MINIO_BASE_URL`
+
+### Daily report delivery mode (DOCUMENT | LINK)
+
+`NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE` — both paths in
+`GlificWhatsAppService.sendDailyReportHsm`. `minio.base-url` must be public and anonymously
+readable either way.
+
+- `DOCUMENT` (default) — two-step media send. Meta fetches `minio.base-url` itself, which the
+  India-only firewall in front of production MinIO blocks.
+- `LINK` — one `sendHsmMessage` with a "View Report" button, no media step. `parameters =
+[officerName, reportDate (dd-MM-yyyy), urlSuffix]` — the URL suffix must come **last**. The
+  button's prefix is frozen at Meta approval and must equal `minio.base-url` + `/`, so each
+  environment needs its own approved template (`GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID`); set
+  `DAILY_REPORT_LINK_BUTTON_BASE_URL` to have that checked at startup.
 
 ### Privacy rule
 Phone numbers are PII — log them only at `DEBUG` level. Never include raw phone numbers in

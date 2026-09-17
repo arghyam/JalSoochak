@@ -97,6 +97,38 @@ class TenantStaffControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.content[0].id").value(1));
         }
+
+        @Test
+        @DisplayName("returns 400 when page is negative")
+        void returns400ForNegativePage() throws Exception {
+            mockMvc.perform(get("/api/v1/tenant/user/staff")
+                            .param("tenantCode", "mp")
+                            .param("page", "-1"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("page"));
+        }
+
+        @Test
+        @DisplayName("returns 400 when limit is zero")
+        void returns400ForZeroLimit() throws Exception {
+            mockMvc.perform(get("/api/v1/tenant/user/staff")
+                            .param("tenantCode", "mp")
+                            .param("limit", "0"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("limit"));
+        }
+
+        @Test
+        @DisplayName("returns 400 when limit exceeds the 100 maximum")
+        void returns400ForLimitAboveMax() throws Exception {
+            mockMvc.perform(get("/api/v1/tenant/user/staff")
+                            .param("tenantCode", "mp")
+                            .param("limit", "101"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400));
+        }
     }
 
     @Nested

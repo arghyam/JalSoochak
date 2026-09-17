@@ -4,6 +4,11 @@ server:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+    # Must equal <swagger-ui.version> in pom.xml. springdoc 2.5.0 ships
+    # springdoc.config.properties with springdoc.swagger-ui.version=5.13.0 and uses it to
+    # build the webjar resource path (AbstractSwaggerResourceResolver), so without this
+    # override every /webjars/swagger-ui/** asset 404s against the pinned webjar.
+    version: 5.32.14
     tags-sorter: alpha
     operations-sorter: method
   api-docs:
@@ -108,11 +113,11 @@ notification:
       api-url: https://api.sendgrid.com
       api-key: ${SENDGRID_API_KEY}
       templates:
-        password-reset: ${SENDGRID_TEMPLATE_PASSWORD_RESET:d-9d83de3639254c18b86fa2834f4a5db1}
-        reinvitation: ${SENDGRID_TEMPLATE_REINVITATION:d-3710ff4d9d874cf1950c589c6f71d752}
-        default-invitation: ${SENDGRID_TEMPLATE_DEFAULT_INVITATION:d-7721978b67bf4f0083891657ed584447}
-        super-user-invitation: ${SENDGRID_TEMPLATE_SUPER_USER_INVITATION:d-6ff964820aae4e03866dd39f64976287}
-        state-admin-invitation: ${SENDGRID_TEMPLATE_STATE_ADMIN_INVITATION:d-ec98926fa9ed4046b3bf9b85c7a1a7e3}
+        password-reset: ${SENDGRID_TEMPLATE_PASSWORD_RESET:d-f7088f302ac146faa4c165b7539e4cd9}
+        reinvitation: ${SENDGRID_TEMPLATE_REINVITATION:d-b3e1cb24d3bc40b3b8c3f0c19c8cff79}
+        default-invitation: ${SENDGRID_TEMPLATE_DEFAULT_INVITATION:d-4f225581b47a4c0ea8e1b84d4be740cb}
+        super-user-invitation: ${SENDGRID_TEMPLATE_SUPER_USER_INVITATION:d-c0f4763d5bd948d0879d4bec9e015646}
+        state-admin-invitation: ${SENDGRID_TEMPLATE_STATE_ADMIN_INVITATION:d-20c14eb80ba84feb87b157f4b1cf4bbc}
 
     # ── SMTP plain-text templates (used when provider: smtp) ─────────────────
     # Placeholders: {name}, {activation_link}, {expiry_hours},
@@ -240,12 +245,14 @@ daily-report:
     dir: ${DAILY_REPORT_DIR:/tmp/escalation-reports/} # reuses the escalation report dir by default
   dashboard-url: ${DAILY_REPORT_DASHBOARD_URL:https://jalsoochak.jjmbrain.in/staff/}
   support-phone: ${DAILY_REPORT_SUPPORT_PHONE:} # shown in the PDF footer; blank hides the line
-  sections:
-    outage-details:
-      # Priority Actions + Reasons for No Water Supply. Hidden by default; set to true to restore both
-      # sections — the remaining sections renumber automatically. analytics-service reads the same
-      # property (same env var) and skips computing their data while they are hidden, so flip both.
-      enabled: ${DAILY_REPORT_OUTAGE_SECTIONS_ENABLED:false}
+  link:
+    # Optional mirror of the URL prefix frozen into the approved LINK template, e.g.
+    # https://jalsoochak.jjmbrain.in/minio/ (mind the trailing slash). When set it must equal
+    # minio.base-url + "/" or the service refuses to start. This is the only check that catches an
+    # environment deployed with another environment's template id or MINIO_BASE_URL: Glific accepts
+    # the send either way, so otherwise the officer is the first to notice the button leads nowhere.
+    # Leave blank to skip the check (a startup warning is logged instead).
+    button-base-url: ${DAILY_REPORT_LINK_BUTTON_BASE_URL:}
 
 # Base URL used to construct the public PDF download link sent via WhatsApp.
 # For local dev: http://localhost:8085
@@ -280,7 +287,10 @@ app:
 # To run daily reports live while everything else stays muted:
 #   NOTIFICATIONS_WHATSAPP_DRY_RUN=true      (OTP/welcome/language muted)
 #   NOTIFICATIONS_DAILY_REPORT_DRY_RUN=false (daily reports delivered; opt-in goes live)
-#   GLIFIC_DAILY_REPORT_SO_TEMPLATE_ID / _SDO_TEMPLATE_ID must be set — startup fails fast otherwise.
+#   Then, per delivery-mode (see notifications.daily-report.delivery-mode below), startup fails fast
+#   unless the templates that mode sends are configured:
+#     DOCUMENT → GLIFIC_DAILY_REPORT_SO_TEMPLATE_ID (numeric; _SDO_TEMPLATE_ID optional)
+#     LINK     → GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID (_SDO_LINK_TEMPLATE_ID optional)
 #
 # To run escalations live while keeping nudges muted:
 #   NOTIFICATIONS_WHATSAPP_DRY_RUN=false   (OTP/welcome live)
@@ -297,6 +307,25 @@ notifications:
     dry-run: ${NOTIFICATIONS_ESCALATION_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
   daily-report:
     dry-run: ${NOTIFICATIONS_DAILY_REPORT_DRY_RUN:${NOTIFICATIONS_WHATSAPP_DRY_RUN:false}}
+    
+    # How the report PDF reaches the officer. DOCUMENT | LINK (case-insensitive).
+    #
+    #   DOCUMENT — the PDF as a WhatsApp document. Glific registers the MinIO URL and META
+    #              DOWNLOADS IT ITSELF. Production MinIO answers Indian source addresses only, so
+    #              that download fails inside Meta
+    #   LINK     — a text HSM whose "View Report" button carries the MinIO path. Meta fetches
+    #              nothing; the officer's phone opens the PDF, from inside India, when they tap it.
+    #              Requires an approved link template (glific.template.daily-report-*-link-id).
+    #
+    # Rollback is this flag plus a restart — both paths stay in the code.
+    delivery-mode: ${NOTIFICATIONS_DAILY_REPORT_DELIVERY_MODE:LINK}
+  weekly-report:
+    # Defaults to SUPPRESSED: the weekly report needs its own Meta-approved templates (the body text
+    # says "Weekly", and SO and SDO get different wording), and until those exist there is nothing to
+    # send. While suppressed the PDFs are still generated and uploaded to MinIO, so the whole pipeline
+    # can be verified end to end before delivery goes live. Set to false once the template ids below
+    # are configured — startup then refuses to proceed if they are still blank.
+    dry-run: ${NOTIFICATIONS_WEEKLY_REPORT_DRY_RUN:false}
   sms:
     dry-run: ${NOTIFICATIONS_SMS_DRY_RUN:false}
 
@@ -316,6 +345,21 @@ glific:
     login-otp-id: ${GLIFIC_LOGIN_OTP_TEMPLATE_ID:}
     daily-report-so-id: ${GLIFIC_DAILY_REPORT_SO_TEMPLATE_ID:}
     daily-report-sdo-id: ${GLIFIC_DAILY_REPORT_SDO_TEMPLATE_ID:}
+    # Link templates — used only when notifications.daily-report.delivery-mode=LINK. These are text
+    # HSMs with a dynamic-URL button, NOT document templates, so they are separate approvals.
+    # Variables: {{1}} officer name, {{2}} report date (dd-MM-yyyy), then the button's URL suffix.
+    # The button's fixed prefix is frozen at approval and must equal MINIO_BASE_URL + "/", which is
+    # why staging and production each need their own template id.
+    daily-report-so-link-id: ${GLIFIC_DAILY_REPORT_SO_LINK_TEMPLATE_ID:}
+    # Optional — falls back to the SO link template when blank.
+    daily-report-sdo-link-id: ${GLIFIC_DAILY_REPORT_SDO_LINK_TEMPLATE_ID:}
+    # Weekly report templates (LINK only — the weekly report has no DOCUMENT path, because that is
+    # the one Meta has to fetch through the India-only firewall).
+    # Variables: {{1}} officer name, {{2}} week start (dd-MM-yyyy), then the button's URL suffix.
+    # Blank until the Meta templates are approved; weekly delivery stays in dry-run until then.
+    weekly-report-so-link-id: ${GLIFIC_WEEKLY_REPORT_SO_LINK_TEMPLATE_ID:}
+    # Optional — falls back to the SO weekly template when blank.
+    weekly-report-sdo-link-id: ${GLIFIC_WEEKLY_REPORT_SDO_LINK_TEMPLATE_ID:}
   flow:
     nudge-id: ${GLIFIC_NUDGE_FLOW_ID:}
     welcome-id: ${GLIFIC_WELCOME_FLOW_ID:38949}
@@ -326,6 +370,40 @@ glific:
     # report covers (D-1) is appended at send time, e.g. "… Report 13-08-2026" for a 14 Aug delivery,
     # so configure the name only — do not put a date here.
     daily-report-caption: ${GLIFIC_DAILY_REPORT_CAPTION:Daily Water Service Situation Report}
+
+  # ────────────────────────────────────────────────────────────
+  # Delivery-status reconciliation (GlificDeliveryReconciliationService)
+  #
+  # result=SENT only means Glific ACCEPTED our API call. Gupshup and Meta act afterwards and report
+  # delivery status back to Glific alone, so a report sent to a number with no WhatsApp account is
+  # counted as sent exactly like one that arrived. This job reads that status back and logs it under
+  # the [GlificStatus] prefix
+  # ────────────────────────────────────────────────────────────
+  status:
+    reconcile:
+      # Off by default: the pass shares the 500 ms Glific throttle with live sends, so a deployment
+      # opts in once window-hours and interval-ms suit its volume.
+      enabled: ${GLIFIC_STATUS_RECONCILE_ENABLED:false}
+      interval-ms: ${GLIFIC_STATUS_RECONCILE_INTERVAL_MS:1800000} # every 30 min
+      initial-delay-ms: ${GLIFIC_STATUS_RECONCILE_INITIAL_DELAY_MS:600000}
+      # Rolling look-back, NOT a fixed hour: the daily-report cron is configurable per tenant via
+      # common_schema.tenant_config_master_table key DAILY_SITUATION_REPORT_TIME, so no single hour
+      # is right for every tenant. Keep it tight — a wide window costs pages of unrelated traffic.
+      window-hours: ${GLIFIC_STATUS_RECONCILE_WINDOW_HOURS:6}
+      page-size: ${GLIFIC_STATUS_RECONCILE_PAGE_SIZE:250}
+      # Hard stop per status so a pathological window cannot consume the whole throttle budget.
+      # Hitting it is logged at WARN — truncated results would silently under-report delivery.
+      max-pages: ${GLIFIC_STATUS_RECONCILE_MAX_PAGES:40}
+      # Glific's dateRange column. inserted_at is when the message row was created and is stable;
+      # updated_at moves on every status change and would let a message drift out of its send window.
+      date-column: ${GLIFIC_STATUS_RECONCILE_DATE_COLUMN:inserted_at}
+      # Blank = derive from the glific.template.daily-report-* ids above. Set explicitly only to
+      # reconcile templates this service does not itself send.
+      template-ids: ${GLIFIC_STATUS_RECONCILE_TEMPLATE_IDS:}
+      # Failure codes that are properties of the Gupshup ACCOUNT, not of any recipient. 9999 is
+      # "low balance": it fails every message in flight, so it is reported on its own line instead of
+      # being counted as N officer failures, which would read as a mass recipient-data problem.
+      account-level-error-codes: ${GLIFIC_STATUS_RECONCILE_ACCOUNT_LEVEL_ERROR_CODES:9999}
 
 # ──────────────────────────────────────────────────────────────
 # SMSCountry REST API (SMS OTP delivery)

@@ -8,12 +8,13 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 /**
- * KPI payload for the Daily Water Service Situation Report, computed by analytics-service
- * for a single officer (scoped to the schemes mapped to that officer) and carried unchanged
- * to message-service for rendering.
+ * KPI payload for the Daily Water Service Situation Report, computed by analytics-service for a
+ * single Section Officer (scoped to that officer's handed-over schemes) and carried unchanged to
+ * message-service for rendering.
  *
- * <p>All values are computed from {@code analytics_schema} only; no PII and no
- * {@code common_schema} access is involved.</p>
+ * <p>All values are computed from {@code analytics_schema} only: no PII and no {@code common_schema}
+ * access. Scheme names, IMIS ids and Jal Mitra contacts are resolved downstream from the operational
+ * schema — this payload carries scheme <em>ids</em>.</p>
  */
 @Data
 @Builder
@@ -21,112 +22,74 @@ import java.util.List;
 @AllArgsConstructor
 public class DailyReportKpiDTO {
 
-    /** The day the report covers (D-1, "Yesterday" in the sample). ISO-8601 string. */
+    /** The day the report covers (today, IST). ISO-8601 string. */
     private String reportDate;
 
-    /** The comparison day (D-2, "Previous Day" in the sample). ISO-8601 string. */
-    private String previousDate;
+    /**
+     * ISO-8601 local date-time (IST) the data window closed at — the instant the job ran. Rendered
+     * into the PDF's "Reporting Period: 00:00 hrs – HH:MM hrs" line, so the stated window is the one
+     * actually applied rather than a hard-coded 16:00.
+     */
+    private String cutoffIst;
 
-    /** Total schemes mapped to the officer (denominator for the percentage KPIs). */
+    /** Total handed-over schemes mapped to the officer — the denominator for the HH percentages. */
     private int totalSchemes;
 
-    /** Summary metrics for {@link #reportDate}. */
-    private DayKpis yesterday;
+    /** Schemes that supplied water during the window. */
+    private int schemesSupplying;
 
-    /** Summary metrics for {@link #previousDate}. */
-    private DayKpis previousDay;
+    /** {@code totalSchemes - schemesSupplying}, never negative. */
+    private int schemesNotSupplying;
 
-    /** Section 3 — outage-reason → scheme-count for {@link #reportDate} (raw reason keys). */
-    private List<ReasonCount> reasonsForNoSupply;
+    /** Households (FHTC) on schemes that supplied water, and that as a percentage of {@link #totalHouseholds}. */
+    private long householdsWithSupply;
+    private double householdsWithSupplyPct;
 
-    /** Section 4 — anomaly-type → count for {@link #reportDate}. Values are the anomaly-type
-     *  NAME as stored in {@code anomaly_table.type} (e.g. {@code NO_SUBMISSION}); legacy rows may
-     *  hold the numeric code string. message-service maps either form to a human label. */
-    private List<TypeCount> anomaliesByType;
+    /** Households (FHTC) on schemes that did not supply, and the corresponding percentage. */
+    private long householdsWithoutSupply;
+    private double householdsWithoutSupplyPct;
 
-    /** Section 2 — Priority Actions: one entry per officer scheme that had an outage reason on
-     *  {@link #reportDate}. Scheme name / IMIS id / pump operators are resolved downstream in
-     *  message-service (which has the operational schema + PII); analytics carries only the ids. */
-    private List<PriorityAction> priorityActions;
-
-    /** SDO-only Summary breakdown — one row per Section Officer under the SDO (for {@link #reportDate}
-     *  only). Populated only when the request carried a subordinate-officer list (i.e. the report is
-     *  for a SUB_DIVISIONAL_OFFICER); {@code null}/empty for a SECTION_OFFICER report. Officer name and
-     *  mobile are resolved downstream in message-service; analytics carries only the user id + KPIs. */
-    private List<SectionOfficerSummary> sectionOfficerSummaries;
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class DayKpis {
-        private int schemesSupplying;
-        private int schemesNotSupplying;
-        /** Average Litres Per Capita per Day across the officer's schemes for the day. */
-        private double avgLpcd;
-        /** Total Million Litres per Day supplied across the officer's schemes for the day. */
-        private double avgMld;
-        /** Regular-supply percentage over the 7-day window ending on the day (0-100). */
-        private double regularSupplyPctWeek;
-        /** Reading-submission percentage for the single day (0-100). */
-        private double readingSubmissionPct;
-        /** Number of anomalies raised for the officer's schemes on the day. */
-        private int anomalousCount;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ReasonCount {
-        private String reason;
-        private int count;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class TypeCount {
-        /** Anomaly type as stored in {@code anomaly_table.type} — the enum NAME
-         *  (e.g. {@code NO_SUBMISSION}); legacy rows may hold the numeric code string. */
-        private String type;
-        private int count;
-    }
+    /** Total households (FHTC) across all the officer's handed-over schemes. */
+    private long totalHouseholds;
 
     /**
-     * One Section Officer's single-day summary KPIs, for the SDO report's per-officer breakdown table.
-     * Mirrors the Section 1 Summary columns (no trend). {@code officerUserId} lets message-service
-     * resolve the officer's name + mobile from the operational schema at render time.
+     * Litres per capita per day across <em>only the schemes that supplied water</em>, per the
+     * template's footnote. The numerator is the day's litres; the denominator is the population of
+     * the supplying subset. This is the one LPCD in the platform not taken over the full scheme set.
+     */
+    private double avgLpcd;
+
+    /** Anomalies raised against the officer's schemes during the window. */
+    private int anomalousCount;
+
+    /** Section 2 — schemes that had not supplied water by the cut-off. Ids only; PII resolved downstream. */
+    private List<Integer> noSupplySchemeIds;
+
+    /** Section 3 — one entry per (scheme, anomaly type) raised during the window. */
+    private List<SchemeAnomaly> schemeAnomalies;
+
+    /**
+     * One anomaly type observed on one scheme. {@code type} is the anomaly enum NAME as stored in
+     * {@code anomaly_table.type} (e.g. {@code UNREADABLE_IMAGE}); rows written before analytics
+     * migration V29 may hold the numeric code as a string, and message-service maps either form to a
+     * human label.
      */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class SectionOfficerSummary {
-        /** Section Officer user id (operational {@code user_table.id}); PII resolved downstream. */
-        private long officerUserId;
-        private int totalSchemes;
-        private int schemesSupplying;
-        private int schemesNotSupplying;
-        private double avgLpcd;
-        private double avgMld;
-        private double regularSupplyPctWeek;
-        private double readingSubmissionPct;
-        private int anomalousCount;
+    public static class SchemeAnomaly {
+        private int schemeId;
+        private String type;
     }
 
+    /** Anomaly type → count, for callers that want the breakdown without the per-scheme detail. */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class PriorityAction {
-        /** Scheme surrogate id — same value in analytics {@code dim_scheme_table.scheme_id}
-         *  and operational {@code scheme_master_table.id}. */
-        private int schemeId;
-        /** Outage reason (human name from {@code fact_water_quantity_table.outage_reason}). */
-        private String issue;
-        /** Consecutive days with no water supply up to the report day; null if never supplied. */
-        private Integer daysNoSupply;
+    public static class TypeCount {
+        private String type;
+        private int count;
     }
 }

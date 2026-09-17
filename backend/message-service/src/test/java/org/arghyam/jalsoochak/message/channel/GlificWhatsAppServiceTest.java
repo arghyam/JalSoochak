@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.message.channel;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,6 +58,9 @@ class GlificWhatsAppServiceTest {
         // Glific hands media URLs to Meta, which fetches them from the public internet, so every
         // sending path now requires a publicly reachable prefix.
         ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+        // Weekly reports ship suppressed until their Meta templates are approved, which is also the
+        // production default. Tests that exercise weekly delivery turn it on explicitly.
+        ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
     }
 
     // ──────────────────────────── optIn ────────────────────────────────────────
@@ -581,7 +585,7 @@ class GlificWhatsAppServiceTest {
                 .thenReturn(mapper.readTree("{\"createAndSendMessage\":{\"message\":{\"id\":\"1\"}}}"));
 
         service.sendDailyReportHsm(555L, "https://minio.example.com/report.pdf", "SECTION_OFFICER",
-                LocalDate.of(2026, 8, 13));
+                LocalDate.of(2026, 8, 13), "Ramesh Kumar");
 
         ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
         verify(client).execute(contains("createMessageMedia"), vars.capture());
@@ -603,6 +607,7 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "nudgeDryRun", true);
             ReflectionTestUtils.setField(service, "escalationDryRun", true);
             ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
         }
 
         @Test
@@ -668,7 +673,7 @@ class GlificWhatsAppServiceTest {
         @Test
         void sendDailyReportHsm_isNoOp() {
             service.sendDailyReportHsm(0L, "https://minio.example.com/daily.pdf", "SECTION_OFFICER",
-                    LocalDate.of(2026, 8, 19));
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
 
             verifyNoInteractions(client);
         }
@@ -799,7 +804,7 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "42");
 
             assertThatThrownBy(() -> service.sendDailyReportHsm(0L, "https://minio.example.com/daily.pdf",
-                    "SECTION_OFFICER", LocalDate.of(2026, 8, 19)))
+                    "SECTION_OFFICER", LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("sendDailyReportHsm");
 
@@ -975,6 +980,39 @@ class GlificWhatsAppServiceTest {
             assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
         }
 
+        @Test
+        void validateTemplates_failsFast_whenOnlyTheWeeklyReportIsLiveButMediaBaseUrlIsInternal() {
+            // The weekly report is LINK-only, so Meta never downloads the file — but the same prefix
+            // is what the officer's phone opens and what is frozen into the approved template. The
+            // gate used to consult only the daily and escalation flags, so a weekly-only deployment
+            // started happily and delivered buttons that lead nowhere.
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "77");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://192.168.20.143:9000");
+
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("minio.base-url")
+                    .hasMessageContaining("MINIO_BASE_URL");
+        }
+
+        @Test
+        void validateTemplates_passes_whenOnlyTheWeeklyReportIsLiveAndTheBaseUrlIsPublic() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "77");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", "https://jalsoochak.jjmbrain.in/minio");
+
+            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+        }
+
         /** A localhost MinIO is normal for local and CI runs, where nothing is delivered. */
         @Test
         void validateTemplates_toleratesAnInternalBaseUrl_whenNoDocumentIsEverSent() {
@@ -982,6 +1020,7 @@ class GlificWhatsAppServiceTest {
             ReflectionTestUtils.setField(service, "nudgeDryRun", true);
             ReflectionTestUtils.setField(service, "escalationDryRun", true);
             ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
             ReflectionTestUtils.setField(service, "mediaBaseUrl", "http://localhost:9000");
 
             assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
@@ -993,7 +1032,7 @@ class GlificWhatsAppServiceTest {
 
             assertThatThrownBy(() -> service.sendDailyReportHsm(16363L,
                     "http://192.168.20.143:9000/escalation-reports/daily_report.pdf",
-                    "SECTION_OFFICER", LocalDate.of(2026, 8, 19)))
+                    "SECTION_OFFICER", LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("MINIO_BASE_URL");
 
@@ -1025,7 +1064,8 @@ class GlificWhatsAppServiceTest {
                     {"createAndSendMessage":{"message":{"id":1,"body":"b","isHsm":true},"errors":[]}}
                     """));
 
-            service.sendDailyReportHsm(16743L, publicUrl, "SECTION_OFFICER", LocalDate.of(2026, 8, 19));
+            service.sendDailyReportHsm(16743L, publicUrl, "SECTION_OFFICER", LocalDate.of(2026, 8, 19),
+                    "Ramesh Kumar");
 
             ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
             verify(client).execute(contains("createMessageMedia"), vars.capture());
@@ -1033,6 +1073,530 @@ class GlificWhatsAppServiceTest {
             Map<String, Object> input = (Map<String, Object>) vars.getValue().get("input");
             assertThat(input).containsEntry("url", publicUrl).containsEntry("source_url", publicUrl);
             verify(client).execute(contains("createAndSendMessage"), anyMap());
+        }
+    }
+
+    // ─────────────────── daily report: LINK delivery mode ──────────────────────
+
+    /**
+     * {@code notifications.daily-report.delivery-mode=LINK} sends a text HSM whose "View Report"
+     * button carries the MinIO path, instead of a document HSM Meta has to download itself. The
+     * behaviour that matters is that no media is registered at all — that round trip is exactly what
+     * fails with {@code (#131053)} behind the India-only firewall in front of production MinIO.
+     */
+@Nested
+    @DisplayName("weekly report")
+    class WeeklyReport {
+
+        private static final String PUBLIC_BASE = "https://jalsoochak.jjmbrain.in/minio";
+        private static final String OBJECT_PATH =
+                "weekly-water-reports/SO/2026-07-13_to_2026-07-19/weekly_water_report_SECTION_OFFICER_21343_2026-07-13_to_2026-07-19.pdf";
+        private static final String PUBLIC_URL = PUBLIC_BASE + "/" + OBJECT_PATH;
+        private static final LocalDate WEEK_START = LocalDate.of(2026, 7, 13);
+
+        @BeforeEach
+        void enableWeeklyDelivery() {
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "7001");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE);
+        }
+
+        private void stubSendHsm() throws Exception {
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree("""
+                    {"sendHsmMessage":{"message":{"id":1,"body":"b","isHSM":true},"errors":[]}}
+                    """));
+        }
+
+        @Test
+        void sendsOneHsmAndNeverRegistersMedia() throws Exception {
+            // No DOCUMENT path at all: registering media would make Meta fetch the PDF through the
+            // India-only firewall, which is the failure the link mode exists to avoid.
+            stubSendHsm();
+
+            service.sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
+
+            verify(client).execute(contains("sendHsmMessage"), anyMap());
+            verify(client, never()).execute(contains("createMessageMedia"), anyMap());
+            verify(client, never()).execute(contains("createAndSendMessage"), anyMap());
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void putsTheUrlSuffixLastInTheParameterList() throws Exception {
+            // Glific flattens the list in order of occurrence: body variables first, the button's URL
+            // suffix last. Reordering them sends the officer a message addressed to a date.
+            stubSendHsm();
+
+            service.sendWeeklyReportHsm(21343L, PUBLIC_URL, "SECTION_OFFICER", WEEK_START, "Binod Nimoli");
+
+            ArgumentCaptor<Map<String, Object>> vars = ArgumentCaptor.forClass(Map.class);
+            verify(client).execute(contains("sendHsmMessage"), vars.capture());
+            List<String> params = (List<String>) vars.getValue().get("parameters");
+            assertThat(params).containsExactly("Binod Nimoli", "13-07-2026", OBJECT_PATH);
+        }
+
+        @Test
+        void prefersTheSdoTemplateWhenOneIsConfigured() throws Exception {
+            stubSendHsm();
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "7002");
+
+            GlificSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
+                    "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
+
+            assertThat(result.templateId()).isEqualTo("7002");
+        }
+
+        @Test
+        void fallsBackToTheSoTemplateWhenNoSdoTemplateIsApproved() throws Exception {
+            stubSendHsm();
+            ReflectionTestUtils.setField(service, "weeklyReportSdoLinkTemplateId", "");
+
+            GlificSendResult result = service.sendWeeklyReportHsm(5521L, PUBLIC_URL,
+                    "SUB_DIVISIONAL_OFFICER", WEEK_START, "Bharat Sharma");
+
+            assertThat(result.templateId()).isEqualTo("7001");
+        }
+
+        @Test
+        void refusesAUrlFromSomeOtherHostRatherThanSendingADeadButton() throws Exception {
+            // Meta appends the remainder to the template's frozen prefix verbatim, so a foreign URL
+            // yields a button pointing nowhere — and Glific would accept the send regardless.
+            assertThatThrownBy(() -> service.sendWeeklyReportHsm(21343L,
+                    "https://elsewhere.example.com/x.pdf", "SECTION_OFFICER", WEEK_START, "Binod"))
+                    .isInstanceOf(IllegalStateException.class);
+
+            verify(client, never()).execute(anyString(), anyMap());
+        }
+
+        @Test
+        void requiresTheWeekStartSinceItIsATemplateVariable() {
+            assertThatThrownBy(() -> service.sendWeeklyReportHsm(21343L, PUBLIC_URL,
+                    "SECTION_OFFICER", null, "Binod"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void suppressesTheSendWhileInDryRun() {
+            ReflectionTestUtils.setField(service, "weeklyReportDryRun", true);
+
+            GlificSendResult result = service.sendWeeklyReportHsm(21343L, PUBLIC_URL,
+                    "SECTION_OFFICER", WEEK_START, "Binod");
+
+            assertThat(result.messageId()).isNull();
+            assertThat(service.isWeeklyReportDeliveryEnabled()).isFalse();
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void startupFailsWhenDeliveryIsLiveButNoTemplateIsConfigured() {
+            // Otherwise the job runs every Monday, builds and uploads a PDF, then fails per message —
+            // discovered from the logs rather than at deploy, with officers receiving nothing.
+            ReflectionTestUtils.setField(service, "weeklyReportSoLinkTemplateId", "");
+            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-1");
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("weekly-report-so-link-id");
+        }
+
+        @Test
+        void startupPassesWhenTheTemplateIsConfigured() {
+            ReflectionTestUtils.setField(service, "loginOtpTemplateId", "otp-1");
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+
+            service.validateTemplates();
+        }
+    }
+
+        @Nested
+    class LinkDeliveryMode {
+
+        private static final String PUBLIC_BASE = "https://jalsoochak.jjmbrain.in/minio";
+        private static final String OBJECT_PATH =
+                "escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf";
+        private static final String PUBLIC_URL = PUBLIC_BASE + "/" + OBJECT_PATH;
+
+        @BeforeEach
+        void enableLinkMode() {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "9101");
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE);
+        }
+
+        private void stubSendHsm() throws Exception {
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree("""
+                    {"sendHsmMessage":{"message":{"id":1,"body":"b","isHSM":true},"errors":[]}}
+                    """));
+        }
+
+        @Test
+        void sendsOneHsm_andNeverRegistersMedia() throws Exception {
+            stubSendHsm();
+
+            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            verify(client).execute(contains("sendHsmMessage"), anyMap());
+            verify(client, never()).execute(contains("createMessageMedia"), anyMap());
+            verify(client, never()).execute(contains("createAndSendMessage"), anyMap());
+        }
+
+        @Test
+        void passesNameThenDateThenUrlSuffix_inThatOrder() throws Exception {
+            stubSendHsm();
+
+            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
+            verify(client).execute(contains("sendHsmMessage"), vars.capture());
+            // Glific forwards this list to Gupshup as a flat params array filled in order of
+            // occurrence: body variables first, the button's URL suffix last.
+            assertThat(vars.getValue())
+                    .containsEntry("templateId", "9101")
+                    .containsEntry("receiverId", 16714L)
+                    .containsEntry("parameters", List.of("Ramesh Kumar", "19-08-2026", OBJECT_PATH));
+        }
+
+        @Test
+        void suffixExcludesTheTemplatesFrozenPrefix_evenWhenBaseUrlHasATrailingSlash() {
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE + "/");
+
+            assertThat(service.linkSuffix(PUBLIC_URL)).isEqualTo(OBJECT_PATH);
+        }
+
+        @Test
+        void refusesAUrlFromAnotherHost_withoutCallingGlific() {
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L,
+                    "https://some-other-host.example.com/minio/" + OBJECT_PATH,
+                    "SECTION_OFFICER", LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("does not start with the template's URL prefix");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void refusesTheBarePrefixWithNoObjectPath() {
+            assertThatThrownBy(() -> service.linkSuffix(PUBLIC_BASE + "/"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("no object path");
+        }
+
+        @Test
+        void blankOfficerNameDegradesToOfficer_ratherThanFailingTheSend() throws Exception {
+            stubSendHsm();
+
+            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "   ");
+
+            ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
+            verify(client).execute(contains("sendHsmMessage"), vars.capture());
+            assertThat(vars.getValue())
+                    .containsEntry("parameters", List.of("Officer", "19-08-2026", OBJECT_PATH));
+        }
+
+        @Test
+        void refusesAMissingReportDate_becauseItIsATemplateVariable() {
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    null, "Ramesh Kumar"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("report date");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void sdoUsesItsOwnLinkTemplate_whenConfigured() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportSdoLinkTemplateId", "9102");
+            stubSendHsm();
+
+            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SUB_DIVISIONAL_OFFICER",
+                    LocalDate.of(2026, 8, 19), "SDO Kumar");
+
+            ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
+            verify(client).execute(contains("sendHsmMessage"), vars.capture());
+            assertThat(vars.getValue()).containsEntry("templateId", "9102");
+        }
+
+        @Test
+        void sdoFallsBackToTheSoLinkTemplate_whenItsOwnIsBlank() throws Exception {
+            stubSendHsm();
+
+            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SUB_DIVISIONAL_OFFICER",
+                    LocalDate.of(2026, 8, 19), "SDO Kumar");
+
+            ArgumentCaptor<Map<String, Object>> vars = varsCaptor();
+            verify(client).execute(contains("sendHsmMessage"), vars.capture());
+            assertThat(vars.getValue()).containsEntry("templateId", "9101");
+        }
+
+        @Test
+        void isNoOp_underDailyReportDryRun() {
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+
+            service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void refusesAnUnresolvedContactId_beforeAnyGlificCall() {
+            assertThatThrownBy(() -> service.sendDailyReportHsm(0L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sendDailyReportHsm");
+
+            verifyNoInteractions(client);
+        }
+
+        @Test
+        void surfacesGlificErrors_soTheRouterCanFailTheDelivery() throws Exception {
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree("""
+                    {"sendHsmMessage":{"errors":[{"key":"params","message":"wrong number of parameters"}]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("wrong number of parameters");
+        }
+
+        @Test
+        void validateTemplates_requiresTheSoLinkTemplate_andNotTheDocumentIds() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            // No daily-report-so-id at all: LINK mode never reads it, so it must not be demanded.
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "");
+
+            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "");
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("glific.template.daily-report-so-link-id");
+        }
+
+        @Test
+        void validateTemplates_failsWhenTheButtonBaseUrlDoesNotMatchMinioBaseUrl() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            // The staging template's prefix against a production MINIO_BASE_URL — the mistake this
+            // guard exists for, because Glific accepts the send and only the officer sees the dead link.
+            ReflectionTestUtils.setField(service, "dailyReportLinkButtonBaseUrl", "https://jalsoochak.in/minio/");
+
+            assertThatThrownBy(() -> service.validateTemplates())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("daily-report.link.button-base-url")
+                    .hasMessageContaining(PUBLIC_BASE + "/");
+        }
+
+        @Test
+        void validateTemplates_passesWhenTheButtonBaseUrlMatches() {
+            ReflectionTestUtils.setField(service, "whatsappDryRun", true);
+            ReflectionTestUtils.setField(service, "nudgeDryRun", true);
+            ReflectionTestUtils.setField(service, "escalationDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", false);
+            ReflectionTestUtils.setField(service, "dailyReportLinkButtonBaseUrl", PUBLIC_BASE + "/");
+
+            assertThatCode(() -> service.validateTemplates()).doesNotThrowAnyException();
+        }
+    }
+
+    // ─────────────────── delivery mode parsing ─────────────────────────────────
+
+    @Test
+    void deliveryMode_defaultsToDocument_soAnUnsetPropertyChangesNothing() {
+        assertThat(DailyReportDeliveryMode.from(null)).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
+        assertThat(DailyReportDeliveryMode.from("  ")).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
+    }
+
+    @Test
+    void deliveryMode_toleratesCaseAndWhitespace() {
+        assertThat(DailyReportDeliveryMode.from("link")).isEqualTo(DailyReportDeliveryMode.LINK);
+        assertThat(DailyReportDeliveryMode.from(" LINK ")).isEqualTo(DailyReportDeliveryMode.LINK);
+        assertThat(DailyReportDeliveryMode.from("Document")).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
+    }
+
+    @Test
+    void deliveryMode_rejectsAnUnknownValue_namingTheValidOnes() {
+        assertThatThrownBy(() -> DailyReportDeliveryMode.from("pdf"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("DOCUMENT or LINK")
+                .hasMessageContaining("pdf");
+    }
+
+    /**
+     * The Glific message id that {@code sendHsmMessage} / {@code createAndSendMessage} return used to be
+     * parsed and discarded. It is the only join key between a report we sent and the delivery status
+     * Gupshup and Meta later report back to Glific, so these tests pin it down.
+     */
+    @Nested
+    class MessageIdCapture {
+
+        private static final String PUBLIC_BASE = "https://jalsoochak.jjmbrain.in/minio";
+        private static final String PUBLIC_URL =
+                PUBLIC_BASE + "/escalation-reports/daily_report_SECTION_OFFICER_16714_2026-08-19.pdf";
+
+        @BeforeEach
+        void publicBaseUrl() {
+            ReflectionTestUtils.setField(service, "mediaBaseUrl", PUBLIC_BASE);
+        }
+
+        @Test
+        void linkMode_returnsTheMessageIdTemplateIdAndMode() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"sendHsmMessage":{"message":{"id":241952654,"body":"b","isHSM":true},"errors":[]}}
+                    """));
+
+            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            assertThat(result.messageId()).isEqualTo("241952654");
+            assertThat(result.templateId()).isEqualTo("880557");
+            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.LINK);
+            assertThat(result.hasMessageId()).isTrue();
+        }
+
+        @Test
+        void documentMode_returnsTheMessageIdTemplateIdAndMode() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":{"id":77,"url":"u"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":{"id":241952700,"body":"b","isHsm":true},"errors":[]}}
+                    """));
+
+            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            assertThat(result.messageId()).isEqualTo("241952700");
+            assertThat(result.templateId()).isEqualTo("880600");
+            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.DOCUMENT);
+        }
+
+        /**
+         * A send with no id must not come back as a result at all. Returning one reported the report as
+         * accepted while it carried no join key — counted as delivered and simultaneously invisible to
+         * reconciliation, which is the one combination that cannot be noticed later.
+         */
+        @Test
+        void aSendThatReturnsNoIdIsRefused() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"sendHsmMessage":{"message":{},"errors":[]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMissingMessageIdException.class)
+                    .hasMessageContaining("returned no message.id")
+                    .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
+                            .isEqualTo("sendHsmMessage"));
+        }
+
+        /** The document path shares {@code extractMessageId}, so it must refuse a blank id too. */
+        @Test
+        void documentMode_refusesASendThatReturnsABlankId() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":{"id":77,"url":"u"},"errors":[]}}
+                    """));
+            when(client.execute(contains("createAndSendMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createAndSendMessage":{"message":{"id":"  "},"errors":[]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMissingMessageIdException.class)
+                    .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
+                            .isEqualTo("createAndSendMessage"));
+        }
+
+        /** A dry-run reports the mode but never a message id — a fake one would poison reconciliation. */
+        @Test
+        void aDryRunReportsTheModeButNoMessageId() {
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+
+            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            assertThat(result.hasMessageId()).isFalse();
+            assertThat(result.mode()).isEqualTo(DailyReportDeliveryMode.LINK);
+            verifyNoInteractions(client);
+        }
+
+        /**
+         * A suppressed send must not start throwing on a delivery-mode typo it never used to read —
+         * that would be a new failure on a path that is switched off.
+         */
+        @Test
+        void aDryRunToleratesAnUnparseableDeliveryMode() {
+            ReflectionTestUtils.setField(service, "dailyReportDryRun", true);
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "pdf");
+
+            GlificSendResult result = service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar");
+
+            assertThat(result.mode()).isNull();
+            assertThat(result.modeForLog()).isEqualTo("-");
+        }
+
+        /** Glific's error key is carried on the exception so the caller can tag the failure stage. */
+        @Test
+        void aRejectedSendCarriesTheMutationKeyAndErrorKey() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "LINK");
+            ReflectionTestUtils.setField(service, "dailyReportSoLinkTemplateId", "880557");
+            when(client.execute(contains("sendHsmMessage"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"sendHsmMessage":{"message":null,"errors":[{"key":"receiver","message":"Receiver does not exist"}]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMutationException.class)
+                    .hasMessageContaining("Glific GraphQL error in sendHsmMessage")
+                    .satisfies(e -> {
+                        GlificMutationException gme = (GlificMutationException) e;
+                        assertThat(gme.getMutationKey()).isEqualTo("sendHsmMessage");
+                        assertThat(gme.getErrorKey()).isEqualTo("receiver");
+                    });
+        }
+
+        /** The 20 Aug incident's shape: the media step is what failed, and the stage must say so. */
+        @Test
+        void aMediaRegistrationFailureIsTaggedWithItsOwnMutationKey() throws Exception {
+            ReflectionTestUtils.setField(service, "dailyReportDeliveryMode", "DOCUMENT");
+            ReflectionTestUtils.setField(service, "dailyReportSoTemplateId", "880600");
+            when(client.execute(contains("createMessageMedia"), anyMap())).thenReturn(mapper.readTree(
+                    """
+                    {"createMessageMedia":{"messageMedia":null,"errors":[{"key":"media","message":"(#131053) Media upload error"}]}}
+                    """));
+
+            assertThatThrownBy(() -> service.sendDailyReportHsm(16714L, PUBLIC_URL, "SECTION_OFFICER",
+                    LocalDate.of(2026, 8, 19), "Ramesh Kumar"))
+                    .isInstanceOf(GlificMutationException.class)
+                    .satisfies(e -> assertThat(((GlificMutationException) e).getMutationKey())
+                            .isEqualTo("createMessageMedia"));
         }
     }
 }

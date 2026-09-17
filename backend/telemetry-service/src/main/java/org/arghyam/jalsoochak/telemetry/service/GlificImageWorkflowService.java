@@ -3,6 +3,7 @@ package org.arghyam.jalsoochak.telemetry.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.arghyam.jalsoochak.telemetry.channel.ReadingChannel;
 import org.arghyam.jalsoochak.telemetry.dto.requests.AssamReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.CreateReadingRequest;
 import org.arghyam.jalsoochak.telemetry.dto.requests.GlificWebhookRequest;
@@ -72,11 +73,6 @@ public class GlificImageWorkflowService {
             String mediaUrl = glificWebhookRequest.getMediaUrl();
             boolean isMeterReplaced = Boolean.TRUE.equals(glificWebhookRequest.getIsMeterReplaced());
 
-            byte[] imageBytes = glificMediaService.downloadImage(mediaId, mediaUrl);
-            log.debug("Downloaded image for contactId {} (bytes={})", contactId, imageBytes.length);
-
-            String imageStorageUrl = glificMediaService.uploadImage(contactId, imageBytes);
-
             TelemetryOperatorWithSchema operatorWithSchema = operatorContextService.resolveOperatorWithSchema(contactId);
             Integer tenantId = operatorWithSchema.operator().tenantId();
             String languageKey = localizationService.normalizeLanguageKey(
@@ -96,6 +92,15 @@ public class GlificImageWorkflowService {
                             operatorWithSchema.operator().id()
                     ))
                     .orElseThrow(() -> new IllegalStateException("Operator is not mapped to any scheme"));
+
+            // Fetched and stored only once the submission is known to belong to a mapped operator.
+            // Doing either earlier meant every rejected submission still made this service dial a
+            // caller-supplied URL, and still wrote an object — unreferenced by any row, under a
+            // caller-chosen key, on an anonymously readable bucket.
+            byte[] imageBytes = glificMediaService.downloadImage(mediaId, mediaUrl);
+            log.debug("Downloaded image for contactId {} (bytes={})", contactId, imageBytes.length);
+
+            String imageStorageUrl = glificMediaService.uploadImage(contactId, imageBytes);
 
             CreateReadingRequest createReadingRequest = CreateReadingRequest.builder()
                     .schemeId(schemeId)
@@ -179,12 +184,25 @@ public class GlificImageWorkflowService {
                     .operatorId(operatorId)
                     .readingUrl(request.getReadingUrl())
                     .readingValue(request.getConfirmedReading())
+                    // READING-PROVENANCE: records that this number came from the caller rather than from
+                    // FlowVision. Marker only — the submission is processed exactly as before.
+                    .externallyAsserted(request.getConfirmedReading() != null)
+                    // SUPPLY-PLAUSIBILITY: opt this endpoint into the implausible-daily-supply check.
+                    // Set here and nowhere else — createReading is shared with the Glific/WhatsApp
+                    // image path, which stays byte-identical because the flag defaults to false
+                    // there. A rejection inside a live WhatsApp conversation has no correction path;
+                    // an API caller gets a 400 and can resubmit.
+                    .supplyPlausibilityChecked(true)
                     .meterChangeReason(null)
                     .readingTime(readingTime)
                     .ingestionSource(lenient ? ingestionSource : null)
                     .submittedStateSchemeId(lenient ? request.getStateSchemeId() : null)
                     .submittedCentreSchemeId(lenient ? request.getCentreSchemeId() : null)
                     .submittedPhoneHash(lenient ? context.submittedPhoneHash() : null)
+                    // An unsupported value never reaches here — the controller rejects it with
+                    // CHANNEL_NOT_SUPPORTED — so an empty parse means the submission simply did not
+                    // declare a channel, and the stored preference decides as before.
+                    .declaredChannel(ReadingChannel.parseStrict(request.getChannel()).orElse(null))
                     .build();
 
             if (lenient) {

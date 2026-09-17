@@ -230,8 +230,13 @@ public class AuthServiceImpl implements AuthService {
             String tenantCode = parseMetadata(tokenRow.metadata(), "tenantCode");
             Integer tenantId = userCommonRepository.findTenantIdByStateCode(tenantCode)
                     .orElseThrow(() -> new AccountDeactivatedException("Tenant not found or no longer exists."));
-            TenantAccessRole accessRole = "STATE_ADMIN".equals(role) || "SUPER_STATE_ADMIN".equals(role)
-                    ? TenantAccessRole.STATE_ADMIN : TenantAccessRole.STAFF;
+            // Must map SUPER_STATE_ADMIN to its own role, not collapse it into STATE_ADMIN: it is
+            // super-user-equivalent and therefore exempt from the INACTIVE/SUSPENDED/ARCHIVED block.
+            // Collapsing it here would 403 the invite lookup while activateAccount (which maps it
+            // correctly) still allowed activation.
+            TenantAccessRole accessRole = "STATE_ADMIN".equals(role) ? TenantAccessRole.STATE_ADMIN
+                    : "SUPER_STATE_ADMIN".equals(role) ? TenantAccessRole.SUPER_STATE_ADMIN
+                    : TenantAccessRole.STAFF;
             validateTenantStatus(tenantId, accessRole);
         }
 
@@ -447,6 +452,10 @@ public class AuthServiceImpl implements AuthService {
             name = userTenantRepository.findUserByEmail(schema, user.email())
                     .map(TenantUserRecord::title)
                     .orElse(null);
+        }
+        if (name == null || name.isBlank()) {
+            // Admins with no tenant (or no matching tenant row) have their name only in Keycloak.
+            name = keycloakAdminHelper.findAdminDisplayName(user);
         }
         TokenResponseDTO resp = buildTokenResponseEnriched(token, user.id(), user.tenantId(), tenantCode, roleName,
                 user.phoneNumber(), name);

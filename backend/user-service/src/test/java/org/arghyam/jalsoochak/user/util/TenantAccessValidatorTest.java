@@ -87,9 +87,13 @@ class TenantAccessValidatorTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN can access INACTIVE tenant")
-        void stateAdminCanAccessInactive() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.INACTIVE, TenantAccessRole.STATE_ADMIN));
+        @DisplayName("STATE_ADMIN cannot access INACTIVE tenant")
+        void stateAdminCannotAccessInactive() {
+            ForbiddenAccessException exception = assertThrows(
+                    ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.INACTIVE, TenantAccessRole.STATE_ADMIN)
+            );
+            assertTrue(exception.getMessage().contains("deactivated"));
         }
 
         @Test
@@ -99,9 +103,13 @@ class TenantAccessValidatorTest {
         }
 
         @Test
-        @DisplayName("STATE_ADMIN can access SUSPENDED tenant")
-        void stateAdminCanAccessSuspended() {
-            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.SUSPENDED, TenantAccessRole.STATE_ADMIN));
+        @DisplayName("STATE_ADMIN cannot access SUSPENDED tenant")
+        void stateAdminCannotAccessSuspended() {
+            ForbiddenAccessException exception = assertThrows(
+                    ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.SUSPENDED, TenantAccessRole.STATE_ADMIN)
+            );
+            assertTrue(exception.getMessage().contains("suspended"));
         }
 
         @Test
@@ -139,6 +147,18 @@ class TenantAccessValidatorTest {
         @DisplayName("SUPER_STATE_ADMIN can access ARCHIVED tenant")
         void superStateAdminCanAccessArchived() {
             assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.ARCHIVED, TenantAccessRole.SUPER_STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN can access INACTIVE tenant")
+        void superStateAdminCanAccessInactive() {
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.INACTIVE, TenantAccessRole.SUPER_STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("SUPER_STATE_ADMIN can access SUSPENDED tenant")
+        void superStateAdminCanAccessSuspended() {
+            assertDoesNotThrow(() -> TenantAccessValidator.validateSystemUserAccess(TenantStatusConstants.SUSPENDED, TenantAccessRole.SUPER_STATE_ADMIN));
         }
 
         @Test
@@ -264,9 +284,34 @@ class TenantAccessValidatorTest {
         }
 
         @Test
+        @DisplayName("STATE_ADMIN cannot access INACTIVE tenant")
+        void stateAdminCannotAccessInactive() {
+            assertThrows(
+                    ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateTenantAccess(TenantStatusConstants.INACTIVE, TenantAccessRole.STATE_ADMIN)
+            );
+        }
+
+        @Test
+        @DisplayName("STATE_ADMIN cannot access SUSPENDED tenant")
+        void stateAdminCannotAccessSuspended() {
+            assertThrows(
+                    ForbiddenAccessException.class,
+                    () -> TenantAccessValidator.validateTenantAccess(TenantStatusConstants.SUSPENDED, TenantAccessRole.STATE_ADMIN)
+            );
+        }
+
+        @Test
         @DisplayName("SUPER_USER can access ARCHIVED tenant")
         void superUserCanAccessArchived() {
             assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(TenantStatusConstants.ARCHIVED, TenantAccessRole.SUPER_USER));
+        }
+
+        @Test
+        @DisplayName("SUPER_USER can access INACTIVE and SUSPENDED tenants")
+        void superUserCanAccessInactiveAndSuspended() {
+            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(TenantStatusConstants.INACTIVE, TenantAccessRole.SUPER_USER));
+            assertDoesNotThrow(() -> TenantAccessValidator.validateTenantAccess(TenantStatusConstants.SUSPENDED, TenantAccessRole.SUPER_USER));
         }
 
         @Test
@@ -389,6 +434,32 @@ class TenantAccessValidatorTest {
         @DisplayName("isAccessibleToSystemUser returns false for STATE_ADMIN accessing ARCHIVED")
         void isAccessibleToSystemUserStateAdminArchived() {
             assertFalse(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.ARCHIVED, TenantAccessRole.STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns false for STATE_ADMIN accessing INACTIVE")
+        void isAccessibleToSystemUserStateAdminInactive() {
+            assertFalse(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.INACTIVE, TenantAccessRole.STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns false for STATE_ADMIN accessing SUSPENDED")
+        void isAccessibleToSystemUserStateAdminSuspended() {
+            assertFalse(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.SUSPENDED, TenantAccessRole.STATE_ADMIN));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns true for SUPER_USER accessing INACTIVE and SUSPENDED")
+        void isAccessibleToSystemUserSuperUserInactiveSuspended() {
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.INACTIVE, TenantAccessRole.SUPER_USER));
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.SUSPENDED, TenantAccessRole.SUPER_USER));
+        }
+
+        @Test
+        @DisplayName("isAccessibleToSystemUser returns true for SUPER_STATE_ADMIN accessing INACTIVE and SUSPENDED")
+        void isAccessibleToSystemUserSuperStateAdminInactiveSuspended() {
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.INACTIVE, TenantAccessRole.SUPER_STATE_ADMIN));
+            assertTrue(TenantAccessValidator.isAccessibleToSystemUser(TenantStatusConstants.SUSPENDED, TenantAccessRole.SUPER_STATE_ADMIN));
         }
 
         @Test

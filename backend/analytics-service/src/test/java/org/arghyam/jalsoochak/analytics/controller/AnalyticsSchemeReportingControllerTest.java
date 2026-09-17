@@ -1,14 +1,15 @@
 package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusBreakdownResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusCountDTO;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusDTO;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.entity.DimUser;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.exception.GlobalExceptionHandler;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
-import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.SchemeRegularityService;
@@ -99,19 +100,24 @@ class AnalyticsSchemeReportingControllerTest {
     @MockBean
     private DimUserRepository dimUserRepository;
     @MockBean
-    private FactEscalationRepository factEscalationRepository;
-    @MockBean
     private DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
 
     @ParameterizedTest
     @MethodSource("schemeStatusValidRoutes")
     void getSchemeStatusCount_validRoutes(String idParam, String idValue, boolean lgdRoute) throws Exception {
+        SchemeStatusBreakdownResponse breakdown = SchemeStatusBreakdownResponse.builder()
+                .total(6)
+                .workStatusCounts(List.of(statusCount(1, "Ongoing", 6)))
+                .operatingStatusCounts(List.of(
+                        statusCount(0, "Non-Operative", 1),
+                        statusCount(2, "Partially Operative", 5)))
+                .build();
         if (lgdRoute) {
             when(schemeRegularityService.getSchemeStatusCountByLgd(TENANT_ID, Integer.parseInt(idValue)))
-                    .thenReturn(Map.of("active_schemes_count", 5, "inactive_schemes_count", 1));
+                    .thenReturn(breakdown);
         } else {
             when(schemeRegularityService.getSchemeStatusCountByDepartment(TENANT_ID, Integer.parseInt(idValue)))
-                    .thenReturn(Map.of("active_schemes_count", 5, "inactive_schemes_count", 1));
+                    .thenReturn(breakdown);
         }
 
         mockMvc.perform(get(BASE + "/schemes/status-count")
@@ -119,8 +125,12 @@ class AnalyticsSchemeReportingControllerTest {
                         .param(idParam, idValue))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.active_schemes_count").value(5))
-                .andExpect(jsonPath("$.data.inactive_schemes_count").value(1));
+                .andExpect(jsonPath("$.data.total").value(6))
+                .andExpect(jsonPath("$.data.workStatusCounts[0].code").value(1))
+                .andExpect(jsonPath("$.data.workStatusCounts[0].label").value("Ongoing"))
+                .andExpect(jsonPath("$.data.operatingStatusCounts[1].code").value(2))
+                .andExpect(jsonPath("$.data.operatingStatusCounts[1].label").value("Partially Operative"))
+                .andExpect(jsonPath("$.data.operatingStatusCounts[1].count").value(5));
 
         if (lgdRoute) {
             verify(schemeRegularityService, times(1))
@@ -485,6 +495,8 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getContinuousSchemesForUser_defaultCountOnly_routesToUserService() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(77, null, TENANT_ID));
         when(schemeRegularityService.getContinuousSchemesByUser(
                 eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull()))
                 .thenReturn(ContinuousSchemesResponse.builder()
@@ -499,8 +511,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/continuous-schemes/user")
-                        .param("tenant_id", String.valueOf(TENANT_ID))
-                        .param("user_id", "77")
+                        .principal(buildJwtAuthentication())
                         .param("start_date", START.toString())
                         .param("end_date", END.toString()))
                 .andExpect(status().isOk())
@@ -515,6 +526,8 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getContinuousSchemesForUser_withoutDates_usesTenantDataDefaultWindow() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(77, null, TENANT_ID));
         when(defaultAnalyticsDateWindowProvider.defaultWindow())
                 .thenReturn(new DefaultAnalyticsDateWindowProvider.DateWindow(START, END));
         when(schemeRegularityService.getContinuousSchemesByUser(
@@ -531,8 +544,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/continuous-schemes/user")
-                        .param("tenant_id", String.valueOf(TENANT_ID))
-                        .param("user_id", "77"))
+                        .principal(buildJwtAuthentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.continuousSchemeCount").value(5));
@@ -544,9 +556,10 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getContinuousSchemesForUser_withListTrue_andInvalidPage_returnsBadRequest() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(77, null, TENANT_ID));
         mockMvc.perform(get(BASE + "/continuous-schemes/user")
-                        .param("tenant_id", String.valueOf(TENANT_ID))
-                        .param("user_id", "77")
+                        .principal(buildJwtAuthentication())
                         .param("start_date", START.toString())
                         .param("end_date", END.toString())
                         .param("list", "true")
@@ -571,15 +584,15 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentLgdCName("Parent")
                         .parentLgdTitle("Parent LGD")
                         .parentLgdLevel(2)
-                        .activeSchemeCount(1)
-                        .inactiveSchemeCount(1)
+                        .workStatusCounts(List.of(statusCount(1, "Ongoing", 2)))
+                        .operatingStatusCounts(List.of(statusCount(1, "Operative", 2)))
                         .totalCount(42L)
                         .topSchemeCount(1)
                         .topSchemes(List.of(SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(1)
                                 .schemeName("Scheme A")
-                                .statusCode(1)
-                                .status("active")
+                                .workStatus(schemeStatus(1, "Ongoing"))
+                                .operatingStatus(schemeStatus(2, "Partially Operative"))
                                 .submissionDays(10)
                                 .reportingRate(BigDecimal.valueOf(0.5))
                                 .totalWaterSupplied(150L)
@@ -631,15 +644,15 @@ class AnalyticsSchemeReportingControllerTest {
                         .parentDepartmentCName("Parent Dept")
                         .parentDepartmentTitle("Parent Dept")
                         .parentDepartmentLevel(4)
-                        .activeSchemeCount(1)
-                        .inactiveSchemeCount(1)
+                        .workStatusCounts(List.of(statusCount(1, "Ongoing", 2)))
+                        .operatingStatusCounts(List.of(statusCount(1, "Operative", 2)))
                         .totalCount(7L)
                         .topSchemeCount(1)
                         .topSchemes(List.of(SchemeStatusAndTopReportingResponse.TopReportingScheme.builder()
                                 .schemeId(2)
                                 .schemeName("Scheme B")
-                                .statusCode(1)
-                                .status("active")
+                                .workStatus(schemeStatus(1, "Ongoing"))
+                                .operatingStatus(schemeStatus(2, "Partially Operative"))
                                 .submissionDays(8)
                                 .reportingRate(BigDecimal.valueOf(0.4))
                                 .totalWaterSupplied(80L)
@@ -689,8 +702,8 @@ class AnalyticsSchemeReportingControllerTest {
         when(schemeRegularityService.getSchemeStatusAndTopReportingByLgd(TENANT_ID, 101, START, END, 1, 5, "schemeName", "asc"))
                 .thenReturn(SchemeStatusAndTopReportingResponse.builder()
                         .parentLgdId(101)
-                        .activeSchemeCount(0)
-                        .inactiveSchemeCount(0)
+                        .workStatusCounts(List.of())
+                        .operatingStatusCounts(List.of())
                         .totalCount(0L)
                         .topSchemeCount(0)
                         .topSchemes(List.of())
@@ -729,8 +742,8 @@ class AnalyticsSchemeReportingControllerTest {
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentLgdId(101)
                         .totalSchemeCount(1)
-                        .activeSchemeCount(1)
-                        .inactiveSchemeCount(0)
+                        .workStatusCounts(List.of(statusCount(1, "Ongoing", 1)))
+                        .operatingStatusCounts(List.of(statusCount(1, "Operative", 1)))
                         .schemeCountInResponse(1)
                         .schemes(List.of(
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
@@ -738,8 +751,8 @@ class AnalyticsSchemeReportingControllerTest {
                                         .schemeName("Scheme A")
                                         .stateSchemeId(10001)
                                         .centreSchemeId(20001)
-                                        .statusCode(1)
-                                        .status("active")
+                                        .workStatus(schemeStatus(1, "Ongoing"))
+                                        .operatingStatus(schemeStatus(2, "Partially Operative"))
                                         .supplyDays(2)
                                         .averageRegularity(BigDecimal.valueOf(0.6667))
                                         .submissionDays(3)
@@ -770,8 +783,8 @@ class AnalyticsSchemeReportingControllerTest {
                 .thenReturn(SchemeRegularityListResponse.builder()
                         .parentDepartmentId(201)
                         .totalSchemeCount(1)
-                        .activeSchemeCount(0)
-                        .inactiveSchemeCount(1)
+                        .workStatusCounts(List.of(statusCount(4, "Handed Over", 1)))
+                        .operatingStatusCounts(List.of(statusCount(0, "Non-Operative", 1)))
                         .schemeCountInResponse(1)
                         .schemes(List.of(
                                 SchemeRegularityListResponse.SchemeMetrics.builder()
@@ -779,8 +792,8 @@ class AnalyticsSchemeReportingControllerTest {
                                         .schemeName("Scheme B")
                                         .stateSchemeId(10002)
                                         .centreSchemeId(20002)
-                                        .statusCode(0)
-                                        .status("inactive")
+                                        .workStatus(schemeStatus(4, "Handed Over"))
+                                        .operatingStatus(schemeStatus(0, "Non-Operative"))
                                         .supplyDays(0)
                                         .averageRegularity(BigDecimal.ZERO)
                                         .submissionDays(1)
@@ -854,8 +867,8 @@ class AnalyticsSchemeReportingControllerTest {
                                         .schemeName("Scheme A")
                                         .stateSchemeId(10001)
                                         .centreSchemeId(20001)
-                                        .statusCode(1)
-                                        .status("active")
+                                        .workStatus(schemeStatus(1, "Ongoing"))
+                                        .operatingStatus(schemeStatus(2, "Partially Operative"))
                                         .supplyDays(2)
                                         .averageRegularity(BigDecimal.valueOf(0.6667))
                                         .submissionDays(3)
@@ -874,8 +887,11 @@ class AnalyticsSchemeReportingControllerTest {
                         "attachment; filename=\"scheme-region-report_parent_lgd_name_2026-01-01_to_2026-01-31.csv\""))
                 .andExpect(content().contentTypeCompatibleWith("text/csv"))
                 .andExpect(content().string(startsWith(
-                        "scheme_id,scheme_name,state_scheme_id,centre_scheme_id,status_code,status,supply_days,average_regularity,submission_days,submission_rate")))
-                .andExpect(content().string(containsString("1,Scheme A,10001,20001,1,active,2,0.6667,3,1.0")));
+                        "scheme_id,scheme_name,state_scheme_id,centre_scheme_id,"
+                                + "work_status_code,work_status,operating_status_code,operating_status,"
+                                + "supply_days,average_regularity,submission_days,submission_rate")))
+                .andExpect(content().string(containsString(
+                        "1,Scheme A,10001,20001,1,Ongoing,2,Partially Operative,2,0.6667,3,1.0")));
     }
 
     @Test
@@ -890,8 +906,8 @@ class AnalyticsSchemeReportingControllerTest {
                                         .schemeName("Scheme, B")
                                         .stateSchemeId(10002)
                                         .centreSchemeId(20002)
-                                        .statusCode(0)
-                                        .status("inactive")
+                                        .workStatus(schemeStatus(4, "Handed Over"))
+                                        .operatingStatus(schemeStatus(0, "Non-Operative"))
                                         .supplyDays(0)
                                         .averageRegularity(BigDecimal.ZERO)
                                         .submissionDays(1)
@@ -909,7 +925,8 @@ class AnalyticsSchemeReportingControllerTest {
                 .andExpect(header().string("Content-Disposition",
                         "attachment; filename=\"scheme-region-report_department_hq_2026-01-01_to_2026-01-31.csv\""))
                 .andExpect(content().contentTypeCompatibleWith("text/csv"))
-                .andExpect(content().string(containsString("2,\"Scheme, B\",10002,20002,0,inactive,0,0,1,0.3333")));
+                .andExpect(content().string(containsString(
+                        "2,\"Scheme, B\",10002,20002,4,Handed Over,0,Non-Operative,0,0,1,0.3333")));
     }
 
     @Test
@@ -1187,160 +1204,6 @@ class AnalyticsSchemeReportingControllerTest {
     }
 
     @Test
-    void updateEscalationResolutionStatus_withEscalationId_updatesOnlyForSameUuid() throws Exception {
-        UUID uuid = UUID.fromString("44444444-4444-4444-4444-444444444444");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        FactEscalation escalation = FactEscalation.builder()
-                .id(77L)
-                .tenantId(10)
-                .userId(9001)
-                .schemeId(101)
-                .resolutionStatus(0)
-                .createdAt(LocalDateTime.of(2026, 2, 1, 10, 0))
-                .updatedAt(LocalDateTime.of(2026, 2, 1, 10, 0))
-                .build();
-
-        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001)))
-                .thenReturn(Optional.of(escalation));
-        when(factEscalationRepository.save(any(FactEscalation.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "77")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":2}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.escalation_id").value(77))
-                .andExpect(jsonPath("$.data.resolution_status").value(2));
-
-        verify(factEscalationRepository, times(1))
-                .findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001));
-        verify(factEscalationRepository, times(1)).save(any(FactEscalation.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_whenNotOwnedByUuid_returnsBadRequest() throws Exception {
-        UUID uuid = UUID.fromString("55555555-5555-5555-5555-555555555555");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(88L), eq(10), eq(9001)))
-                .thenReturn(Optional.empty());
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "88")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":1}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-
-        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_withBothIdentifiers_returnsBadRequest() throws Exception {
-        UUID uuid = UUID.fromString("66666666-6666-6666-6666-666666666666");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "77")
-                        .param("correlation_id", "esc-1")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":1}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false));
-
-        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_withoutResolutionStatus_returnsBadRequest() throws Exception {
-        UUID uuid = UUID.fromString("77777777-7777-7777-7777-777777777777");
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "77")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-
-        verify(factEscalationRepository, never()).save(any(FactEscalation.class));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_withCorrelationId_updatesLatestRow() throws Exception {
-        UUID uuid = UUID.fromString("88888888-8888-8888-8888-888888888888");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        FactEscalation escalation = FactEscalation.builder()
-                .id(99L)
-                .tenantId(10)
-                .userId(9001)
-                .schemeId(101)
-                .resolutionStatus(0)
-                .createdAt(LocalDateTime.of(2026, 2, 2, 10, 0))
-                .updatedAt(LocalDateTime.of(2026, 2, 2, 10, 0))
-                .build();
-
-        when(factEscalationRepository.findFirstByTenantIdAndUserIdAndCorrelationIdOrderByCreatedAtDesc(eq(10), eq(9001), eq("esc-1")))
-                .thenReturn(Optional.of(escalation));
-        when(factEscalationRepository.save(any(FactEscalation.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("correlation_id", "  esc-1  ")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":1}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.escalation_id").value(99))
-                .andExpect(jsonPath("$.data.resolution_status").value(1));
-    }
-
-    @Test
-    void updateEscalationResolutionStatus_whenUnexpectedError_returnsServerError() throws Exception {
-        UUID uuid = UUID.fromString("99999999-9999-9999-9999-999999999999");
-        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(eq(10), eq(uuid)))
-                .thenReturn(Optional.of(DimUser.builder().userId(9001).tenantId(10).uuid(uuid).build()));
-
-        FactEscalation escalation = FactEscalation.builder()
-                .id(77L)
-                .tenantId(10)
-                .userId(9001)
-                .resolutionStatus(0)
-                .build();
-        when(factEscalationRepository.findByIdAndTenantIdAndUserId(eq(77L), eq(10), eq(9001)))
-                .thenReturn(Optional.of(escalation));
-        when(factEscalationRepository.save(any(FactEscalation.class)))
-                .thenThrow(new RuntimeException("db down"));
-
-        mockMvc.perform(put(BASE + "/escalations/status")
-                        .param("tenant_id", "10")
-                        .param("uuid", uuid.toString())
-                        .param("escalation_id", "77")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolutionStatus\":2}"))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.data").value(nullValue()));
-    }
-
-    @Test
     void getEscalationsPaginated_whenPageNumberInvalid_returnsBadRequest() throws Exception {
         when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
                 .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
@@ -1424,6 +1287,8 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getUserAlertTotals_returnsExpectedShape() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
         LocalDate start = LocalDate.of(2026, 3, 1);
         LocalDate end = LocalDate.of(2026, 3, 31);
 
@@ -1436,8 +1301,7 @@ class AnalyticsSchemeReportingControllerTest {
                         .build());
 
         mockMvc.perform(get(BASE + "/officer/dashboard")
-                        .param("tenant_id", "10")
-                        .param("user_id", "9001")
+                        .principal(buildJwtAuthentication())
                         .param("start_date", start.toString())
                         .param("end_date", end.toString()))
                 .andExpect(status().isOk())
@@ -1548,12 +1412,13 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getUserAlertTotals_whenServiceThrowsIllegalArg_returnsBadRequest() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
         when(userAlertTotalsService.getTotals(any(), any(), any(), any()))
                 .thenThrow(new IllegalArgumentException("invalid"));
 
         mockMvc.perform(get(BASE + "/officer/dashboard")
-                        .param("tenant_id", "10")
-                        .param("user_id", "9001")
+                        .principal(buildJwtAuthentication())
                         .param("start_date", START.toString())
                         .param("end_date", END.toString()))
                 .andExpect(status().isBadRequest())
@@ -1562,12 +1427,13 @@ class AnalyticsSchemeReportingControllerTest {
 
     @Test
     void getUserAlertTotals_whenServiceThrows_returnsInternalServerError() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
         when(userAlertTotalsService.getTotals(any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("db error"));
 
         mockMvc.perform(get(BASE + "/officer/dashboard")
-                        .param("tenant_id", "10")
-                        .param("user_id", "9001")
+                        .principal(buildJwtAuthentication())
                         .param("start_date", START.toString())
                         .param("end_date", END.toString()))
                 .andExpect(status().isInternalServerError())
@@ -1584,6 +1450,123 @@ class AnalyticsSchemeReportingControllerTest {
                         .param("schemeId", "11"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    private static SchemeStatusDTO schemeStatus(Integer code, String label) {
+        return SchemeStatusDTO.builder().code(code).label(label).build();
+    }
+
+    private static SchemeStatusCountDTO statusCount(Integer code, String label, Integer count) {
+        return SchemeStatusCountDTO.builder().code(code).label(label).count(count).build();
+    }
+
+    /**
+     * SA finding: "Authorization Bypass via Missing Subdivisional JWT Token".
+     *
+     * <p>Both endpoints used to take tenant_id and user_id as query parameters and pass them
+     * straight to the service. Closing the anonymous hole is not enough on its own -- any
+     * authenticated caller could still name someone else's user_id, in any tenant. Identity now
+     * comes from the token, and these pin that: the query parameters are ignored even when a
+     * caller supplies them.
+     */
+    @Test
+    void getContinuousSchemesForUser_ignoresCallerSuppliedIdentity() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(77, null, TENANT_ID));
+        when(schemeRegularityService.getContinuousSchemesByUser(
+                eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull()))
+                .thenReturn(ContinuousSchemesResponse.builder()
+                        .continuousSchemeCount(1L)
+                        .list(false)
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/continuous-schemes/user")
+                        .principal(buildJwtAuthentication())
+                        // Another officer, in another tenant. Both must be disregarded.
+                        .param("tenant_id", "999")
+                        .param("user_id", "424242")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk());
+
+        verify(schemeRegularityService, times(1)).getContinuousSchemesByUser(
+                eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull());
+        verify(schemeRegularityService, never()).getContinuousSchemesByUser(
+                eq(999), any(), any(), any(), anyBoolean(), any(), any());
+        verify(schemeRegularityService, never()).getContinuousSchemesByUser(
+                any(), eq(424242), any(), any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void getUserAlertTotals_ignoresCallerSuppliedIdentity() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(9001, null, 10));
+        when(userAlertTotalsService.getTotals(eq(10), eq(9001), any(), any()))
+                .thenReturn(org.arghyam.jalsoochak.analytics.dto.response.UserAlertTotalsResponse.builder()
+                        .totalEscalationCount(1L)
+                        .totalAnomalyCount(1L)
+                        .totalMappedSchemeCount(1)
+                        .totalWaterSupplied(1L)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/officer/dashboard")
+                        .principal(buildJwtAuthentication())
+                        .param("tenant_id", "999")
+                        .param("user_id", "424242")
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk());
+
+        verify(userAlertTotalsService, times(1)).getTotals(eq(10), eq(9001), any(), any());
+        verify(userAlertTotalsService, never()).getTotals(eq(999), any(), any(), any());
+        verify(userAlertTotalsService, never()).getTotals(any(), eq(424242), any(), any());
+    }
+
+    /** A token with only a uuid subject still resolves to the right numeric user id. */
+    @Test
+    void getContinuousSchemesForUser_resolvesUserIdFromUuidWhenClaimAbsent() throws Exception {
+        UUID uuid = UUID.fromString("3f1a9c22-5b7e-4d38-9a10-8c4b2e6f0d71");
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(null, uuid, TENANT_ID));
+        DimUser user = new DimUser();
+        user.setUserId(77);
+        when(dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(TENANT_ID, uuid))
+                .thenReturn(Optional.of(user));
+        when(schemeRegularityService.getContinuousSchemesByUser(
+                eq(TENANT_ID), eq(77), eq(START), eq(END), eq(false), isNull(), isNull()))
+                .thenReturn(ContinuousSchemesResponse.builder()
+                        .continuousSchemeCount(4L)
+                        .list(false)
+                        .startDate(START)
+                        .endDate(END)
+                        .daysInRange(31)
+                        .build());
+
+        mockMvc.perform(get(BASE + "/continuous-schemes/user")
+                        .principal(buildJwtAuthentication())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.continuousSchemeCount").value(4));
+    }
+
+    /** A token carrying no tenant context must not fall through to an unscoped read. */
+    @Test
+    void getContinuousSchemesForUser_withoutTenantContext_returnsBadRequest() throws Exception {
+        when(authenticatedRequestContextService.extractAuthenticatedUserRef(any()))
+                .thenReturn(new org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper.AuthenticatedUserRef(77, null, 0));
+
+        mockMvc.perform(get(BASE + "/continuous-schemes/user")
+                        .principal(buildJwtAuthentication())
+                        .param("start_date", START.toString())
+                        .param("end_date", END.toString()))
+                .andExpect(status().isBadRequest());
+
+        verify(schemeRegularityService, never()).getContinuousSchemesByUser(
+                any(), any(), any(), any(), anyBoolean(), any(), any());
     }
 
     private static Stream<Arguments> schemeStatusValidRoutes() {

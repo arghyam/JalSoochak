@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -70,6 +71,22 @@ public class GlobalExceptionHandler {
     ) {
         log.warn("{} Forbidden: {}", formatRequest(request), ex.getMessage());
         return buildResponse(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    /**
+     * A {@code @PreAuthorize} denial arrives here as an {@link AccessDeniedException}, because
+     * method security throws inside the handler rather than in the filter chain. Without this it
+     * fell through to the catch-all below and was reported as a 500 — an authorization decision
+     * disguised as a server fault, which reads as an outage in monitoring and tells the caller
+     * nothing useful. Filter-level denials never reach this advice; Spring Security answers those.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessDenied(
+            AccessDeniedException ex,
+            HttpServletRequest request
+    ) {
+        log.warn("{} Access denied: {}", formatRequest(request), ex.getMessage());
+        return buildResponse(HttpStatus.FORBIDDEN, "Access denied");
     }
 
     @ExceptionHandler(Exception.class)

@@ -12,6 +12,7 @@ import org.arghyam.jalsoochak.telemetry.dto.response.TelemetryErrorCode;
 import org.arghyam.jalsoochak.telemetry.service.BfmReadingService;
 import org.arghyam.jalsoochak.telemetry.service.GlificWebhookService;
 import org.arghyam.jalsoochak.telemetry.service.TelemetryApiKeyService;
+import org.arghyam.jalsoochak.telemetry.validation.ReadingUrlTestValidation;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -159,6 +160,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -183,6 +185,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -211,6 +214,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -240,6 +244,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -265,6 +270,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -293,6 +299,7 @@ class SingleTenantTelemetryControllerUnitTest {
                 new StubBfmReadingService(false)
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setValidator(ReadingUrlTestValidation.springValidator())
                 .setControllerAdvice(new TelemetryValidationExceptionHandler(null, null))
                 .build();
 
@@ -405,14 +412,63 @@ class SingleTenantTelemetryControllerUnitTest {
     }
 
     @Test
-    void resetLatestReadingIsPublicAndDoesNotRequireApiKey() {
+    void resetLatestReadingRejectsARequestWithNoApiKey() {
+        // Regression test for the reported finding: this route used to process an unauthenticated
+        // request and destroy the reading, returning 200 whether or not a key was supplied.
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
                 new StubGlificWebhookService(),
                 new StubTelemetryApiKeyService(Optional.empty()),
-                new StubBfmReadingService(false)
+                bfmReadingService
         );
 
         ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                null,
+                null,
+                ResetLatestReadingRequest.builder()
+                        .contactId("919999999999")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertFalse(response.getBody().isSuccess());
+        assertEquals(TelemetryErrorCode.INVALID_API_KEY, response.getBody().getData().getErrorCode());
+        assertFalse(bfmReadingService.resetWasCalled(), "the reset must not run for an unauthenticated caller");
+    }
+
+    @Test
+    void resetLatestReadingRejectsAnInvalidApiKey() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.empty()),
+                bfmReadingService
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_invalid_key",
+                null,
+                ResetLatestReadingRequest.builder()
+                        .contactId("919999999999")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertFalse(bfmReadingService.resetWasCalled());
+    }
+
+    @Test
+    void resetLatestReadingAcceptsAValidApiKeyAndScopesTheResetToItsTenant() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                bfmReadingService
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
                 null,
                 ResetLatestReadingRequest.builder()
                         .contactId("919999999999")
@@ -424,6 +480,200 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(true, response.getBody().isSuccess());
         assertEquals("Latest reading reset successfully", response.getBody().getData().getMessage());
         assertEquals("CONFIRMED", response.getBody().getData().getQualityStatus());
+        assertEquals(22, bfmReadingService.lastResetTenantId);
+    }
+
+    @Test
+    void resetLatestReadingTrustsTheTenantAlreadyResolvedByTheFilter() {
+        // The filter authenticates first and publishes the tenant; the handler must not re-reject a
+        // request the filter already accepted, and must not hash the key a second time.
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        StubTelemetryApiKeyService apiKeyService = new StubTelemetryApiKeyService(Optional.empty());
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                apiKeyService,
+                bfmReadingService
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
+                31,
+                ResetLatestReadingRequest.builder()
+                        .contactId("919999999999")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(31, bfmReadingService.lastResetTenantId);
+        assertEquals(0, apiKeyService.resolveCount, "the key was already resolved by the filter");
+    }
+
+    @Test
+    void resetLatestReadingAuditsTheDestroyedValueAndTheRefusals() {
+        StubBfmReadingService bfmReadingService = new StubBfmReadingService(false);
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                bfmReadingService
+        );
+
+        SingleTenantTelemetryController unauthenticatedController = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.empty()),
+                new StubBfmReadingService(false)
+        );
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(SingleTenantTelemetryController.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            controller.resetLatestReading("js_valid_key", null,
+                    ResetLatestReadingRequest.builder().contactId("919999999999").build());
+            unauthenticatedController.resetLatestReading(null, null,
+                    ResetLatestReadingRequest.builder().contactId("919999999999").build());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+
+        String accepted = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.startsWith("reading_reset") && m.contains("status=SUCCESS"))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(accepted, "an accepted reset must be audited");
+        assertTrue(accepted.contains("tenantId=22"));
+        assertTrue(accepted.contains("previousReading=1450"), "the audit line must record what was destroyed");
+        assertTrue(accepted.contains("phone=****9999"));
+        assertFalse(accepted.contains("919999999999"), "raw phone numbers must not reach INFO logs");
+
+        assertTrue(appender.list.stream()
+                        .map(ILoggingEvent::getFormattedMessage)
+                        .anyMatch(m -> m.startsWith("reading_reset") && m.contains("status=REJECTED")),
+                "a refused reset must be audited too, so probing is detectable");
+    }
+
+    // ERROR-CODE-404: errorCodeForStatusException special-cased only 401 and 500 and let everything
+    // else fall through to BAD_REQUEST, so a 404 described itself in the body as a client validation
+    // error. The status line and the body disagreed, and a caller reading only the body — which is
+    // what an integrator logs — could not tell "not found" from "malformed request".
+
+    @Test
+    void aResetRefusedWithNoOperatorReportsOperatorNotFoundInsteadOfBadRequest() {
+        // The service answers an unknown contact and a contact belonging to another tenant with this
+        // same 404, so neither confirms the contact exists elsewhere. The error code has to stay just
+        // as undiscriminating: one code for both, naming the lookup, not the caller's request.
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "No reading found for operator"))
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
+                null,
+                ResetLatestReadingRequest.builder().contactId("919999999999").build()
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(TelemetryErrorCode.OPERATOR_NOT_FOUND, response.getBody().getData().getErrorCode());
+        assertEquals("No reading found for operator", response.getBody().getData().getMessage());
+    }
+
+    @Test
+    void aMissingSchemeReportsSchemeNotFound() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new ThrowingGlificWebhookService(
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "State scheme not found")),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.receiveAssamReading(
+                "js_valid_key",
+                null,
+                AssamReadingRequest.builder()
+                        .readingUrl("https://example.com/meter.jpg")
+                        .phoneNumber("919999999999")
+                        .stateSchemeId("30178236")
+                        .build()
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.SCHEME_NOT_FOUND, response.getBody().getData().getErrorCode());
+    }
+
+    @Test
+    void aNotFoundThatNamesNeitherOperatorNorSchemeFallsBackToRequestFailed() {
+        // "Reading not found" from the correlation-id correction path. There is no READING_NOT_FOUND
+        // code, and inventing one would widen a contract the Assam integration already matches on —
+        // so it takes the unclassified fallback rather than a code that misdescribes it.
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "Reading not found"))
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.REQUEST_FAILED, response.getBody().getData().getErrorCode());
+    }
+
+    @Test
+    void aGenuineBadRequestStillReportsBadRequest() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, "confirmedReading must be positive"))
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.BAD_REQUEST, response.getBody().getData().getErrorCode());
+    }
+
+    @Test
+    void anApiKeyFailureKeepsItsOwnCodeWhateverTheStatus() {
+        // The api-key reason check must keep winning over the status-based branches.
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found for API key"))
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .confirmedReading(new BigDecimal("111"))
+                        .build()
+        );
+
+        assertEquals(TelemetryErrorCode.INVALID_API_KEY, response.getBody().getData().getErrorCode());
     }
 
     @Test
@@ -687,7 +937,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void updateReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
-        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null) {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public CreateReadingResponse updateConfirmedReading(String correlationId,
                                                                 String phoneNumber,
@@ -716,6 +966,59 @@ class SingleTenantTelemetryControllerUnitTest {
         assertEquals(TelemetryErrorCode.PROCESSING_FAILED, response.getBody().getData().getErrorCode());
     }
 
+    /**
+     * SUPPLY-PLAUSIBILITY: a correction refused on its value comes back as a REJECTED response
+     * rather than an exception, and the handler has to map that to 400 itself — before this it
+     * returned 200 with success=true for anything that did not throw, so an implausible correction
+     * would have been reported to the caller as applied.
+     */
+    @Test
+    void updateReadingReturnsBadRequestWhenCorrectionIsRejected() {
+        BfmReadingService rejecting = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null) {
+            @Override
+            public CreateReadingResponse updateConfirmedReading(String correlationId,
+                                                                String phoneNumber,
+                                                                BigDecimal confirmedReading,
+                                                                Integer tenantId) {
+                return CreateReadingResponse.builder()
+                        .success(false)
+                        .message("Correction rejected: this reading looks unusually high for this scheme. "
+                                + "Please check the meter reading and try again.")
+                        .correlationId(correlationId)
+                        .meterReading(confirmedReading)
+                        .lastConfirmedReading(new BigDecimal("950"))
+                        .qualityStatus("REJECTED")
+                        .errorCode(TelemetryErrorCode.ABNORMAL_READING)
+                        .build();
+            }
+        };
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                rejecting
+        );
+
+        ResponseEntity<ReadingsApiResponse> response = controller.updateReading(
+                "js_valid_key",
+                null,
+                UpdateReadingRequest.builder()
+                        .correlationId("corr-123")
+                        .confirmedReading(new BigDecimal("1100"))
+                        .build()
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertFalse(response.getBody().isSuccess());
+        assertEquals(TelemetryErrorCode.ABNORMAL_READING, response.getBody().getData().getErrorCode());
+        assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
+        // THRESHOLD-DISCLOSURE: the wire carries no ceiling, population or connection count. An
+        // API-key holder who learns the ceiling can solve for both of its factors in two requests.
+        String message = response.getBody().getData().getMessage();
+        assertFalse(message.contains("75000"));
+        assertFalse(message.contains("500"));
+        assertFalse(message.contains("150"));
+    }
+
     @Test
     void resetLatestReadingSetsBadRequestErrorCodeWhenContactIdMissing() {
         SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
@@ -725,6 +1028,7 @@ class SingleTenantTelemetryControllerUnitTest {
         );
 
         ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
                 null,
                 ResetLatestReadingRequest.builder().build()
         );
@@ -735,9 +1039,9 @@ class SingleTenantTelemetryControllerUnitTest {
 
     @Test
     void resetLatestReadingSetsProcessingFailedErrorCodeOnUnexpectedError() {
-        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null) {
+        BfmReadingService failing = new BfmReadingService(null, null, null, null, null, null, null, null, null, null, null, null) {
             @Override
-            public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+            public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
                 throw new IllegalStateException("boom");
             }
         };
@@ -748,6 +1052,7 @@ class SingleTenantTelemetryControllerUnitTest {
         );
 
         ResponseEntity<ReadingsApiResponse> response = controller.resetLatestReading(
+                "js_valid_key",
                 null,
                 ResetLatestReadingRequest.builder().contactId("919999999999").build()
         );
@@ -758,6 +1063,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     private static final class StubGlificWebhookService extends GlificWebhookService {
         private final boolean rejected;
+        private int processAssamReadingCount;
 
         private StubGlificWebhookService() {
             this(false);
@@ -770,6 +1076,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
         @Override
         public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+            processAssamReadingCount++;
             if (rejected) {
                 return CreateReadingResponse.builder()
                         .success(false)
@@ -784,6 +1091,20 @@ class SingleTenantTelemetryControllerUnitTest {
                     .message("assam-reading-ok")
                     .correlationId("corr-hidden")
                     .build();
+        }
+    }
+
+    private static final class ThrowingGlificWebhookService extends GlificWebhookService {
+        private final ResponseStatusException failure;
+
+        private ThrowingGlificWebhookService(ResponseStatusException failure) {
+            super(null, null, null, null);
+            this.failure = failure;
+        }
+
+        @Override
+        public CreateReadingResponse processAssamReading(AssamReadingRequest request, Integer preferredTenantId) {
+            throw failure;
         }
     }
 
@@ -805,6 +1126,7 @@ class SingleTenantTelemetryControllerUnitTest {
 
     private static final class StubTelemetryApiKeyService extends TelemetryApiKeyService {
         private final Optional<Integer> tenantId;
+        private int resolveCount;
 
         private StubTelemetryApiKeyService(Optional<Integer> tenantId) {
             super(null);
@@ -813,19 +1135,37 @@ class SingleTenantTelemetryControllerUnitTest {
 
         @Override
         public Optional<Integer> resolveTenantIdFromRawApiKey(String rawApiKey) {
+            resolveCount++;
             return tenantId;
         }
     }
 
     private static final class StubBfmReadingService extends BfmReadingService {
         private final boolean throwError;
+        private final ResponseStatusException failure;
         private String lastCorrelationId;
         private String lastPhoneNumber;
         private Integer lastTenantId;
+        private boolean resetCalled;
+        private Integer lastResetTenantId;
 
         private StubBfmReadingService(boolean throwError) {
-            super(null, null, null, null, null, null, null, null, null, null, null);
+            this(throwError, null);
+        }
+
+        /** Lets a test choose the exact status and reason the service rejects with. */
+        private StubBfmReadingService(ResponseStatusException failure) {
+            this(true, failure);
+        }
+
+        private StubBfmReadingService(boolean throwError, ResponseStatusException failure) {
+            super(null, null, null, null, null, null, null, null, null, null, null, null);
             this.throwError = throwError;
+            this.failure = failure;
+        }
+
+        private ResponseStatusException rejection() {
+            return failure != null ? failure : new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad request");
         }
 
         @Override
@@ -837,7 +1177,7 @@ class SingleTenantTelemetryControllerUnitTest {
             this.lastPhoneNumber = phoneNumber;
             this.lastTenantId = tenantId;
             if (throwError) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad request");
+                throw rejection();
             }
             return CreateReadingResponse.builder()
                     .success(true)
@@ -851,7 +1191,7 @@ class SingleTenantTelemetryControllerUnitTest {
         @Override
         public CreateReadingResponse updateConfirmedReading(String correlationId, BigDecimal confirmedReading) {
             if (throwError) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad request");
+                throw rejection();
             }
             return CreateReadingResponse.builder()
                     .success(true)
@@ -863,16 +1203,126 @@ class SingleTenantTelemetryControllerUnitTest {
         }
 
         @Override
-        public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber) {
+        public CreateReadingResponse resetLatestConfirmedReadingByPhone(String phoneNumber, Integer tenantId) {
+            this.resetCalled = true;
+            this.lastResetTenantId = tenantId;
             if (throwError) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad request");
+                throw rejection();
             }
             return CreateReadingResponse.builder()
                     .success(true)
                     .message("Latest reading reset successfully")
-                    .correlationId(phoneNumber)
+                    // A real correlationId is a UUID, never the phone number: the audit assertions
+                    // check that no raw phone reaches an INFO line, and echoing it here would hide
+                    // exactly the leak they exist to catch.
+                    .correlationId("corr-reset-1")
+                    .meterReading(BigDecimal.ZERO)
+                    .lastConfirmedReading(new BigDecimal("1450"))
                     .qualityStatus("CONFIRMED")
                     .build();
         }
+
+        private boolean resetWasCalled() {
+            return resetCalled;
+        }
+    }
+
+    @Test
+    void assamReadingsRejectsAnUnsupportedChannel() {
+        StubGlificWebhookService webhook = new StubGlificWebhookService();
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                webhook,
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response =
+                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("BFMX"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertFalse(response.getBody().isSuccess());
+        assertEquals(TelemetryErrorCode.CHANNEL_NOT_SUPPORTED, response.getBody().getData().getErrorCode());
+        assertEquals("REJECTED", response.getBody().getData().getQualityStatus());
+        // The allowed set is published in the message so an integrator can fix the call without
+        // going back to the specification.
+        assertTrue(response.getBody().getData().getMessage().contains("BFM, ELM, PDU, IOT, MAN"));
+        // Refused before any processing: nothing is stored, nothing is published.
+        assertEquals(0, webhook.processAssamReadingCount);
+    }
+
+    @Test
+    void assamReadingsDoNotEchoTheRejectedChannelBack() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response =
+                controller.receiveAssamReading("js_valid_key", null,
+                        assamReadingWithChannel("<script>alert(1)</script>"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertFalse(response.getBody().getData().getMessage().contains("script"));
+    }
+
+    @Test
+    void assamReadingsAcceptADeclaredChannelInAnyCase() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response =
+                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("  pdu  "));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+    }
+
+    @Test
+    void assamReadingsAcceptASubmissionThatDeclaresNoChannel() {
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.of(22)),
+                new StubBfmReadingService(false)
+        );
+
+        assertEquals(HttpStatus.OK,
+                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel(null))
+                        .getStatusCode());
+        assertEquals(HttpStatus.OK,
+                controller.receiveAssamReading("js_valid_key", null, assamReadingWithChannel("   "))
+                        .getStatusCode());
+    }
+
+    @Test
+    void assamReadingsCheckTheApiKeyBeforeTheChannel() {
+        // An unauthenticated caller must not learn which channels exist by probing the field.
+        SingleTenantTelemetryController controller = new SingleTenantTelemetryController(
+                new StubGlificWebhookService(),
+                new StubTelemetryApiKeyService(Optional.empty()),
+                new StubBfmReadingService(false)
+        );
+
+        ResponseEntity<ReadingsApiResponse> response =
+                controller.receiveAssamReading("js_invalid_key", null, assamReadingWithChannel("BFMX"));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals(TelemetryErrorCode.INVALID_API_KEY, response.getBody().getData().getErrorCode());
+    }
+
+    private static AssamReadingRequest assamReadingWithChannel(String channel) {
+        return AssamReadingRequest.builder()
+                .readingUrl("https://example.com/meter.jpg")
+                .confirmedReading(new BigDecimal("123.4"))
+                .stateSchemeId("30178236")
+                .centreSchemeId("30244993")
+                .phoneNumber("919999999999")
+                .readingDateTime(OffsetDateTime.parse("2026-04-23T07:38:22.031Z"))
+                .channel(channel)
+                .build();
     }
 }

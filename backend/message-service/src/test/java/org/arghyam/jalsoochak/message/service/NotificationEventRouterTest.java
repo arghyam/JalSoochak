@@ -23,11 +23,16 @@ import java.time.LocalDate;
 import java.sql.ResultSet;
 import java.util.List;
 
+import org.arghyam.jalsoochak.message.channel.DailyReportDeliveryMode;
+import org.arghyam.jalsoochak.message.channel.DailyReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.GlificSendResult;
+import org.arghyam.jalsoochak.message.channel.GlificSendStage;
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
-import org.arghyam.jalsoochak.message.dto.DailyReportPriorityRow;
-import org.arghyam.jalsoochak.message.dto.DailyReportSectionOfficerRow;
+import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
+import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
 import reactor.core.publisher.Mono;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +72,9 @@ class NotificationEventRouterTest {
 
     @Mock
     private DailyReportPdfService dailyReportPdfService;
+
+    @Mock
+    private WeeklyReportPdfService weeklyReportPdfService;
 
     @Mock
     private MinioStorageService minioStorageService;
@@ -222,6 +230,7 @@ class NotificationEventRouterTest {
                 """);
 
         verify(escalationPdfService).generate(anyList(), eq(2), eq("DO Singh"), eq("JE"), eq("corr-stored"));
+        // Escalations keep the original flat single-bucket upload; only the water reports are foldered.
         verify(minioStorageService).upload(any(Path.class));
         verify(whatsAppChannel).sendDocument(eq(77L), eq("https://minio.example.com/report.pdf"));
         verify(glificWhatsAppService, never()).optIn(anyString());
@@ -1125,16 +1134,23 @@ class NotificationEventRouterTest {
     private static final String DAILY_REPORT_JSON = """
             {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
              "officerUserId":500,"officerUserType":"SECTION_OFFICER",
-             "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
-                     "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,
-                                  "regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
-                     "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,
-                                    "regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4}}}
+             "kpis":{"reportDate":"2026-07-07","cutoffIst":"2026-07-07T16:00:00","totalSchemes":10,
+                     "schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"anomalousCount":3,
+                     "householdsWithSupply":800,"householdsWithSupplyPct":80.0,
+                     "householdsWithoutSupply":200,"householdsWithoutSupplyPct":20.0,"totalHouseholds":1000,
+                     "noSupplySchemeIds":[11,12],
+                     "schemeAnomalies":[{"schemeId":11,"type":"UNREADABLE_IMAGE"}]}}
             """;
 
+    /**
+     * Answers only the officer-by-id lookup. Matched on the SQL rather than on any query, because the
+     * report also resolves scheme labels and Jal Mitra contacts through the same JdbcTemplate — a
+     * blanket stub would hand those row mappers an officer-shaped row.
+     */
     @SuppressWarnings("unchecked")
     private void stubOfficerContact(Long whatsappId, String encTitle, String encPhone) {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id = ?")),
+                any(RowMapper.class), any(Object[].class)))
                 .thenAnswer(inv -> {
                     RowMapper<Object> rm = inv.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
@@ -1143,6 +1159,11 @@ class NotificationEventRouterTest {
                     when(rs.getString("phone_number")).thenReturn(encPhone);
                     return List.of(rm.mapRow(rs, 0));
                 });
+        // Scheme-detail lookups resolve to nothing unless a test says otherwise; the rows still render,
+        // labelled by scheme id.
+        lenient().when(jdbcTemplate.query(argThat(sql -> sql != null && !sql.contains(".user_table WHERE id = ?")),
+                any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of());
     }
 
     @Test
@@ -1150,109 +1171,21 @@ class NotificationEventRouterTest {
         stubOfficerContact(12345L, "enc-title", null);
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7)))
-                .thenReturn(true);
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
+                .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
         verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
-        verify(minioStorageService).upload(any(Path.class));
-        verify(whatsAppChannel).sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7));
+        verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.DAILY_BUCKET), anyString());
+        verify(whatsAppChannel).sendDailyReport(12345L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
         // Stored contact present → no opt-in, no contact-registered event.
         verify(glificWhatsAppService, never()).optIn(anyString());
     }
 
-    @Test
-    void handleDailyReport_skipsSubDivisionalOfficerWhenSdoDisabled() {
-        // Kill-switch: field left false in this test (default true in prod via @Value).
-        ReflectionTestUtils.setField(router, "dailyReportSdoEnabled", false);
-        String sdoJson = DAILY_REPORT_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER");
 
-        router.route(sdoJson);
-
-        verifyNoInteractions(dailyReportPdfService);
-        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any());
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void handleDailyReport_sdoEnabled_resolvesSectionOfficerRowsAndSends() throws Exception {
-        ReflectionTestUtils.setField(router, "dailyReportSdoEnabled", true);
-        String sdoJson = """
-                {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
-                 "officerUserId":500,"officerUserType":"SUB_DIVISIONAL_OFFICER",
-                 "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
-                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
-                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
-                         "sectionOfficerSummaries":[
-                           {"officerUserId":601,"totalSchemes":154,"schemesSupplying":148,"schemesNotSupplying":6,"avgLpcd":67.0,"avgMld":678.0,"regularSupplyPctWeek":32.0,"readingSubmissionPct":78.0,"anomalousCount":8},
-                           {"officerUserId":602,"totalSchemes":90,"schemesSupplying":80,"schemesNotSupplying":10,"avgLpcd":55.0,"avgMld":400.0,"regularSupplyPctWeek":60.0,"readingSubmissionPct":88.0,"anomalousCount":2}]}}
-                """;
-
-        // SDO's own contact (WHERE id = ?) — stored WhatsApp id.
-        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id = ?")),
-                any(RowMapper.class), eq(500L)))
-                .thenAnswer(inv -> {
-                    RowMapper<Object> rm = inv.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getObject("whatsapp_connection_id", Long.class)).thenReturn(999L);
-                    when(rs.getString("title")).thenReturn("enc-sdo");
-                    when(rs.getString("phone_number")).thenReturn(null);
-                    return List.of(rm.mapRow(rs, 0));
-                });
-        // Section Officer contacts (WHERE id IN (...)) — two rows.
-        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id IN")),
-                any(RowMapper.class), any(Object[].class)))
-                .thenAnswer(inv -> {
-                    RowMapper<Object> rm = inv.getArgument(1);
-                    ResultSet r1 = mock(ResultSet.class);
-                    when(r1.getLong("id")).thenReturn(601L);
-                    when(r1.getObject("whatsapp_connection_id", Long.class)).thenReturn(null);
-                    when(r1.getString("title")).thenReturn("enc-alice");
-                    when(r1.getString("phone_number")).thenReturn("enc-alice-p");
-                    ResultSet r2 = mock(ResultSet.class);
-                    when(r2.getLong("id")).thenReturn(602L);
-                    when(r2.getObject("whatsapp_connection_id", Long.class)).thenReturn(null);
-                    when(r2.getString("title")).thenReturn("enc-bob");
-                    when(r2.getString("phone_number")).thenReturn("enc-bob-p");
-                    return List.of(rm.mapRow(r1, 0), rm.mapRow(r2, 1));
-                });
-        when(piiEncryptionService.safeDecrypt(any())).thenAnswer(inv -> {
-            String v = inv.getArgument(0);
-            if (v == null) {
-                return null;
-            }
-            return switch (v) {
-                case "enc-sdo" -> "SDO Kumar";
-                case "enc-alice" -> "Alice";
-                case "enc-alice-p" -> "919868595001";
-                case "enc-bob" -> "Bob";
-                case "enc-bob-p" -> "919868595002";
-                default -> v;
-            };
-        });
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), anyList()))
-                .thenReturn("sdo.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/sdo.pdf");
-        when(whatsAppChannel.sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER", LocalDate.of(2026, 7, 7))).thenReturn(true);
-
-        router.route(sdoJson);
-
-        ArgumentCaptor<List<DailyReportSectionOfficerRow>> cap = ArgumentCaptor.forClass(List.class);
-        verify(dailyReportPdfService).generate(
-                any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"), anyList(), cap.capture());
-        verify(whatsAppChannel).sendDailyReport(999L, "https://minio/sdo.pdf", "SUB_DIVISIONAL_OFFICER", LocalDate.of(2026, 7, 7));
-
-        List<DailyReportSectionOfficerRow> soRows = cap.getValue();
-        assertThat(soRows).hasSize(2);
-        assertThat(soRows).extracting(DailyReportSectionOfficerRow::getOfficerName)
-                .containsExactly("Alice", "Bob");
-        assertThat(soRows.get(0).getOfficerMobile()).isEqualTo("919868595001");
-        assertThat(soRows.get(0).getTotalSchemes()).isEqualTo(154);
-        assertThat(soRows.get(0).getSchemesNotSupplying()).isEqualTo(6);
-    }
 
     @Test
     void handleDailyReport_logsFailedGenerationOutcomeAndRethrows() throws Exception {
@@ -1280,20 +1213,20 @@ class NotificationEventRouterTest {
         assertThat(appender.list).anySatisfy(event -> assertThat(event.getFormattedMessage())
                 .contains("result=FAILED_GENERATION role=SECTION_OFFICER tenant=1 officer=500"));
         verify(minioStorageService, never()).upload(any(Path.class));
-        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any());
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
     }
 
     @Test
-    void handleDailyReport_sdoKillSwitchMatchesRoleWithSurroundingWhitespace() {
-        // The PDF layout and the Glific template both trim the role, so the kill-switch must too —
-        // otherwise a padded role would render/send as an SDO while claiming to be suppressed.
-        ReflectionTestUtils.setField(router, "dailyReportSdoEnabled", false);
+    void handleDailyReport_dropsASubDivisionalOfficerEventSinceTheyNowGetTheWeeklyReport() {
+        // Events published before the upgrade can still be sitting in the topic, so an SDO's queued
+        // daily report has to be dropped rather than rendered into a layout that no longer describes
+        // their command. The role is trimmed first, or a padded one would slip past the check.
         String sdoJson = DAILY_REPORT_JSON.replace("\"SECTION_OFFICER\"", "\"  SUB_DIVISIONAL_OFFICER  \"");
 
         router.route(sdoJson);
 
         verifyNoInteractions(dailyReportPdfService);
-        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any());
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1304,7 +1237,7 @@ class NotificationEventRouterTest {
         router.route(DAILY_REPORT_JSON);
 
         verifyNoInteractions(dailyReportPdfService);
-        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any());
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1314,17 +1247,17 @@ class NotificationEventRouterTest {
         when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
         when(piiEncryptionService.safeDecrypt("enc-phone")).thenReturn("919876500024");
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("daily_report_x.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/daily_report_x.pdf");
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
         when(glificWhatsAppService.optIn("919876500024")).thenReturn(88L);
-        when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7)))
-                .thenReturn(true);
+        when(whatsAppChannel.sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli"))
+                .thenReturn(acceptedSend());
 
         router.route(DAILY_REPORT_JSON);
 
         verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList());
         verify(glificWhatsAppService).optIn("919876500024");
-        verify(whatsAppChannel).sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7));
+        verify(whatsAppChannel).sendDailyReport(88L, "https://minio/daily_report_x.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod Nimoli");
         verify(kafkaProducer).publishJson(eq("common-topic"), argThat(event -> {
             String s = event.toString();
             return s.contains("WHATSAPP_CONTACT_REGISTERED") && s.contains("88");
@@ -1353,22 +1286,21 @@ class NotificationEventRouterTest {
 
         verifyNoInteractions(dailyReportPdfService);
         verify(minioStorageService, never()).upload(any(Path.class));
-        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any());
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
         verify(kafkaProducer, never()).publishJson(eq("common-topic"), any());
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void handleDailyReport_enrichesPriorityRowsFromOperationalSchema() throws Exception {
-        // Priority Actions is hidden by default; enrichment only runs when the section is restored.
-        ReflectionTestUtils.setField(router, "dailyReportOutageDetailSectionsEnabled", true);
+    void handleDailyReport_enrichesNoSupplySchemeRowsFromOperationalSchema() throws Exception {
+        // analytics sends scheme ids and nothing else; the name, IMIS id and Jal Mitra contacts are
+        // resolved here, from the operational schema, because analytics never holds PII.
         String json = """
                 {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
                  "officerUserId":500,"officerUserType":"SECTION_OFFICER",
-                 "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
-                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
-                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
-                         "priorityActions":[{"schemeId":7,"issue":"Pump Failure","daysNoSupply":5}]}}
+                 "kpis":{"reportDate":"2026-07-07","cutoffIst":"2026-07-07T16:00:00","totalSchemes":10,
+                         "schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"anomalousCount":3,
+                         "noSupplySchemeIds":[7],"schemeAnomalies":[]}}
                 """;
 
         // Officer contact (by id) — has a stored WhatsApp id, so no opt-in.
@@ -1423,61 +1355,555 @@ class NotificationEventRouterTest {
             };
         });
         when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("f.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7))).thenReturn(true);
+                .thenReturn(Path.of("f.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/f.pdf");
+        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7), "Binod"))
+                .thenReturn(acceptedSend());
 
         router.route(json);
 
-        ArgumentCaptor<List<DailyReportPriorityRow>> cap = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<ReportSchemeRow>> cap = ArgumentCaptor.forClass(List.class);
         verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), cap.capture(), anyList());
-        List<DailyReportPriorityRow> rows = cap.getValue();
+        List<ReportSchemeRow> rows = cap.getValue();
         assertThat(rows).hasSize(1);
-        DailyReportPriorityRow row = rows.get(0);
-        assertThat(row.getScheme()).isEqualTo("Rampur WSS");
+        ReportSchemeRow row = rows.get(0);
+        assertThat(row.getSchemeName()).isEqualTo("Rampur WSS");
         assertThat(row.getImisId()).isEqualTo("IMIS-7");
+        // Several Jal Mitras on one scheme are joined into one cell rather than dropping any of them.
         assertThat(row.getJalMitraNames()).isEqualTo("Ramesh, Suresh");
         assertThat(row.getJalMitraMobiles()).isEqualTo("919000000001, 919000000002");
-        assertThat(row.getIssue()).isEqualTo("Pump Failure");
-        assertThat(row.getRemarks()).isEqualTo("No water supply for past 5 days");
+    }
+
+
+
+    // ───────────────── delivery-status join keys on the SENT line ─────────────────
+
+    /**
+     * {@code result=SENT} means Glific ACCEPTED the send, not that WhatsApp delivered it. The
+     * {@code glificMsgId} on this line is the only join key that lets the delivery status Gupshup and
+     * Meta later report back to Glific be matched to this officer — losing it breaks reconciliation
+     * silently, so it is asserted rather than assumed.
+     */
+    @Test
+    void handleDailyReport_sentLineCarriesTheGlificJoinKeys() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(acceptedSend());
+
+        String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
+
+        assertThat(sent)
+                .contains("glificMsgId=241952654")
+                .contains("glificContactId=12345")
+                .contains("mode=LINK")
+                .contains("templateId=880557")
+                .contains("stage=GLIFIC_ACCEPTED");
+    }
+
+    /**
+     * The counting grep for the adjacent run
+     * {@code result=… role=… tenant=… officer=…}. Every new field must therefore be appended after
+     * {@code officer=}, never inserted between them, or a year of documented one-liners breaks.
+     */
+    @Test
+    void handleDailyReport_sentLinePreservesTheFieldAdjacencyTheCountingRecipesRelyOn() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(acceptedSend());
+
+        String sent = captureRouterLog(DAILY_REPORT_JSON, "result=SENT");
+
+        assertThat(sent).containsPattern("result=SENT role=SECTION_OFFICER tenant=1 officer=500");
+    }
+
+    /**
+     * The 20 Aug 2026 incident collapsed every cause into one FAILED_DELIVERY token. The stage says
+     * which half of the handoff broke, and Glific's own error key comes with it.
+     */
+    @Test
+    void handleDailyReport_failedDeliveryLineCarriesTheStageAndGlificErrorKey() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
+
+        String failed = captureRouterLogExpectingRethrow(DAILY_REPORT_JSON, "result=FAILED_DELIVERY");
+
+        assertThat(failed)
+                .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
+                .contains("stage=MEDIA_REGISTER")
+                .contains("glificErrorKey=media");
+    }
+
+    /**
+     * A {@code CONFIG} failure never reached Glific: the template id, contact id or MinIO URL prefix is
+     * wrong on our side. It is a definite rejection — so it keeps {@code result=FAILED_DELIVERY} — but
+     * one no retry can repair, so redriving it only stalls the partition until someone changes
+     * configuration. Terminal, not rethrown.
+     */
+    @Test
+    void handleDailyReport_aConfigFailureIsCountedAsFailedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.CONFIG, null, "daily report LINK template id is not configured"));
+
+        // captureRouterLogs fails the test if the router rethrows — which is the property under test.
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).filteredOn(l -> l.contains("result=FAILED_DELIVERY")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("stage=CONFIG"));
+        assertThat(lines)
+                .anyMatch(l -> l.contains("stage=CONFIG") && l.contains("(non-retryable)"))
+                .noneMatch(l -> l.contains("result=DELIVERY_UNCONFIRMED"));
+    }
+
+    /**
+     * A dry-run is accepted but nothing was sent, so it gets its own result token. Sharing
+     * {@code result=SENT} with a real send meant a fully muted deployment counted as one that delivered
+     * reports — and the line carried a {@code stage=GLIFIC_ACCEPTED} that never happened.
+     */
+    @Test
+    void handleDailyReport_suppressedSendIsNotCountedAsSent() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.accepted(
+                        GlificSendResult.suppressed(DailyReportDeliveryMode.LINK)));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).noneMatch(l -> l.contains("result=SENT"));
+        assertThat(lines).filteredOn(l -> l.contains("result=SUPPRESSED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=SUPPRESSED role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("mode=LINK")
+                        .doesNotContain("stage=GLIFIC_ACCEPTED")
+                        .doesNotContain("glificMsgId="));
+    }
+
+    /**
+     * A {@code block()} timeout is the one failure a retry makes worse: Glific may already have created
+     * and sent the message, so re-driving the event delivers the officer a second copy of the same
+     * report. It is recorded for reconciliation and swallowed, not rethrown for the Kafka container.
+     */
+    @Test
+    void handleDailyReport_aTimeoutIsRecordedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.TIMEOUT, null, "Timeout on blocking read for 30000 MILLISECONDS"));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        // One terminal line, and it is the unconfirmed one. Also emitting result=FAILED_DELIVERY counted
+        // the same send twice and put a send that may well have arrived into the definite-failure total.
+        assertThat(lines).noneMatch(l -> l.contains("result=FAILED_DELIVERY"));
+        assertThat(lines).filteredOn(l -> l.contains("result=DELIVERY_UNCONFIRMED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .containsPattern("result=DELIVERY_UNCONFIRMED role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("stage=TIMEOUT")
+                        .contains("(non-retryable)"));
+    }
+
+    /**
+     * The same ambiguity, reached the other way: Glific reported no errors but returned no
+     * {@code message.id}, so it holds a message we can never match a status to. A retry is a guaranteed
+     * duplicate, which is why this stage joins TIMEOUT rather than being rethrown.
+     */
+    @Test
+    void handleDailyReport_aSendWithNoMessageIdIsRecordedButNotRetried() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(GlificSendStage.SEND_NO_MESSAGE_ID, null,
+                        "Glific accepted sendHsmMessage but returned no message.id"));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines)
+                .anyMatch(l -> l.contains("result=DELIVERY_UNCONFIRMED")
+                        && l.contains("stage=SEND_NO_MESSAGE_ID"))
+                .noneMatch(l -> l.contains("result=FAILED_DELIVERY"));
+    }
+
+    /** Every other failure stage still rethrows, so the Kafka container can apply its retry policy. */
+    @Test
+    void handleDailyReport_aRejectedSendStillRethrowsForRetry() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"), anyList(), anyList()))
+                .thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString())).thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(
+                        GlificSendStage.MEDIA_REGISTER, "media", "(#131053) Media upload error"));
+
+        assertThatThrownBy(() -> router.route(DAILY_REPORT_JSON))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Notification event processing failed");
+    }
+
+    /**
+     * Routes the event with a log appender attached and returns the first line containing
+     * {@code needle}. Fails on a router exception — see {@link #captureRouterLogs(String)}.
+     */
+    private String captureRouterLog(String json, String needle) {
+        return firstLineContaining(captureRouterLogs(json), needle);
+    }
+
+    /** {@link #captureRouterLog} for the stages that rethrow for retry by design. */
+    private String captureRouterLogExpectingRethrow(String json, String needle) {
+        return firstLineContaining(captureRouterLogsExpectingRethrow(json), needle);
+    }
+
+    private static String firstLineContaining(List<String> lines, String needle) {
+        return lines.stream()
+                .filter(m -> m.contains(needle))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no log line containing '" + needle + "'; lines were "
+                        + lines));
+    }
+
+    /**
+     * Every line the router logs while routing one event. Needed wherever the assertion is about which
+     * result token was <em>not</em> emitted — a suppressed send must produce no {@code result=SENT}
+     * line at all, which no single-line lookup can show.
+     *
+     * <p>Fails the test if the router throws. Swallowing it here made every non-retryable path
+     * un-assertable: a stage that was supposed to be terminal could start rethrowing — stalling the
+     * Kafka partition on an event no retry can repair — and these tests would still pass, because the
+     * log lines they check are written before the throw. Tests that <em>want</em> the throw say so with
+     * {@link #captureRouterLogsExpectingRethrow}.</p>
+     */
+    private List<String> captureRouterLogs(String json) {
+        return captureRouterLogs(json, false);
+    }
+
+    /**
+     * Same capture, for the failure stages that rethrow so the Kafka container can retry
+     * ({@code MEDIA_REGISTER}, {@code SEND}). Explicit, so the throw is an asserted property of those
+     * tests rather than something silently tolerated in all of them.
+     */
+    private List<String> captureRouterLogsExpectingRethrow(String json) {
+        return captureRouterLogs(json, true);
+    }
+
+    private List<String> captureRouterLogs(String json, boolean expectRethrow) {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(NotificationEventRouter.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        RuntimeException thrown = null;
+        try {
+            router.route(json);
+        } catch (RuntimeException e) {
+            thrown = e;
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        List<String> lines = appender.list.stream()
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .toList();
+        if (thrown != null && !expectRethrow) {
+            throw new AssertionError("router rethrew, so this event would be retried; use"
+                    + " captureRouterLogsExpectingRethrow if that is intended. Lines were " + lines, thrown);
+        }
+        if (thrown == null && expectRethrow) {
+            throw new AssertionError("router did not rethrow, so the Kafka container never retries this"
+                    + " event. Lines were " + lines);
+        }
+        return lines;
+    }
+
+    /**
+     * A successful Glific acceptance, carrying the message id the router now logs. Glific returns
+     * {@code message { id }} on every send and the router puts it on the {@code result=SENT} line —
+     * it is the join key the delivery-status reconciliation matches back to this officer.
+     */
+    // ── WEEKLY_REPORT_KPIS ───────────────────────────────────────────────────────
+
+    private static final String WEEKLY_SO_JSON = """
+            {"eventType":"WEEKLY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+             "officerUserId":500,"officerUserType":"SECTION_OFFICER","correlationId":"corr-w",
+             "kpis":{"weekStart":"2026-07-13","weekEnd":"2026-07-19",
+                     "previousWeekStart":"2026-07-06","previousWeekEnd":"2026-07-12",
+                     "week":{"totalSchemes":148,"schemesSupplying":142,"schemesNotSupplying":6,
+                             "schemesLowLpcd":4,"avgLpcd":63.0},
+                     "previousWeek":{"totalSchemes":148,"schemesSupplying":140,"schemesNotSupplying":8,
+                                     "schemesLowLpcd":7,"avgLpcd":61.0},
+                     "noSupplySchemeIds":[11],"lowSupplyDaysSchemeIds":[12],"lowLpcdSchemeIds":[13]}}
+            """;
+
+    @Test
+    void handleWeeklyReport_generatesUploadsAndSendsForASectionOfficer() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(weeklyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
+                .thenReturn("https://minio/weekly.pdf");
+        when(whatsAppChannel.sendWeeklyReport(12345L, "https://minio/weekly.pdf", "SECTION_OFFICER",
+                LocalDate.of(2026, 7, 13), "Binod Nimoli")).thenReturn(acceptedSend());
+
+        router.route(WEEKLY_SO_JSON);
+
+        verify(weeklyReportPdfService).generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
+                anyList(), anyList(), anyList(), anyList());
+        // The weekly bucket, not the daily one — they are separate stores.
+        verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.WEEKLY_BUCKET), anyString());
+        verify(whatsAppChannel).sendWeeklyReport(12345L, "https://minio/weekly.pdf", "SECTION_OFFICER",
+                LocalDate.of(2026, 7, 13), "Binod Nimoli");
+        verify(whatsAppChannel, never()).sendDailyReport(anyLong(), anyString(), anyString(), any(), any());
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void handleDailyReport_withOutageSectionsDisabled_skipsPriorityRowEnrichment() throws Exception {
-        // Default state: the Priority Actions section is hidden, so no rows are built — and crucially
-        // the Jal Mitra name/mobile lookups (PII decryption) are never performed.
-        String json = """
-                {"eventType":"DAILY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+    void handleWeeklyReport_uploadsUnderTheWeekRangeFolder() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
+                .thenReturn("https://minio/weekly.pdf");
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        router.route(WEEKLY_SO_JSON);
+
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+        verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.WEEKLY_BUCKET), key.capture());
+        assertThat(key.getValue()).isEqualTo("SO/2026-07-13_to_2026-07-19/weekly.pdf");
+    }
+
+    @Test
+    void handleWeeklyReport_sendsToASubDivisionalOfficerToo() throws Exception {
+        // Unlike the daily report, the weekly one serves both roles.
+        stubOfficerContact(999L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("SDO Kumar");
+        when(weeklyReportPdfService.generate(any(), eq(500L), eq("SDO Kumar"), eq("SUB_DIVISIONAL_OFFICER"),
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly_sdo.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
+                .thenReturn("https://minio/weekly_sdo.pdf");
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(acceptedSend());
+
+        router.route(WEEKLY_SO_JSON.replace("SECTION_OFFICER", "SUB_DIVISIONAL_OFFICER"));
+
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+        verify(minioStorageService).upload(any(Path.class), eq(ReportFileNaming.WEEKLY_BUCKET), key.capture());
+        assertThat(key.getValue()).startsWith("SDO/");
+    }
+
+    @Test
+    void handleWeeklyReport_skipsAnEventWithNoKpis() {
+        router.route("""
+                {"eventType":"WEEKLY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+                 "officerUserId":500,"officerUserType":"SECTION_OFFICER"}
+                """);
+
+        verifyNoInteractions(weeklyReportPdfService);
+    }
+
+    @Test
+    void handleWeeklyReport_skipsAnEventWithAnUnusableWeekRange() {
+        // Without both bounds the report cannot name the period it covers, and guessing one would
+        // deliver a week nobody asked for.
+        router.route("""
+                {"eventType":"WEEKLY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
                  "officerUserId":500,"officerUserType":"SECTION_OFFICER",
-                 "kpis":{"reportDate":"2026-07-07","previousDate":"2026-07-06","totalSchemes":10,
-                         "yesterday":{"schemesSupplying":8,"schemesNotSupplying":2,"avgLpcd":55.0,"avgMld":1.2,"regularSupplyPctWeek":80.0,"readingSubmissionPct":90.0,"anomalousCount":3},
-                         "previousDay":{"schemesSupplying":7,"schemesNotSupplying":3,"avgLpcd":50.0,"avgMld":1.1,"regularSupplyPctWeek":75.0,"readingSubmissionPct":85.0,"anomalousCount":4},
-                         "priorityActions":[{"schemeId":7,"issue":"Pump Failure","daysNoSupply":5}]}}
-                """;
+                 "kpis":{"weekStart":"13-07-2026","weekEnd":"2026-07-19"}}
+                """);
 
-        when(jdbcTemplate.query(argThat(sql -> sql != null && sql.contains(".user_table WHERE id = ?")),
-                any(RowMapper.class), eq(500L)))
-                .thenAnswer(inv -> {
-                    RowMapper<Object> rm = inv.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.getObject("whatsapp_connection_id", Long.class)).thenReturn(12345L);
-                    when(rs.getString("title")).thenReturn("enc-officer");
-                    when(rs.getString("phone_number")).thenReturn(null);
-                    return List.of(rm.mapRow(rs, 0));
-                });
-        when(piiEncryptionService.safeDecrypt("enc-officer")).thenReturn("Binod");
-        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), anyList(), anyList()))
-                .thenReturn("f.pdf");
-        when(minioStorageService.upload(any(Path.class))).thenReturn("https://minio/f.pdf");
-        when(whatsAppChannel.sendDailyReport(12345L, "https://minio/f.pdf", "SECTION_OFFICER", LocalDate.of(2026, 7, 7))).thenReturn(true);
+        verifyNoInteractions(weeklyReportPdfService);
+    }
 
-        router.route(json);
+    @Test
+    void handleWeeklyReport_skipsAnEventWithAnUnusableComparisonWeekRange() {
+        // The summary table parses the comparison bounds for its column header, so a malformed one
+        // throws mid-render. Skipping here keeps that a permanent skip rather than a retry loop.
+        router.route(WEEKLY_SO_JSON.replace("\"previousWeekStart\":\"2026-07-06\"",
+                "\"previousWeekStart\":\"06-07-2026\""));
 
-        ArgumentCaptor<List<DailyReportPriorityRow>> cap = ArgumentCaptor.forClass(List.class);
-        verify(dailyReportPdfService).generate(any(), eq(500L), eq("Binod"), eq("SECTION_OFFICER"), cap.capture(), anyList());
-        assertThat(cap.getValue()).isEmpty();
-        verify(jdbcTemplate, never()).query(argThat(sql -> sql != null && sql.contains("PUMP_OPERATOR")),
-                any(RowMapper.class), eq(7));
+        verifyNoInteractions(weeklyReportPdfService);
+    }
+
+    @Test
+    void handleWeeklyReport_skipsAnEventMissingTheComparisonWeekRange() {
+        router.route("""
+                {"eventType":"WEEKLY_REPORT_KPIS","tenantId":1,"tenantSchema":"tenant_mp",
+                 "officerUserId":500,"officerUserType":"SECTION_OFFICER",
+                 "kpis":{"weekStart":"2026-07-13","weekEnd":"2026-07-19"}}
+                """);
+
+        verifyNoInteractions(weeklyReportPdfService);
+    }
+
+    @Test
+    void handleWeeklyReport_skipsAnEventWithAnInjectableSchemaName() {
+        router.route(WEEKLY_SO_JSON.replace("tenant_mp", "tenant_mp; DROP TABLE user_table"));
+
+        verifyNoInteractions(weeklyReportPdfService);
+        verifyNoInteractions(minioStorageService);
+    }
+
+    @Test
+    void handleWeeklyReport_rethrowsWhenTheUploadFailsSoTheReportIsNotLost() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("MinIO down"));
+
+        assertThatThrownBy(() -> router.route(WEEKLY_SO_JSON)).isInstanceOf(RuntimeException.class);
+
+        verify(whatsAppChannel, never()).sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString());
+    }
+
+    private static DailyReportSendOutcome acceptedSend() {
+        return DailyReportSendOutcome.accepted(
+                new GlificSendResult("241952654", "880557", DailyReportDeliveryMode.LINK));
+    }
+
+    // ── weekly terminal log lines ────────────────────────────────────────────────
+    //
+    // The send-logging helpers are shared by both reports, and used to hard-code the daily prefix. A
+    // Section Officer now receives both, so that folded every weekly SENT into the daily total and left
+    // every weekly GENERATED with no SENT of its own to reconcile against.
+
+    @Test
+    void handleWeeklyReport_logsGeneratedAndSentUnderTheWeeklyPrefix() throws Exception {
+        stubWeeklySend(acceptedSend());
+
+        List<String> lines = captureRouterLogs(WEEKLY_SO_JSON);
+
+        assertThat(lines).filteredOn(l -> l.contains("result=SENT")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .startsWith("[Router/WEEKLY_REPORT]")
+                        .containsPattern("result=SENT role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("glificMsgId=241952654"));
+        // GENERATED and SENT have to share a prefix, or the run cannot be reconciled per report.
+        assertThat(lines).filteredOn(l -> l.contains("result=GENERATED")).singleElement()
+                .satisfies(line -> assertThat(line).startsWith("[Router/WEEKLY_REPORT]"));
+        assertThat(lines).noneMatch(l -> l.startsWith("[Router/DAILY_REPORT]"));
+    }
+
+    @Test
+    void handleWeeklyReport_logsASuppressedSendUnderTheWeeklyPrefix() throws Exception {
+        // Weekly delivery ships suppressed until the Meta templates are approved, so this is the shape
+        // of a normal run for now — and it must not read as a delivered one.
+        stubWeeklySend(DailyReportSendOutcome.accepted(
+                GlificSendResult.suppressed(DailyReportDeliveryMode.LINK)));
+
+        List<String> lines = captureRouterLogs(WEEKLY_SO_JSON);
+
+        assertThat(lines).noneMatch(l -> l.contains("result=SENT"));
+        assertThat(lines).filteredOn(l -> l.contains("result=SUPPRESSED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .startsWith("[Router/WEEKLY_REPORT]")
+                        .containsPattern("result=SUPPRESSED role=SECTION_OFFICER tenant=1 officer=500")
+                        .contains("mode=LINK"));
+    }
+
+    @Test
+    void handleWeeklyReport_logsAFailedDeliveryUnderTheWeeklyPrefixAndNamesItInTheThrow() throws Exception {
+        stubWeeklySend(DailyReportSendOutcome.failed(
+                GlificSendStage.SEND, "receiver", "Receiver does not exist"));
+
+        String failed = captureRouterLogExpectingRethrow(WEEKLY_SO_JSON, "result=FAILED_DELIVERY");
+
+        assertThat(failed)
+                .startsWith("[Router/WEEKLY_REPORT]")
+                .containsPattern("result=FAILED_DELIVERY role=SECTION_OFFICER tenant=1 officer=500")
+                .contains("stage=SEND")
+                .contains("glificErrorKey=receiver");
+        // The exception reaches the Kafka container's error handler, so it has to say which report
+        // stalled the partition.
+        assertThatThrownBy(() -> router.route(WEEKLY_SO_JSON))
+                .hasRootCauseMessage("[Router/WEEKLY_REPORT] corr=corr-w"
+                        + " WhatsApp weekly report delivery failed at stage=SEND");
+    }
+
+    @Test
+    void handleWeeklyReport_recordsAnUnconfirmedDeliveryWithTheWeekItCovers() throws Exception {
+        stubWeeklySend(DailyReportSendOutcome.failed(GlificSendStage.TIMEOUT, null,
+                "Timeout on blocking read for 30000 MILLISECONDS"));
+
+        List<String> lines = captureRouterLogs(WEEKLY_SO_JSON);
+
+        assertThat(lines).noneMatch(l -> l.contains("result=FAILED_DELIVERY"));
+        assertThat(lines).filteredOn(l -> l.contains("result=DELIVERY_UNCONFIRMED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .startsWith("[Router/WEEKLY_REPORT]")
+                        .contains("stage=TIMEOUT")
+                        // The Monday the reported week opened on — a different fact from a daily
+                        // report's date, so it does not borrow that field's name.
+                        .contains("weekStart=2026-07-13")
+                        .doesNotContain("reportDate="));
+    }
+
+    /** The other half of the split: the daily lines keep the prefix and date field they always had. */
+    @Test
+    void handleDailyReport_keepsItsOwnPrefixAndDateFieldOnTheTerminalLines() throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(dailyReportPdfService.generate(any(), eq(500L), eq("Binod Nimoli"), eq("SECTION_OFFICER"),
+                anyList(), anyList())).thenReturn(Path.of("daily_report_x.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
+                .thenReturn("https://minio/daily_report_x.pdf");
+        when(whatsAppChannel.sendDailyReport(anyLong(), anyString(), anyString(), any(), any()))
+                .thenReturn(DailyReportSendOutcome.failed(GlificSendStage.TIMEOUT, null,
+                        "Timeout on blocking read for 30000 MILLISECONDS"));
+
+        List<String> lines = captureRouterLogs(DAILY_REPORT_JSON);
+
+        assertThat(lines).filteredOn(l -> l.contains("result=DELIVERY_UNCONFIRMED")).singleElement()
+                .satisfies(line -> assertThat(line)
+                        .startsWith("[Router/DAILY_REPORT]")
+                        .contains("reportDate=")
+                        .doesNotContain("weekStart="));
+        assertThat(lines).noneMatch(l -> l.startsWith("[Router/WEEKLY_REPORT]"));
+    }
+
+    private void stubWeeklySend(DailyReportSendOutcome outcome) throws Exception {
+        stubOfficerContact(12345L, "enc-title", null);
+        when(piiEncryptionService.safeDecrypt("enc-title")).thenReturn("Binod Nimoli");
+        when(weeklyReportPdfService.generate(any(), anyLong(), anyString(), anyString(),
+                anyList(), anyList(), anyList(), anyList())).thenReturn(Path.of("weekly.pdf"));
+        when(minioStorageService.upload(any(Path.class), anyString(), anyString()))
+                .thenReturn("https://minio/weekly.pdf");
+        when(whatsAppChannel.sendWeeklyReport(anyLong(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(outcome);
     }
 }

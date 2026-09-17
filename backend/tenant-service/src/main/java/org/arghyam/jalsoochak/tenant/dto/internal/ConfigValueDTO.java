@@ -16,6 +16,8 @@ public sealed interface ConfigValueDTO permits
         TimeSettingsConfigDTO,
         NudgeTimingConfigDTO,
         EscalationRulesConfigDTO,
+        DailyReportTimingConfigDTO,
+        WeeklyReportTimingConfigDTO,
         GlificMessagesConfigDTO,
         WaterSupplyThresholdConfigDTO,
         IncludedWorkStatusesConfigDTO,

@@ -2,6 +2,7 @@ package org.arghyam.jalsoochak.analytics.controller;
 
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeRegularityListResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusAndTopReportingResponse;
+import org.arghyam.jalsoochak.analytics.dto.response.SchemeStatusBreakdownResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.CriticalSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ContinuousSchemesResponse;
 import org.arghyam.jalsoochak.analytics.dto.response.ApiResponse;
@@ -9,11 +10,9 @@ import org.arghyam.jalsoochak.analytics.dto.response.EscalationListItemDto;
 import org.arghyam.jalsoochak.analytics.dto.response.EscalationPaginatedResponse;
 import org.arghyam.jalsoochak.analytics.config.SwaggerExamples;
 import org.arghyam.jalsoochak.analytics.helper.DefaultAnalyticsDateWindowProvider;
-import org.arghyam.jalsoochak.analytics.entity.FactEscalation;
 import org.arghyam.jalsoochak.analytics.entity.FactSchemePerformance;
 import org.arghyam.jalsoochak.analytics.helper.AnalyticsControllerHelper;
 import org.arghyam.jalsoochak.analytics.repository.DimUserRepository;
-import org.arghyam.jalsoochak.analytics.repository.FactEscalationRepository;
 import org.arghyam.jalsoochak.analytics.repository.FactSchemePerformanceRepository;
 import org.arghyam.jalsoochak.analytics.service.AuthenticatedRequestContextService;
 import org.arghyam.jalsoochak.analytics.service.AnomalyQueryService;
@@ -44,7 +43,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -76,11 +74,7 @@ public class AnalyticsSchemeReportingController {
     private final UserAlertTotalsService userAlertTotalsService;
     private final AuthenticatedRequestContextService authenticatedRequestContextService;
     private final DimUserRepository dimUserRepository;
-    private final FactEscalationRepository factEscalationRepository;
     private final DefaultAnalyticsDateWindowProvider defaultAnalyticsDateWindowProvider;
-
-    public record UpdateEscalationResolutionStatusRequest(Integer resolutionStatus) {
-    }
 
     private Integer resolveUserIdByUuid(Integer tenantId, UUID userUuid) {
         return dimUserRepository.findTopByTenantIdAndUuidOrderByUpdatedAtDescCreatedAtDesc(tenantId, userUuid)
@@ -88,63 +82,9 @@ public class AnalyticsSchemeReportingController {
                 .orElseThrow(() -> new IllegalArgumentException("No user found for uuid: " + userUuid));
     }
 
-    @PutMapping("/escalations/status")
-    @Operation(summary = "Update escalation resolution status (UUID-scoped)")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> updateEscalationResolutionStatus(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "uuid") UUID userUuid,
-            @RequestParam(name = "escalation_id", required = false) Long escalationId,
-            @RequestParam(name = "correlation_id", required = false) String correlationId,
-            @RequestBody UpdateEscalationResolutionStatusRequest request
-    ) {
-        try {
-            if (request == null || request.resolutionStatus() == null) {
-                throw new IllegalArgumentException("resolutionStatus is required");
-            }
-            boolean hasEscalationId = escalationId != null;
-            boolean hasCorrelationId = correlationId != null && !correlationId.isBlank();
-            if (hasEscalationId == hasCorrelationId) {
-                throw new IllegalArgumentException("Provide exactly one of escalation_id or correlation_id");
-            }
-
-            Integer userId = resolveUserIdByUuid(tenantId, userUuid);
-
-            java.util.Optional<FactEscalation> opt = hasEscalationId
-                    ? factEscalationRepository.findByIdAndTenantIdAndUserId(escalationId, tenantId, userId)
-                    : factEscalationRepository.findFirstByTenantIdAndUserIdAndCorrelationIdOrderByCreatedAtDesc(
-                    tenantId, userId, correlationId.trim());
-
-            FactEscalation escalation = opt.orElseThrow(() -> new IllegalArgumentException("Escalation not found for the given user/identifier"));
-
-            escalation.setResolutionStatus(request.resolutionStatus());
-            escalation.setUpdatedAt(LocalDateTime.now());
-            FactEscalation saved = factEscalationRepository.save(escalation);
-
-            return ResponseEntity.ok(ApiResponse.<Map<String, Object>>builder()
-                    .success(true)
-                    .data(Map.of(
-                            "escalation_id", saved.getId(),
-                            "resolution_status", saved.getResolutionStatus()
-                    ))
-                    .build());
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(ApiResponse.<Map<String, Object>>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        } catch (Exception ex) {
-            log.error(
-                    "Failed PUT /escalations/status (tenantId={}, uuid={}, escalationId={}, correlationId={})",
-                    tenantId, userUuid, escalationId, correlationId, ex);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<Map<String, Object>>builder()
-                    .success(false)
-                    .data(null)
-                    .build());
-        }
-    }
     @GetMapping("/schemes/status-count")
     @Operation(
-            summary = "Get active and inactive scheme count for an LGD or department area",
+            summary = "Get scheme counts by work status and operating status for an LGD or department area",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",
@@ -175,7 +115,7 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
-    public ResponseEntity<ApiResponse<Map<String, Integer>>> getSchemeStatusCount(
+    public ResponseEntity<ApiResponse<SchemeStatusBreakdownResponse>> getSchemeStatusCount(
             @RequestParam(name = "tenant_id") Integer tenantId,
             @RequestParam(name = "lgd_id", required = false) Integer lgdId,
             @RequestParam(name = "department_id", required = false) Integer departmentId) {
@@ -187,21 +127,21 @@ public class AnalyticsSchemeReportingController {
                 throw new IllegalArgumentException("Provide either lgd_id or department_id");
             }
 
-            Map<String, Integer> data = (lgdId != null)
+            SchemeStatusBreakdownResponse data = (lgdId != null)
                     ? schemeRegularityService.getSchemeStatusCountByLgd(tenantId, lgdId)
                     : schemeRegularityService.getSchemeStatusCountByDepartment(tenantId, departmentId);
 
-            return ResponseEntity.ok(ApiResponse.<Map<String, Integer>>builder()
+            return ResponseEntity.ok(ApiResponse.<SchemeStatusBreakdownResponse>builder()
                     .success(true)
                     .data(data)
                     .build());
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(ApiResponse.<Map<String, Integer>>builder()
+            return ResponseEntity.badRequest().body(ApiResponse.<SchemeStatusBreakdownResponse>builder()
                     .success(false)
                     .data(null)
                     .build());
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<Map<String, Integer>>builder()
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.<SchemeStatusBreakdownResponse>builder()
                     .success(false)
                     .data(null)
                     .build());
@@ -503,9 +443,9 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<ContinuousSchemesResponse>> getContinuousSchemesForUser(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "user_id") Integer userId,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(name = "list", required = false, defaultValue = "false") boolean list,
@@ -533,6 +473,19 @@ public class AnalyticsSchemeReportingController {
                 }
             }
 
+            // Identity comes from the token, never from the request. Taking tenant_id and user_id
+            // as query parameters let any authenticated caller read another officer's schemes --
+            // and, because tenant_id was equally free, another tenant's.
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef == null ? null : userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer userId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             ContinuousSchemesResponse data =
                     schemeRegularityService.getContinuousSchemesByUser(tenantId, userId, startDate, endDate, list, page, limit);
 
@@ -555,7 +508,7 @@ public class AnalyticsSchemeReportingController {
 
     @GetMapping("/schemes/dashboard")
     @Operation(
-            summary = "Get active/inactive scheme count and top-N schemes by reporting rate for a parent LGD or parent department",
+            summary = "Get scheme counts by work status and operating status, plus top-N schemes by reporting rate, for a parent LGD or parent department",
             responses = {
                     @io.swagger.v3.oas.annotations.responses.ApiResponse(
                             responseCode = "200",
@@ -1053,13 +1006,25 @@ public class AnalyticsSchemeReportingController {
                     )
             }
     )
+    @PreAuthorize("hasAnyAuthority('USER_TYPE_SECTION_OFFICER', 'USER_TYPE_SUB_DIVISIONAL_OFFICER')")
     public ResponseEntity<ApiResponse<UserAlertTotalsResponse>> getUserAlertTotals(
-            @RequestParam(name = "tenant_id") Integer tenantId,
-            @RequestParam(name = "user_id") Integer userId,
+            JwtAuthenticationToken authentication,
             @RequestParam(name = "start_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(name = "end_date", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
         try {
+            // As with /continuous-schemes/user: the officer whose totals these are is the one
+            // holding the token, not whoever the caller names in a query string.
+            AnalyticsControllerHelper.AuthenticatedUserRef userRef =
+                    authenticatedRequestContextService.extractAuthenticatedUserRef(authentication);
+            Integer tenantId = userRef == null ? null : userRef.tenantId();
+            if (tenantId == null || tenantId <= 0) {
+                throw new IllegalArgumentException("tenant_id is required");
+            }
+            Integer userId = userRef.userId() != null
+                    ? userRef.userId()
+                    : resolveUserIdByUuid(tenantId, userRef.userUuid());
+
             UserAlertTotalsResponse data = userAlertTotalsService.getTotals(tenantId, userId, startDate, endDate);
             return ResponseEntity.ok(ApiResponse.<UserAlertTotalsResponse>builder()
                     .success(true)

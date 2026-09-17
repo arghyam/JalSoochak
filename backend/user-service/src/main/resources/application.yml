@@ -27,6 +27,10 @@ spring:
       minimum-idle: 20
       connection-timeout: 30000
       initialization-fail-timeout: -1
+      # A query that outlives the gateway timeout can only burn the connection it holds: the client
+      # is already gone with a 504. Fail it in the database instead, so the pool is returned and the
+      # caller gets a real error. Raise per-environment if a legitimate report needs longer.
+      connection-init-sql: SET statement_timeout = ${DB_STATEMENT_TIMEOUT_MS:15000}
 
   jpa:
     hibernate:
@@ -153,6 +157,14 @@ otp:
   cheat:
     enabled: ${OTP_CHEAT_ENABLED:false}
     value: ${OTP_CHEAT_VALUE:}
+
+springdoc:
+  swagger-ui:
+    # Must equal <swagger-ui.version> in pom.xml. springdoc 2.5.0 ships
+    # springdoc.config.properties with springdoc.swagger-ui.version=5.13.0 and uses it to
+    # build the webjar resource path (AbstractSwaggerResourceResolver), so without this
+    # override every /webjars/swagger-ui/** asset 404s against the pinned webjar.
+    version: 5.32.14
 
 eureka:
   client:

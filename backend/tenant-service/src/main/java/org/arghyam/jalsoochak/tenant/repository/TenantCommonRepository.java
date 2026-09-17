@@ -479,6 +479,47 @@ public class TenantCommonRepository {
     }
 
     /**
+     * Finds the state codes of tenants in {@link TenantStatusEnum#ACTIVE} status, excluding the
+     * system tenant and soft-deleted rows. Used by the Single Tenant Mode startup check, which
+     * must refuse to boot when more than one tenant is ACTIVE.
+     *
+     * <p>Deliberately narrower than {@link #countOnboardedTenants()}: that method counts every
+     * status except {@code REGISTERED}, whereas this one counts only ACTIVE. State codes rather
+     * than a bare count so the startup failure can name the offending tenants.
+     *
+     * @return the ACTIVE tenants' state codes, ordered by state code
+     */
+    public List<String> findActiveTenantStateCodes() {
+        return findTenantStateCodesByStatus(TenantStatusEnum.ACTIVE);
+    }
+
+    /**
+     * Finds the state codes of tenants in {@link TenantStatusEnum#DEGRADED} status, excluding the
+     * system tenant and soft-deleted rows. DEGRADED tenants are fully loginable
+     * ({@code TenantAccessValidator.isAccessibleToStaff} allows ACTIVE and DEGRADED), so the
+     * Single Tenant Mode startup check logs them for visibility even though they do not count
+     * toward the enforced ACTIVE limit.
+     *
+     * @return the DEGRADED tenants' state codes, ordered by state code
+     */
+    public List<String> findDegradedTenantStateCodes() {
+        return findTenantStateCodesByStatus(TenantStatusEnum.DEGRADED);
+    }
+
+    /**
+     * Finds the state codes of non-system, non-deleted tenants in exactly the given status.
+     *
+     * @param status the status to match
+     * @return the matching tenants' state codes, ordered by state code
+     */
+    private List<String> findTenantStateCodesByStatus(TenantStatusEnum status) {
+        String sql = "SELECT state_code FROM common_schema.tenant_master_table "
+                + "WHERE id != ? AND deleted_at IS NULL AND status = ? ORDER BY state_code";
+        return jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString(1),
+                TenantConstants.SYSTEM_TENANT_ID, status.getCode());
+    }
+
+    /**
      * Validates a schema name.
      */
     private void validateSchemaName(String schemaName) {

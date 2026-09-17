@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import org.arghyam.jalsoochak.user.dto.response.RoleCountDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeSummaryDTO;
 import org.arghyam.jalsoochak.user.dto.response.TenantStaffResponseDTO;
+import org.arghyam.jalsoochak.user.enums.SchemeOperatingStatus;
+import org.arghyam.jalsoochak.user.enums.SchemeWorkStatus;
 import org.arghyam.jalsoochak.user.enums.TenantUserStatus;
 import org.arghyam.jalsoochak.user.service.PiiEncryptionService;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -40,18 +42,6 @@ public class TenantStaffRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService pii;
-
-    private static final Map<Integer, String> WORK_STATUS_LABELS = Map.of(
-            1, "Ongoing",
-            2, "Completed",
-            3, "Not Started",
-            4, "Handed Over"
-    );
-    private static final Map<Integer, String> OPERATING_STATUS_LABELS = Map.of(
-            1, "Operative",
-            2, "Non-Operative",
-            3, "Partially Operative"
-    );
 
     private RowMapper<TenantStaffResponseDTO> staffRowMapper() {
         return (rs, rowNum) -> TenantStaffResponseDTO.builder()
@@ -415,8 +405,8 @@ public class TenantStaffRepository {
                 SchemeSummaryDTO scheme = SchemeSummaryDTO.builder()
                         .schemeId(rs.getLong("scheme_id"))
                         .schemeName(rs.getString("scheme_name"))
-                        .workStatus(workStatusLabel(getNullableInt(rs.getObject("work_status"))))
-                        .operatingStatus(operatingStatusLabel(getNullableInt(rs.getObject("operating_status"))))
+                        .workStatus(SchemeWorkStatus.labelOf(getNullableInt(rs.getObject("work_status"))))
+                        .operatingStatus(SchemeOperatingStatus.labelOf(getNullableInt(rs.getObject("operating_status"))))
                         .build();
                 byUser.computeIfAbsent(userId, k -> new ArrayList<>()).add(scheme);
             }, chunk.toArray());
@@ -439,20 +429,6 @@ public class TenantStaffRepository {
                 .role(row.role())
                 .schemes(schemes)
                 .build();
-    }
-
-    private String workStatusLabel(Integer code) {
-        if (code == null) {
-            return "Unknown";
-        }
-        return WORK_STATUS_LABELS.getOrDefault(code, "Unknown");
-    }
-
-    private String operatingStatusLabel(Integer code) {
-        if (code == null) {
-            return "Unknown";
-        }
-        return OPERATING_STATUS_LABELS.getOrDefault(code, "Unknown");
     }
 
     private Integer getNullableInt(Object value) {

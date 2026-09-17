@@ -1,8 +1,0 @@
-export { OverviewPage } from './components/overview/overview-page'
-export { ActivityPage } from './components/activity/activity-page'
-export { LanguagePage } from './components/language/language-page'
-export { IntegrationPage } from './components/integration/integration-page'
-export { WaterNormsPage } from './components/water-norms/water-norms-page'
-export { EscalationsPage } from './components/escalations/escalations-page'
-export { ThresholdsPage } from './components/thresholds/thresholds-page'
-export { NudgesTemplatePage } from './components/nudges-template/nudges-template-page'

@@ -164,6 +164,51 @@ public class UserCommonRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * Finds the state codes of tenants in ACTIVE status, excluding the system tenant and
+     * soft-deleted rows. Used by the Single Tenant Mode startup check, which must refuse to boot
+     * when more than one tenant is ACTIVE — otherwise the SUPER_STATE_ADMIN role expansion in
+     * {@code JwtAuthConverter} would grant SUPER_USER + STATE_ADMIN across every tenant.
+     *
+     * <p>Deliberately narrower than {@link #findSingleTenant()}, which matches every status
+     * except REGISTERED. State codes rather than a bare count so the startup failure can name
+     * the offending tenants.
+     *
+     * @return the ACTIVE tenants' state codes, ordered by state code
+     */
+    public List<String> findActiveTenantStateCodes() {
+        return findTenantStateCodesByStatus(TenantStatusConstants.ACTIVE);
+    }
+
+    /**
+     * Finds the state codes of tenants in DEGRADED status, excluding the system tenant and
+     * soft-deleted rows. DEGRADED tenants are fully loginable
+     * ({@link org.arghyam.jalsoochak.user.util.TenantAccessValidator#isAccessibleToStaff} allows
+     * ACTIVE and DEGRADED), so the Single Tenant Mode startup check logs them for visibility even
+     * though they do not count toward the enforced ACTIVE limit.
+     *
+     * @return the DEGRADED tenants' state codes, ordered by state code
+     */
+    public List<String> findDegradedTenantStateCodes() {
+        return findTenantStateCodesByStatus(TenantStatusConstants.DEGRADED);
+    }
+
+    /**
+     * Finds the state codes of non-system, non-deleted tenants in exactly the given status.
+     *
+     * @param status the tenant status code to match, from {@link TenantStatusConstants}
+     * @return the matching tenants' state codes, ordered by state code
+     */
+    private List<String> findTenantStateCodesByStatus(int status) {
+        String sql = """
+                SELECT state_code
+                FROM common_schema.tenant_master_table
+                WHERE id != 0 AND deleted_at IS NULL AND status = ?
+                ORDER BY state_code
+                """;
+        return jdbcTemplate.query(sql, (rs, n) -> rs.getString(1), status);
+    }
+
     public Optional<String> findTenantTitleByStateCode(String stateCode) {
         String sql = """
                 SELECT title

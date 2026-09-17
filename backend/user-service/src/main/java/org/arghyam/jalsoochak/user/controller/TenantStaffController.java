@@ -1,6 +1,8 @@
 package org.arghyam.jalsoochak.user.controller;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,14 +39,23 @@ import java.util.List;
 @Validated
 public class TenantStaffController {
 
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final TenantStaffService tenantStaffService;
     private final WelcomeMessageService welcomeMessageService;
 
+    /**
+     * Staff directory for a tenant. Returns names, emails and phone numbers, so it is restricted
+     * to tenant administrators and pinned to the caller's own tenant — it was {@code permitAll}
+     * and let anyone read every officer's contact details for any {@code tenantCode}.
+     */
     @GetMapping("/staff")
+    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN', 'SUPER_STATE_ADMIN') "
+            + "and @userSecurity.canAccessTenant(#tenantCode, authentication)")
     public ResponseEntity<ApiResponseDTO<PageResponseDTO<TenantStaffResponseDTO>>> listStaff(
             @RequestParam String tenantCode,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(MAX_PAGE_SIZE) int limit,
             @RequestParam(defaultValue = "id") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(required = false) List<String> role,
@@ -66,6 +77,8 @@ public class TenantStaffController {
     }
 
     @GetMapping("/staff/counts/by-role")
+    @PreAuthorize("hasAnyRole('SUPER_USER', 'STATE_ADMIN', 'SUPER_STATE_ADMIN') "
+            + "and @userSecurity.canAccessTenant(#tenantCode, authentication)")
     public ResponseEntity<ApiResponseDTO<List<RoleCountDTO>>> countStaffByRole(
             @RequestParam String tenantCode,
             @RequestParam(required = false) String status,

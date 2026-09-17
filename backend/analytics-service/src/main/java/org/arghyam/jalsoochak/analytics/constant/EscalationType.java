@@ -13,7 +13,8 @@ public enum EscalationType {
     NO_WATER_SUPPLY(6, "NO_WATER_SUPPLY"),
     LOW_WATER_SUPPLY(7, "LOW_WATER_SUPPLY"),
     OVER_WATER_SUPPLY(8, "OVER_WATER_SUPPLY"),
-    NO_SUBMISSION(9, "NO_SUBMISSION");
+    NO_SUBMISSION(9, "NO_SUBMISSION"),
+    IMPLAUSIBLE_WATER_SUPPLY(10, "IMPLAUSIBLE_WATER_SUPPLY");
 
     public final int code;
     public final String label;
@@ -27,10 +28,19 @@ public enum EscalationType {
     public static final Set<EscalationType> WATER_ANOMALIES = EnumSet.of(
             NO_WATER_SUPPLY, LOW_WATER_SUPPLY, OVER_WATER_SUPPLY);
 
-    /** Anomalies scoped to a specific user action — correlationId keyed on (userId, tenantId, schemeId, type). */
+    /**
+     * Anomalies scoped to a specific user action — correlationId keyed on (userId, tenantId, schemeId, type).
+     *
+     * <p>Membership here also decides whether {@code FactServiceImpl} writes a {@code fact_escalation}
+     * row: only {@link #WATER_ANOMALIES} do. {@link #IMPLAUSIBLE_WATER_SUPPLY} sits here despite its
+     * name because it is raised against the operator who submitted the reading, and no escalation is
+     * wanted for it — the rejection is already answered to the caller and recorded on
+     * {@code anomaly_table}.
+     */
     public static final Set<EscalationType> USER_ANOMALIES = EnumSet.of(
             UNREADABLE_IMAGE, MANUAL_OVERRIDE, CONSECUTIVE_OVERRIDE_5_DAYS,
-            DUPLICATE_IMAGE_SUBMISSION, READING_LESS_THAN_PREVIOUS, NO_SUBMISSION);
+            DUPLICATE_IMAGE_SUBMISSION, READING_LESS_THAN_PREVIOUS, NO_SUBMISSION,
+            IMPLAUSIBLE_WATER_SUPPLY);
 
     public static EscalationType fromCode(Integer code) {
         if (code == null) {

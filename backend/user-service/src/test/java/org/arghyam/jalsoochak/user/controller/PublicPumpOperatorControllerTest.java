@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.user.controller;
 
+import org.arghyam.jalsoochak.user.config.PumpOperatorAccessGuard;
 import org.arghyam.jalsoochak.user.config.properties.AppProperties;
 import org.arghyam.jalsoochak.user.dto.common.PageResponseDTO;
 import org.arghyam.jalsoochak.user.dto.response.PersonSchemeDetailsDTO;
@@ -8,15 +9,18 @@ import org.arghyam.jalsoochak.user.dto.response.PumpOperatorDetailsWithComplianc
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorReadingDetailDTO;
-import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSchemeComplianceRowDTO;
+import org.arghyam.jalsoochak.user.dto.response.SchemeReadingComplianceRowDTO;
 import org.arghyam.jalsoochak.user.dto.response.PumpOperatorSummaryWithMetricsDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeDetailsWithReportingDTO;
 import org.arghyam.jalsoochak.user.dto.response.SchemeReadingSubmissionDTO;
 import org.arghyam.jalsoochak.user.service.PersonSchemeService;
 import org.arghyam.jalsoochak.user.service.PublicPumpOperatorService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -25,6 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -54,6 +59,15 @@ class PublicPumpOperatorControllerTest {
     @MockBean
     private PersonSchemeService personSchemeService;
 
+    @MockBean
+    private PumpOperatorAccessGuard accessGuard;
+
+    @BeforeEach
+    void resolveScope() {
+        when(accessGuard.resolve(any(), any()))
+                .thenReturn(new PumpOperatorAccessGuard.CallerScope("MP", "tenant_mp", true, null));
+    }
+
     @Nested
     @DisplayName("GET /pump-operators/{id}")
     class GetPumpOperatorDetails {
@@ -66,7 +80,7 @@ class PublicPumpOperatorControllerTest {
                     .stateSchemeId("STATE-5")
                     .centerSchemeId("CENTER-5")
                     .build();
-            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(5L), any(), any())).thenReturn(dto);
+            when(publicPumpOperatorService.getPumpOperatorDetails(eq("MP"), eq(1L), eq(5L), any(), any())).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
                             .param("tenantCode", "mp")
@@ -81,7 +95,7 @@ class PublicPumpOperatorControllerTest {
         @DisplayName("returns 200 when schemeId is omitted")
         void returns200WithoutSchemeId() throws Exception {
             PumpOperatorDetailsDTO dto = PumpOperatorDetailsDTO.builder().id(1L).build();
-            when(publicPumpOperatorService.getPumpOperatorDetails(eq("mp"), eq(1L), eq(null), any(), any())).thenReturn(dto);
+            when(publicPumpOperatorService.getPumpOperatorDetails(eq("MP"), eq(1L), eq(null), any(), any())).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1")
                             .param("tenantCode", "mp"))
@@ -121,7 +135,7 @@ class PublicPumpOperatorControllerTest {
         @DisplayName("returns 200 with compliance data")
         void returns200() throws Exception {
             PumpOperatorReadingComplianceDTO dto = PumpOperatorReadingComplianceDTO.builder().build();
-            when(publicPumpOperatorService.getReadingCompliance(eq("mp"), eq(1L))).thenReturn(dto);
+            when(publicPumpOperatorService.getReadingCompliance(eq("MP"), eq(1L))).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1/reading-compliance")
                             .param("tenantCode", "mp"))
@@ -140,7 +154,7 @@ class PublicPumpOperatorControllerTest {
                     .details(PumpOperatorDetailsDTO.builder().id(1L).build())
                     .readingCompliance(PumpOperatorReadingComplianceDTO.builder().build())
                     .build();
-            when(publicPumpOperatorService.getPumpOperatorDetailsWithCompliance(eq("mp"), eq(1L))).thenReturn(dto);
+            when(publicPumpOperatorService.getPumpOperatorDetailsWithCompliance(eq("MP"), eq(1L))).thenReturn(dto);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/1/details-with-compliance")
                             .param("tenantCode", "mp"))
@@ -174,10 +188,10 @@ class PublicPumpOperatorControllerTest {
         @Test
         @DisplayName("returns 200 with scheme compliance rows")
         void returns200() throws Exception {
-            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
-                    PageResponseDTO.<PumpOperatorSchemeComplianceRowDTO>builder()
+            PageResponseDTO<SchemeReadingComplianceRowDTO> page =
+                    PageResponseDTO.<SchemeReadingComplianceRowDTO>builder()
                             .content(List.of()).totalElements(0L).totalPages(0).number(0).size(20).build();
-            when(publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
+            when(publicPumpOperatorService.listSchemeReadingCompliance(
                     anyString(), anyLong(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
@@ -190,10 +204,10 @@ class PublicPumpOperatorControllerTest {
         @Test
         @DisplayName("returns 200 when pumpOperatorId is missing")
         void returns200WhenPumpOperatorIdMissing() throws Exception {
-            PageResponseDTO<PumpOperatorSchemeComplianceRowDTO> page =
-                    PageResponseDTO.<PumpOperatorSchemeComplianceRowDTO>builder()
+            PageResponseDTO<SchemeReadingComplianceRowDTO> page =
+                    PageResponseDTO.<SchemeReadingComplianceRowDTO>builder()
                             .content(List.of()).totalElements(0L).totalPages(0).number(0).size(20).build();
-            when(publicPumpOperatorService.listPumpOperatorsBySchemeWithCompliance(
+            when(publicPumpOperatorService.listSchemeReadingCompliance(
                     anyString(), anyLong(), any(), any(), any(), anyInt(), anyInt())).thenReturn(page);
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance")
@@ -226,7 +240,60 @@ class PublicPumpOperatorControllerTest {
                     .thenReturn(List.of());
 
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme")
+                            .param("tenantCode", "mp").param("schemeId", "5"))
+                    .andExpect(status().isOk());
+        }
+
+        /**
+         * Without a scheme filter this endpoint took the unpaginated branch and returned every
+         * operator in the tenant — names, emails and phone numbers — to an anonymous caller in one
+         * response, bypassing the page-size ceiling entirely.
+         */
+        @Test
+        @DisplayName("returns 400 when no scheme filter is supplied")
+        void returns400WhenSchemeFilterMissing() throws Exception {
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme")
                             .param("tenantCode", "mp"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value("schemeId or schemeIds is required"));
+        }
+
+        @Test
+        @DisplayName("returns 400 when only a scheme name is supplied")
+        void returns400ForSchemeNameWithoutIds() throws Exception {
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme")
+                            .param("tenantCode", "mp").param("schemeName", "a"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value("schemeId or schemeIds is required"));
+        }
+
+        @Test
+        @DisplayName("returns 400 when more schemeIds are requested than the per-request ceiling")
+        void returns400ForTooManySchemeIds() throws Exception {
+            String[] ids = new String[26];
+            for (int i = 0; i < ids.length; i++) {
+                ids[i] = String.valueOf(i + 1);
+            }
+
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme")
+                            .param("tenantCode", "mp").param("schemeIds", ids))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message")
+                            .value("at most 25 schemeIds may be requested at once"));
+        }
+
+        @Test
+        @DisplayName("accepts a batch at the per-request ceiling")
+        void acceptsSchemeIdsAtCeiling() throws Exception {
+            when(publicPumpOperatorService.listPumpOperatorsByScheme(anyString(), any(), any(), any(), any()))
+                    .thenReturn(List.of());
+            String[] ids = new String[25];
+            for (int i = 0; i < ids.length; i++) {
+                ids[i] = String.valueOf(i + 1);
+            }
+
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme")
+                            .param("tenantCode", "mp").param("schemeIds", ids))
                     .andExpect(status().isOk());
         }
 
@@ -234,15 +301,58 @@ class PublicPumpOperatorControllerTest {
         @DisplayName("returns 400 when page is negative")
         void returns400ForNegativePage() throws Exception {
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme")
-                            .param("tenantCode", "mp").param("page", "-1").param("size", "10"))
+                            .param("tenantCode", "mp").param("schemeId", "5")
+                            .param("page", "-1").param("size", "10"))
                     .andExpect(status().isBadRequest());
         }
 
         @Test
-        @DisplayName("returns 400 when size exceeds 500")
+        @DisplayName("returns 400 when size exceeds the shared 100 maximum")
         void returns400ForLargeSize() throws Exception {
             mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-scheme")
-                            .param("tenantCode", "mp").param("page", "0").param("size", "501"))
+                            .param("tenantCode", "mp").param("schemeId", "5")
+                            .param("page", "0").param("size", "101"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value("size must be between 1 and 100"));
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /pump-operators/by-uuid/{uuid}")
+    class GetByUuid {
+
+        private static final String UUID = "3f1a9c22-5b7e-4d38-9a10-8c4b2e6f0d71";
+
+        @Test
+        @DisplayName("returns 200 for a known operator uuid")
+        void returns200() throws Exception {
+            when(publicPumpOperatorService.getPumpOperatorDetailsByUuid(anyString(), anyString(), any(), any(), any()))
+                    .thenReturn(PumpOperatorDetailsDTO.builder().id(1L).uuid(UUID).name("Operator").build());
+
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-uuid/" + UUID)
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.uuid").value(UUID));
+        }
+
+        @Test
+        @DisplayName("returns 404 when the uuid matches no operator")
+        void returns404() throws Exception {
+            when(publicPumpOperatorService.getPumpOperatorDetailsByUuid(anyString(), anyString(), any(), any(), any()))
+                    .thenThrow(new ResponseStatusException(NOT_FOUND, "Pump operator not found"));
+
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-uuid/" + UUID)
+                            .param("tenantCode", "mp"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("returns 400 when startDate is after endDate")
+        void returns400ForInvertedRange() throws Exception {
+            mockMvc.perform(get("/api/v1/pumpoperator/pump-operators/by-uuid/" + UUID)
+                            .param("tenantCode", "mp")
+                            .param("startDate", "2026-02-01")
+                            .param("endDate", "2026-01-01"))
                     .andExpect(status().isBadRequest());
         }
     }
@@ -372,6 +482,100 @@ class PublicPumpOperatorControllerTest {
 
             mockMvc.perform(get("/api/v1/pumpoperator/schemes/5/reading-submissions")
                             .param("tenantCode", "mp"))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("Pagination boundary validation")
+    class PaginationValidation {
+
+        /**
+         * Every paginated endpoint on this controller. {@code schemeId} is always supplied by the
+         * tests so the by-scheme endpoint never fails argument resolution instead of validation.
+         */
+        static Stream<String> paginatedEndpoints() {
+            return Stream.of(
+                    "/api/v1/pumpoperator/pump-operators/reading-compliance",
+                    "/api/v1/pumpoperator/pump-operators/by-scheme/reading-compliance",
+                    "/api/v1/pumpoperator/pump-operators/1/readings",
+                    "/api/v1/pumpoperator/person/10/schemes",
+                    "/api/v1/pumpoperator/person/10/pump-operators",
+                    "/api/v1/pumpoperator/schemes/5/reading-submissions"
+            );
+        }
+
+        /**
+         * The same endpoints plus {@code /pump-operators/by-scheme}, which shares the ceiling but
+         * checks it by hand — it only paginates when asked to, so the bounds cannot be annotated.
+         * Its rejection carries no {@code fieldErrors} entry, so it joins only the assertions on
+         * the maximum, which turn on the status.
+         */
+        static Stream<String> endpointsSharingTheMaximumPageSize() {
+            return Stream.concat(
+                    paginatedEndpoints(),
+                    Stream.of("/api/v1/pumpoperator/pump-operators/by-scheme"));
+        }
+
+        @ParameterizedTest(name = "{0} rejects page=-1")
+        @MethodSource("paginatedEndpoints")
+        @DisplayName("returns 400 when page is negative")
+        void returns400ForNegativePage(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("page", "-1"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("page"));
+        }
+
+        @ParameterizedTest(name = "{0} rejects size=0")
+        @MethodSource("paginatedEndpoints")
+        @DisplayName("returns 400 when size is zero")
+        void returns400ForZeroSize(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("size", "0"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("size"));
+        }
+
+        @ParameterizedTest(name = "{0} rejects size=-1")
+        @MethodSource("paginatedEndpoints")
+        @DisplayName("returns 400 when size is negative")
+        void returns400ForNegativeSize(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("size", "-1"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400));
+        }
+
+        @ParameterizedTest(name = "{0} rejects size=101")
+        @MethodSource("endpointsSharingTheMaximumPageSize")
+        @DisplayName("returns 400 when size exceeds the 100 maximum")
+        void returns400ForSizeAboveMax(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("size", "101"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400));
+        }
+
+        @ParameterizedTest(name = "{0} accepts size=100")
+        @MethodSource("endpointsSharingTheMaximumPageSize")
+        @DisplayName("accepts the boundary values page=0 and size=100")
+        void accepts200ForBoundaryValues(String path) throws Exception {
+            mockMvc.perform(get(path)
+                            .param("tenantCode", "mp")
+                            .param("schemeId", "5")
+                            .param("page", "0")
+                            .param("size", "100"))
                     .andExpect(status().isOk());
         }
     }
