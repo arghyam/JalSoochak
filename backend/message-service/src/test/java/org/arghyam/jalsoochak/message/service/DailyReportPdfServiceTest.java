@@ -83,9 +83,18 @@ class DailyReportPdfServiceTest {
      */
     private String render(DailyReportKpis kpis, List<ReportSchemeRow> noSupply, List<ReportSchemeRow> anomalies)
             throws IOException {
+        return renderRaw(kpis, noSupply, anomalies).replaceAll("\\s+", " ");
+    }
+
+    /**
+     * As {@link #render} but keeping the line breaks, so an assertion can tell a label that fits on one
+     * line from one the cell wrapped — which collapsing the whitespace hides.
+     */
+    private String renderRaw(DailyReportKpis kpis, List<ReportSchemeRow> noSupply,
+                             List<ReportSchemeRow> anomalies) throws IOException {
         Path pdf = service.generate(kpis, 21343L, "Binod Nimoli", "SECTION_OFFICER", noSupply, anomalies);
         try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
-            return new PDFTextStripper().getText(doc).replaceAll("\\s+", " ");
+            return new PDFTextStripper().getText(doc);
         }
     }
 
@@ -282,6 +291,18 @@ class DailyReportPdfServiceTest {
         }
 
         @Test
+        void headsTheImisColumnWithAReadableLabelOnOneLine() throws Exception {
+            // Read by officers, not by the database: the column carries the scheme's IMIS id, so it is
+            // labelled as prose rather than as the `scheme_imis_id` column it is sourced from. Asserted
+            // on the un-collapsed text, so the column staying wide enough to hold it unwrapped is part
+            // of the claim — a wrapped heading costs a row of height on every page the table spills to.
+            String text = renderRaw(sampleKpis(), sampleNoSupply(), sampleAnomalies());
+
+            assertThat(countOccurrences(text, "Scheme IMIS Id")).isEqualTo(2); // both scheme sections
+            assertThat(text).doesNotContain("Scheme_imis_id");
+        }
+
+        @Test
         void listsAnomalousSubmissionsWithTheirType() throws Exception {
             String text = render(sampleKpis(), sampleNoSupply(), sampleAnomalies());
 
@@ -320,7 +341,7 @@ class DailyReportPdfServiceTest {
                 assertThat(text).contains("Scheme 1");
                 assertThat(text).contains("Scheme 120");
                 // The header row is re-drawn on each page it spills onto.
-                assertThat(countOccurrences(text, "Scheme_imis_id")).isGreaterThan(1);
+                assertThat(countOccurrences(text, "Scheme IMIS Id")).isGreaterThan(1);
             }
         }
 
