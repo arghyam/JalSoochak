@@ -11,6 +11,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnap
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -72,7 +73,9 @@ class BfmReadingServiceAnomalyDedupTest {
                 readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
-                        SupplyPlausibilityProperties.Mode.AUDIT, telemetryTenantRepository, tenantConfigRepository)
+                        SupplyPlausibilityProperties.Mode.AUDIT, telemetryTenantRepository, tenantConfigRepository),
+                null,
+                null
         );
     }
 
@@ -143,7 +146,7 @@ class BfmReadingServiceAnomalyDedupTest {
                         .build()
         );
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_up", 100L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), LocalDateTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("123"), ReadingTime.now().minusDays(1))));
         when(tenantConfigRepository.findConfigValue(anyInt(), anyString())).thenReturn(Optional.empty());
 
         CreateReadingRequest request = CreateReadingRequest.builder()

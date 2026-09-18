@@ -13,6 +13,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnap
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -84,14 +85,16 @@ class BfmReadingServiceAssertedReadingTest {
                 readingChannelResolver,
                 new RolloverResolutionService(true, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(
-                        SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository));
+                        SupplyPlausibilityProperties.Mode.AUDIT, repo, tenantConfigRepository),
+                null,
+                null);
         lenient().when(readingChannelResolver.resolve(any(), any())).thenReturn(ReadingChannel.BFM);
         lenient().when(repo.existsSchemeById(SCHEMA, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findOperatorById(SCHEMA, OPERATOR_ID)).thenReturn(Optional.of(operator));
         lenient().when(repo.isOperatorMappedToScheme(SCHEMA, OPERATOR_ID, SCHEME_ID)).thenReturn(true);
         lenient().when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, SCHEME_ID, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(
-                        new BigDecimal("140"), LocalDateTime.now().minusDays(1))));
+                        new BigDecimal("140"), ReadingTime.now().minusDays(1))));
     }
 
     @Test

@@ -108,7 +108,9 @@ class BfmReadingServiceCorrectionOutcomeTest {
                 repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
                 new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
-                SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository));
+                SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
+                null,
+                null);
     }
 
     /** The row a correction resolves to, published (reason 0) or already quarantined (reason 1). */

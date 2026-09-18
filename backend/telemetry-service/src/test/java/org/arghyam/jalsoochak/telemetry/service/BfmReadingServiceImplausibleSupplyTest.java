@@ -107,7 +107,9 @@ class BfmReadingServiceImplausibleSupplyTest {
                 repo, flowVisionService, telemetryEventPublisher, tenantConfigRepository,
                 new ObjectMapper(), glificOperatorContextService, null, readingChannelResolver,
                 new RolloverResolutionService(false, new ObjectMapper()),
-                SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository));
+                SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
+                null,
+                null);
     }
 
     /** The scheme is migrated, has 100 connections, and has a reading to be measured against. */
