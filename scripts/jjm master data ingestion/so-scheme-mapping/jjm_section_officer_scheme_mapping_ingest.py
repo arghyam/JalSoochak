@@ -18,7 +18,7 @@ What it touches
 ---------------
 tenant DB (shared_db), schema tenant_<code>:
   user_table                        insert / update (title, user_type, state_user_id)
-  user_scheme_mapping_table         insert, and soft-delete of stale SO mappings
+  user_scheme_mapping_table         insert, revive, and retire (unless --additive)
 
 analytics DB, schema analytics_schema:
   dim_user_table                    upsert (every SO this run wrote)
@@ -44,27 +44,44 @@ division tool's MappingWriter, unchanged.
 
 Scheme matching contract
 ------------------------
-The CSV carries two scheme identifiers. imis_id is the centre's id, which we
-store as scheme_master_table.centre_scheme_id, and that is what a scheme is
-resolved by. scheme_public_id (SCH-…) is the state portal's own handle: no
-column holds it, so it is carried through the report for a human to read and is
-never matched on.
+The CSV carries two scheme identifiers, and they are tried in that order of
+authority:
 
-  imis_id resolves to exactly one live scheme          -> mapped
-  imis_id resolves to several live schemes             -> all of them are mapped
-  imis_id resolves to none                             -> reported, nothing mapped
-  imis_id blank or the literal 'NULL'                  -> reported, nothing mapped
+  1. scheme_public_id (SCH-…) — the state portal's own handle, stored by V39 as
+     scheme_master_table.state_scheme_code. A partial UNIQUE index holds it to
+     at most one live scheme, so a claim it resolves is exact.
+  2. imis_id — the centre's id, stored as centre_scheme_id. Used when the CSV
+     gives no public id, when we do not hold the one it gives, or when the
+     column itself is not there yet (before V39).
 
-The several-schemes case is normal here rather than exceptional: our scheme
-master is unique on the (state_scheme_id, centre_scheme_id) pair, so one centre
-id legitimately covers several schemes, and the state's own file says the same —
-4,003 of its imis_ids carry more than one scheme_public_id. Nine in ten of those
-belong to a single officer, in which case mapping the whole fan-out is exactly
-right and the scheme_detail sheet records it. The 383 centre ids two officers
-both claim are the ones that over-grant: with no state scheme id in the file
-there is nothing to split them by, so both officers get all of it and the
-conflicts sheet says so under SCHEME_CONTESTED_FANOUT. --skip-ambiguous-schemes
-refuses every fanned-out imis_id instead.
+  public id resolves to one scheme                -> mapped
+  public id unknown here, imis_id resolves to one -> mapped, fall-back reported
+  the id that answered matches several schemes    -> refused, nothing mapped
+  neither resolves                                -> reported, nothing mapped
+  both blank (or the literal 'NULL')              -> reported, nothing mapped
+
+The order is what removes this file's central ambiguity. Our scheme master is
+unique on the (state_scheme_id, centre_scheme_id) pair rather than on the centre
+id alone, so one centre id legitimately covers several schemes — and the state's
+own file agrees: 4,003 of its imis_ids carry more than one scheme_public_id. The
+public id is precisely what tells those apart, so every code we hold shrinks the
+fan-out, and a fully backfilled state_scheme_code removes it entirely without
+this tool changing.
+
+Until then a fanned-out claim is refused rather than guessed at, because mapping
+all of it is a statement the CSV never made: the officer gets every scheme behind
+the id, which is right only when they happen to hold the lot and over-grants
+whenever two officers split them. Refusing means the claim contributes nothing to
+what the officer covers — and, since this run is authoritative for the role (see
+Reconciliation), any live mapping they already held on those schemes is retired
+along with everything else the CSV no longer states. That is the point: coverage
+this run cannot vouch for does not survive it.
+
+  --map-ambiguous-schemes  maps the officer to every scheme behind the id
+                           instead. Use it only where the fan-outs are known to
+                           be one officer's whole responsibility — the
+                           conflicts sheet's SCHEME_CONTESTED_FANOUT rows are
+                           the ones it would over-grant.
 
 Schemes are taken regardless of scheme_master_table.is_active: that flag tracks
 recent flow readings, not whether the scheme is the officer's responsibility.
@@ -79,31 +96,61 @@ password and status of an existing user are never touched.
 
 An officer appears on one row per scheme — up to 166 of them in this file — so
 the rows are collapsed onto the phone number first and the officer is resolved
-once, against the union of their schemes. An officer none of whose schemes
-resolved is not written at all: an account with no schemes cannot do anything,
-and once the ids are fixed a re-run picks them up.
+once, against the union of their schemes. An officer left with no scheme this
+run can map — every id of theirs resolving to nothing, or to several things — is
+not written at all: an account with no schemes cannot do anything, and once the
+ids are fixed (or state_scheme_code is backfilled) a re-run picks them up.
 --create-users-without-schemes onboards them anyway.
 
-Stale mappings
+Reconciliation
 --------------
-The CSV is authoritative for who covers the schemes it names, so by default:
+The CSV is the whole truth about SECTION_OFFICER, tenant-wide, so by default:
 
-    for every scheme this run resolved, its live SECTION_OFFICER mappings are
-    made to match exactly the officers the CSV names for it
+    every live SECTION_OFFICER mapping in the tenant is made to match exactly
+    what this file states — nothing more and nothing less
 
-Mappings that fall outside that sentence are left alone, deliberately:
+Four consequences worth being sure about before running it:
 
-  * a scheme this run could not resolve is never touched — an unreadable
-    imis_id must not cost an officer a scheme they really do cover;
-  * a mapping held by a pump operator, jal sahayak, EE or SDO is never touched —
+  * an officer the file has dropped keeps no schemes at all. Absence from the
+    latest dataset is read as a statement about the person, not about the
+    schemes they happen to hold, so even a scheme this CSV never mentions is
+    taken off them;
+  * an officer the file names but this run could not process — an unreadable
+    phone number, a duplicate one, or scheme ids that resolved to nothing or to
+    several things — is treated the same way and stripped too, because a run
+    that cannot place them cannot vouch for their coverage either. They are
+    reported apart from the genuinely absent, under SKIPPED_HOLDER_STRIPPED, so
+    an operator can tell a dropped officer from a broken row at a glance;
+  * an officer whose *other* claims did resolve is written, and then holds
+    exactly those schemes: a mapping of theirs on a scheme only a refused claim
+    named is retired like any other the CSV no longer states. Removal is scoped
+    to the role and to the officer, never to the scheme, so there is no such
+    thing as a scheme this sweep leaves alone;
+  * a mapping held by a pump operator, jal sahayak, EE or SDO is never touched.
     user_scheme_mapping_table is shared by every role, and this file speaks only
-    for section officers;
-  * a scheme whose only claimants are officers this run had to skip keeps its
-    mappings, rather than being stripped because we could not process a person.
+    for section officers — that one exception is not negotiable and is the only
+    thing outside the sweep.
 
-Removal is a soft delete (deleted_at/deleted_by, mirroring UserUploadRepository).
---additive turns it off entirely: missing mappings are still inserted, nothing
-is ever removed.
+The removal_detail sheet lists every row that goes, with the reason and whether
+it costs anybody coverage; the conflicts sheet names each stripped user once.
+Read both before executing.
+
+Removal is a soft delete: the row stays, deleted_at/deleted_by record who
+dropped it and when — mirroring UserUploadRepository — and status drops to 0.
+Every service read path already demands `deleted_at IS NULL AND status = 1`
+together, so a retired row that kept status 1 was failing only one of the two
+guards it should.
+
+Nothing is ever duplicated. A pair the CSV asks for again revives the row a
+previous run retired rather than stacking a second one on it, and a pair that
+already carried several live rows — nothing in the schema forbids it, there is
+no uniqueness on (user_id, scheme_id) — is collapsed onto its earliest row and
+reported in duplicate_detail. Running the same CSV twice is therefore a no-op
+the second time.
+
+--additive turns rule 2 off entirely: missing mappings are still inserted,
+retired ones the CSV wants are still revived and duplicates are still collapsed,
+but nothing is ever taken away.
 
 Roles
 -----
@@ -121,6 +168,13 @@ has not been applied. The mapping itself never needs the column. V37 is
 irrelevant to this file: it touches no departmental node.
 
   --with-state-user-id   needs V36 (user_table.state_user_id)
+
+V39 (scheme_master_table.state_scheme_code) needs no option and is checked for
+rather than assumed. Without it, or before it is backfilled, the public id
+cannot be looked up and every claim falls back to the centre id. What that costs
+is reported: the summary counts the fall-backs, and the conflicts sheet says how
+many of them ended up ambiguous and therefore unmapped. Backfilling the column
+is what turns those back into coverage.
 
 PII
 ---
@@ -141,10 +195,19 @@ Usage
       --actor-id 21357 \
       --out "scripts/jjm master data ingestion/so-scheme-mapping/jjm_section_officer_analysis.xlsx"
 
-  # apply: insert the missing mappings and soft-delete the stale ones
+  # apply in full: insert what is missing, revive what is coming back, and
+  # retire every SECTION_OFFICER mapping the CSV no longer states — which
+  # includes the schemes behind an id that matched several of them
   python3 "scripts/jjm master data ingestion/so-scheme-mapping/jjm_section_officer_scheme_mapping_ingest.py" \
       --csv "scripts/jjm master data ingestion/so-scheme-mapping/section-officer-scheme-mapping.csv" \
       --actor-id 21357 --out jjm_section_officer_analysis.xlsx --execute
+
+  # the same, but map an officer to every scheme behind an id that matches
+  # several instead of refusing the claim (the pre-V39 behaviour)
+  python3 "scripts/jjm master data ingestion/so-scheme-mapping/jjm_section_officer_scheme_mapping_ingest.py" \
+      --csv "scripts/jjm master data ingestion/so-scheme-mapping/section-officer-scheme-mapping.csv" \
+      --actor-id 21357 --out jjm_section_officer_analysis.xlsx \
+      --map-ambiguous-schemes --execute
 
   # apply without removing anything, and once V36 is applied also backfill the
   # officers' public ids
@@ -160,6 +223,7 @@ import argparse
 import logging
 import os
 import sys
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterable, Optional
@@ -190,6 +254,7 @@ for _dir in (_SCHEME_DIR, _USERS_DIR, _DIV_EE_DIR):
 try:
     from jjm_scheme_master_ingest import (  # noqa: E402
         ROLE_SECTION_OFFICER,
+        STATE_SCHEME_CODE_COLUMN,
         AnalyticsWriter,
         PiiCrypto,
         norm_name,
@@ -213,9 +278,19 @@ try:
         safe_mask,
     )
     from jjm_division_ee_mapping_ingest import (  # noqa: E402
+        REMOVAL_ABSENT,
+        REMOVAL_DUPLICATE,
+        REMOVAL_OUTSIDE_TARGET,
+        REMOVAL_REASSIGNED,
+        REMOVAL_SKIPPED,
+        DivisionDb,
         MappingIngestPlan,
         MappingWriter,
+        build_duplicate_frame,
+        build_reconciliation,
+        build_removal_frame,
         count_missing_dim_schemes,
+        legacy_holder_conflicts,
     )
 except ImportError as exc:  # pragma: no cover
     sys.exit(
@@ -244,16 +319,26 @@ CSV_COLUMNS = [
 SO_ROLE = ROLE_SECTION_OFFICER
 
 # Scheme resolution outcomes. SCHEME_NO_ID doubles as the key of the one pseudo
-# plan that collects every row with no centre id at all: scheme_id_key lowercases
-# anything non-numeric, so an upper-case key can never collide with a real one.
+# plan that collects every row carrying neither id: claim_key is built out of
+# scheme_id_key, which lowercases anything non-numeric, so an upper-case key can
+# never collide with a real one.
 SCHEME_MATCHED = "MATCHED"
 SCHEME_FANOUT = "MATCHED_SEVERAL"
 SCHEME_NOT_FOUND = "NOT_FOUND"
-SCHEME_NO_ID = "NO_IMIS_ID"
+SCHEME_NO_ID = "NO_SCHEME_ID"
+
+# Which of the two identifiers actually resolved a claim. Named after the column
+# each one is matched against, because that is what an operator has to go and
+# look at when a claim went somewhere they did not expect.
+MATCH_PUBLIC_ID = STATE_SCHEME_CODE_COLUMN
+MATCH_CENTRE_ID = "centre_scheme_id"
 
 # Person-level outcome that is this tool's own, on top of the user module's
 # CAT_* categories.
-SKIP_NO_SCHEME = "no scheme on any of this officer's rows resolved"
+SKIP_NO_SCHEME = (
+    "no scheme this run can map came out of any of this officer's rows — every one "
+    "of their scheme ids either resolved to nothing or to several schemes"
+)
 
 # How many rival ids to name inline before eliding.
 REPORT_LIMIT = 20
@@ -263,11 +348,25 @@ REPORT_LIMIT = 20
 # CSV model
 # ─────────────────────────────────────────────────────────────────────────────
 
+def claim_key(scheme_public_id: Any, imis_id: Any) -> str:
+    """What tells one scheme claim from another: both of the ids it names.
+
+    The public id is what resolves the claim and the centre id is what the run
+    falls back to when we do not hold that public id, so a claim is identified
+    by the pair rather than by whichever of the two happened to win. Keying on
+    the public id alone would merge two rows that fall back to different centre
+    ids; keying on the centre id alone would merge the rows a public id is there
+    to tell apart — which is the whole point of preferring it.
+    """
+    return f"{scheme_id_key(scheme_public_id) or '-'}/{scheme_id_key(imis_id) or '-'}"
+
+
 @dataclass
 class SoMappingRow:
     """One CSV line: a scheme on the left, a section officer on the right."""
     row_no: int                 # 1-based row number as shown in the CSV
     scheme_public_id: str
+    code_key: str               # canonical state_scheme_code, '' when unusable
     imis_id: str
     imis_key: str               # canonical centre id, '' when unusable
     user_public_id: str
@@ -293,6 +392,11 @@ class SoMappingRow:
         them that scheme and nothing else — the other 165 rows still stand.
         """
         return [i for i in self.issues if i.startswith("scheme:")]
+
+    @property
+    def claim_key(self) -> str:
+        """The scheme claim this row makes; see the module-level claim_key."""
+        return claim_key(self.scheme_public_id, self.imis_id)
 
     @property
     def officer_key(self) -> str:
@@ -341,15 +445,20 @@ def load_csv(path: str, header_row: int, encoding: str) -> tuple[list[SoMappingR
         issues: list[str] = []
 
         scheme_public_id = clean(raw.get("scheme_public_id"))
+        code_key = scheme_id_key(scheme_public_id)
         # clean() folds the literal 'NULL' this export writes into '' — 131 rows
-        # of it — so a scheme with no centre id and one that says NULL are the
-        # same case, and neither is guessed at.
+        # of it in imis_id — so an id that is blank and one that says NULL are
+        # the same case, and neither is guessed at.
         imis_id = clean(raw.get("imis_id"))
         imis_key = scheme_id_key(imis_id)
-        if not imis_key:
+        # Only a row naming neither id is unusable on its face. A row that gives
+        # just one of them still has something to resolve by; whether it does
+        # resolve is the tenant's answer, not the file's, and is settled in
+        # resolve_schemes.
+        if not code_key and not imis_key:
             issues.append(
-                "scheme:blank imis_id — the scheme cannot be resolved and this row "
-                "is not mapped"
+                "scheme:neither scheme_public_id nor imis_id — the scheme cannot be "
+                "resolved and this row is not mapped"
             )
 
         user_public_id = clean(raw.get("public_id"))
@@ -369,6 +478,7 @@ def load_csv(path: str, header_row: int, encoding: str) -> tuple[list[SoMappingR
         rows.append(SoMappingRow(
             row_no=row_no,
             scheme_public_id=scheme_public_id,
+            code_key=code_key,
             imis_id=imis_id,
             imis_key=imis_key,
             user_public_id=user_public_id,
@@ -399,16 +509,29 @@ def load_csv(path: str, header_row: int, encoding: str) -> tuple[list[SoMappingR
 
 @dataclass
 class SchemePlan:
-    """One centre id as the CSV names it, and the live schemes it resolved to."""
-    key: str                                 # canonical imis id
+    """One scheme claim as the CSV makes it, and the live schemes it resolved to."""
+    key: str                                 # claim_key(public id, imis id)
     imis_id: str                             # raw, as the CSV wrote it
+    code_key: str = ""                       # canonical state_scheme_code
+    imis_key: str = ""                       # canonical centre_scheme_id
     public_ids: list[str] = field(default_factory=list)   # SCH-… ids on these rows
     csv_rows: list[int] = field(default_factory=list)
     category: str = SCHEME_NOT_FOUND
     reason: str = ""
+    # Which identifier produced the candidates — MATCH_PUBLIC_ID or
+    # MATCH_CENTRE_ID, '' while nothing has resolved.
+    matched_on: str = ""
+    # Set when the CSV named a public id that did not resolve, saying why. It is
+    # what separates "the file gave us nothing better" from "we do not hold what
+    # the file gave us", which is the difference between a data problem upstream
+    # and a backfill we still owe.
+    fallback_reason: str = ""
     scheme_ids: set[int] = field(default_factory=set)
-    scheme_names: list[str] = field(default_factory=list)
-    # Every officer that named this centre id, resolvable or not. The two are
+    # Every scheme the winning identifier found, id -> name, whether or not it
+    # was mapped: a refused fan-out leaves scheme_ids empty but the report still
+    # has to say what it refused.
+    scheme_titles: dict[int, str] = field(default_factory=dict)
+    # Every officer that made this claim, resolvable or not. The two are
     # kept apart because a scheme claimed only by officers we had to skip must
     # keep its mappings rather than be stripped of them.
     claimants: list["OfficerPlan"] = field(default_factory=list)
@@ -418,104 +541,109 @@ class SchemePlan:
         return bool(self.scheme_ids)
 
     @property
+    def public_id(self) -> str:
+        """The public code this claim is resolved by, as the CSV wrote it."""
+        return self.public_ids[0] if self.public_ids else self.code_key
+
+    @property
+    def scheme_names(self) -> list[str]:
+        return [name for _, name in sorted(self.scheme_titles.items())]
+
+    @property
     def writable_claimants(self) -> list["OfficerPlan"]:
         return [p for p in self.claimants if p.will_write]
 
     @property
-    def removable(self) -> bool:
-        """Whether this run may soft-delete section-officer mappings on it.
+    def mapped(self) -> bool:
+        """Whether this claim actually puts an officer on a scheme.
 
-        A scheme nobody usable claims is left exactly as it is: removing its
-        officers because we could not read a phone number would take coverage
-        away that the CSV never asked us to take away.
+        Deliberately not a statement about removal. Removal follows the officer,
+        not the scheme — reconcile_mappings retires every live mapping of every
+        section officer that the CSV does not restate — so no claim, resolved or
+        refused, protects a scheme from the sweep. Saying otherwise here is what
+        the report used to do, and it was wrong in exactly the case that matters:
+        an officer whose claim this run could not use still loses the mappings
+        they held under it.
         """
         return self.resolved and bool(self.writable_claimants)
 
     @property
     def subject(self) -> str:
-        shown = ", ".join(self.public_ids[:3])
+        shown = ", ".join(self.public_ids[:3]) or "no scheme_public_id"
         if len(self.public_ids) > 3:
             shown += f", … (+{len(self.public_ids) - 3} more)"
         return f"imis {self.imis_id or '(blank)'} [{shown}]"
 
 
-class SoDb(UserDb):
+@dataclass
+class SchemeLookup:
+    """The live schemes, indexed by each of the two ids a claim can name.
+
+    Both indexes map to a *list* of (id, name). state_scheme_code carries a
+    partial UNIQUE index over live rows, so its lists should always hold one
+    entry — the list is what lets a tenant that somehow holds two say so instead
+    of the resolver picking one silently.
+    """
+    by_code: dict[str, list[tuple[int, str]]]
+    by_centre: dict[str, list[tuple[int, str]]]
+    # False on a tenant that has not taken V39: the public id cannot be looked
+    # up at all there, which is a different thing from not holding it.
+    code_column_present: bool
+
+
+class SoDb(DivisionDb):
     """Reads the schemes and the section-officer mappings hanging off them.
 
-    Extends the user tool's UserDb (same connection, schema validation, PII
-    crypto, officer lookups and, from its own base, load_user_scheme_mappings)
-    so one object serves both halves of a CSV row.
+    Extends the division tool's DivisionDb — which is itself the user tool's
+    UserDb — so one object serves both halves of a CSV row and, more to the
+    point, so the reconciliation loaders (load_mapping_rows,
+    load_role_holder_ids, load_user_names) are the same code here as they are
+    one and two rungs up the hierarchy. The departmental half of that base is
+    simply never called: this file names its schemes outright and has no node to
+    resolve. state_scheme_code_column_exists comes from the same base, so
+    whether V39 has landed is asked exactly once and in exactly one way.
     """
 
-    def load_schemes_by_centre_id(self) -> dict[str, list[tuple[int, str]]]:
-        """canonical centre id -> [(scheme id, name)] for every live scheme.
+    def load_scheme_lookup(self) -> SchemeLookup:
+        """Every live scheme, indexed by public code and by centre id.
 
         Not the scheme tool's load_scheme_index: that reads the eleven columns a
         scheme *ingest* diffs against and indexes them by state id as well, none
-        of which this file has an opinion about. What must not drift is how a
-        centre id is canonicalised on both sides of the join, and that is
-        scheme_id_key — shared, not re-implemented.
+        of which this file has an opinion about. What must not drift is how an
+        id is canonicalised on both sides of the join, and that is scheme_id_key
+        — shared, not re-implemented, and applied to the public code as well so
+        that case and stray whitespace cannot hide a match.
+
+        One scan builds both indexes: it is the same table either way, and the
+        centre id is needed even for the rows whose public code resolves, since
+        the report says which of the two answered.
         """
+        by_code: dict[str, list[tuple[int, str]]] = {}
         by_centre: dict[str, list[tuple[int, str]]] = {}
+        has_code = self.state_scheme_code_column_exists()
+        # A literal NULL keeps the row shape identical on a pre-V39 tenant.
+        code_expr = STATE_SCHEME_CODE_COLUMN if has_code else "NULL::varchar"
         with self.conn.cursor(name="so_scheme_scan") as cur:
             cur.itersize = 5000
             cur.execute(f"""
-                SELECT id, centre_scheme_id, scheme_name
+                SELECT id, {code_expr}, centre_scheme_id, scheme_name
                 FROM {self.schema}.scheme_master_table
                 WHERE deleted_at IS NULL
             """)
-            for scheme_id, centre_scheme_id, scheme_name in cur:
-                key = scheme_id_key(centre_scheme_id)
-                if key:
-                    by_centre.setdefault(key, []).append((scheme_id, scheme_name))
-        return by_centre
-
-    def load_section_officer_mappings(self, scheme_ids: Iterable[int]) -> set[tuple[int, int]]:
-        """Live (user_id, scheme_id) pairs on these schemes held by section officers.
-
-        Restricted to the one role this file speaks for. user_scheme_mapping_table
-        is shared with pump operators, jal sahayaks, EEs and SDOs, and none of
-        their mappings is this CSV's business.
-        """
-        ids = sorted(set(scheme_ids))
-        if not ids:
-            return set()
-        pairs: set[tuple[int, int]] = set()
-        with self.conn.cursor() as cur:
-            for start in range(0, len(ids), 5000):
-                cur.execute(f"""
-                    SELECT m.user_id, m.scheme_id
-                    FROM {self.schema}.user_scheme_mapping_table m
-                    JOIN {self.schema}.user_table u
-                      ON u.id = m.user_id AND u.deleted_at IS NULL
-                    JOIN common_schema.user_type_master_table ut
-                      ON ut.id = u.user_type AND upper(ut.c_name) = %s
-                    WHERE m.deleted_at IS NULL AND m.scheme_id = ANY(%s)
-                """, (SO_ROLE, ids[start:start + 5000]))
-                pairs.update((user_id, scheme_id) for user_id, scheme_id in cur)
-        return pairs
-
-    def load_user_names(self, user_ids: Iterable[int]) -> dict[int, str]:
-        """id -> decrypted name, for holders of a stale mapping the CSV never names."""
-        ids = sorted(set(user_ids))
-        if not ids:
-            return {}
-        names: dict[int, str] = {}
-        with self.conn.cursor() as cur:
-            for start in range(0, len(ids), 5000):
-                cur.execute(
-                    f"SELECT id, title FROM {self.schema}.user_table WHERE id = ANY(%s)",
-                    (ids[start:start + 5000],),
-                )
-                for user_id, title_enc in cur:
-                    names[user_id] = self.pii.safe_decrypt(title_enc) or ""
-        return names
+            for scheme_id, state_scheme_code, centre_scheme_id, scheme_name in cur:
+                code_key = scheme_id_key(state_scheme_code)
+                if code_key:
+                    by_code.setdefault(code_key, []).append((scheme_id, scheme_name))
+                centre_key = scheme_id_key(centre_scheme_id)
+                if centre_key:
+                    by_centre.setdefault(centre_key, []).append((scheme_id, scheme_name))
+        return SchemeLookup(by_code, by_centre, has_code)
 
 
 def resolve_schemes(
-    rows: list[SoMappingRow], db: SoDb, skip_ambiguous: bool = False
+    rows: list[SoMappingRow], db: SoDb, map_ambiguous: bool = False
 ) -> dict[str, SchemePlan]:
-    """One plan per centre id the CSV names, resolved against scheme_master_table.
+    """One plan per scheme claim the CSV makes, resolved against scheme_master_table.
 
     Rows whose officer is unusable still register their scheme: the claim is
     what protects that scheme from having its mappings removed on the strength
@@ -527,10 +655,15 @@ def resolve_schemes(
         if row.scheme_issues:
             unresolvable.append(row)
             continue
-        plan = plans.get(row.imis_key)
+        plan = plans.get(row.claim_key)
         if plan is None:
-            plan = SchemePlan(key=row.imis_key, imis_id=row.imis_id)
-            plans[row.imis_key] = plan
+            plan = SchemePlan(
+                key=row.claim_key,
+                imis_id=row.imis_id,
+                code_key=row.code_key,
+                imis_key=row.imis_key,
+            )
+            plans[row.claim_key] = plan
         plan.csv_rows.append(row.row_no)
         if row.scheme_public_id and row.scheme_public_id not in plan.public_ids:
             plan.public_ids.append(row.scheme_public_id)
@@ -543,51 +676,133 @@ def resolve_schemes(
             public_ids=[r.scheme_public_id for r in unresolvable if r.scheme_public_id],
             csv_rows=[r.row_no for r in unresolvable],
             category=SCHEME_NO_ID,
-            reason="blank imis_id — nothing to resolve the scheme by",
+            reason="neither scheme_public_id nor imis_id — nothing to resolve the "
+                   "scheme by",
         )
 
     resolvable = [p for p in plans.values() if p.category != SCHEME_NO_ID]
     if not resolvable:
         return plans
 
-    LOG.info("  resolving %d centre id(s) against %s …", len(resolvable), db.schema)
-    by_centre = db.load_schemes_by_centre_id()
-    LOG.info("  %d live centre id(s) in the tenant", len(by_centre))
+    LOG.info("  resolving %d scheme claim(s) against %s …", len(resolvable), db.schema)
+    lookup = db.load_scheme_lookup()
+    LOG.info("  %d live %s(s) and %d live centre id(s) in the tenant",
+             len(lookup.by_code), STATE_SCHEME_CODE_COLUMN, len(lookup.by_centre))
+    if not lookup.code_column_present:
+        LOG.warning(
+            "%s.scheme_master_table has no %s column — every claim is resolved by "
+            "centre_scheme_id alone. Apply "
+            "V39__add_state_scheme_code_to_scheme_master_table.sql to let the CSV's "
+            "scheme_public_id resolve the schemes one centre id covers several of.",
+            db.schema, STATE_SCHEME_CODE_COLUMN,
+        )
 
     for plan in resolvable:
-        _resolve_one_scheme(plan, by_centre, skip_ambiguous)
+        _resolve_one_scheme(plan, lookup, map_ambiguous)
+
+    refused = [p for p in resolvable if p.category == SCHEME_FANOUT and not p.resolved]
+    if refused:
+        LOG.warning(
+            "%d claim(s) match several live schemes each and are not mapped; any "
+            "section-officer mapping already held on those schemes is retired with "
+            "everything else the CSV does not state. Pass --map-ambiguous-schemes to "
+            "map every scheme behind such an id instead.",
+            len(refused),
+        )
+
+    fell_back = [p for p in resolvable if p.fallback_reason]
+    if fell_back and lookup.code_column_present:
+        LOG.warning(
+            "%d claim(s) name a scheme_public_id we do not hold and fell back to "
+            "centre_scheme_id; %d of those fanned out over several schemes",
+            len(fell_back),
+            len([p for p in fell_back if p.category == SCHEME_FANOUT]),
+        )
     return plans
 
 
 def _resolve_one_scheme(
-    plan: SchemePlan, by_centre: dict[str, list[tuple[int, str]]], skip_ambiguous: bool
+    plan: SchemePlan, lookup: SchemeLookup, map_ambiguous: bool
 ) -> None:
-    candidates = sorted(by_centre.get(plan.key, []))
+    """Public id first, centre id second — see the matching contract up top."""
+    if plan.code_key:
+        if not lookup.code_column_present:
+            plan.fallback_reason = (
+                f"this tenant has no {STATE_SCHEME_CODE_COLUMN} column (V39), so "
+                f"scheme_public_id {plan.public_id!r} could not be looked up"
+            )
+        else:
+            candidates = sorted(lookup.by_code.get(plan.code_key, []))
+            if candidates:
+                _apply_candidates(plan, candidates, MATCH_PUBLIC_ID, map_ambiguous)
+                return
+            plan.fallback_reason = (
+                f"no live scheme carries {STATE_SCHEME_CODE_COLUMN} "
+                f"{plan.public_id!r}"
+            )
+
+    candidates = sorted(lookup.by_centre.get(plan.imis_key, [])) if plan.imis_key else []
     if not candidates:
         plan.category = SCHEME_NOT_FOUND
-        plan.reason = f"no live scheme has centre_scheme_id {plan.imis_id!r}"
+        plan.reason = _with_fallback(
+            plan,
+            f"no live scheme has centre_scheme_id {plan.imis_id!r}" if plan.imis_key
+            else "the row gives no imis_id to fall back to",
+        )
         return
+    _apply_candidates(plan, candidates, MATCH_CENTRE_ID, map_ambiguous)
 
-    plan.scheme_names = [name for _, name in candidates]
+
+def _apply_candidates(
+    plan: SchemePlan,
+    candidates: list[tuple[int, str]],
+    matched_on: str,
+    map_ambiguous: bool,
+) -> None:
+    """Turn the schemes an identifier found into the claim's outcome.
+
+    Shared by both identifiers so that one scheme, several schemes and
+    --map-ambiguous-schemes mean the same thing whichever of the two answered.
+    """
+    plan.matched_on = matched_on
+    plan.scheme_titles = dict(candidates)
+    if matched_on == MATCH_PUBLIC_ID:
+        identifier = f"{STATE_SCHEME_CODE_COLUMN} {plan.public_id!r}"
+        why_several = (
+            "which the partial UNIQUE index V39 creates should make impossible — "
+            "the tenant's data needs looking at"
+        )
+    else:
+        identifier = f"centre_scheme_id {plan.imis_id!r}"
+        why_several = (
+            "our master is unique on the state/centre id pair, not on the centre id "
+            "alone"
+        )
+
     if len(candidates) == 1:
         plan.category = SCHEME_MATCHED
         plan.scheme_ids = {candidates[0][0]}
-        plan.reason = "matched on centre_scheme_id"
+        plan.reason = _with_fallback(plan, f"matched on {identifier}")
         return
 
     plan.category = SCHEME_FANOUT
-    if skip_ambiguous:
-        plan.reason = (
-            f"centre_scheme_id {plan.imis_id!r} matches {len(candidates)} live schemes "
-            f"and --skip-ambiguous-schemes is set — none of them is mapped"
-        )
+    if not map_ambiguous:
+        plan.reason = _with_fallback(plan, (
+            f"{identifier} matches {len(candidates)} live schemes ({why_several}) — "
+            f"none of them is mapped, because the CSV does not say which one it "
+            f"means; pass --map-ambiguous-schemes to map all of them"
+        ))
         return
     plan.scheme_ids = {scheme_id for scheme_id, _ in candidates}
-    plan.reason = (
-        f"centre_scheme_id {plan.imis_id!r} matches {len(candidates)} live schemes "
-        f"(our master is unique on the state/centre id pair, not on the centre id "
-        f"alone) — all of them are mapped"
-    )
+    plan.reason = _with_fallback(plan, (
+        f"{identifier} matches {len(candidates)} live schemes ({why_several}) — "
+        f"--map-ambiguous-schemes is set, so all of them are mapped"
+    ))
+
+
+def _with_fallback(plan: SchemePlan, reason: str) -> str:
+    """Append why the public id did not settle it, when it was tried and failed."""
+    return f"{reason}; {plan.fallback_reason}" if plan.fallback_reason else reason
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -622,17 +837,6 @@ class OfficerPlan:
         if self.skip_reason:
             return "skip"
         return self.decision.action
-
-
-@dataclass
-class StaleMapping:
-    """A live section-officer mapping the CSV does not stand behind any more."""
-    user_id: int
-    scheme_id: int
-    holder_name: str = ""
-    # Set when the holder is an officer the CSV names, so the report can say
-    # 'moved to another officer' rather than 'no longer a section officer here'.
-    in_csv: bool = False
 
 
 def collapse_officers(
@@ -706,7 +910,7 @@ def build_officer_plans(
         seen_keys: set[str] = set()
         seen_names: set[str] = set()
         for member in members:
-            scheme = schemes.get(member.imis_key) if not member.scheme_issues else None
+            scheme = schemes.get(member.claim_key) if not member.scheme_issues else None
             if scheme is not None and scheme.key not in seen_keys:
                 seen_keys.add(scheme.key)
                 plan.schemes.append(scheme)
@@ -748,51 +952,77 @@ def build_officer_plans(
     return plans
 
 
-def find_stale_mappings(
-    officers: list[OfficerPlan], schemes: dict[str, SchemePlan], db: SoDb
-) -> list[StaleMapping]:
-    """Live section-officer mappings on covered schemes that the CSV contradicts.
+@dataclass
+class SchemeContention:
+    """One scheme this run would map to more than one section officer."""
+    scheme_id: int
+    title: str
+    officers: list[OfficerPlan]
+    # True when at least one of those officers reached it through a claim that
+    # covered several schemes behind one id.
+    via_fanout: bool
+    csv_rows: int
 
-    The covered universe is exactly the schemes this run resolved and that at
-    least one usable officer claims; everything outside it — an unresolved
-    scheme, another role's mapping, a scheme nobody usable claimed — is not this
-    file's to remove, so it is never even read.
+
+def contested_schemes(plan: "SoIngestPlan") -> list[SchemeContention]:
+    """The schemes several officers end up on, worked out scheme by scheme.
+
+    Deliberately not per claim. Two claims that name different public ids can
+    still fall back to one centre id and land on the same schemes, so asking
+    "who is on this scheme?" is the only question that catches every shape of
+    contention — a fan-out shared by two officers included, which is the one
+    that over-grants.
+
+    Only officers this run would actually map count. An officer it had to skip
+    takes no coverage from anyone, and their own row in the report says why.
     """
-    covered: set[int] = set()
-    for scheme in schemes.values():
-        if scheme.removable:
-            covered |= scheme.scheme_ids
-    if not covered:
-        return []
+    by_scheme: dict[int, list[OfficerPlan]] = defaultdict(list)
+    titles: dict[int, str] = {}
+    via_fanout: set[int] = set()
+    csv_rows: Counter = Counter()
 
-    held = db.load_section_officer_mappings(covered)
-    claimed = {
-        (p.decision.existing_id, scheme_id)
-        for p in officers if p.will_write and p.decision.existing_id
-        for scheme_id in p.target_scheme_ids
-    }
-    stale_pairs = sorted(held - claimed)
-    if not stale_pairs:
-        return []
+    for claim in plan.schemes.values():
+        if not claim.resolved:
+            continue
+        titles.update(claim.scheme_titles)
+        for scheme_id in claim.scheme_ids:
+            csv_rows[scheme_id] += len(claim.csv_rows)
+            if claim.category == SCHEME_FANOUT:
+                via_fanout.add(scheme_id)
+            holders = by_scheme[scheme_id]
+            for officer in claim.writable_claimants:
+                # Identity, not equality: one officer can reach the same scheme
+                # through two claims, and OfficerPlan is not hashable.
+                if not any(held is officer for held in holders):
+                    holders.append(officer)
 
-    known = {p.decision.existing_id: p for p in officers if p.decision.existing_id}
-    unknown_names = db.load_user_names(
-        user_id for user_id, _ in stale_pairs if user_id not in known
-    )
-
-    stale: list[StaleMapping] = []
-    for user_id, scheme_id in stale_pairs:
-        officer = known.get(user_id)
-        if officer is not None:
-            officer.to_remove.add(scheme_id)
-        stale.append(StaleMapping(
-            user_id=user_id,
+    return [
+        SchemeContention(
             scheme_id=scheme_id,
-            holder_name=(officer.decision.row.name if officer is not None
-                         else unknown_names.get(user_id, "")),
-            in_csv=officer is not None,
-        ))
-    return stale
+            title=titles.get(scheme_id, ""),
+            officers=holders,
+            via_fanout=scheme_id in via_fanout,
+            csv_rows=csv_rows[scheme_id],
+        )
+        for scheme_id, holders in sorted(by_scheme.items())
+        if len(holders) > 1
+    ]
+
+
+def attribute_removals(officers: list[OfficerPlan],
+                       reconciliation: "MappingReconciliation") -> None:
+    """Hand each officer back the schemes the reconciler is taking from them.
+
+    The reconciler works in row ids across the whole tenant; the per-officer
+    sheets speak in scheme ids. This is the one translation between the two, and
+    it is why mapping_detail can still say what a named officer loses without
+    re-deriving it from a second, drifting copy of the rule.
+    """
+    by_user = {p.decision.existing_id: p for p in officers if p.decision.existing_id}
+    for removal in reconciliation.coverage_removals:
+        officer = by_user.get(removal.user_id)
+        if officer is not None:
+            officer.to_remove.add(removal.scheme_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -806,10 +1036,15 @@ class SoIngestPlan(MappingIngestPlan):
     MappingIngestPlan.divisions stays empty on purpose: this CSV names its
     schemes outright, so there is no departmental node between the officer and
     their schemes. What is inherited and does matter is the writable/blocked-role
-    bookkeeping, the user-plan projection and the insert pairing.
+    bookkeeping, the user-plan projection, the insert pairing and the whole
+    reconciliation — which is now the same code that settles the two tools one
+    and two rungs up the hierarchy.
     """
     schemes: dict[str, SchemePlan] = field(default_factory=dict)
-    stale: list[StaleMapping] = field(default_factory=list)
+    # Whether the tenant has taken V39. False turns every claim into a
+    # centre_scheme_id one, which the report has to be able to say outright
+    # rather than leave as tens of thousands of identical fall-backs.
+    code_column_present: bool = True
 
     @property
     def officers(self) -> list[OfficerPlan]:
@@ -817,15 +1052,8 @@ class SoIngestPlan(MappingIngestPlan):
         return self.engineers
 
     @property
-    def remove_pairs(self) -> list[tuple[int, int]]:
-        """(user_id, scheme_id) to soft-delete. `replace` is on unless --additive."""
-        if not self.replace:
-            return []
-        return [(s.user_id, s.scheme_id) for s in self.stale]
-
-    @property
     def named_schemes(self) -> list[SchemePlan]:
-        """The centre ids the CSV actually gave, without the no-id pseudo plan."""
+        """The claims the CSV actually made, without the no-id pseudo plan."""
         return [s for s in self.schemes.values() if s.category != SCHEME_NO_ID]
 
     @property
@@ -837,15 +1065,6 @@ class SoIngestPlan(MappingIngestPlan):
         return set().union(*(s.scheme_ids for s in self.resolved_schemes)) \
             if self.resolved_schemes else set()
 
-    @property
-    def affected_user_ids(self) -> list[int]:
-        """Everyone whose mappings this run may change, officers and holders alike."""
-        ids = {p.decision.existing_id for p in self.writable if p.decision.existing_id}
-        if self.replace:
-            ids |= {s.user_id for s in self.stale}
-        return sorted(ids)
-
-
 def build_plan(
     rows: list[SoMappingRow],
     csv_issues: list[dict],
@@ -853,17 +1072,17 @@ def build_plan(
     update_roles: bool = True,
     create_users_without_schemes: bool = False,
     replace: bool = True,
-    skip_ambiguous_schemes: bool = False,
+    map_ambiguous_schemes: bool = False,
 ) -> SoIngestPlan:
     LOG.info("Classifying %d CSV rows …", len(rows))
-    schemes = resolve_schemes(rows, db, skip_ambiguous=skip_ambiguous_schemes)
+    schemes = resolve_schemes(rows, db, map_ambiguous=map_ambiguous_schemes)
     unresolved = [s for s in schemes.values()
                   if not s.resolved and s.category != SCHEME_NO_ID]
     if unresolved:
-        LOG.warning("%d centre id(s) did not resolve to a live scheme", len(unresolved))
+        LOG.warning("%d scheme claim(s) did not resolve to a live scheme", len(unresolved))
     no_id = schemes.get(SCHEME_NO_ID)
     if no_id is not None:
-        LOG.warning("%d row(s) carry no usable imis_id and are not mapped",
+        LOG.warning("%d row(s) carry neither scheme id and are not mapped",
                     len(no_id.csv_rows))
 
     officers = build_officer_plans(
@@ -871,10 +1090,15 @@ def build_plan(
         update_roles=update_roles,
         create_users_without_schemes=create_users_without_schemes,
     )
-    stale = find_stale_mappings(officers, schemes, db) if replace else []
-    if stale:
+
+    # Every row of this file is a section officer, so the CSV claims authority
+    # over exactly that role: a pump operator or SDO mapped to one of these
+    # schemes is somebody else's statement and is never read, let alone retired.
+    reconciliation = build_reconciliation(officers, db, (SO_ROLE,), prune=replace)
+    attribute_removals(officers, reconciliation)
+    if reconciliation.coverage_removals:
         LOG.warning("%d live section-officer mapping(s) are no longer stated by the CSV",
-                    len(stale))
+                    len(reconciliation.coverage_removals))
 
     user_types = db.load_user_types()
     role_plans = build_role_plans([p.decision for p in officers if p.will_write], user_types)
@@ -888,8 +1112,11 @@ def build_plan(
         replace=replace,
         with_state_dept_id=False,
         with_state_user_id=db.with_state_user_id,
+        roles=(SO_ROLE,),
+        reconciliation=reconciliation,
+        holder_names=db.load_user_names(reconciliation.affected_user_ids),
         schemes=schemes,
-        stale=stale,
+        code_column_present=db.state_scheme_code_column_exists(),
     )
 
 
@@ -943,24 +1170,39 @@ def build_summary_frame(plan: SoIngestPlan) -> pd.DataFrame:
     schemes = plan.named_schemes
     resolved = plan.resolved_schemes
     no_id = plan.schemes.get(SCHEME_NO_ID)
+    contested = contested_schemes(plan)
+    counts = plan.reconciliation.removals_by_reason()
 
     records = [
         {"metric": "CSV rows", "value": sum(len(p.csv_rows) for p in officers)},
-        {"metric": "  rows with no imis_id", "value": len(no_id.csv_rows) if no_id else 0},
-        {"metric": "distinct centre ids named", "value": len(schemes)},
-        {"metric": "  centre ids resolved", "value": len(resolved)},
-        {"metric": "  centre ids matching one scheme",
+        {"metric": "  rows with neither scheme id",
+         "value": len(no_id.csv_rows) if no_id else 0},
+        {"metric": "distinct scheme claims named", "value": len(schemes)},
+        {"metric": "  claims resolved", "value": len(resolved)},
+        {"metric": f"    by {STATE_SCHEME_CODE_COLUMN} (scheme_public_id)",
+         "value": len([s for s in resolved if s.matched_on == MATCH_PUBLIC_ID])},
+        {"metric": "    by centre_scheme_id (imis_id)",
+         "value": len([s for s in resolved if s.matched_on == MATCH_CENTRE_ID])},
+        {"metric": "  claims whose public id we do not hold (fell back to imis_id)",
+         "value": len([s for s in schemes if s.fallback_reason])},
+        {"metric": "  claims matching one scheme",
          "value": len([s for s in resolved if s.category == SCHEME_MATCHED])},
-        {"metric": "  centre ids matching several schemes",
+        {"metric": "  claims matching several schemes",
          "value": len([s for s in schemes if s.category == SCHEME_FANOUT])},
-        {"metric": "  centre ids not found",
-         "value": len([s for s in schemes if s.category == SCHEME_NOT_FOUND])},
-        {"metric": "  centre ids claimed by several officers",
-         "value": len([s for s in schemes if len(s.claimants) > 1])},
-        {"metric": "    of those, ones covering several schemes",
+        {"metric": "    of those, refused (nothing mapped, existing mappings retired)",
          "value": len([s for s in schemes
-                       if len(s.claimants) > 1 and s.category == SCHEME_FANOUT
-                       and s.resolved])},
+                       if s.category == SCHEME_FANOUT and not s.resolved])},
+        {"metric": "    of those, mapped in full (--map-ambiguous-schemes)",
+         "value": len([s for s in schemes
+                       if s.category == SCHEME_FANOUT and s.resolved])},
+        {"metric": "    of those, ones a public id would have resolved",
+         "value": len([s for s in schemes
+                       if s.category == SCHEME_FANOUT and s.fallback_reason])},
+        {"metric": "  claims not found",
+         "value": len([s for s in schemes if s.category == SCHEME_NOT_FOUND])},
+        {"metric": "schemes mapped to several officers", "value": len(contested)},
+        {"metric": "  of those, ones reached through a fan-out",
+         "value": len([c for c in contested if c.via_fanout])},
         {"metric": "schemes covered by the CSV", "value": len(plan.scheme_ids_covered)},
         {"metric": "distinct section officers", "value": len(officers)},
         {"metric": "  officers inserted",
@@ -973,15 +1215,29 @@ def build_summary_frame(plan: SoIngestPlan) -> pd.DataFrame:
                        if p.decision.category == CAT_EXISTING and not p.decision.changes])},
         {"metric": "  officers skipped",
          "value": len([p for p in officers if not p.will_write])},
-        {"metric": "scheme mappings to insert", "value": sum(len(p.to_insert) for p in writable)},
-        {"metric": "scheme mappings already correct",
-         "value": sum(len(p.target_scheme_ids & p.existing_scheme_ids) for p in writable)},
-        {"metric": "stale mappings to soft-delete",
-         "value": len(plan.remove_pairs)},
-        {"metric": "  of them held by an officer this CSV names",
-         "value": len([s for s in plan.stale if s.in_csv]) if plan.replace else 0},
-        {"metric": "  of them held by someone the CSV never names",
-         "value": len([s for s in plan.stale if not s.in_csv]) if plan.replace else 0},
+        {"metric": "scheme mappings to insert",
+         "value": len(plan.reconciliation.to_insert)
+         + sum(len(p.target_scheme_ids) for p in writable
+               if p.decision.category == CAT_NEW)},
+        {"metric": "scheme mappings to revive (a retired row reused)",
+         "value": len(plan.reconciliation.to_resurrect)},
+        {"metric": "scheme mappings already correct", "value": plan.reconciliation.unchanged},
+        {"metric": "mappings to retire (coverage lost)",
+         "value": len(plan.reconciliation.coverage_removals)},
+        {"metric": "  because the CSV moved the scheme to another officer",
+         "value": counts.get(REMOVAL_REASSIGNED, 0)},
+        {"metric": "  because the CSV no longer gives the officer the scheme",
+         "value": counts.get(REMOVAL_OUTSIDE_TARGET, 0)},
+        {"metric": "  because the holder is not in the latest dataset",
+         "value": counts.get(REMOVAL_ABSENT, 0)},
+        {"metric": "  because the holder is named but could not be processed",
+         "value": counts.get(REMOVAL_SKIPPED, 0)},
+        {"metric": "officers losing every mapping they hold",
+         "value": len(plan.reconciliation.stripped_user_ids)},
+        {"metric": "duplicate rows to collapse (no coverage lost)",
+         "value": counts.get(REMOVAL_DUPLICATE, 0)},
+        {"metric": "  pairs that held more than one live row",
+         "value": len(plan.reconciliation.duplicates)},
         {"metric": "state_user_id backfills",
          "value": len([p for p in writable if FIELD_STATE_USER_ID in p.decision.changes])},
     ]
@@ -989,10 +1245,13 @@ def build_summary_frame(plan: SoIngestPlan) -> pd.DataFrame:
 
 
 def build_scheme_frame(plan: SoIngestPlan, full: bool) -> pd.DataFrame:
-    """One row per centre id. Cleanly matched ids are elided unless --full-scheme-sheet.
+    """One row per scheme claim. Clean matches are elided unless --full-scheme-sheet.
 
-    27,000 rows of 'MATCHED' bury the handful an operator actually has to look
-    at, so by default only the ids that did something unusual are written.
+    31,000 rows of 'MATCHED' bury the handful an operator actually has to look
+    at, so by default only the claims that did something unusual are written.
+    A fall-back to the centre id that still matched one scheme is not unusual —
+    it is every row until state_scheme_code is backfilled — so it is counted in
+    the summary rather than listed here.
     """
     schemes = sorted(
         plan.schemes.values(), key=lambda s: (s.category, s.imis_id, s.key)
@@ -1000,14 +1259,15 @@ def build_scheme_frame(plan: SoIngestPlan, full: bool) -> pd.DataFrame:
     if not full:
         schemes = [
             s for s in schemes
-            if s.category != SCHEME_MATCHED or len(s.claimants) > 1 or not s.removable
+            if s.category != SCHEME_MATCHED or len(s.claimants) > 1 or not s.mapped
         ]
 
     records = [
         {
-            "imis_id": s.imis_id,
             "scheme_public_ids": _fmt_ids(s.public_ids, limit=5),
+            "imis_id": s.imis_id,
             "outcome": s.category,
+            "matched_on": s.matched_on,
             "reason": s.reason,
             "csv_rows": len(s.csv_rows),
             "our_scheme_ids": _fmt_ids(s.scheme_ids),
@@ -1016,33 +1276,49 @@ def build_scheme_frame(plan: SoIngestPlan, full: bool) -> pd.DataFrame:
                 p.decision.row.name or "(unnamed)" for p in s.claimants
             ),
             "usable_officers": len(s.writable_claimants),
-            "stale_mappings_removable": "yes" if s.removable else "no",
+            # What this claim does to coverage. It never says a scheme is safe:
+            # a mapping on it is retired if the CSV does not restate it, whatever
+            # became of the claim — see SchemePlan.mapped.
+            "anyone_mapped_from_it": "yes" if s.mapped else "no",
         }
         for s in schemes
     ]
     return pd.DataFrame.from_records(records) if records else pd.DataFrame(
-        columns=["imis_id", "scheme_public_ids", "outcome", "reason", "our_scheme_ids"]
+        columns=["scheme_public_ids", "imis_id", "outcome", "matched_on", "reason",
+                 "our_scheme_ids"]
     )
 
 
 def build_mapping_frame(plan: SoIngestPlan, include_pii: bool) -> pd.DataFrame:
     show = (lambda p: p) if include_pii else safe_mask
+    inserts = plan.reconciliation.inserts_by_user()
+    revivals = plan.reconciliation.revivals_by_user()
+    removals = plan.reconciliation.removals_by_user()
     records = []
     for p in plan.writable:
         decision = p.decision
+        # A user this run onboards holds no rows yet, so their whole target is
+        # an insert and the reconciler — which only saw existing users — has
+        # nothing to say about them.
+        fresh = (p.target_scheme_ids if decision.category == CAT_NEW
+                 else inserts.get(decision.existing_id, set()))
+        revived = revivals.get(decision.existing_id, set())
+        retired = removals.get(decision.existing_id, set())
         records.append({
             "csv_rows": len(p.csv_rows),
             "section_officer": decision.row.name,
             "phone": show(p.phone),
             "existing_user_id": decision.existing_id,
-            "centre_ids_in_csv": len(p.schemes),
-            "centre_ids_resolved": len(p.resolved_schemes),
+            "scheme_claims_in_csv": len(p.schemes),
+            "scheme_claims_resolved": len(p.resolved_schemes),
             "schemes_claimed": len(p.target_scheme_ids),
             "already_mapped": len(p.target_scheme_ids & p.existing_scheme_ids),
-            "mappings_to_insert": len(p.to_insert),
-            "mappings_to_soft_delete": len(p.to_remove) if plan.replace else 0,
-            "scheme_ids_to_insert": _fmt_ids(p.to_insert),
-            "scheme_ids_to_soft_delete": _fmt_ids(p.to_remove) if plan.replace else "",
+            "mappings_to_insert": len(fresh),
+            "mappings_to_revive": len(revived),
+            "mappings_to_retire": len(retired),
+            "scheme_ids_to_insert": _fmt_ids(fresh),
+            "scheme_ids_to_revive": _fmt_ids(revived),
+            "scheme_ids_to_retire": _fmt_ids(retired),
         })
     return pd.DataFrame.from_records(records) if records else pd.DataFrame(
         columns=["csv_rows", "section_officer", "schemes_claimed", "mappings_to_insert"]
@@ -1077,29 +1353,6 @@ def build_officer_frame(plan: SoIngestPlan, include_pii: bool) -> pd.DataFrame:
     )
 
 
-def build_removal_frame(plan: SoIngestPlan) -> pd.DataFrame:
-    """Every mapping an execute run would soft-delete, in full.
-
-    This is the destructive half of the run, so nothing here is elided: the
-    operator signs off on the whole list or on none of it.
-    """
-    records = [
-        {
-            "user_id": s.user_id,
-            "holder": s.holder_name,
-            "holder_is_in_the_csv": "yes" if s.in_csv else "no",
-            "scheme_id": s.scheme_id,
-            "reason": "the CSV gives this scheme to another section officer"
-            if s.in_csv else
-            "this section officer is not the one the CSV names for this scheme",
-        }
-        for s in plan.stale
-    ] if plan.replace else []
-    return pd.DataFrame.from_records(records) if records else pd.DataFrame(
-        columns=["user_id", "holder", "holder_is_in_the_csv", "scheme_id", "reason"]
-    )
-
-
 def build_role_frame(plan: SoIngestPlan) -> pd.DataFrame:
     """One row, normally: SECTION_OFFICER, already present."""
     records = [
@@ -1128,8 +1381,8 @@ def build_analytics_frame(plan: SoIngestPlan) -> pd.DataFrame:
     return pd.DataFrame.from_records([
         {"metric": "dim_user_table rows upserted", "value": len(touched)},
         {"metric": "dim_user_scheme_mapping_table users replaced", "value": len(affected)},
-        {"metric": "  of them only because a stale mapping was removed",
-         "value": len({s.user_id for s in plan.stale if not s.in_csv}) if plan.replace else 0},
+        {"metric": "  of them only because a legacy mapping was retired",
+         "value": len(plan.reconciliation.stripped_user_ids)},
     ])
 
 
@@ -1141,7 +1394,7 @@ def build_conflict_frame(plan: SoIngestPlan, include_pii: bool) -> pd.DataFrame:
     for scheme in plan.schemes.values():
         if scheme.category == SCHEME_NO_ID:
             records.append({
-                "kind": "SCHEME_NO_IMIS_ID",
+                "kind": "SCHEME_NO_ID_AT_ALL",
                 "csv_rows": len(scheme.csv_rows),
                 "subject": f"{len(scheme.csv_rows)} row(s)",
                 "detail": f"{scheme.reason}; scheme_public_id(s): "
@@ -1150,41 +1403,78 @@ def build_conflict_frame(plan: SoIngestPlan, include_pii: bool) -> pd.DataFrame:
             continue
         if not scheme.resolved:
             records.append({
-                "kind": f"SCHEME_{scheme.category}",
+                # A fan-out is refused rather than unfindable, and reads as
+                # "MATCHED_SEVERAL" otherwise — which is the opposite of what
+                # happened to it.
+                "kind": "SCHEME_AMBIGUOUS_NOT_MAPPED"
+                if scheme.category == SCHEME_FANOUT else f"SCHEME_{scheme.category}",
                 "csv_rows": len(scheme.csv_rows),
                 "subject": scheme.subject,
                 "detail": scheme.reason,
-            })
-        # A fan-out one officer owns outright is not a conflict — they cover all
-        # of it either way — so it is left to the scheme_detail sheet. What lands
-        # here is the combination that actually over-grants: several schemes
-        # behind one centre id, and several officers claiming it.
-        if len(scheme.claimants) > 1:
-            names = ", ".join(p.decision.row.name or "(unnamed)" for p in scheme.claimants)
-            fanout = scheme.category == SCHEME_FANOUT and scheme.resolved
-            records.append({
-                "kind": "SCHEME_CONTESTED_FANOUT" if fanout else "SCHEME_MULTIPLE_OFFICERS",
-                "csv_rows": len(scheme.csv_rows),
-                "subject": scheme.subject,
-                "detail": (
-                    f"{len(scheme.claimants)} officers ({names}) are listed against this "
-                    f"centre id, and it covers {len(scheme.scheme_ids)} schemes "
-                    f"({_fmt_ids(scheme.scheme_ids)}) — every one of those officers is "
-                    f"mapped to every one of those schemes, because the CSV gives no "
-                    f"state scheme id to tell them apart"
-                    if fanout else
-                    f"{len(scheme.claimants)} officers ({names}) are listed against this "
-                    f"centre id — all of them are mapped to it"
-                ),
             })
         if scheme.resolved and not scheme.writable_claimants:
             records.append({
                 "kind": "SCHEME_CLAIMANTS_ALL_SKIPPED",
                 "csv_rows": len(scheme.csv_rows),
                 "subject": scheme.subject,
-                "detail": "every officer listed against this centre id was skipped, so "
-                          "its existing mappings are left exactly as they are",
+                "detail": "every officer listed against this claim was skipped, so "
+                          "nothing is mapped from it — and because removal follows the "
+                          "officer rather than the scheme, the mappings those officers "
+                          "held on it are retired all the same unless --additive",
             })
+
+    # The public ids we could not use, as one record rather than tens of
+    # thousands. Every claim falls back until state_scheme_code is backfilled,
+    # so a row per claim would bury everything else on the sheet; what an
+    # operator needs from here is the size of the gap and what it cost, and
+    # scheme_detail carries the individual fan-outs it left behind.
+    fell_back = [s for s in plan.named_schemes if s.fallback_reason]
+    if fell_back:
+        fanned = [s for s in fell_back if s.category == SCHEME_FANOUT]
+        refused = [s for s in fanned if not s.resolved]
+        records.append({
+            "kind": "SCHEME_PUBLIC_ID_UNKNOWN_HERE",
+            "csv_rows": sum(len(s.csv_rows) for s in fell_back),
+            "subject": f"{len(fell_back)} claim(s)",
+            "detail": (
+                (f"this tenant has no {STATE_SCHEME_CODE_COLUMN} column (V39), so every "
+                 f"claim was resolved by centre_scheme_id alone"
+                 if not plan.code_column_present else
+                 f"{len(fell_back)} claim(s) name a scheme_public_id no live scheme "
+                 f"carries, so they were resolved by centre_scheme_id instead")
+                + (f"; {len(fanned)} of those match several schemes each "
+                   f"(e.g. {_fmt_ids([s.public_id for s in fanned], limit=5)}) and "
+                   + ("are mapped to none of them"
+                      if refused else "are mapped to all of them")
+                   + f" — backfilling {STATE_SCHEME_CODE_COLUMN} would resolve each of "
+                   f"them to exactly one scheme"
+                   if fanned else
+                   "; none of them matched several schemes, so each still resolved to one")
+            ),
+        })
+
+    # Contention is a fact about a scheme, not about a claim: two officers can
+    # arrive at one scheme down two different claims, and a fan-out puts them
+    # there without the file ever saying so. A scheme several officers genuinely
+    # share is legal — the mapping table is many-to-many — so the two are
+    # reported apart rather than blurred together.
+    for contested in contested_schemes(plan):
+        names = ", ".join(p.decision.row.name or "(unnamed)" for p in contested.officers)
+        records.append({
+            "kind": "SCHEME_CONTESTED_FANOUT" if contested.via_fanout
+            else "SCHEME_MULTIPLE_OFFICERS",
+            "csv_rows": contested.csv_rows,
+            "subject": f"scheme {contested.scheme_id} ({contested.title})",
+            "detail": (
+                f"{len(contested.officers)} officers ({names}) are mapped to this "
+                f"scheme, at least one of them through an id that covers several "
+                f"schemes and --map-ambiguous-schemes — we hold nothing that tells "
+                f"those schemes apart, so this is coverage the CSV never stated"
+                if contested.via_fanout else
+                f"{len(contested.officers)} officers ({names}) are listed against this "
+                f"scheme — all of them are mapped to it"
+            ),
+        })
 
     for p in plan.officers:
         subject = p.decision.row.name or show(p.decision.row.phone_raw)
@@ -1215,9 +1505,10 @@ def build_conflict_frame(plan: SoIngestPlan, include_pii: bool) -> pd.DataFrame:
                 "kind": "OFFICER_SCHEMES_UNRESOLVED",
                 "csv_rows": len(p.csv_rows),
                 "subject": subject,
-                "detail": f"{len(unresolved)} of this officer's {len(p.schemes)} centre "
-                          f"id(s) did not resolve; those schemes are neither mapped nor "
-                          f"removed from anyone",
+                "detail": f"{len(unresolved)} of this officer's {len(p.schemes)} scheme "
+                          f"claim(s) resolved to nothing this run can map — nothing is "
+                          f"mapped from them, and any mapping this officer already held "
+                          f"under them is retired unless --additive",
             })
         if p.will_write and not plan.replace and p.existing_scheme_ids - p.target_scheme_ids:
             records.append({
@@ -1229,15 +1520,7 @@ def build_conflict_frame(plan: SoIngestPlan, include_pii: bool) -> pd.DataFrame:
                           f"they are kept",
             })
 
-    holders = {s.user_id for s in plan.stale if not s.in_csv} if plan.replace else set()
-    if holders:
-        records.append({
-            "kind": "STALE_HOLDERS_OUTSIDE_THE_CSV",
-            "csv_rows": 0,
-            "subject": f"{len(holders)} user(s)",
-            "detail": "section officers the CSV never names hold mappings on schemes it "
-                      "does name; those mappings are soft-deleted — see removal_detail",
-        })
+    records.extend(legacy_holder_conflicts(plan))
 
     for problem in unusable_roles(plan):
         records.append({
@@ -1272,6 +1555,8 @@ def write_analysis_workbook(plan: SoIngestPlan, path: str, include_pii: bool,
         build_officer_frame(plan, include_pii).to_excel(
             writer, sheet_name="so_detail", index=False)
         build_removal_frame(plan).to_excel(writer, sheet_name="removal_detail", index=False)
+        build_duplicate_frame(plan).to_excel(
+            writer, sheet_name="duplicate_detail", index=False)
         build_role_frame(plan).to_excel(writer, sheet_name="role_summary", index=False)
         build_analytics_frame(plan).to_excel(writer, sheet_name="analytics_summary", index=False)
         build_conflict_frame(plan, include_pii).to_excel(
@@ -1308,13 +1593,20 @@ def execute_tenant(
             f"refusing to write scheme mappings against an unknown user."
         )
 
+    # Order matters. Retiring first frees every row the CSV contradicts,
+    # including the duplicate copies of a pair that is about to be revived, so
+    # the resurrect that follows can leave exactly one live row behind it.
+    reconciliation = plan.reconciliation
+    stats["scheme_mappings_retired"] = mapping_writer.deactivate_rows(
+        plan.deactivate_row_ids
+    )
+    stats["scheme_mappings_revived"] = mapping_writer.resurrect_rows(
+        plan.resurrect_row_ids
+    )
     stats["scheme_mappings_inserted"] = mapping_writer.insert_mappings(plan.insert_pairs)
-    stats["scheme_mappings_soft_deleted"] = mapping_writer.soft_delete_mappings(
-        plan.remove_pairs
-    )
-    stats["scheme_mappings_already_correct"] = sum(
-        len(p.target_scheme_ids & p.existing_scheme_ids) for p in plan.writable
-    )
+    stats["scheme_mappings_already_correct"] = reconciliation.unchanged
+    stats["duplicate_rows_collapsed"] = len(reconciliation.duplicate_removals)
+    stats["mappings_removed_costing_coverage"] = len(reconciliation.coverage_removals)
     return stats
 
 
@@ -1416,16 +1708,21 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                              "every existing one alone. By default the CSV is authoritative "
                              "for the schemes it names, so a section-officer mapping on one "
                              "of them that the CSV does not state is soft-deleted")
-    parser.add_argument("--skip-ambiguous-schemes", action="store_true",
-                        help="refuse an imis_id that matches more than one live scheme "
-                             "instead of mapping the officer to all of them")
+    parser.add_argument("--map-ambiguous-schemes", action="store_true",
+                        help="map the officer to every live scheme a single id matches. "
+                             "By default such a claim is refused, so the officer covers "
+                             "only what the CSV states unambiguously and any mapping "
+                             "they held on the rest is retired with everything else the "
+                             "CSV no longer states. Only the fall-back to imis_id can "
+                             f"fan out in practice; a {STATE_SCHEME_CODE_COLUMN} is "
+                             f"unique per live scheme")
     parser.add_argument("--skip-analytics", action="store_true",
                         help="do not touch the analytics warehouse")
     parser.add_argument("--no-role-updates", action="store_true",
                         help=f"never change an existing user's role to {SO_ROLE}, even when "
                              f"the CSV disagrees; the difference is still reported")
     parser.add_argument("--create-users-without-schemes", action="store_true",
-                        help="onboard an officer whose centre ids all failed to resolve; "
+                        help="onboard an officer whose scheme claims all failed to resolve; "
                              "by default they are skipped, because the account would have "
                              "no schemes and a re-run picks them up once the ids are fixed")
     parser.add_argument("--with-state-user-id", action="store_true",
@@ -1434,8 +1731,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                              "option the column is neither read nor written, so the mapping "
                              "can be ingested before the migration lands")
     parser.add_argument("--full-scheme-sheet", action="store_true",
-                        help="write every centre id to the scheme_detail sheet; by default "
-                             "only the ones that need a human eye are listed")
+                        help="write every scheme claim to the scheme_detail sheet; by "
+                             "default only the ones that need a human eye are listed")
     parser.add_argument("--include-pii", action="store_true",
                         help="write full phone numbers into the analysis workbook "
                              "(masked by default)")
@@ -1467,8 +1764,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         # the removal rule reads their absence as the CSV taking them away.
         return _fail(
             "--limit cannot be combined with --execute unless --additive is also set: "
-            "the CSV lists one row per scheme, so cutting it short would soft-delete "
-            "every mapping past the cut. Rehearse with --limit and no --execute."
+            "the run is authoritative and the CSV lists one row per scheme, so cutting "
+            "it short would retire every mapping past the cut. Rehearse with --limit "
+            "and no --execute."
         )
 
     try:
@@ -1507,7 +1805,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             update_roles=not args.no_role_updates,
             create_users_without_schemes=args.create_users_without_schemes,
             replace=not args.additive,
-            skip_ambiguous_schemes=args.skip_ambiguous_schemes,
+            map_ambiguous_schemes=args.map_ambiguous_schemes,
         )
 
         context = {
@@ -1521,12 +1819,19 @@ def main(argv: Optional[list[str]] = None) -> int:
             "mapping_mode": "ADDITIVE (nothing is ever removed)" if args.additive else
             "AUTHORITATIVE (a section-officer mapping on a scheme the CSV names, "
             "that the CSV does not state, is soft-deleted)",
-            "ambiguous_schemes": "skipped" if args.skip_ambiguous_schemes
-            else "every scheme sharing the imis_id is mapped",
+            "scheme_matching": f"scheme_public_id -> {STATE_SCHEME_CODE_COLUMN} first, "
+                               f"then imis_id -> centre_scheme_id"
+                               if db.state_scheme_code_column_exists() else
+                               f"imis_id -> centre_scheme_id only ({STATE_SCHEME_CODE_COLUMN} "
+                               f"is not in this tenant; apply V39)",
+            "ambiguous_schemes": "every scheme sharing the id that resolved is mapped"
+            if args.map_ambiguous_schemes else
+            "refused — nothing is mapped from a claim matching several schemes, and "
+            "existing mappings on them are retired like any other the CSV omits",
             "analytics": "skipped" if args.skip_analytics else "included",
             "phones_in_report": "full" if args.include_pii else "masked",
-            "scheme_sheet": "every centre id" if args.full_scheme_sheet
-            else "only the centre ids that need a human eye",
+            "scheme_sheet": "every scheme claim" if args.full_scheme_sheet
+            else "only the claims that need a human eye",
             "role": f"{SO_ROLE} for every row; never created by this tool",
             "role_updates": "withheld" if args.no_role_updates else "applied",
             "officers_without_schemes": "onboarded" if args.create_users_without_schemes

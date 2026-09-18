@@ -47,6 +47,11 @@ sys.path.insert(
 from jjm_division_ee_mapping_ingest import (  # noqa: E402
     CAT_EXISTING,
     CAT_NEW,
+    MAPPING_STATUS_ACTIVE,
+    MAPPING_STATUS_INACTIVE,
+    REMOVAL_ABSENT,
+    REMOVAL_REASSIGNED,
+    REMOVAL_SKIPPED,
     AnalyticsWriter,
     MappingWriter,
     RolePlan,
@@ -63,6 +68,8 @@ from test_jjm_division_ee_mapping_ingest import (  # noqa: E402
 )
 
 from jjm_section_officer_scheme_mapping_ingest import (  # noqa: E402
+    MATCH_CENTRE_ID,
+    MATCH_PUBLIC_ID,
     SCHEME_FANOUT,
     SCHEME_MATCHED,
     SCHEME_NO_ID,
@@ -73,6 +80,8 @@ from jjm_section_officer_scheme_mapping_ingest import (  # noqa: E402
     SoIngestPlan,
     build_conflict_frame,
     build_plan,
+    build_scheme_frame,
+    claim_key,
     collapse_officers,
     execute_analytics,
     execute_tenant,
@@ -163,8 +172,10 @@ class TestLoadCsv:
 
         assert [r.row_no for r in rows] == [3, 4]
         assert rows[0].scheme_public_id == "SCH-001001"
+        assert rows[0].code_key == "sch-001001"
         assert rows[0].imis_id == "8156128"
         assert rows[0].imis_key == "8156128"
+        assert rows[0].claim_key == "sch-001001/8156128"
         assert rows[0].user_public_id == "USR-015758"
         assert rows[0].phone == "917002921268"
         assert issues == []
@@ -178,22 +189,32 @@ class TestLoadCsv:
         assert rows[0].role_raw == ""
         assert issues == []
 
-    def test_a_literal_null_imis_id_costs_the_row_its_scheme_not_the_officer(self, tmp_path):
-        """131 rows of this file say 'NULL' and two are simply blank. Both mean
-        the same thing, and neither may invalidate an officer who is perfectly
-        readable on their other 40 rows."""
+    def test_a_literal_null_imis_id_still_leaves_the_public_id_to_resolve_by(self, tmp_path):
+        """131 rows of this file say 'NULL' where the centre id belongs and two
+        are simply blank. Both mean the same thing — and neither costs the row
+        its scheme any more, because scheme_public_id is tried first."""
         rows, issues = rows_of(
             tmp_path,
             "SCH-011098,NULL,USR-041763,Pallabi Das,7896188354",
             "SCH-011112,,USR-041763,Pallabi Das,7896188354",
+        )
+
+        assert rows[0].imis_key == rows[1].imis_key == ""
+        assert rows[0].code_key == "sch-011098"
+        assert all(r.scheme_issues == [] for r in rows)
+        assert issues == []
+
+    def test_a_row_naming_neither_id_loses_its_scheme_but_not_its_officer(self, tmp_path):
+        """Only a row with nothing to resolve by is unusable, and even then the
+        officer is perfectly readable on their other 40 rows."""
+        rows, issues = rows_of(
+            tmp_path,
+            ",NULL,USR-041763,Pallabi Das,7896188354",
             "SCH-011113,8156128,USR-041763,Pallabi Das,7896188354",
         )
 
-        assert rows[0].imis_key == ""
-        assert rows[1].imis_key == ""
-        assert rows[0].scheme_issues and rows[1].scheme_issues
-        assert rows[0].blocking_issues == [] and rows[1].blocking_issues == []
-        assert rows[2].scheme_issues == []
+        assert rows[0].scheme_issues and rows[0].blocking_issues == []
+        assert rows[1].scheme_issues == []
         assert {i["issue_kind"] for i in issues} == {"scheme"}
 
     def test_leading_zeros_do_not_make_a_different_centre_id(self, tmp_path):
@@ -224,15 +245,16 @@ class TestLoadCsv:
         assert not any("1234567890" in i["issue"] for i in issues)
 
     def test_issue_records_use_the_csv_vocabulary(self, tmp_path):
-        _, issues = rows_of(tmp_path, "SCH-1,NULL,,No Ids,9000000004")
+        _, issues = rows_of(tmp_path, ",NULL,,No Ids,9000000004")
 
         assert {i["issue_kind"] for i in issues} == {"scheme", "state_user_id"}
-        assert issues[0]["scheme_public_id"] == "SCH-1"
+        assert "scheme_public_id" in issues[0]
         assert "imis_id" in issues[0]
 
     def test_the_real_export_parses(self):
         """The file this tool exists for, as shipped: 31,684 rows over 691
-        officers, 133 of which carry no usable centre id."""
+        officers. 133 rows carry no usable centre id, and every one of those
+        still names a scheme_public_id to be resolved by."""
         csv_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "section-officer-scheme-mapping.csv"
         )
@@ -245,7 +267,9 @@ class TestLoadCsv:
         assert len(rows) == 31684
         assert all(r.role == SO_ROLE for r in rows)
         assert len([r for r in rows if r.blocking_issues]) == 0
-        assert len([r for r in rows if r.scheme_issues]) == 133
+        assert len([r for r in rows if not r.imis_key]) == 133
+        assert all(r.code_key for r in rows)
+        assert len([r for r in rows if r.scheme_issues]) == 0
         assert len(officers) == 691
 
 
@@ -428,6 +452,18 @@ def conn_ready(conn):
         )
         _create_schema(cur, SCHEMA, with_columns=True)
         _create_schema(cur, LEGACY_SCHEMA, with_columns=False)
+        # V39, which the division/EE DDL predates: the public scheme code this
+        # tool resolves by, and the partial UNIQUE index that makes one code at
+        # most one live scheme. LEGACY_SCHEMA deliberately goes without it.
+        cur.execute(
+            f"ALTER TABLE {SCHEMA}.scheme_master_table "
+            f"ADD COLUMN state_scheme_code VARCHAR(255)"
+        )
+        cur.execute(
+            f"CREATE UNIQUE INDEX uq_{SCHEMA}_scheme_state_scheme_code "
+            f"ON {SCHEMA}.scheme_master_table(state_scheme_code) "
+            f"WHERE state_scheme_code IS NOT NULL AND deleted_at IS NULL"
+        )
         cur.execute("DROP SCHEMA IF EXISTS analytics_schema CASCADE")
         cur.execute("CREATE SCHEMA analytics_schema")
         cur.execute(ANALYTICS_DDL)
@@ -447,7 +483,7 @@ def db(conn_ready):
 
 @pytest.fixture
 def legacy_db(conn_ready):
-    """The same tool against a tenant where V36 has not been applied."""
+    """The same tool against a tenant where neither V36 nor V39 has been applied."""
     return SoDb(conn_ready, LEGACY_SCHEMA, _pii(), with_state_user_id=False)
 
 
@@ -462,16 +498,22 @@ def writers(db):
 
 
 def seed_scheme(db: SoDb, centre_id: str, state_id: str = "", name: str = "",
-                deleted: bool = False, is_active: bool = True) -> int:
+                deleted: bool = False, is_active: bool = True,
+                public_code: str = "") -> int:
     """A scheme identified the way the tenant identifies one: a centre id and a
-    state id, unique as a pair rather than singly."""
+    state id, unique as a pair rather than singly, plus the state's public code
+    where V39 has landed and the backfill has reached this scheme."""
+    code_column = ", state_scheme_code" if public_code else ""
+    code_value = ", %s" if public_code else ""
     with db.conn.cursor() as cur:
         cur.execute(
             f"INSERT INTO {db.schema}.scheme_master_table "
-            f"(uuid, state_scheme_id, centre_scheme_id, scheme_name, is_active, deleted_at) "
+            f"(uuid, state_scheme_id, centre_scheme_id, scheme_name, is_active, "
+            f"deleted_at{code_column}) "
             f"VALUES (gen_random_uuid()::text, %s, %s, %s, %s, "
-            f"{'NOW()' if deleted else 'NULL'}) RETURNING id",
-            (state_id or centre_id, centre_id, name or f"Scheme {centre_id}", is_active),
+            f"{'NOW()' if deleted else 'NULL'}{code_value}) RETURNING id",
+            (state_id or centre_id, centre_id, name or f"Scheme {centre_id}", is_active,
+             *((public_code,) if public_code else ())),
         )
         return cur.fetchone()[0]
 
@@ -512,17 +554,124 @@ class TestSchemeResolution:
 
         plan = plan_for(db, tmp_path, "SCH-001001,8156128,USR-1,A,9000000001")
 
-        resolved = plan.schemes["8156128"]
+        resolved = plan.schemes[claim_key("SCH-001001", "8156128")]
         assert resolved.category == SCHEME_MATCHED
+        assert resolved.matched_on == MATCH_CENTRE_ID
         assert resolved.scheme_ids == {scheme}
         assert resolved.public_ids == ["SCH-001001"]
 
-    def test_a_centre_id_shared_by_several_schemes_maps_all_of_them(self, db, tmp_path):
+    def test_the_public_id_resolves_the_scheme_before_the_centre_id_is_tried(
+        self, db, tmp_path
+    ):
+        """state_scheme_code is unique per live scheme, so it answers exactly;
+        the centre id it shares with another scheme never gets a say."""
+        wanted = seed_scheme(db, "8156128", "19394", public_code="SCH-001001")
+        seed_scheme(db, "8156128", "19395", public_code="SCH-001002")
+
+        plan = plan_for(db, tmp_path, "SCH-001001,8156128,USR-1,A,9000000001")
+
+        resolved = plan.schemes[claim_key("SCH-001001", "8156128")]
+        assert resolved.category == SCHEME_MATCHED
+        assert resolved.matched_on == MATCH_PUBLIC_ID
+        assert resolved.scheme_ids == {wanted}
+        assert resolved.fallback_reason == ""
+        assert officer(plan).target_scheme_ids == {wanted}
+
+    def test_the_public_id_splits_a_centre_id_two_officers_share(self, db, tmp_path):
+        """The 383 contested fan-outs are exactly this shape: one centre id,
+        two officers, one scheme each. The public code is what tells them
+        apart, so neither officer is granted the other's scheme."""
+        first_scheme = seed_scheme(db, "8156128", "19394", public_code="SCH-001001")
+        second_scheme = seed_scheme(db, "8156128", "19395", public_code="SCH-001002")
+
+        plan = plan_for(
+            db, tmp_path,
+            "SCH-001001,8156128,USR-1,First Officer,9000000001",
+            "SCH-001002,8156128,USR-2,Second Officer,9000000002",
+        )
+
+        first, second = plan.officers
+        assert first.target_scheme_ids == {first_scheme}
+        assert second.target_scheme_ids == {second_scheme}
+        assert all(len(s.claimants) == 1 for s in plan.named_schemes)
+
+    def test_case_and_whitespace_do_not_hide_a_public_id_match(self, db, tmp_path):
+        scheme = seed_scheme(db, "8156128", "19394", public_code=" sch-001001 ")
+
+        plan = plan_for(db, tmp_path, "SCH-001001,9999999,USR-1,A,9000000001")
+
+        resolved = plan.schemes[claim_key("SCH-001001", "9999999")]
+        assert resolved.matched_on == MATCH_PUBLIC_ID
+        assert resolved.scheme_ids == {scheme}
+
+    def test_a_public_id_we_do_not_hold_falls_back_to_the_centre_id(self, db, tmp_path):
+        """Until state_scheme_code is backfilled this is every row, so the
+        fall-back has to map exactly what it mapped before — and say it did."""
+        scheme = seed_scheme(db, "8156128", "19394")
+
+        plan = plan_for(db, tmp_path, "SCH-001001,8156128,USR-1,A,9000000001")
+
+        resolved = plan.schemes[claim_key("SCH-001001", "8156128")]
+        assert resolved.category == SCHEME_MATCHED
+        assert resolved.matched_on == MATCH_CENTRE_ID
+        assert resolved.scheme_ids == {scheme}
+        assert "no live scheme carries state_scheme_code 'SCH-001001'" in resolved.reason
+
+    def test_a_public_id_resolves_a_row_whose_imis_id_is_null(self, db, tmp_path):
+        """131 rows of the export say 'NULL' where the centre id belongs. With
+        the public code held, those rows are no longer unmappable."""
+        scheme = seed_scheme(db, "8156128", "19394", public_code="SCH-011098")
+
+        plan = plan_for(db, tmp_path, "SCH-011098,NULL,USR-1,A,9000000001")
+
+        resolved = plan.schemes[claim_key("SCH-011098", "")]
+        assert resolved.matched_on == MATCH_PUBLIC_ID
+        assert resolved.scheme_ids == {scheme}
+        assert SCHEME_NO_ID not in plan.schemes
+
+    def test_a_row_with_only_an_unknown_public_id_resolves_to_nothing(self, db, tmp_path):
+        seed_scheme(db, "8156128", "19394")
+
+        plan = plan_for(db, tmp_path, "SCH-011098,NULL,USR-1,A,9000000001")
+
+        resolved = plan.schemes[claim_key("SCH-011098", "")]
+        assert resolved.category == SCHEME_NOT_FOUND
+        assert "no imis_id to fall back to" in resolved.reason
+        assert officer(plan).skip_reason == SKIP_NO_SCHEME
+
+    def test_a_tenant_without_v39_resolves_by_the_centre_id_alone(
+        self, legacy_db, tmp_path
+    ):
+        """The column is checked for, not assumed: on a pre-V39 tenant the tool
+        behaves exactly as it did before it existed, and says why."""
+        scheme = seed_scheme(legacy_db, "8156128", "19394")
+
+        plan = plan_for(legacy_db, tmp_path, "SCH-001001,8156128,USR-1,A,9000000001")
+
+        resolved = plan.schemes[claim_key("SCH-001001", "8156128")]
+        assert resolved.matched_on == MATCH_CENTRE_ID
+        assert resolved.scheme_ids == {scheme}
+        assert "no state_scheme_code column (V39)" in resolved.reason
+
+    def test_a_soft_deleted_scheme_does_not_answer_for_its_public_id(self, db, tmp_path):
+        """The partial UNIQUE index skips deleted rows, so a retired scheme can
+        still hold the code — it must not be resolved by it."""
+        seed_scheme(db, "8156128", "19394", public_code="SCH-001001", deleted=True)
+        live = seed_scheme(db, "8156128", "19395")
+
+        plan = plan_for(db, tmp_path, "SCH-001001,8156128,USR-1,A,9000000001")
+
+        resolved = plan.schemes[claim_key("SCH-001001", "8156128")]
+        assert resolved.matched_on == MATCH_CENTRE_ID
+        assert resolved.scheme_ids == {live}
+
+    def test_a_centre_id_shared_by_several_schemes_maps_none_of_them(self, db, tmp_path):
         """scheme_master_table is unique on the (state, centre) pair, so one
         centre id legitimately covers several schemes — and the state's file says
-        so too, giving 4,003 of its imis_ids more than one scheme_public_id."""
-        first = seed_scheme(db, "8156128", "19394")
-        second = seed_scheme(db, "8156128", "19395")
+        so too, giving 4,003 of its imis_ids more than one scheme_public_id.
+        Which of them the row means is not guessed at: the claim is refused."""
+        seed_scheme(db, "8156128", "19394")
+        seed_scheme(db, "8156128", "19395")
 
         plan = plan_for(
             db, tmp_path,
@@ -530,22 +679,82 @@ class TestSchemeResolution:
             "SCH-001002,8156128,USR-1,A,9000000001",
         )
 
-        resolved = plan.schemes["8156128"]
-        assert resolved.category == SCHEME_FANOUT
-        assert resolved.scheme_ids == {first, second}
+        claims = [plan.schemes[claim_key(code, "8156128")]
+                  for code in ("SCH-001001", "SCH-001002")]
+        assert all(c.category == SCHEME_FANOUT for c in claims)
+        assert all(c.scheme_ids == set() for c in claims)
+        assert all("--map-ambiguous-schemes" in c.reason for c in claims)
+        assert officer(plan).target_scheme_ids == set()
+        assert officer(plan).skip_reason == SKIP_NO_SCHEME
+
+    def test_map_ambiguous_schemes_opts_back_into_the_fan_out(self, db, tmp_path):
+        first = seed_scheme(db, "8156128", "19394")
+        second = seed_scheme(db, "8156128", "19395")
+
+        plan = plan_for(
+            db, tmp_path,
+            "SCH-001001,8156128,USR-1,A,9000000001",
+            "SCH-001002,8156128,USR-1,A,9000000001",
+            map_ambiguous_schemes=True,
+        )
+
+        claims = [plan.schemes[claim_key(code, "8156128")]
+                  for code in ("SCH-001001", "SCH-001002")]
+        assert all(c.category == SCHEME_FANOUT for c in claims)
+        assert all(c.scheme_ids == {first, second} for c in claims)
         assert officer(plan).target_scheme_ids == {first, second}
 
-    def test_skip_ambiguous_schemes_refuses_the_fan_out(self, db, tmp_path):
+    def test_an_ambiguous_claim_is_not_dressed_up_as_a_match_on_the_sheets(
+        self, db, tmp_path
+    ):
+        """'MATCHED_SEVERAL' is what happened to the id, not what happened to the
+        officer — the conflicts sheet has to say the claim was dropped."""
         seed_scheme(db, "8156128", "19394")
         seed_scheme(db, "8156128", "19395")
 
-        plan = plan_for(db, tmp_path, "SCH-1,8156128,USR-1,A,9000000001",
-                        skip_ambiguous_schemes=True)
+        plan = plan_for(db, tmp_path, "SCH-001001,8156128,USR-1,A,9000000001")
 
-        resolved = plan.schemes["8156128"]
-        assert resolved.category == SCHEME_FANOUT
-        assert resolved.scheme_ids == set()
-        assert "--skip-ambiguous-schemes" in resolved.reason
+        conflicts = build_conflict_frame(plan, include_pii=False)
+        assert "SCHEME_AMBIGUOUS_NOT_MAPPED" in set(conflicts["kind"])
+
+    def test_the_public_ids_we_do_not_hold_are_reported_as_one_record(self, db, tmp_path):
+        """Every claim falls back until state_scheme_code is backfilled, so the
+        conflicts sheet gets the size of the gap and what it cost — not 31,000
+        identical rows that would bury everything else on it."""
+        seed_scheme(db, "8156128", "19394")
+        seed_scheme(db, "8156128", "19395")
+        seed_scheme(db, "100", "19396")
+
+        plan = plan_for(
+            db, tmp_path,
+            "SCH-001001,8156128,USR-1,A,9000000001",
+            "SCH-001002,100,USR-1,A,9000000001",
+        )
+
+        conflicts = build_conflict_frame(plan, include_pii=False)
+        gap = conflicts[conflicts["kind"] == "SCHEME_PUBLIC_ID_UNKNOWN_HERE"]
+        assert len(gap) == 1
+        assert "2 claim(s) name a scheme_public_id no live scheme carries" in \
+            gap.iloc[0]["detail"]
+        assert "1 of those match several schemes each" in gap.iloc[0]["detail"]
+        assert "are mapped to none of them" in gap.iloc[0]["detail"]
+
+    def test_a_pre_v39_tenant_says_so_on_the_conflicts_sheet(self, legacy_db, tmp_path):
+        seed_scheme(legacy_db, "8156128", "19394")
+
+        plan = plan_for(legacy_db, tmp_path, "SCH-001001,8156128,USR-1,A,9000000001")
+
+        conflicts = build_conflict_frame(plan, include_pii=False)
+        gap = conflicts[conflicts["kind"] == "SCHEME_PUBLIC_ID_UNKNOWN_HERE"]
+        assert len(gap) == 1
+        assert "no state_scheme_code column (V39)" in gap.iloc[0]["detail"]
+
+    def test_an_officer_whose_every_claim_is_ambiguous_is_not_written(self, db, tmp_path):
+        seed_scheme(db, "8156128", "19394")
+        seed_scheme(db, "8156128", "19395")
+
+        plan = plan_for(db, tmp_path, "SCH-1,8156128,USR-1,A,9000000001")
+
         assert not officer(plan).will_write
 
     def test_an_unknown_centre_id_is_reported_not_guessed(self, db, tmp_path):
@@ -553,7 +762,7 @@ class TestSchemeResolution:
 
         plan = plan_for(db, tmp_path, "SCH-1,9999999,USR-1,A,9000000001")
 
-        resolved = plan.schemes["9999999"]
+        resolved = plan.schemes[claim_key("SCH-1", "9999999")]
         assert resolved.category == SCHEME_NOT_FOUND
         assert not resolved.resolved
         assert officer(plan).skip_reason == SKIP_NO_SCHEME
@@ -563,7 +772,7 @@ class TestSchemeResolution:
 
         plan = plan_for(db, tmp_path, "SCH-1,8156128,USR-1,A,9000000001")
 
-        assert plan.schemes["8156128"].category == SCHEME_NOT_FOUND
+        assert plan.schemes[claim_key("SCH-1", "8156128")].category == SCHEME_NOT_FOUND
 
     def test_an_inactive_scheme_is_still_the_officers_to_cover(self, db, tmp_path):
         """is_active tracks recent flow readings, not responsibility."""
@@ -571,16 +780,16 @@ class TestSchemeResolution:
 
         plan = plan_for(db, tmp_path, "SCH-1,8156128,USR-1,A,9000000001")
 
-        assert plan.schemes["8156128"].scheme_ids == {scheme}
+        assert plan.schemes[claim_key("SCH-1", "8156128")].scheme_ids == {scheme}
 
-    def test_rows_with_no_centre_id_collect_into_one_reported_plan(self, db, tmp_path):
+    def test_rows_with_neither_id_collect_into_one_reported_plan(self, db, tmp_path):
         scheme = seed_scheme(db, "100")
 
         plan = plan_for(
             db, tmp_path,
             "SCH-1,100,USR-1,A,9000000001",
-            "SCH-2,NULL,USR-1,A,9000000001",
-            "SCH-3,,USR-1,A,9000000001",
+            ",NULL,USR-1,A,9000000001",
+            ",,USR-1,A,9000000001",
         )
 
         no_id = plan.schemes[SCHEME_NO_ID]
@@ -588,7 +797,22 @@ class TestSchemeResolution:
         assert not no_id.resolved
         # The officer is still written, on the scheme that did resolve.
         assert officer(plan).target_scheme_ids == {scheme}
-        assert plan.named_schemes == [plan.schemes["100"]]
+        assert plan.named_schemes == [plan.schemes[claim_key("SCH-1", "100")]]
+
+    def test_the_scheme_sheet_names_which_id_answered(self, db, tmp_path):
+        seed_scheme(db, "100", "19394", public_code="SCH-1")
+        seed_scheme(db, "200", "19395")
+
+        plan = plan_for(
+            db, tmp_path,
+            "SCH-1,100,USR-1,A,9000000001",
+            "SCH-2,200,USR-1,A,9000000001",
+        )
+
+        frame = build_scheme_frame(plan, full=True)
+        matched_on = dict(zip(frame["scheme_public_ids"], frame["matched_on"]))
+        assert matched_on["SCH-1"] == MATCH_PUBLIC_ID
+        assert matched_on["SCH-2"] == MATCH_CENTRE_ID
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -654,6 +878,14 @@ class TestMapping:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestStaleMappings:
+    """The CSV is authoritative for SECTION_OFFICER, tenant-wide.
+
+    Every live mapping of that role which the file does not restate is retired,
+    whether it belongs to an officer the file names, an officer it names but
+    could not process, or one it has dropped altogether. Only another role's
+    mapping is out of reach.
+    """
+
     def test_a_scheme_handed_to_another_officer_is_taken_off_the_old_one(
         self, db, tmp_path, roles, writers
     ):
@@ -662,12 +894,12 @@ class TestStaleMappings:
         seed_mapping(db, previous, scheme)
 
         plan = plan_for(db, tmp_path, "SCH-1,100,USR-1,New Officer,9000000001")
-        assert [(s.user_id, s.scheme_id) for s in plan.stale] == [(previous, scheme)]
-        assert plan.stale[0].in_csv is False
+        assert [(r.user_id, r.scheme_id) for r in plan.reconciliation.coverage_removals] \
+            == [(previous, scheme)]
 
         stats = execute_tenant(plan, *writers)
 
-        assert stats["scheme_mappings_soft_deleted"] == 1
+        assert stats["scheme_mappings_retired"] == 1
         assert live_mappings(db, previous) == set()
         assert live_mappings(db, officer(plan).decision.existing_id) == {scheme}
 
@@ -687,11 +919,91 @@ class TestStaleMappings:
             "SCH-2,200,USR-2,Second,9000000002",
         )
         assert officer(plan, 0).to_remove == {moved}
-        assert [s.in_csv for s in plan.stale] == [True]
+        assert [r.reason for r in plan.reconciliation.coverage_removals] == [REMOVAL_REASSIGNED]
 
         execute_tenant(plan, *writers)
 
         assert live_mappings(db, first) == {kept}
+
+    def test_an_ambiguous_claim_takes_away_what_the_officer_held_under_it(
+        self, db, tmp_path, roles, writers
+    ):
+        """A refused claim is not a claim left alone. The officer is written on
+        what the CSV states unambiguously, and the schemes behind the ambiguous
+        id go the way of everything else the file no longer states."""
+        stated = seed_scheme(db, "100")
+        first = seed_scheme(db, "200", "A")
+        second = seed_scheme(db, "200", "B")
+        holder = seed_user(db, "Officer", "919000000001", roles[SO_ROLE])
+        for scheme in (stated, first, second):
+            seed_mapping(db, holder, scheme)
+
+        plan = plan_for(
+            db, tmp_path,
+            "SCH-1,100,USR-1,Officer,9000000001",
+            "SCH-2,200,USR-1,Officer,9000000001",
+        )
+        assert officer(plan).target_scheme_ids == {stated}
+        assert officer(plan).to_remove == {first, second}
+
+        execute_tenant(plan, *writers)
+
+        assert live_mappings(db, holder) == {stated}
+
+    def test_map_ambiguous_schemes_keeps_those_mappings_instead(
+        self, db, tmp_path, roles, writers
+    ):
+        stated = seed_scheme(db, "100")
+        first = seed_scheme(db, "200", "A")
+        second = seed_scheme(db, "200", "B")
+        holder = seed_user(db, "Officer", "919000000001", roles[SO_ROLE])
+        for scheme in (stated, first, second):
+            seed_mapping(db, holder, scheme)
+
+        plan = plan_for(
+            db, tmp_path,
+            "SCH-1,100,USR-1,Officer,9000000001",
+            "SCH-2,200,USR-1,Officer,9000000001",
+            map_ambiguous_schemes=True,
+        )
+        assert plan.reconciliation.coverage_removals == []
+
+        execute_tenant(plan, *writers)
+
+        assert live_mappings(db, holder) == {stated, first, second}
+
+    def test_an_officer_left_with_no_unambiguous_scheme_is_stripped_entirely(
+        self, db, tmp_path, roles, writers
+    ):
+        """Nothing the run can vouch for is left, so nothing survives — the same
+        rule that governs an officer whose ids resolved to nothing at all."""
+        first = seed_scheme(db, "200", "A")
+        second = seed_scheme(db, "200", "B")
+        holder = seed_user(db, "Officer", "919000000001", roles[SO_ROLE])
+        seed_mapping(db, holder, first)
+        seed_mapping(db, holder, second)
+
+        plan = plan_for(db, tmp_path, "SCH-1,200,USR-1,Officer,9000000001")
+        assert not officer(plan).will_write
+        assert {r.reason for r in plan.reconciliation.coverage_removals} == {REMOVAL_SKIPPED}
+
+        execute_tenant(plan, *writers)
+
+        assert live_mappings(db, holder) == set()
+
+    def test_additive_keeps_what_an_ambiguous_claim_would_have_taken(
+        self, db, tmp_path, roles, writers
+    ):
+        first = seed_scheme(db, "200", "A")
+        seed_scheme(db, "200", "B")          # makes the claim ambiguous
+        holder = seed_user(db, "Officer", "919000000001", roles[SO_ROLE])
+        seed_mapping(db, holder, first)
+
+        plan = plan_for(db, tmp_path, "SCH-1,200,USR-1,Officer,9000000001", replace=False)
+
+        execute_tenant(plan, *writers)
+
+        assert live_mappings(db, holder) == {first}
 
     def test_another_roles_mapping_on_the_same_scheme_is_never_touched(
         self, db, tmp_path, roles, writers
@@ -705,61 +1017,50 @@ class TestStaleMappings:
         seed_mapping(db, sdo, scheme)
 
         plan = plan_for(db, tmp_path, "SCH-1,100,USR-1,New Officer,9000000001")
-        assert plan.stale == []
+        assert plan.reconciliation.removals == []
 
         execute_tenant(plan, *writers)
 
         assert live_mappings(db, operator) == {scheme}
         assert live_mappings(db, sdo) == {scheme}
 
-    def test_a_scheme_the_csv_never_names_is_left_alone(self, db, tmp_path, roles, writers):
+    def test_a_legacy_officer_loses_even_a_scheme_the_csv_never_names(
+        self, db, tmp_path, roles, writers
+    ):
+        """Requirement 5: absence from the dataset is a statement about the
+        person, not about the schemes they happen to hold."""
         named = seed_scheme(db, "100")
         elsewhere = seed_scheme(db, "999")
-        holder = seed_user(db, "Officer", "919000000009", roles[SO_ROLE])
+        holder = seed_user(db, "Legacy Officer", "919000000009", roles[SO_ROLE])
         seed_mapping(db, holder, elsewhere)
 
         plan = plan_for(db, tmp_path, "SCH-1,100,USR-1,New Officer,9000000001")
-        assert plan.stale == []
+        assert [r.reason for r in plan.reconciliation.coverage_removals] == [REMOVAL_ABSENT]
 
         execute_tenant(plan, *writers)
 
-        assert live_mappings(db, holder) == {elsewhere}
+        assert live_mappings(db, holder) == set()
         assert live_mappings(db, officer(plan).decision.existing_id) == {named}
 
-    def test_a_scheme_whose_centre_id_did_not_resolve_is_left_alone(
+    def test_an_officer_the_csv_names_but_could_not_process_is_stripped_and_labelled(
         self, db, tmp_path, roles, writers
     ):
-        """An unreadable imis_id must not cost an officer a scheme they cover."""
+        """Named but unresolvable is still 'not in the latest snapshot'. It is
+        reported under its own reason so the operator can tell the two apart."""
         scheme = seed_scheme(db, "100")
-        holder = seed_user(db, "Officer", "919000000009", roles[SO_ROLE])
+        holder = seed_user(db, "Known Officer", "919000000001", roles[SO_ROLE])
         seed_mapping(db, holder, scheme)
 
-        # The CSV names this officer's scheme by a centre id we do not hold.
-        plan = plan_for(db, tmp_path, "SCH-1,777,USR-1,New Officer,9000000001")
-        assert plan.stale == []
+        # Same phone, but the centre id on their only row does not resolve, so
+        # the officer is skipped rather than written.
+        plan = plan_for(db, tmp_path, "SCH-1,777,USR-1,Known Officer,9000000001")
+        assert not officer(plan).will_write
+        assert [r.reason for r in plan.reconciliation.coverage_removals] == [REMOVAL_SKIPPED]
+        assert "no scheme" in plan.reconciliation.coverage_removals[0].detail
 
         execute_tenant(plan, *writers)
 
-        assert live_mappings(db, holder) == {scheme}
-
-    def test_a_scheme_whose_only_claimants_were_skipped_keeps_its_mappings(
-        self, db, tmp_path, roles, writers
-    ):
-        """Stripping a scheme of its officers because we could not read a phone
-        number would take away coverage the CSV never asked us to take away."""
-        scheme = seed_scheme(db, "100")
-        holder = seed_user(db, "Officer", "919000000009", roles[SO_ROLE])
-        seed_mapping(db, holder, scheme)
-
-        plan = plan_for(db, tmp_path, "SCH-1,100,USR-1,Bad Phone,1234567890")
-        assert plan.schemes["100"].resolved
-        assert plan.schemes["100"].removable is False
-        assert plan.stale == []
-
-        stats = execute_tenant(plan, *writers)
-
-        assert stats["scheme_mappings_soft_deleted"] == 0
-        assert live_mappings(db, holder) == {scheme}
+        assert live_mappings(db, holder) == set()
 
     def test_additive_removes_nothing(self, db, tmp_path, roles, writers):
         scheme = seed_scheme(db, "100")
@@ -768,19 +1069,20 @@ class TestStaleMappings:
 
         plan = plan_for(db, tmp_path, "SCH-1,100,USR-1,New Officer,9000000001",
                         replace=False)
-        assert plan.stale == []
-        assert plan.remove_pairs == []
+        assert plan.reconciliation.removals == []
+        assert plan.deactivate_row_ids == []
 
         stats = execute_tenant(plan, *writers)
 
-        assert stats["scheme_mappings_soft_deleted"] == 0
+        assert stats["scheme_mappings_retired"] == 0
         assert live_mappings(db, previous) == {scheme}
 
     def test_the_removal_is_a_soft_delete_with_an_audit_trail(
         self, db, tmp_path, roles, writers
     ):
-        """Mirrors UserUploadRepository: the row stays, deleted_at/deleted_by
-        record who dropped it and when."""
+        """Mirrors UserUploadRepository — the row stays, deleted_at/deleted_by
+        record who dropped it and when — and additionally drops status to 0,
+        which every service read path already demands alongside deleted_at."""
         scheme = seed_scheme(db, "100")
         previous = seed_user(db, "Previous", "919000000009", roles[SO_ROLE])
         seed_mapping(db, previous, scheme)
@@ -789,11 +1091,11 @@ class TestStaleMappings:
 
         with db.conn.cursor() as cur:
             cur.execute(
-                f"SELECT deleted_at IS NOT NULL, deleted_by "
+                f"SELECT deleted_at IS NOT NULL, deleted_by, status "
                 f"FROM {SCHEMA}.user_scheme_mapping_table "
                 f"WHERE user_id = %s AND scheme_id = %s", (previous, scheme)
             )
-            assert cur.fetchone() == (True, ACTOR_ID)
+            assert cur.fetchone() == (True, ACTOR_ID, MAPPING_STATUS_INACTIVE)
 
     def test_a_rerun_of_the_same_csv_changes_nothing(self, db, tmp_path, roles, writers):
         """Idempotence is what makes this safe to run again after a fix."""
@@ -804,10 +1106,37 @@ class TestStaleMappings:
         second = plan_for(db, tmp_path, line)
 
         assert second.insert_pairs == []
-        assert second.remove_pairs == []
+        assert second.deactivate_row_ids == []
+        assert second.resurrect_row_ids == []
         stats = execute_tenant(second, *writers)
         assert stats["scheme_mappings_inserted"] == 0
-        assert stats["scheme_mappings_soft_deleted"] == 0
+        assert stats["scheme_mappings_retired"] == 0
+        assert stats["scheme_mappings_revived"] == 0
+
+    def test_a_scheme_taken_away_and_given_back_reuses_the_same_row(
+        self, db, tmp_path, roles, writers
+    ):
+        """Requirement 2 and 4 together: no second row is ever created."""
+        scheme = seed_scheme(db, "100")
+        line = "SCH-1,100,USR-1,Ashif Ahmed,9000000001"
+        execute_tenant(plan_for(db, tmp_path, line), *writers)
+        user = officer(plan_for(db, tmp_path, line)).decision.existing_id
+
+        # A run that does not mention them at all retires the mapping ...
+        execute_tenant(plan_for(db, tmp_path, "SCH-2,200,USR-2,Someone Else,9000000002"),
+                       *writers)
+        assert live_mappings(db, user) == set()
+
+        # ... and putting them back revives the row rather than adding one.
+        stats = execute_tenant(plan_for(db, tmp_path, line), *writers)
+
+        assert stats["scheme_mappings_revived"] == 1
+        assert stats["scheme_mappings_inserted"] == 0
+        with db.conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(*) FROM {SCHEMA}.user_scheme_mapping_table "
+                f"WHERE user_id = %s AND scheme_id = %s", (user, scheme))
+            assert cur.fetchone()[0] == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1016,7 +1345,7 @@ class TestAnalysisWorkbook:
         production write, so it has to survive every outcome the plan can hold —
         a clean match, a fan-out, an unresolvable id, a skipped person and a
         removal — and describe them in the file's own vocabulary."""
-        matched = seed_scheme(db, "100")
+        matched = seed_scheme(db, "100", public_code="SCH-1")
         seed_scheme(db, "200", "A")
         seed_scheme(db, "200", "B")            # a fanned-out centre id
         previous = seed_user(db, "Previous Officer", "919000000009", roles[SO_ROLE])
@@ -1027,8 +1356,8 @@ class TestAnalysisWorkbook:
             "SCH-1,100,USR-1,New Officer,9000000001",
             "SCH-2,200,USR-2,Fanout Officer,9000000002",
             "SCH-3,999,USR-3,Lost Officer,9000000003",
-            "SCH-4,100,USR-4,Bad Phone,1234567890",
-            "SCH-5,NULL,USR-5,No Id Officer,9000000005",
+            "SCH-1,100,USR-4,Bad Phone,1234567890",
+            ",NULL,USR-5,No Id Officer,9000000005",
         )
         out = tmp_path / "analysis.xlsx"
         write_analysis_workbook(plan, str(out), include_pii=False, context={"mode": "TEST"})
@@ -1036,23 +1365,29 @@ class TestAnalysisWorkbook:
         book = pd.read_excel(out, sheet_name=None)
         assert set(book) == {
             "run_info", "summary", "scheme_detail", "mapping_detail", "so_detail",
-            "removal_detail", "role_summary", "analytics_summary", "conflicts",
-            "csv_issues",
+            "removal_detail", "duplicate_detail", "role_summary", "analytics_summary",
+            "conflicts", "csv_issues",
         }
 
         summary = dict(zip(book["summary"]["metric"], book["summary"]["value"]))
-        assert summary["distinct centre ids named"] == 3
-        assert summary["  centre ids resolved"] == 2
-        assert summary["  centre ids matching several schemes"] == 1
-        assert summary["  centre ids not found"] == 1
-        assert summary["  rows with no imis_id"] == 1
-        # lost, bad phone, and the one whose only row carried no centre id
-        assert summary["  officers skipped"] == 3
-        assert summary["stale mappings to soft-delete"] == 1
+        assert summary["distinct scheme claims named"] == 3
+        assert summary["  claims resolved"] == 1
+        assert summary["    by state_scheme_code (scheme_public_id)"] == 1
+        assert summary["    by centre_scheme_id (imis_id)"] == 0
+        assert summary["  claims whose public id we do not hold (fell back to imis_id)"] == 2
+        assert summary["  claims matching several schemes"] == 1
+        assert summary[
+            "    of those, refused (nothing mapped, existing mappings retired)"] == 1
+        assert summary["  claims not found"] == 1
+        assert summary["  rows with neither scheme id"] == 1
+        # lost, fanned out, bad phone, and the one whose only row carried no id
+        assert summary["  officers skipped"] == 4
+        assert summary["mappings to retire (coverage lost)"] == 1
+        assert summary["  because the holder is not in the latest dataset"] == 1
 
         kinds = set(book["conflicts"]["kind"])
-        assert {"SCHEME_NOT_FOUND", "SCHEME_NO_IMIS_ID",
-                "OFFICER_SKIPPED", "STALE_HOLDERS_OUTSIDE_THE_CSV"} <= kinds
+        assert {"SCHEME_NOT_FOUND", "SCHEME_NO_ID_AT_ALL",
+                "OFFICER_SKIPPED", "LEGACY_HOLDER_STRIPPED"} <= kinds
         # A fan-out one officer owns outright is not a conflict; scheme_detail
         # carries it, and the sheet an operator has to read stays readable.
         assert "SCHEME_CONTESTED_FANOUT" not in kinds
@@ -1082,24 +1417,50 @@ class TestAnalysisWorkbook:
     def test_a_contested_fan_out_is_the_one_the_conflicts_sheet_singles_out(
         self, db, tmp_path
     ):
-        """One centre id, two schemes, two officers, and no state scheme id in
-        the file to split them by: both officers get both schemes. That is the
-        combination that over-grants, and it has to be legible among the 4,000
-        harmless fan-outs the same file contains."""
+        """One centre id, two schemes, two officers, and neither public id held
+        here to split them by. Refused, nobody is over-granted and there is
+        nothing to report; asked for with --map-ambiguous-schemes, both officers
+        get both schemes and every one of those schemes is named."""
         first = seed_scheme(db, "200", "A")
         second = seed_scheme(db, "200", "B")
-
-        plan = plan_for(
-            db, tmp_path,
+        lines = (
             "SCH-1,200,USR-1,First Officer,9000000001",
             "SCH-2,200,USR-2,Second Officer,9000000002",
         )
-        conflicts = build_conflict_frame(plan, include_pii=False)
+
+        refused = plan_for(db, tmp_path, *lines)
+        assert all(p.target_scheme_ids == set() for p in refused.officers)
+        assert "SCHEME_CONTESTED_FANOUT" not in set(
+            build_conflict_frame(refused, include_pii=False)["kind"])
+
+        mapped = plan_for(db, tmp_path, *lines, map_ambiguous_schemes=True)
+        conflicts = build_conflict_frame(mapped, include_pii=False)
 
         contested = conflicts[conflicts["kind"] == "SCHEME_CONTESTED_FANOUT"]
-        assert len(contested) == 1
-        assert "First Officer" in contested.iloc[0]["detail"]
-        assert all(p.target_scheme_ids == {first, second} for p in plan.officers)
+        assert sorted(contested["subject"]) == [
+            f"scheme {scheme} (Scheme 200)" for scheme in sorted((first, second))
+        ]
+        assert all("First Officer" in detail and "Second Officer" in detail
+                   for detail in contested["detail"])
+        assert all(p.target_scheme_ids == {first, second} for p in mapped.officers)
+
+    def test_a_scheme_two_officers_share_outright_is_reported_apart_from_a_fan_out(
+        self, db, tmp_path
+    ):
+        """Two officers on one scheme is a fact the CSV is allowed to state, and
+        must not be dressed up as an accidental over-grant."""
+        scheme = seed_scheme(db, "100", public_code="SCH-1")
+
+        plan = plan_for(
+            db, tmp_path,
+            "SCH-1,100,USR-1,First Officer,9000000001",
+            "SCH-1,100,USR-2,Second Officer,9000000002",
+        )
+        conflicts = build_conflict_frame(plan, include_pii=False)
+
+        shared = conflicts[conflicts["kind"] == "SCHEME_MULTIPLE_OFFICERS"]
+        assert list(shared["subject"]) == [f"scheme {scheme} (Scheme 100)"]
+        assert "SCHEME_CONTESTED_FANOUT" not in set(conflicts["kind"])
 
     def test_two_officers_on_a_single_scheme_centre_id_are_reported_more_mildly(
         self, db, tmp_path

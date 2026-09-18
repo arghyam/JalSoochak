@@ -22,7 +22,7 @@ common_schema:
 tenant DB (shared_db), schema tenant_<code>:
   user_table                        insert / update (title, user_type, state_user_id)
   department_location_master_table  update (state_dept_id) — OPT-IN, see below
-  user_scheme_mapping_table         insert (and soft-delete with --replace)
+  user_scheme_mapping_table         insert, revive, and retire (unless --additive)
 
 analytics DB, schema analytics_schema:
   dim_user_table                    upsert (every EE this run wrote)
@@ -75,11 +75,45 @@ a re-run picks them up. --create-users-without-schemes onboards them anyway.
 
 Scheme mapping semantics
 ------------------------
-Additive by default: the division's schemes the EE is not mapped to yet are
-inserted, and every mapping they already hold is left alone. --replace makes
-the CSV authoritative instead — mappings outside the union of their divisions'
-schemes are soft-deleted (deleted_at/deleted_by, mirroring
-UserUploadRepository), so the EE ends up covering exactly what the CSV says.
+The CSV is the whole truth about the roles it names, tenant-wide, so by default:
+
+    every live mapping of those roles is made to match exactly what this file
+    states — nothing more and nothing less
+
+Three consequences worth being sure about before running it:
+
+  * an engineer the file has dropped keeps no schemes at all. Absence from the
+    latest dataset is read as a statement about the person, not about the
+    schemes they happen to hold, so even a scheme outside every division this
+    CSV names is taken off them;
+  * an engineer the file names but this run could not process — an unreadable
+    phone number, a duplicate one, or divisions that all failed to resolve — is
+    treated the same way and stripped too, because a run that cannot place them
+    cannot vouch for their coverage either. They are reported apart from the
+    genuinely absent, under SKIPPED_HOLDER_STRIPPED;
+  * a mapping held by a role this CSV does not name is never touched.
+    user_scheme_mapping_table is shared by every role, and the sweep is scoped
+    to the roles the file actually assigns.
+
+The removal_detail sheet lists every row that goes, with the reason and whether
+it costs anybody coverage; the conflicts sheet names each stripped user once.
+
+Removal is a soft delete: the row stays, deleted_at/deleted_by record who
+dropped it and when — mirroring UserUploadRepository — and status drops to 0.
+Every service read path already demands `deleted_at IS NULL AND status = 1`
+together, so a retired row that kept status 1 was failing only one of the two
+guards it should.
+
+Nothing is ever duplicated. A pair the CSV asks for again revives the row a
+previous run retired rather than stacking a second one on it, and a pair that
+already carried several live rows — nothing in the schema forbids it, there is
+no uniqueness on (user_id, scheme_id) — is collapsed onto its earliest row and
+reported in duplicate_detail. Running the same CSV twice is therefore a no-op
+the second time.
+
+--additive turns the removal off entirely: missing mappings are still inserted,
+retired ones the CSV wants are still revived and duplicates are still collapsed,
+but nothing is ever taken away.
 
 Migrations
 ----------
@@ -108,17 +142,17 @@ Usage
       --csv "scripts/jjm master data ingestion/div-ee-mapping/divsion-executive-engineer-mapping.csv" \
       --actor-id 21357 --out "scripts/jjm master data ingestion/div-ee-mapping/jjm_division_ee_analysis.xlsx"
 
-  # apply (additive)
+  # apply, adding only (nothing is ever retired)
   python3 "scripts/jjm master data ingestion/div-ee-mapping/jjm_division_ee_mapping_ingest.py" \
       --csv "scripts/jjm master data ingestion/div-ee-mapping/divsion-executive-engineer-mapping.csv" \
-      --actor-id 21357 --out jjm_division_ee_analysis.xlsx --execute
+      --actor-id 21357 --out jjm_division_ee_analysis.xlsx --additive --execute
 
-  # once V36/V37 are applied: reconcile both public ids, and make the CSV
-  # authoritative for what each EE covers
+  # apply in full: the CSV becomes the whole truth about the roles it names,
+  # and once V36/V37 are applied both public ids are reconciled too
   python3 "scripts/jjm master data ingestion/div-ee-mapping/jjm_division_ee_mapping_ingest.py" \
       --csv "scripts/jjm master data ingestion/div-ee-mapping/divsion-executive-engineer-mapping.csv" \
       --actor-id 21357 --out jjm_division_ee_analysis.xlsx \
-      --with-state-dept-id --with-state-user-id --replace --execute
+      --with-state-dept-id --with-state-user-id --execute
 """
 
 from __future__ import annotations
@@ -212,8 +246,27 @@ DEPT_REGION_TYPE = 2
 DIVISION_LEVEL = DEPT_LEVELS["division"]
 
 # user_scheme_mapping_table.status — 1 = active, as PumpOperatorUploadChunkProcessor
-# and the scheme ingest both write it.
+# and the scheme ingest both write it. 0 is written alongside deleted_at when a
+# mapping is retired: every service read path filters on both
+# (`usm.deleted_at IS NULL AND usm.status = 1` — PersonSchemeRepository,
+# TenantStaffRepository, SchemeDbRepository), so a retired row that kept
+# status = 1 was only ever hidden by one of the two guards it should fail.
 MAPPING_STATUS_ACTIVE = 1
+MAPPING_STATUS_INACTIVE = 0
+
+# Why a live mapping is being retired. Only DUPLICATE_ROW leaves coverage
+# unchanged; the other four each take a scheme away from somebody, so they are
+# counted apart in the summary and listed in full in the removal_detail sheet.
+REMOVAL_ABSENT = "ABSENT_FROM_CSV"
+REMOVAL_SKIPPED = "SKIPPED_OFFICER"
+REMOVAL_REASSIGNED = "REASSIGNED"
+REMOVAL_OUTSIDE_TARGET = "OUTSIDE_CSV_TARGET"
+REMOVAL_DUPLICATE = "DUPLICATE_ROW"
+
+# Removal reasons that cost somebody a scheme, as opposed to row hygiene.
+COVERAGE_REMOVALS = (
+    REMOVAL_ABSENT, REMOVAL_SKIPPED, REMOVAL_REASSIGNED, REMOVAL_OUTSIDE_TARGET,
+)
 
 # Trailing words a state sheet adds to a node's name that our own title may not
 # carry ('Umrangsu Division' vs 'Umrangsu'). Only ever stripped as a fallback,
@@ -440,6 +493,31 @@ class DivisionPlan:
         return self.category == DIV_MATCHED and self.node_id is not None
 
 
+@dataclass(frozen=True)
+class MappingRowState:
+    """One physical user_scheme_mapping_table row, whatever state it is in.
+
+    The reconciler has to see retired and duplicate rows, not just the live
+    ones: resurrecting the row a previous run retired is what stops a re-run
+    stacking a second row on the same pair, and seeing the duplicates an earlier
+    additive run left behind is what lets them be collapsed.
+    """
+    id: int
+    user_id: int
+    scheme_id: int
+    status: int
+    live: bool          # deleted_at IS NULL
+
+    @property
+    def pair(self) -> tuple[int, int]:
+        return (self.user_id, self.scheme_id)
+
+    @property
+    def usable(self) -> bool:
+        """Live *and* active — the only state the services will read."""
+        return self.live and self.status == MAPPING_STATUS_ACTIVE
+
+
 class DivisionDb(UserDb):
     """Reads the departmental hierarchy and the scheme mappings hanging off it.
 
@@ -546,6 +624,78 @@ class DivisionDb(UserDb):
                 for code, node_id in cur:
                     owners.setdefault(code, node_id)
         return owners
+
+    def load_mapping_rows(
+        self, user_ids: Iterable[int]
+    ) -> dict[tuple[int, int], list[MappingRowState]]:
+        """(user_id, scheme_id) -> every physical row for that pair, oldest first.
+
+        Unlike load_user_scheme_mappings this does *not* filter deleted_at: the
+        retired rows are exactly what makes a re-run idempotent, because the
+        reconciler revives one of them instead of inserting a duplicate. Ordering
+        by id is what makes 'keep the earliest row' deterministic.
+        """
+        ids = sorted(set(user_ids))
+        if not ids:
+            return {}
+        rows: dict[tuple[int, int], list[MappingRowState]] = defaultdict(list)
+        with self.conn.cursor() as cur:
+            for start in range(0, len(ids), 5000):
+                cur.execute(f"""
+                    SELECT id, user_id, scheme_id, status, deleted_at IS NULL
+                    FROM {self.schema}.user_scheme_mapping_table
+                    WHERE user_id = ANY(%s)
+                    ORDER BY id
+                """, (ids[start:start + 5000],))
+                for row_id, user_id, scheme_id, status, live in cur:
+                    rows[(user_id, scheme_id)].append(
+                        MappingRowState(row_id, user_id, scheme_id, status, live)
+                    )
+        return dict(rows)
+
+    def load_user_names(self, user_ids: Iterable[int]) -> dict[int, str]:
+        """id -> decrypted name, for holders of a mapping the CSV never names.
+
+        The removal report has to be able to say *whose* coverage is going, and
+        a user the file does not carry has no name in it to borrow.
+        """
+        ids = sorted(set(user_ids))
+        if not ids:
+            return {}
+        names: dict[int, str] = {}
+        with self.conn.cursor() as cur:
+            for start in range(0, len(ids), 5000):
+                cur.execute(
+                    f"SELECT id, title FROM {self.schema}.user_table WHERE id = ANY(%s)",
+                    (ids[start:start + 5000],),
+                )
+                for user_id, title_enc in cur:
+                    names[user_id] = self.pii.safe_decrypt(title_enc) or ""
+        return names
+
+    def load_role_holder_ids(self, roles: Iterable[str]) -> set[int]:
+        """Every live user of these roles holding at least one live mapping.
+
+        This is the universe the CSV claims authority over. It is role-scoped
+        because user_scheme_mapping_table is shared by every role: ingesting the
+        section-officer file must not so much as read a pump operator's mapping,
+        let alone retire it. A file that names several roles claims all of them,
+        and only them.
+        """
+        wanted = sorted({r.strip().upper() for r in roles if r and r.strip()})
+        if not wanted:
+            return set()
+        with self.conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT DISTINCT m.user_id
+                FROM {self.schema}.user_scheme_mapping_table m
+                JOIN {self.schema}.user_table u
+                  ON u.id = m.user_id AND u.deleted_at IS NULL
+                JOIN common_schema.user_type_master_table ut
+                  ON ut.id = u.user_type AND upper(ut.c_name) = ANY(%s)
+                WHERE m.deleted_at IS NULL
+            """, (wanted,))
+            return {user_id for (user_id,) in cur}
 
 
 def build_children_index(nodes: dict[int, DeptNode]) -> dict[int, list[int]]:
@@ -880,6 +1030,257 @@ def build_engineer_plans(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Mapping reconciliation
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Removal:
+    """One live row this run retires, and why a human should be unsurprised."""
+    row_id: int
+    user_id: int
+    scheme_id: int
+    reason: str
+    detail: str = ""
+
+    @property
+    def costs_coverage(self) -> bool:
+        return self.reason in COVERAGE_REMOVALS
+
+
+@dataclass(frozen=True)
+class DuplicateGroup:
+    """A (user, scheme) pair that already held more than one live row.
+
+    Nothing in the schema forbids it — user_scheme_mapping_table has plain
+    indexes on user_id and scheme_id and no uniqueness at all — so every
+    additive run before this one could stack another row on a pair it had
+    already mapped. They are collapsed to one and reported apart from real
+    removals, because collapsing them costs nobody any coverage.
+    """
+    user_id: int
+    scheme_id: int
+    kept_row_id: Optional[int]      # None when the pair is being retired outright
+    collapsed_row_ids: list[int]
+
+
+@dataclass(frozen=True)
+class Revival:
+    """A retired row the CSV asks for again, reused instead of duplicated."""
+    row_id: int
+    user_id: int
+    scheme_id: int
+
+
+@dataclass
+class MappingReconciliation:
+    """What the tenant's mapping rows must become for the CSV to be true.
+
+    Expressed as row ids wherever a row already exists, so that the writes are
+    UPDATEs against known rows rather than blind inserts. That is what makes a
+    second run of the same CSV a no-op instead of a second copy of everything.
+    """
+    to_insert: list[tuple[int, int]] = field(default_factory=list)
+    revivals: list[Revival] = field(default_factory=list)
+    removals: list[Removal] = field(default_factory=list)
+    duplicates: list[DuplicateGroup] = field(default_factory=list)
+    unchanged: int = 0
+
+    @property
+    def to_resurrect(self) -> list[int]:
+        return [r.row_id for r in self.revivals]
+
+    @property
+    def to_deactivate(self) -> list[int]:
+        return [r.row_id for r in self.removals]
+
+    def inserts_by_user(self) -> dict[int, set[int]]:
+        out: dict[int, set[int]] = defaultdict(set)
+        for user_id, scheme_id in self.to_insert:
+            out[user_id].add(scheme_id)
+        return out
+
+    def revivals_by_user(self) -> dict[int, set[int]]:
+        out: dict[int, set[int]] = defaultdict(set)
+        for revival in self.revivals:
+            out[revival.user_id].add(revival.scheme_id)
+        return out
+
+    def removals_by_user(self) -> dict[int, set[int]]:
+        """Coverage lost, per user. Duplicate collapses are not coverage."""
+        out: dict[int, set[int]] = defaultdict(set)
+        for removal in self.coverage_removals:
+            out[removal.user_id].add(removal.scheme_id)
+        return out
+
+    @property
+    def coverage_removals(self) -> list[Removal]:
+        return [r for r in self.removals if r.costs_coverage]
+
+    @property
+    def duplicate_removals(self) -> list[Removal]:
+        return [r for r in self.removals if r.reason == REMOVAL_DUPLICATE]
+
+    @property
+    def affected_user_ids(self) -> set[int]:
+        """Everyone whose live mapping set this run changes."""
+        users = {u for u, _ in self.to_insert}
+        users |= {r.user_id for r in self.removals}
+        return users
+
+    @property
+    def stripped_user_ids(self) -> set[int]:
+        """Users losing coverage because the latest dataset does not carry them."""
+        return {r.user_id for r in self.removals
+                if r.reason in (REMOVAL_ABSENT, REMOVAL_SKIPPED)}
+
+    def removals_by_reason(self) -> dict[str, int]:
+        counts: dict[str, int] = defaultdict(int)
+        for removal in self.removals:
+            counts[removal.reason] += 1
+        return dict(counts)
+
+
+def reconcile_mappings(
+    desired: dict[int, set[int]],
+    ledger: dict[tuple[int, int], list[MappingRowState]],
+    strip_users: set[int],
+    skip_reasons: Optional[dict[int, str]] = None,
+    prune: bool = True,
+) -> MappingReconciliation:
+    """Diff what the CSV states against every physical row the tenant holds.
+
+    Three rules, in order of how much damage getting them wrong would do:
+
+    1. a pair the CSV states ends with exactly one live, active row — an
+       existing row is revived rather than duplicated, and the *earliest* row
+       wins so the pair keeps its original created_at;
+    2. a live row the CSV contradicts is retired, whether it belongs to an
+       officer the file names or to one it has dropped entirely;
+    3. a pair that already held several live rows is collapsed to one, which
+       changes no coverage and is reported separately so it cannot be mistaken
+       for one of the removals in rule 2.
+
+    `ledger` must cover every user in `desired` and every user in `strip_users`;
+    anything outside those two sets is not this file's to touch and is ignored
+    even if it appears.
+
+    prune=False (the --additive runs) suppresses rule 2 only. Rules 1 and 3
+    still apply: an additive run that declined to revive a retired row, or that
+    left a pair holding two live rows, would be exactly the run that put the
+    duplicates there in the first place.
+    """
+    skip_reasons = skip_reasons or {}
+    result = MappingReconciliation()
+
+    wanted = {(user_id, scheme_id)
+              for user_id, scheme_ids in desired.items()
+              for scheme_id in scheme_ids}
+    # A scheme somebody in the CSV now covers: losing it is a reassignment
+    # rather than the file simply dropping it.
+    claimed_schemes = {scheme_id for _, scheme_id in wanted}
+    survivor: dict[tuple[int, int], int] = {}
+
+    for pair in sorted(wanted):
+        rows = ledger.get(pair, [])
+        if not rows:
+            result.to_insert.append(pair)
+            continue
+        usable = [r for r in rows if r.usable]
+        if usable:
+            keep = usable[0]            # load_mapping_rows orders by id
+            result.unchanged += 1
+        else:
+            # Revive the earliest row rather than stacking a new one on top.
+            keep = rows[0]
+            result.revivals.append(Revival(keep.id, keep.user_id, keep.scheme_id))
+        survivor[pair] = keep.id
+
+    for pair, rows in sorted(ledger.items()):
+        user_id, scheme_id = pair
+        live = [r for r in rows if r.live]
+        if not live:
+            continue
+
+        if pair in wanted:
+            kept = survivor[pair]
+            extras = [r for r in live if r.id != kept]
+            for row in extras:
+                result.removals.append(Removal(
+                    row.id, user_id, scheme_id, REMOVAL_DUPLICATE,
+                    f"a second live row for a pair already held by row id {kept}; "
+                    f"collapsed, coverage unchanged",
+                ))
+            if extras:
+                result.duplicates.append(DuplicateGroup(
+                    user_id, scheme_id, kept, [r.id for r in extras]))
+            continue
+
+        if not prune:
+            continue
+        if user_id in desired:
+            reason = (REMOVAL_REASSIGNED if scheme_id in claimed_schemes
+                      else REMOVAL_OUTSIDE_TARGET)
+            detail = ("the CSV gives this scheme to another officer"
+                      if reason == REMOVAL_REASSIGNED else
+                      "the CSV no longer gives this officer this scheme")
+        elif user_id in strip_users:
+            skipped = skip_reasons.get(user_id)
+            reason = REMOVAL_SKIPPED if skipped else REMOVAL_ABSENT
+            detail = (f"named in the CSV but not written: {skipped}" if skipped else
+                      "this user is not in the latest dataset at all")
+        else:
+            continue        # another role's mapping — not ours to read or retire
+
+        for row in live:
+            result.removals.append(Removal(row.id, user_id, scheme_id, reason, detail))
+        if len(live) > 1:
+            result.duplicates.append(DuplicateGroup(
+                user_id, scheme_id, None, [r.id for r in live]))
+
+    return result
+
+
+def build_reconciliation(
+    engineers: list[EngineerPlan],
+    db: DivisionDb,
+    roles: Iterable[str],
+    prune: bool = True,
+) -> MappingReconciliation:
+    """Gather what the reconciler needs from the tenant and run it.
+
+    Only users that already exist take part: an officer this run is about to
+    onboard holds no rows yet, so their whole target is an insert, and
+    MappingIngestPlan.insert_pairs adds it once the user write has minted an id.
+
+    The strip universe is read with the *current* roles, before any of this
+    run's writes, so the workbook an operator signs off on and the statement
+    that finally executes describe the same set of people.
+    """
+    desired = {
+        p.decision.existing_id: set(p.target_scheme_ids)
+        for p in engineers if p.will_write and p.decision.existing_id
+    }
+    skip_reasons = {
+        p.decision.existing_id: (p.skip_reason or p.decision.reason)
+        for p in engineers if not p.will_write and p.decision.existing_id
+    }
+
+    strip_users: set[int] = set()
+    if prune:
+        strip_users = db.load_role_holder_ids(roles) - set(desired)
+        if strip_users:
+            LOG.warning(
+                "%d user(s) of role %s hold live mappings but are not in the latest "
+                "dataset — every one of those mappings is retired "
+                "(see the removal_detail sheet)",
+                len(strip_users), "/".join(sorted(roles)),
+            )
+
+    ledger = db.load_mapping_rows(set(desired) | strip_users)
+    return reconcile_mappings(desired, ledger, strip_users, skip_reasons, prune=prune)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tenant database writes
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -937,15 +1338,21 @@ class MappingWriter:
         return len(inserted)
 
     def soft_delete_mappings(self, pairs: list[tuple[int, int]]) -> int:
-        """--replace only. Mirrors UserUploadRepository's soft delete exactly:
-        the row stays, deleted_at/deleted_by record who dropped it and when."""
+        """Retire every live row for these pairs, by (user_id, scheme_id).
+
+        Follows UserUploadRepository's soft delete — the row stays,
+        deleted_at/deleted_by record who dropped it and when — and additionally
+        drops status to 0. Every service read path already demands
+        `deleted_at IS NULL AND status = 1` together, so leaving status at 1 on
+        a retired row left it failing only one of the two guards it should.
+        """
         if not pairs:
             return 0
         sql = f"""
             UPDATE {self.schema}.user_scheme_mapping_table AS t
-            SET deleted_at = NOW(), deleted_by = v.actor,
+            SET deleted_at = NOW(), deleted_by = v.actor, status = v.retired,
                 updated_by = v.actor, updated_at = NOW()
-            FROM (VALUES %s) AS v (user_id, scheme_id, actor)
+            FROM (VALUES %s) AS v (user_id, scheme_id, actor, retired)
             WHERE t.user_id = v.user_id AND t.scheme_id = v.scheme_id
               AND t.deleted_at IS NULL
             RETURNING t.id
@@ -953,11 +1360,51 @@ class MappingWriter:
         with self.conn.cursor() as cur:
             removed = psycopg2.extras.execute_values(
                 cur, sql,
-                [(u, s, self.actor_id) for u, s in pairs],
-                template="(%s::integer, %s::integer, %s::integer)",
+                [(u, s, self.actor_id, MAPPING_STATUS_INACTIVE) for u, s in pairs],
+                template="(%s::integer, %s::integer, %s::integer, %s::integer)",
                 page_size=1000, fetch=True,
             )
         return len(removed)
+
+    def deactivate_rows(self, row_ids: Iterable[int]) -> int:
+        """Retire specific rows, by id.
+
+        The reconciler addresses rows rather than pairs because a pair may hold
+        several of them: collapsing a duplicate has to retire one row and spare
+        another that carries the same (user_id, scheme_id).
+        """
+        ids = sorted(set(row_ids))
+        if not ids:
+            return 0
+        with self.conn.cursor() as cur:
+            cur.execute(f"""
+                UPDATE {self.schema}.user_scheme_mapping_table
+                SET deleted_at = NOW(), deleted_by = %s, status = %s,
+                    updated_by = %s, updated_at = NOW()
+                WHERE id = ANY(%s) AND deleted_at IS NULL
+                RETURNING id
+            """, (self.actor_id, MAPPING_STATUS_INACTIVE, self.actor_id, ids))
+            return len(cur.fetchall())
+
+    def resurrect_rows(self, row_ids: Iterable[int]) -> int:
+        """Bring retired rows back, rather than inserting a second copy.
+
+        Clearing deleted_by as well as deleted_at matters: a row that kept the
+        id of whoever retired it, while being live again, would misreport its
+        own history to anybody reading the audit columns.
+        """
+        ids = sorted(set(row_ids))
+        if not ids:
+            return 0
+        with self.conn.cursor() as cur:
+            cur.execute(f"""
+                UPDATE {self.schema}.user_scheme_mapping_table
+                SET deleted_at = NULL, deleted_by = NULL, status = %s,
+                    updated_by = %s, updated_at = NOW()
+                WHERE id = ANY(%s)
+                RETURNING id
+            """, (MAPPING_STATUS_ACTIVE, self.actor_id, ids))
+            return len(cur.fetchall())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -974,6 +1421,13 @@ class MappingIngestPlan:
     replace: bool = False
     with_state_dept_id: bool = False
     with_state_user_id: bool = False
+    # The roles this file speaks for. The strip in rule 2 is scoped to them, so
+    # ingesting one role's mapping can never retire another role's.
+    roles: tuple[str, ...] = (DEFAULT_ROLE,)
+    reconciliation: MappingReconciliation = field(default_factory=MappingReconciliation)
+    # Decrypted names for every user the reconciliation touches, so the removal
+    # sheet can name a legacy holder the CSV itself never mentions.
+    holder_names: dict[int, str] = field(default_factory=dict)
 
     @property
     def writable(self) -> list[EngineerPlan]:
@@ -984,23 +1438,47 @@ class MappingIngestPlan:
         return [p for p in self.role_plans if p.action == "blocked_soft_deleted"]
 
     @property
-    def insert_pairs(self) -> list[tuple[int, int]]:
-        """(user_id, scheme_id) to create. Only meaningful once ids exist."""
-        return [
-            (p.decision.existing_id, scheme_id)
-            for p in self.writable if p.decision.existing_id
-            for scheme_id in sorted(p.to_insert)
-        ]
+    def new_user_ids(self) -> set[int]:
+        """Officers this run onboarded. Empty until the user writes have run."""
+        return {p.decision.existing_id for p in self.writable
+                if p.decision.category == CAT_NEW and p.decision.existing_id}
 
     @property
-    def remove_pairs(self) -> list[tuple[int, int]]:
-        if not self.replace:
-            return []
-        return [
-            (p.decision.existing_id, scheme_id)
-            for p in self.writable if p.decision.existing_id
-            for scheme_id in sorted(p.to_remove)
-        ]
+    def insert_pairs(self) -> list[tuple[int, int]]:
+        """(user_id, scheme_id) to create. Only meaningful once ids exist.
+
+        The reconciler settled every pair belonging to a user that already
+        existed; a user this run onboarded was not in its ledger at all, so
+        their whole target is added here, once the user write has given them an
+        id to be addressed by.
+        """
+        pairs = set(self.reconciliation.to_insert)
+        onboarded = self.new_user_ids
+        for p in self.writable:
+            if p.decision.existing_id in onboarded:
+                pairs |= {(p.decision.existing_id, s) for s in p.target_scheme_ids}
+        return sorted(pairs)
+
+    @property
+    def affected_user_ids(self) -> list[int]:
+        """Everyone whose mappings this run may change, officers and legacy
+        holders alike.
+
+        Wider than the officers in the file on purpose: a user the CSV never
+        names whose mapping was retired has to have their dim rows rewritten
+        too, or the warehouse keeps serving coverage the tenant no longer grants.
+        """
+        ids = {p.decision.existing_id for p in self.writable if p.decision.existing_id}
+        ids |= self.reconciliation.affected_user_ids
+        return sorted(ids)
+
+    @property
+    def resurrect_row_ids(self) -> list[int]:
+        return self.reconciliation.to_resurrect
+
+    @property
+    def deactivate_row_ids(self) -> list[int]:
+        return self.reconciliation.to_deactivate
 
     def as_user_plan(self) -> UserIngestPlan:
         """The engineer half, shaped for the user module's execute path."""
@@ -1021,7 +1499,7 @@ def build_plan(
     db: DivisionDb,
     update_roles: bool = True,
     create_users_without_schemes: bool = False,
-    replace: bool = False,
+    replace: bool = True,
 ) -> MappingIngestPlan:
     LOG.info("Classifying %d CSV rows …", len(rows))
     divisions, _ = resolve_divisions(rows, db)
@@ -1043,6 +1521,12 @@ def build_plan(
             LOG.warning("Role %s is not in user_type_master_table — %d engineer(s) need it",
                         role_plan.role, role_plan.csv_rows)
 
+    roles = tuple(sorted(
+        {p.decision.row.role for p in engineers if p.will_write and p.decision.row.role}
+    )) or (DEFAULT_ROLE,)
+    reconciliation = build_reconciliation(engineers, db, roles, prune=replace)
+    holder_names = db.load_user_names(reconciliation.affected_user_ids)
+
     return MappingIngestPlan(
         engineers=engineers,
         divisions=divisions,
@@ -1052,6 +1536,9 @@ def build_plan(
         replace=replace,
         with_state_dept_id=db.with_state_dept_id,
         with_state_user_id=db.with_state_user_id,
+        roles=roles,
+        reconciliation=reconciliation,
+        holder_names=holder_names,
     )
 
 
@@ -1078,6 +1565,7 @@ def build_summary_frame(plan: MappingIngestPlan) -> pd.DataFrame:
     writable = plan.writable
     divisions = list(plan.divisions.values())
     resolved = [d for d in divisions if d.resolved]
+    counts = plan.reconciliation.removals_by_reason()
 
     records = [
         {"metric": "CSV rows", "value": sum(len(p.csv_rows) for p in engineers)},
@@ -1100,11 +1588,28 @@ def build_summary_frame(plan: MappingIngestPlan) -> pd.DataFrame:
                        if p.decision.category == CAT_EXISTING and not p.decision.changes])},
         {"metric": "  engineers skipped",
          "value": len([p for p in engineers if not p.will_write])},
-        {"metric": "scheme mappings to insert", "value": sum(len(p.to_insert) for p in writable)},
-        {"metric": "scheme mappings to soft-delete (--replace)",
-         "value": sum(len(p.to_remove) for p in writable) if plan.replace else 0},
-        {"metric": "scheme mappings already correct",
-         "value": sum(len(p.target_scheme_ids & p.existing_scheme_ids) for p in writable)},
+        {"metric": "scheme mappings to insert", "value": len(plan.reconciliation.to_insert)
+         + sum(len(p.target_scheme_ids) for p in writable
+               if p.decision.category == CAT_NEW)},
+        {"metric": "scheme mappings to revive (a retired row reused)",
+         "value": len(plan.reconciliation.to_resurrect)},
+        {"metric": "scheme mappings already correct", "value": plan.reconciliation.unchanged},
+        {"metric": "mappings to retire (coverage lost)",
+         "value": len(plan.reconciliation.coverage_removals)},
+        {"metric": "  because the CSV moved the scheme to another officer",
+         "value": counts.get(REMOVAL_REASSIGNED, 0)},
+        {"metric": "  because the CSV no longer gives the officer the scheme",
+         "value": counts.get(REMOVAL_OUTSIDE_TARGET, 0)},
+        {"metric": "  because the holder is not in the latest dataset",
+         "value": counts.get(REMOVAL_ABSENT, 0)},
+        {"metric": "  because the holder is named but could not be processed",
+         "value": counts.get(REMOVAL_SKIPPED, 0)},
+        {"metric": "users losing every mapping they hold",
+         "value": len(plan.reconciliation.stripped_user_ids)},
+        {"metric": "duplicate rows to collapse (no coverage lost)",
+         "value": counts.get(REMOVAL_DUPLICATE, 0)},
+        {"metric": "  pairs that held more than one live row",
+         "value": len(plan.reconciliation.duplicates)},
         {"metric": "state_dept_id backfills",
          "value": len([d for d in resolved if d.state_dept_id_change is not None])},
         {"metric": "state_user_id backfills",
@@ -1173,9 +1678,19 @@ def build_engineer_frame(plan: MappingIngestPlan, include_pii: bool) -> pd.DataF
 
 def build_mapping_frame(plan: MappingIngestPlan, include_pii: bool) -> pd.DataFrame:
     show = (lambda p: p) if include_pii else safe_mask
+    inserts = plan.reconciliation.inserts_by_user()
+    revivals = plan.reconciliation.revivals_by_user()
+    removals = plan.reconciliation.removals_by_user()
     records = []
     for p in plan.writable:
         decision = p.decision
+        # A user this run onboards holds no rows yet, so their whole target is
+        # an insert and the reconciler — which only saw existing users — has
+        # nothing to say about them.
+        fresh = (p.target_scheme_ids if decision.category == CAT_NEW
+                 else inserts.get(decision.existing_id, set()))
+        revived = revivals.get(decision.existing_id, set())
+        retired = removals.get(decision.existing_id, set())
         records.append({
             "csv_rows": ", ".join(str(r) for r in p.csv_rows),
             "engineer": decision.row.name,
@@ -1187,15 +1702,70 @@ def build_mapping_frame(plan: MappingIngestPlan, include_pii: bool) -> pd.DataFr
             ),
             "schemes_in_divisions": len(p.target_scheme_ids),
             "already_mapped": len(p.target_scheme_ids & p.existing_scheme_ids),
-            "mappings_to_insert": len(p.to_insert),
-            "mappings_to_soft_delete": len(p.to_remove) if plan.replace else 0,
+            "mappings_to_insert": len(fresh),
+            "mappings_to_revive": len(revived),
+            "mappings_to_retire": len(retired),
             "mappings_outside_divisions_kept":
                 0 if plan.replace else len(p.to_remove),
-            "scheme_ids_to_insert": _fmt_ids(p.to_insert),
-            "scheme_ids_to_soft_delete": _fmt_ids(p.to_remove) if plan.replace else "",
+            "scheme_ids_to_insert": _fmt_ids(fresh),
+            "scheme_ids_to_revive": _fmt_ids(revived),
+            "scheme_ids_to_retire": _fmt_ids(retired),
         })
     return pd.DataFrame.from_records(records) if records else pd.DataFrame(
         columns=["csv_rows", "engineer", "schemes_in_divisions", "mappings_to_insert"]
+    )
+
+
+def build_removal_frame(plan: MappingIngestPlan) -> pd.DataFrame:
+    """Every mapping an execute run would retire, in full.
+
+    This is the destructive half of the run, so nothing here is elided: the
+    operator signs off on the whole list or on none of it. Duplicate collapses
+    are listed too, marked as costing no coverage, so that the sheet accounts
+    for every row the run touches rather than only the alarming ones.
+    """
+    records = [
+        {
+            "user_id": r.user_id,
+            "holder": plan.holder_names.get(r.user_id, ""),
+            "scheme_id": r.scheme_id,
+            "mapping_row_id": r.row_id,
+            "reason": r.reason,
+            "costs_coverage": "yes" if r.costs_coverage else "no",
+            "detail": r.detail,
+        }
+        for r in sorted(plan.reconciliation.removals,
+                        key=lambda r: (r.reason, r.user_id, r.scheme_id))
+    ]
+    return pd.DataFrame.from_records(records) if records else pd.DataFrame(
+        columns=["user_id", "holder", "scheme_id", "mapping_row_id", "reason",
+                 "costs_coverage", "detail"]
+    )
+
+
+def build_duplicate_frame(plan: MappingIngestPlan) -> pd.DataFrame:
+    """Pairs that already carried more than one live row, before this run.
+
+    Nothing in the schema prevents them — user_scheme_mapping_table has no
+    uniqueness on (user_id, scheme_id) — so every additive run before this one
+    could add another copy. Reported separately from the removals because
+    collapsing them changes nobody's coverage.
+    """
+    records = [
+        {
+            "user_id": d.user_id,
+            "holder": plan.holder_names.get(d.user_id, ""),
+            "scheme_id": d.scheme_id,
+            "live_rows_before": len(d.collapsed_row_ids) + (1 if d.kept_row_id else 0),
+            "row_kept": d.kept_row_id if d.kept_row_id else "(none — pair retired)",
+            "rows_collapsed": ", ".join(str(i) for i in d.collapsed_row_ids),
+        }
+        for d in sorted(plan.reconciliation.duplicates,
+                        key=lambda d: (d.user_id, d.scheme_id))
+    ]
+    return pd.DataFrame.from_records(records) if records else pd.DataFrame(
+        columns=["user_id", "holder", "scheme_id", "live_rows_before", "row_kept",
+                 "rows_collapsed"]
     )
 
 
@@ -1281,13 +1851,46 @@ def build_conflict_frame(plan: MappingIngestPlan, include_pii: bool) -> pd.DataF
                 "csv_rows": ", ".join(str(r) for r in p.csv_rows),
                 "subject": subject,
                 "detail": f"{len(p.to_remove)} existing mapping(s) are not under any "
-                          f"division the CSV gives this engineer; they are kept "
-                          f"(pass --replace to soft-delete them)",
+                          f"division the CSV gives this engineer; --additive is set, "
+                          f"so they are kept",
             })
+
+    records.extend(legacy_holder_conflicts(plan))
 
     return pd.DataFrame.from_records(records) if records else pd.DataFrame(
         columns=["kind", "csv_rows", "subject", "detail"]
     )
+
+
+def legacy_holder_conflicts(plan: MappingIngestPlan) -> list[dict]:
+    """Name, one per row, every user this run strips of all their coverage.
+
+    The strip is the widest thing either tool does, and the users it hits are by
+    definition the ones the CSV cannot describe — so the report has to reach
+    into the tenant for their names rather than the file. One row per user, not
+    per mapping: the mappings themselves are in removal_detail.
+    """
+    by_user: dict[int, list[Removal]] = defaultdict(list)
+    for removal in plan.reconciliation.removals:
+        if removal.reason in (REMOVAL_ABSENT, REMOVAL_SKIPPED):
+            by_user[removal.user_id].append(removal)
+
+    records = []
+    for user_id, removals in sorted(by_user.items()):
+        absent = removals[0].reason == REMOVAL_ABSENT
+        records.append({
+            "kind": "LEGACY_HOLDER_STRIPPED" if absent else "SKIPPED_HOLDER_STRIPPED",
+            "csv_rows": "",
+            "subject": f"user id {user_id} {plan.holder_names.get(user_id, '') or '(unnamed)'}",
+            "detail": (
+                f"holds {len(removals)} live mapping(s) of role "
+                f"{'/'.join(plan.roles)} and "
+                + ("is not in the latest dataset at all"
+                   if absent else f"could not be processed — {removals[0].detail}")
+                + "; every one of those mappings is retired by this run"
+            ),
+        })
+    return records
 
 
 def build_role_frame(plan: MappingIngestPlan) -> pd.DataFrame:
@@ -1344,6 +1947,9 @@ def write_analysis_workbook(plan: MappingIngestPlan, path: str,
             writer, sheet_name="mapping_detail", index=False)
         build_engineer_frame(plan, include_pii).to_excel(
             writer, sheet_name="engineer_detail", index=False)
+        build_removal_frame(plan).to_excel(writer, sheet_name="removal_detail", index=False)
+        build_duplicate_frame(plan).to_excel(
+            writer, sheet_name="duplicate_detail", index=False)
         build_role_frame(plan).to_excel(writer, sheet_name="role_summary", index=False)
         build_analytics_frame(plan).to_excel(writer, sheet_name="analytics_summary", index=False)
         build_conflict_frame(plan, include_pii).to_excel(
@@ -1383,13 +1989,20 @@ def execute_tenant(
             f"refusing to write scheme mappings against an unknown user."
         )
 
+    # Order matters. Retiring first frees every row the CSV contradicts,
+    # including the duplicate copies of a pair that is about to be revived, so
+    # the resurrect that follows can leave exactly one live row behind it.
+    reconciliation = plan.reconciliation
+    stats["scheme_mappings_retired"] = mapping_writer.deactivate_rows(
+        plan.deactivate_row_ids
+    )
+    stats["scheme_mappings_revived"] = mapping_writer.resurrect_rows(
+        plan.resurrect_row_ids
+    )
     stats["scheme_mappings_inserted"] = mapping_writer.insert_mappings(plan.insert_pairs)
-    stats["scheme_mappings_soft_deleted"] = mapping_writer.soft_delete_mappings(
-        plan.remove_pairs
-    )
-    stats["scheme_mappings_already_correct"] = sum(
-        len(p.target_scheme_ids & p.existing_scheme_ids) for p in plan.writable
-    )
+    stats["scheme_mappings_already_correct"] = reconciliation.unchanged
+    stats["duplicate_rows_collapsed"] = len(reconciliation.duplicate_removals)
+    stats["mappings_removed_costing_coverage"] = len(reconciliation.coverage_removals)
     return stats
 
 
@@ -1404,18 +2017,19 @@ def execute_analytics(
     warehouse as if it had been.
     """
     touched = [p for p in plan.writable if p.decision.existing_id]
-    if not touched:
+    ids = plan.affected_user_ids
+    if not ids:
         return {"dim_user_rows_upserted": 0, "dim_user_scheme_mapping_rows": 0}
 
-    ids = [p.decision.existing_id for p in touched]
+    written = [p.decision.existing_id for p in touched]
     snapshot: dict[int, tuple] = {}
     with db.conn.cursor() as cur:
-        for start in range(0, len(ids), 5000):
+        for start in range(0, len(written), 5000):
             cur.execute(f"""
                 SELECT id, uuid, email, user_type, title, status
                 FROM {db.schema}.user_table
                 WHERE id = ANY(%s)
-            """, (ids[start:start + 5000],))
+            """, (written[start:start + 5000],))
             for uid, uuid, email, user_type, title_enc, status in cur:
                 snapshot[uid] = (uuid, email, user_type, db.pii.safe_decrypt(title_enc), status)
 
@@ -1506,10 +2120,15 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                         help="analytics DB DSN (default: $ANALYTICS_DSN)")
     parser.add_argument("--execute", action="store_true",
                         help="apply the plan; without this the run is read-only")
+    parser.add_argument("--additive", action="store_true",
+                        help="never retire anything: insert the missing mappings, revive the "
+                             "retired ones the CSV asks for again, collapse duplicate rows, "
+                             "and leave every other existing mapping alone. By default the "
+                             "CSV is authoritative for the roles it names — a mapping it does "
+                             "not state is retired, including one held by a user the file "
+                             "does not carry at all")
     parser.add_argument("--replace", action="store_true",
-                        help="make the CSV authoritative for what each engineer covers: "
-                             "soft-delete every mapping of theirs that is not under one of "
-                             "their divisions. Additive (nothing removed) by default")
+                        help=argparse.SUPPRESS)   # pre-authoritative spelling; now the default
     parser.add_argument("--skip-analytics", action="store_true",
                         help="do not touch the analytics warehouse")
     parser.add_argument("--no-role-updates", action="store_true",
@@ -1553,6 +2172,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _fail("--tenant-dsn (or $TENANT_DSN) is required")
     if args.execute and not args.skip_analytics and not args.analytics_dsn:
         return _fail("--analytics-dsn (or $ANALYTICS_DSN) is required unless --skip-analytics")
+    if args.limit is not None and args.limit < 1:
+        return _fail("--limit must be a positive number of rows")
+    if args.limit is not None and args.execute and not args.additive:
+        # A truncated file is a truncated statement of who covers what: every
+        # engineer past the cut reads as absent, and absence now retires
+        # mappings rather than merely failing to add them.
+        return _fail(
+            "--limit cannot be combined with --execute unless --additive is also set: "
+            "the run is authoritative, so cutting the CSV short would retire the "
+            "mappings of everyone past the cut. Rehearse with --limit and no --execute."
+        )
+    if args.replace:
+        LOG.warning(
+            "--replace is the default now and does nothing; pass --additive for the "
+            "old default of never removing anything."
+        )
 
     try:
         pii = PiiCrypto(os.environ.get("PII_ENCRYPTION_KEY", ""), os.environ.get("PII_HMAC_KEY", ""))
@@ -1603,7 +2238,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             rows, csv_issues, db,
             update_roles=not args.no_role_updates,
             create_users_without_schemes=args.create_users_without_schemes,
-            replace=args.replace,
+            replace=not args.additive,
         )
 
         context = {
@@ -1615,8 +2250,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             "actor_id": args.actor_id,
             "division_level": args.division_level,
             "mode": "EXECUTE" if args.execute else "ANALYZE (read-only)",
-            "mapping_mode": "REPLACE (mappings outside the division are soft-deleted)"
-            if args.replace else "ADDITIVE (existing mappings are never removed)",
+            "mapping_mode": "ADDITIVE (nothing is ever retired)" if args.additive else
+            "AUTHORITATIVE (a mapping of these roles that the CSV does not state is "
+            "retired, including one held by a user the CSV never names)",
+            "roles_claimed": "/".join(plan.roles),
             "analytics": "skipped" if args.skip_analytics else "included",
             "phones_in_report": "full" if args.include_pii else "masked",
             "role_updates": "withheld" if args.no_role_updates else "applied",
