@@ -12,7 +12,7 @@
 * [Database Design](database-design.md)
 * [Non-functional Requirements](nfrs.md)
 * [Future Work](future-work.md)
-* [test](K8s-to-Docker-Compose-Migration-Plan.docx)
+* [test](test.docx)
 
 ## Guides
 
