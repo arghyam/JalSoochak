@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryLatestFlowReadingRec
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.TenantConfigRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -165,7 +166,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, LocalDate.now(), LocalDateTime.now(), "BFM", 0);
+                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -192,7 +193,7 @@ class BfmReadingServiceRolloverTest {
                     99L, 10L, 1L, "corr-1",
                     new BigDecimal("250"),  // extracted (model)
                     new BigDecimal("150"),  // confirmed (resolver's value)
-                    IMAGE_URL, LocalDate.now(), LocalDateTime.now(), "BFM", 0);
+                    IMAGE_URL, ReadingTime.today(), ReadingTime.now(), "BFM", 0);
             when(repo.findFlowReadingDetailsByCorrelationId(SCHEMA, "corr-1"))
                     .thenReturn(Optional.of(reading));
             when(repo.findOperatorById(SCHEMA, 1L)).thenReturn(Optional.of(operator));
@@ -247,7 +248,7 @@ class BfmReadingServiceRolloverTest {
         when(flowVisionService.extractReading(IMAGE_URL)).thenReturn(ocr);
         when(repo.findLatestConfirmedReadingSnapshot(SCHEMA, 10L, null))
                 .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("140"),
-                        LocalDateTime.now().minusDays(1))));
+                        ReadingTime.now().minusDays(1))));
         when(repo.findLatestPlaceholderFlowReadingIdForDate(eq(SCHEMA), eq(10L), eq(1L), any(LocalDate.class)))
                 .thenReturn(Optional.empty());
         // Tenant schema migrated with confirmed_reading_source (V35) so the resolver is allowed to run.

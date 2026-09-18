@@ -9,6 +9,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperator;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -76,7 +77,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = ReadingTime.today();
         LocalDate targetDate = today.minusDays(2);
         LocalDate previousDate = today.minusDays(3);
         LocalDate nextDate = today.minusDays(1);
@@ -127,7 +128,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
         when(localizationService.normalizeLanguageKey("en")).thenReturn("english");
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = ReadingTime.today();
         LocalDate targetDate = today.minusDays(2);
         LocalDate previousDate = today.minusDays(3);
         LocalDate nextDate = today.minusDays(1);
@@ -181,7 +182,7 @@ class GlificMeterWorkflowServiceUpdatePreviousReadingTest {
 
         when(telemetryTenantRepository.findFirstSchemeForUser("tenant_test", 1L)).thenReturn(Optional.of(10L));
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = ReadingTime.today();
         LocalDate targetDate = today.minusDays(2);
         LocalDate previousDate = today.minusDays(3);
         LocalDate nextDate = today.minusDays(1);

@@ -10,6 +10,7 @@ import org.arghyam.jalsoochak.telemetry.repository.TelemetryOperatorWithSchema;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryConfirmedReadingSnapshot;
 import org.arghyam.jalsoochak.telemetry.repository.TelemetryTenantRepository;
 import org.arghyam.jalsoochak.telemetry.repository.UserChannelPreferenceRepository;
+import org.arghyam.jalsoochak.telemetry.util.ReadingTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
@@ -84,7 +85,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L,
                         "bfm-1",
@@ -136,7 +137,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
 
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         77L,
                         "bfm-2",
@@ -189,7 +190,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.empty());
 
         // Today's row already holds the resolver's value (150); the operator re-enters the same number.
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L,
                         "bfm-1",
@@ -233,8 +234,8 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L,
                         "bfm-1",
@@ -308,7 +309,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.of("{\"undersupplyThresholdPercent\":50.0,\"oversupplyThresholdPercent\":0.0}"));
         when(tenantConfigRepository.findConfigValue(1, "WATER_NORM"))
                 .thenReturn(Optional.of("{\"value\":\"100\"}"));
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         55L,
                         "bfm-threshold",
@@ -407,7 +408,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.empty());
 
         // Nothing recorded for today yet: the manual value opens the row.
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.persistFlowReadingWithTracking(anyString(), any(), anyLong(), anyLong(),
                 any(), any(), any(), anyString(), any(), anyString(), any(), anyInt(), any(), any(), any(), any()))
@@ -463,7 +464,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.empty());
 
         // The provenance write is inside the persist transaction, so its failure rolls the insert back
@@ -500,10 +501,10 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.empty());
 
         // No confirmed reading before today => allow today's manual reading.
-        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null))
+        when(telemetryTenantRepository.findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, ReadingTime.today(), null))
                 .thenReturn(Optional.empty());
 
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L,
                         "bfm-1",
@@ -534,7 +535,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
         assertEquals(new BigDecimal("1000"), resp.getMeterReading());
         assertEquals("bfm-1", resp.getCorrelationId());
 
-        verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, LocalDate.now(), null);
+        verify(telemetryTenantRepository).findLatestConfirmedReadingSnapshotBeforeDate("tenant_test", 10L, ReadingTime.today(), null);
         verify(telemetryTenantRepository, never()).findLatestConfirmedReadingSnapshot("tenant_test", 10L, null);
         verify(telemetryTenantRepository).updateConfirmedReading("tenant_test", 99L, new BigDecimal("1000"), 1L,
                 RolloverResolutionService.SOURCE_MANUAL);
@@ -555,9 +556,9 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.findLatestPendingMeterChangeRecord("tenant_test", 10L, 1L))
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
-                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), LocalDateTime.now().minusDays(1))));
+                .thenReturn(Optional.of(new TelemetryConfirmedReadingSnapshot(new BigDecimal("200"), ReadingTime.now().minusDays(1))));
 
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         55L,
                         "bfm-55",
@@ -611,7 +612,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 .thenReturn(Optional.empty());
         when(telemetryTenantRepository.findLatestConfirmedReadingSnapshot("tenant_test", 10L, null))
                 .thenReturn(Optional.empty());
-        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, LocalDate.now()))
+        when(telemetryTenantRepository.findLatestFlowReadingForDate("tenant_test", 10L, 1L, ReadingTime.today()))
                 .thenReturn(Optional.of(new TelemetryFlowReadingDetails(
                         99L,
                         "bfm-1",
@@ -622,11 +623,11 @@ class GlificMeterWorkflowServiceManualReadingTest {
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt()))
                 .thenReturn(List.of(
-                        LocalDate.now(),
-                        LocalDate.now().minusDays(1),
-                        LocalDate.now().minusDays(2),
-                        LocalDate.now().minusDays(3),
-                        LocalDate.now().minusDays(4)
+                        ReadingTime.today(),
+                        ReadingTime.today().minusDays(1),
+                        ReadingTime.today().minusDays(2),
+                        ReadingTime.today().minusDays(3),
+                        ReadingTime.today().minusDays(4)
                 ));
 
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
