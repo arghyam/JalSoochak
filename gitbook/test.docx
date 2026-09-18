@@ -1,4 +1,4 @@
-📝 Infrastructure Migration Plan: K8s to Docker Compose
+Infrastructure Migration Plan: K8s to Docker Compose
 Project: PUCAR Infrastructure Transition
 1. Executive Summary
 This document outlines the strategic transition of the PUCAR ecosystem from an OpenShift (Kubernetes) environment to a Docker Compose architecture. The primary goal is to reduce operational complexity and resource overhead while maintaining service availability.
