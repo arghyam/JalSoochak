@@ -15,17 +15,20 @@ Two modes:
 What it touches
 ---------------
 tenant DB (shared_db), schema tenant_<code>:
-  scheme_master_table              insert / update / revive / retire
+  scheme_master_table              insert / update / revive
   user_table                       insert / update / revive (PUMP_OPERATOR, SECTION_OFFICER)
   user_scheme_mapping_table        insert / revive / retire
-  scheme_lgd_mapping_table         insert / revive / retire (village)
+  scheme_lgd_mapping_table         insert / revive / retire (village, or the state placeholder)
   scheme_department_mapping_table  insert / revive / retire (sub-division)
 
 analytics DB, schema analytics_schema:
-  dim_scheme_table                 upsert (one row per scheme x village x sub-division)
+  dim_scheme_table                 upsert (one row per scheme x village x sub-division,
+                                   or per scheme at state level when it has no village)
                                    + attribute sync across *every* row of a scheme
+                                   + delete a superseded state-level row
   dim_user_table                   upsert
-  dim_user_scheme_mapping_table    replace-per-user from the tenant DB's post-state
+  dim_user_scheme_mapping_table    replace-per-user from the tenant DB's post-state;
+                                   deleted for retired schemes
 
 Which of those the run touches depends on what the source file actually carries
 (see "Source shapes" below) — a file with no village column never prunes a
@@ -48,6 +51,12 @@ Scheme matching contract (evaluated in this order)
            delete) would silently duplicate every retired scheme.
 4. Neither id found anywhere, live or retired                  -> insert
 
+A single id may repeat across sheet rows; only the (imis_id, smt_id) pair has
+to be unique, and rows repeating a pair are skipped. A scheme one row matches
+on both ids is that row's, so rule 2 never hands it to another row sharing just
+one of those ids — that row is a different scheme. If two rows still reach the
+same existing scheme, neither is written (SEVERAL_ROWS_MATCH_ONE_SCHEME).
+
 Idempotence
 -----------
 Every write path is keyed on something the previous run also saw, and every
@@ -66,9 +75,10 @@ Legacy data (--replace)
 The snapshot is treated as the complete current truth for everything it speaks
 for. With --replace:
 
-  * a live scheme whose ids appear nowhere in the snapshot is retired
-    (is_active = FALSE + deleted_at), together with its village, sub-division
-    and user mappings, and its dim_scheme rows drop to operating_status = 0;
+  * a live scheme no snapshot row points at — not even a row skipped as a
+    conflict — is retired: its user -> scheme mappings are removed from both
+    DBs. The scheme itself, its village and sub-division mappings and its
+    dim_scheme rows all stay;
   * a scheme IS SPARED, loudly and in its own report sheet, when it still has a
     flow reading inside the last --reading-window-days (default 90). Data is
     arriving for it, so the snapshot is out of date, not the scheme;
@@ -78,10 +88,6 @@ for. With --replace:
 Retirement is opt-in, but the analysis workbook reports the whole legacy
 distribution on every run, --replace or not, so nothing goes unnoticed.
 
-Note on is_active: scheme-service's SchemeActivitySyncScheduler recomputes that
-column from recent flow readings, but only `WHERE deleted_at IS NULL`. Setting
-deleted_at in the same statement is what makes the retirement stick.
-
 Location mapping contract
 -------------------------
 A village / sub-division mapping is written ONLY when the name resolves to
@@ -90,6 +96,11 @@ hierarchy columns are used to disambiguate (village: panchayat > block >
 district; sub-division: division > circle > zone). If that still leaves more
 than one candidate, the mapping is left unwritten and reported. Nothing is
 guessed.
+
+A written scheme that ends the run with no village mapping at all is mapped to
+the state instead (the single LGD node at the state level, parent_lgd_level
+STATE), and its dim_scheme row sits at state level. The placeholder is retired,
+in both DBs, as soon as the scheme gains a real village.
 
 Source shapes
 -------------
@@ -101,7 +112,8 @@ what the run claims authority over:
   all_ascheme_exist.xlsx    locations + users  -> full reconciliation
   schemes-master-data.csv   scheme columns only -> scheme attributes and legacy
                             schemes only; village, sub-division and user
-                            mappings are neither written nor pruned
+                            mappings are neither written nor pruned (a scheme
+                            with no village at all still goes under the state)
 
 --skip-users forces the user half off even for a file that carries it.
 
@@ -123,17 +135,17 @@ Usage
 
 
   # dry run -> analysis workbook only
-  python3 jjm_scheme_master_ingest.py \
-      --excel all_ascheme_exist.xlsx --actor-id 21357 --out jjm_scheme_analysis.xlsx
+  python3 "scripts/jjm master data ingestion/scheme/jjm_scheme_master_ingest.py" \
+      --excel "scripts/jjm master data ingestion/scheme/all_ascheme_exist.xlsx" --actor-id 21357 --out "scripts/jjm master data ingestion/scheme/jjm_scheme_analysis.xlsx"
 
   # the CSV snapshot: schemes only, no users, no location mappings
-  python3 jjm_scheme_master_ingest.py \
-      --csv schemes-master-data.csv --actor-id 21357 --out jjm_scheme_analysis.xlsx
+  python3 "scripts/jjm master data ingestion/scheme/jjm_scheme_master_ingest.py" \
+      --csv "scripts/jjm master data ingestion/scheme/schemes-master-data.csv" --actor-id 21357 --out "scripts/jjm master data ingestion/scheme/prod_jjm_scheme_analysis_against_csv.xlsx"
 
   # apply, retiring everything the snapshot has dropped
-  python3 jjm_scheme_master_ingest.py \
-      --excel all_ascheme_exist.xlsx --actor-id 21357 \
-      --out jjm_scheme_analysis.xlsx --replace --execute
+  python3 "scripts/jjm master data ingestion/scheme/jjm_scheme_master_ingest.py" \
+      --excel "scripts/jjm master data ingestion/scheme/all_ascheme_exist.xlsx" --actor-id 21357 \
+      --out "scripts/jjm master data ingestion/scheme/jjm_scheme_analysis.xlsx" --replace --execute
 """
 
 from __future__ import annotations
@@ -151,7 +163,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field, fields
 from dataclasses import replace as dataclass_replace
 from datetime import datetime
-from typing import Any, Iterable, Optional
+from typing import Any, Collection, Iterable, Optional
 
 try:
     import pandas as pd
@@ -229,9 +241,9 @@ SCHEME_UPDATE_COLUMN_TYPES = {
 }
 
 # scheme_master_table.state_scheme_code — the state system's public scheme code
-# ("SCH-034035"), added by V38. Distinct from state_scheme_id, which holds the
+# ("SCH-034035"), added by V42. Distinct from state_scheme_id, which holds the
 # numeric SMT id. Only the CSV export carries it (as `public_id`), and only
-# databases past V38 have the column, so both the read and the write are
+# databases past V42 have the column, so both the read and the write are
 # conditional; see TenantDb.state_scheme_code_column_exists.
 STATE_SCHEME_CODE_COLUMN = "state_scheme_code"
 
@@ -241,6 +253,11 @@ DEPT_LEVELS = {"state": 1, "zone": 2, "circle": 3, "division": 4, "sub_division"
 # scheme_lgd_mapping_table.parent_lgd_level / scheme_department_mapping_table.parent_department_level
 LGD_MAPPING_LEVEL = "VILLAGE"
 DEPT_MAPPING_LEVEL = "Sub-division"
+# A scheme with no village mapping is placed directly under the state (the one
+# LGD node at LGD_LEVELS["state"]) so that it still has a location — and so a
+# dim_scheme_table row, whose parent_lgd_location_id is NOT NULL. The mapping
+# is a placeholder: it is retired as soon as the scheme gains a real village.
+LGD_STATE_MAPPING_LEVEL = "STATE"
 
 INDIAN_MOBILE_RE = re.compile(r"^[6-9]\d{9}$")
 SAFE_SCHEMA_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -279,11 +296,12 @@ CAT_REVIVED = "REVIVED_SOFT_DELETED_SCHEME"
 CAT_CONFLICT = "CONFLICT_IDS_POINT_TO_DIFFERENT_SCHEMES"
 CAT_NEW = "NEW_SCHEME"
 CAT_AMBIGUOUS = "AMBIGUOUS_ID_MATCHES_MULTIPLE_SCHEMES"
+CAT_CONTESTED = "SEVERAL_ROWS_MATCH_ONE_SCHEME"
 CAT_INVALID = "INVALID_SHEET_ROW"
 
 CATEGORY_ORDER = [
     CAT_BOTH_MATCH, CAT_CENTRE_ONLY_STATE_NEW, CAT_STATE_ONLY_CENTRE_NEW,
-    CAT_REVIVED, CAT_NEW, CAT_CONFLICT, CAT_AMBIGUOUS, CAT_INVALID,
+    CAT_REVIVED, CAT_NEW, CAT_CONFLICT, CAT_AMBIGUOUS, CAT_CONTESTED, CAT_INVALID,
 ]
 CATEGORY_ACTION = {
     CAT_BOTH_MATCH: "update",
@@ -293,6 +311,7 @@ CATEGORY_ACTION = {
     CAT_NEW: "insert",
     CAT_CONFLICT: "skip",
     CAT_AMBIGUOUS: "skip",
+    CAT_CONTESTED: "skip",
     CAT_INVALID: "skip",
 }
 CATEGORY_DESCRIPTION = {
@@ -303,7 +322,10 @@ CATEGORY_DESCRIPTION = {
     CAT_NEW: "Neither id exists in our system, live or soft-deleted",
     CAT_CONFLICT: "imis_id and smt_id point at two different existing schemes",
     CAT_AMBIGUOUS: "An id matches several schemes and the pair does not resolve it",
-    CAT_INVALID: "Sheet row cannot be used (blank name/ids or unusable work_status)",
+    CAT_CONTESTED: "Several sheet rows reach one existing scheme through a single id, "
+                   "and none matches it on both",
+    CAT_INVALID: "Sheet row cannot be used (blank name/ids, unusable work_status, "
+                 "or an imis_id + smt_id pair repeated in the sheet)",
 }
 
 # Why a mapping row is being retired. Kept apart from each other so the report
@@ -311,6 +333,7 @@ CATEGORY_DESCRIPTION = {
 REMOVAL_DUPLICATE = "duplicate_row_collapsed"
 REMOVAL_NOT_IN_SNAPSHOT = "not_in_latest_snapshot"
 REMOVAL_SCHEME_RETIRED = "scheme_retired"
+REMOVAL_STATE_SUPERSEDED = "state_placeholder_superseded"
 
 # Legacy-scheme outcomes.
 LEGACY_RETIRE = "retire"
@@ -580,7 +603,7 @@ class SourceShape:
     """
     columns: frozenset[str]
     skip_users: bool = False
-    # Set from the database, not the file: the column only exists past V38.
+    # Set from the database, not the file: the column only exists past V42.
     state_scheme_code_supported: bool = True
 
     @property
@@ -833,25 +856,25 @@ def _extract_people(raw: dict, shape: SourceShape) -> tuple[list[PersonRef], lis
     return people, issues
 
 
-def find_sheet_duplicates(rows: list[SheetRow]) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
-    """Ids repeated *within the sheet* — these break the 1:1 matching contract."""
-    by_centre: dict[str, list[int]] = defaultdict(list)
-    by_state: dict[str, list[int]] = defaultdict(list)
+def find_sheet_duplicates(rows: list[SheetRow]) -> dict[tuple[str, str], list[int]]:
+    """(imis_id, smt_id) pairs repeated *within the sheet*.
+
+    Only the pair has to be unique. The state's master legitimately repeats a
+    single id — two schemes sharing an imis_id with different smt_ids are two
+    schemes — so a repeated id alone is not a duplicate. Two rows that could
+    then reach the same existing scheme are caught in classify_rows instead.
+    """
+    by_pair: dict[tuple[str, str], list[int]] = defaultdict(list)
     for row in rows:
-        if row.centre_key:
-            by_centre[row.centre_key].append(row.row_no)
-        if row.state_key:
-            by_state[row.state_key].append(row.row_no)
-    return (
-        {k: v for k, v in by_centre.items() if len(v) > 1},
-        {k: v for k, v in by_state.items() if len(v) > 1},
-    )
+        if row.centre_key or row.state_key:
+            by_pair[(row.centre_key, row.state_key)].append(row.row_no)
+    return {k: v for k, v in by_pair.items() if len(v) > 1}
 
 
 def find_public_id_duplicates(rows: list[SheetRow]) -> dict[str, list[int]]:
     """public_id values repeated inside the source.
 
-    V38 puts a partial UNIQUE index on state_scheme_code, so two rows claiming
+    V42 puts a partial UNIQUE index on state_scheme_code, so two rows claiming
     one code cannot both be written; catching it here reports both rows instead
     of failing the transaction on whichever reached the index second.
     """
@@ -886,8 +909,7 @@ class SchemeSnapshot:
     longitude: Optional[float]
     work_status: Optional[int]
     operating_status: Optional[int]
-    state_scheme_code: Optional[str] = None   # NULL before V38, or never set
-    is_active: Optional[bool] = None
+    state_scheme_code: Optional[str] = None   # NULL before V42, or never set
     live: bool = True           # deleted_at IS NULL
 
 
@@ -905,7 +927,7 @@ class SchemeIndex:
     snapshots: dict[int, SchemeSnapshot]
     retired_by_centre: dict[str, list[int]] = field(default_factory=dict)
     retired_by_state: dict[str, list[int]] = field(default_factory=dict)
-    # lower(state_scheme_code) -> the live scheme already holding it. V38 puts a
+    # lower(state_scheme_code) -> the live scheme already holding it. V42 puts a
     # partial UNIQUE index on that column, so writing a code another live scheme
     # owns aborts the whole transaction; this is what lets it be caught first.
     code_owners: dict[str, int] = field(default_factory=dict)
@@ -1014,10 +1036,10 @@ class TenantDb:
         return types
 
     def state_scheme_code_column_exists(self) -> bool:
-        """V38 adds scheme_master_table.state_scheme_code; older DBs lack it.
+        """V42 adds scheme_master_table.state_scheme_code; older DBs lack it.
 
         Checked once rather than assumed, so the whole tool still runs against a
-        database that has not taken V38 yet — the public code is simply neither
+        database that has not taken V42 yet — the public code is simply neither
         read nor written there.
         """
         if self._has_state_scheme_code is None:
@@ -1058,7 +1080,7 @@ class TenantDb:
                 SELECT id, state_scheme_id, centre_scheme_id, scheme_name,
                        planned_fhtc, fhtc_count, house_hold_count,
                        latitude, longitude, work_status, operating_status,
-                       {code_expr}, is_active, deleted_at IS NULL
+                       {code_expr}, deleted_at IS NULL
                 FROM {self.schema}.scheme_master_table
             """)
             for rec in cur:
@@ -1317,8 +1339,8 @@ class SchemeDecision:
     adopt_state_id: bool = False
     adopt_centre_id: bool = False
     # The public code this row may claim, or None when it may not — because the
-    # source has none, the database predates V38, the source repeats the code,
-    # or another live scheme already owns it (V38's UNIQUE index would reject
+    # source has none, the database predates V42, the source repeats the code,
+    # or another live scheme already owns it (V42's UNIQUE index would reject
     # it). Decided once, in resolve_public_ids, and read by both the update diff
     # and the insert. The rest of the row is written either way.
     public_id_to_write: Optional[str] = None
@@ -1356,11 +1378,18 @@ def match_scheme_ids(
     by_centre: dict[str, list[int]],
     by_state: dict[str, list[int]],
     label: str,
+    taken: Collection[int] = frozenset(),
 ) -> IdMatch:
     """Rules 1 and 2 of the matching contract, over one index.
 
     Factored out so the live rows and the soft-deleted rows are judged by
     exactly the same rules; `label` only colours the reasons the report shows.
+
+    `taken` holds schemes another sheet row matches on both ids. When every
+    scheme this row's ids reach is one of those, the row is a different scheme
+    sharing an id with them, not a new id for any of them — so rule 2 finds
+    nothing. Otherwise `taken` changes nothing: an id held by a matched scheme
+    is still in use, and never looks free to adopt.
     """
     centre_hits = by_centre.get(row.centre_key, []) if row.centre_key else []
     state_hits = by_state.get(row.state_key, []) if row.state_key else []
@@ -1380,6 +1409,8 @@ def match_scheme_ids(
         )
 
     # Rule 2 — fall back to single-id matching; multiplicity is unresolvable here.
+    if all(s in taken for s in centre_hits + state_hits):
+        return IdMatch("none")
     if len(centre_hits) > 1:
         return IdMatch(
             "ambiguous",
@@ -1432,26 +1463,29 @@ def match_scheme_ids(
     return IdMatch("none")
 
 
-def classify_scheme(row: SheetRow, index: SchemeIndex, dup_centre: dict, dup_state: dict) -> SchemeDecision:
-    """Apply the matching contract to a single sheet row."""
+def classify_scheme(
+    row: SheetRow,
+    index: SchemeIndex,
+    dup_pairs: dict[tuple[str, str], list[int]],
+    taken: Collection[int] = frozenset(),
+) -> SchemeDecision:
+    """Apply the matching contract to a single sheet row.
+
+    `taken` is pair_matched_schemes over the whole sheet; see match_scheme_ids.
+    """
     if row.blocking_issues:
         return SchemeDecision(row, CAT_INVALID, reason="; ".join(row.blocking_issues))
 
-    # An id repeated inside the sheet cannot be reconciled 1:1 with our system.
-    if row.centre_key and row.centre_key in dup_centre:
-        others = [r for r in dup_centre[row.centre_key] if r != row.row_no]
+    # The same id pair twice cannot be reconciled 1:1 with our system.
+    pair = (row.centre_key, row.state_key)
+    if pair in dup_pairs:
+        others = [r for r in dup_pairs[pair] if r != row.row_no]
         return SchemeDecision(
             row, CAT_INVALID,
-            reason=f"imis_id repeated within the sheet (also on row(s) {others})",
-        )
-    if row.state_key and row.state_key in dup_state:
-        others = [r for r in dup_state[row.state_key] if r != row.row_no]
-        return SchemeDecision(
-            row, CAT_INVALID,
-            reason=f"smt_id repeated within the sheet (also on row(s) {others})",
+            reason=f"imis_id + smt_id pair repeated within the sheet (also on row(s) {others})",
         )
 
-    live = match_scheme_ids(row, index.by_centre, index.by_state, "")
+    live = match_scheme_ids(row, index.by_centre, index.by_state, "", taken)
     if live.outcome == "ambiguous":
         return SchemeDecision(row, CAT_AMBIGUOUS, reason=live.reason)
     if live.outcome == "conflict":
@@ -1478,7 +1512,7 @@ def classify_scheme(row: SheetRow, index: SchemeIndex, dup_centre: dict, dup_sta
     # back. Reviving keeps its id, its readings and its mappings; inserting
     # would strand all three behind a second row carrying the same two ids.
     retired = match_scheme_ids(row, index.retired_by_centre, index.retired_by_state,
-                               "soft-deleted ")
+                               "soft-deleted ", taken)
     if retired.outcome == "ambiguous":
         return SchemeDecision(row, CAT_AMBIGUOUS, reason=retired.reason)
     if retired.outcome == "conflict":
@@ -1514,12 +1548,84 @@ def classify_scheme(row: SheetRow, index: SchemeIndex, dup_centre: dict, dup_sta
     return SchemeDecision(row, CAT_NEW, reason="neither imis_id nor smt_id exists in our system")
 
 
+def pair_matched_schemes(rows: list[SheetRow], index: SchemeIndex) -> set[int]:
+    """Schemes, live or soft-deleted, that some sheet row matches on both ids.
+
+    Such a scheme is spoken for by that row, whatever else points at it; see
+    match_scheme_ids for why that closes it to single-id matches.
+    """
+    taken: set[int] = set()
+    for row in rows:
+        if row.blocking_issues or not row.centre_key or not row.state_key:
+            continue
+        for by_centre, by_state in (
+            (index.by_centre, index.by_state),
+            (index.retired_by_centre, index.retired_by_state),
+        ):
+            hits = set(by_centre.get(row.centre_key, [])) & set(by_state.get(row.state_key, []))
+            if len(hits) == 1:
+                taken |= hits
+    return taken
+
+
+def classify_rows(rows: list[SheetRow], index: SchemeIndex) -> list[SchemeDecision]:
+    """Classify every sheet row, then refuse any existing scheme two rows claim.
+
+    With a single id allowed to repeat across rows, two rows can reach the same
+    scheme — each through a different id, or both through one they share.
+    Writing both would give that scheme two identities, and nothing says which
+    row is really it, so every such row is skipped and reported instead.
+    """
+    dup_pairs = find_sheet_duplicates(rows)
+    taken = pair_matched_schemes(rows, index)
+    decisions = [classify_scheme(row, index, dup_pairs, taken) for row in rows]
+
+    claims: dict[int, list[SchemeDecision]] = defaultdict(list)
+    for decision in decisions:
+        if decision.will_write and decision.scheme_id:
+            claims[decision.scheme_id].append(decision)
+    for scheme_id, claimants in claims.items():
+        if len(claimants) < 2:
+            continue
+        row_nos = [d.row.row_no for d in claimants]
+        for decision in claimants:
+            others = [r for r in row_nos if r != decision.row.row_no]
+            decision.category = CAT_CONTESTED
+            decision.adopt_state_id = decision.adopt_centre_id = False
+            decision.reason = (
+                f"{decision.reason}; row(s) {others} also reach scheme id {scheme_id} "
+                f"and none matches it on both ids"
+            )
+    return decisions
+
+
+def schemes_named_by_sheet(decisions: list[SchemeDecision], index: SchemeIndex) -> set[int]:
+    """Live schemes some sheet row points at, whether or not that row is written.
+
+    A row skipped as a conflict, as ambiguous or as contested still names the
+    schemes its ids reach. Treating those schemes as absent from the snapshot
+    would retire the very schemes the sheet is asking a human to reconcile.
+    """
+    named: set[int] = set()
+    for decision in decisions:
+        if decision.will_write:
+            if decision.scheme_id:
+                named.add(decision.scheme_id)
+            continue
+        row = decision.row
+        centre = set(index.by_centre.get(row.centre_key, [])) if row.centre_key else set()
+        state = set(index.by_state.get(row.state_key, [])) if row.state_key else set()
+        # A pair match is exact; only without one do the single ids speak.
+        named |= (centre & state) or (centre | state)
+    return named
+
+
 def resolve_public_ids(
     decisions: list[SchemeDecision], index: SchemeIndex, shape: SourceShape
 ) -> dict[str, list[int]]:
     """Decide which rows may claim their public_id, and say why not when they may not.
 
-    V38 puts a partial UNIQUE index on scheme_master_table.state_scheme_code, so
+    V42 puts a partial UNIQUE index on scheme_master_table.state_scheme_code, so
     a code claimed twice cannot be written twice. Deciding it here, once, means
     the analysis and the two write paths (update diff, insert) all agree, and a
     mislabelled row costs that one column rather than aborting the transaction.
@@ -1594,6 +1700,47 @@ def compute_scheme_changes(decision: SchemeDecision, index: SchemeIndex) -> None
     decision.changes = changes
 
 
+def new_scheme_values(decision: SchemeDecision) -> dict[str, Any]:
+    """The scheme_master_table columns insert_schemes writes for a new scheme."""
+    row = decision.row
+    return {
+        "state_scheme_id": row.state_id,
+        "centre_scheme_id": row.centre_id,
+        "scheme_name": row.scheme_name,
+        "fhtc_count": row.achieved_fhtc or 0,
+        "planned_fhtc": row.planned_fhtc or 0,
+        "latitude": row.latitude,
+        "longitude": row.longitude,
+        "work_status": row.work_status,
+        "operating_status": row.operating_status if row.operating_status is not None
+        else DEFAULT_OPERATING_STATUS,
+        STATE_SCHEME_CODE_COLUMN: decision.public_id_to_write,
+    }
+
+
+def scheme_post_state(
+    decision: SchemeDecision, snapshots: dict[int, SchemeSnapshot]
+) -> dict[str, Any]:
+    """scheme_master_table's columns for a written scheme, as this run leaves them.
+
+    A matched or revived scheme is its snapshot with decision.changes applied —
+    the very diff update_schemes sends — and a new one is exactly what
+    insert_schemes writes. Nothing here re-reads the sheet, so wherever the
+    update declines the sheet's value (coordinates we already hold, a blank
+    status) this declines it too.
+    """
+    if decision.category == CAT_NEW:
+        # The source carries no household count; the insert leaves the column default.
+        return {**new_scheme_values(decision), "house_hold_count": 0}
+    snap = snapshots[decision.scheme_id]
+    state = {
+        column: getattr(snap, column)
+        for column in (*SCHEME_UPDATE_COLUMN_TYPES, "house_hold_count")
+    }
+    state.update((column, new) for column, (_, new) in decision.changes.items())
+    return state
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Location resolution (village -> LGD, sub-division -> department)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1621,6 +1768,9 @@ class LocationIndex:
 
     def __len__(self) -> int:
         return len(self.nodes)
+
+    def ids_at_level(self, level: int) -> list[int]:
+        return sorted(node.id for node in self.nodes.values() if node.level == level)
 
     def ancestor_titles(self, node_id: int) -> dict[int, str]:
         """level -> normalised title for a node and each of its ancestors."""
@@ -2058,31 +2208,24 @@ class TenantWriter:
         """Insert new schemes. Returns sheet row_no -> new scheme id.
 
         state_scheme_code is only named when the source carries a public_id and
-        the database has V38's column, so the same statement works on a
+        the database has V42's column, so the same statement works on a
         database that predates it.
         """
         if not decisions:
             return {}
-        code_column = f", {STATE_SCHEME_CODE_COLUMN}" if with_public_id else ""
-        code_placeholder = ",%s" if with_public_id else ""
-        payload = [
-            (
-                d.row.state_id, d.row.centre_id, d.row.scheme_name,
-                d.row.achieved_fhtc or 0, d.row.planned_fhtc or 0,
-                d.row.latitude, d.row.longitude,
-                d.row.work_status,
-                d.row.operating_status if d.row.operating_status is not None
-                else DEFAULT_OPERATING_STATUS,
-                *((d.public_id_to_write,) if with_public_id else ()),
-                self.actor_id, self.actor_id,
-            )
-            for d in decisions
+        columns = [
+            "state_scheme_id", "centre_scheme_id", "scheme_name",
+            "fhtc_count", "planned_fhtc", "latitude", "longitude",
+            "work_status", "operating_status",
+            *([STATE_SCHEME_CODE_COLUMN] if with_public_id else []),
         ]
+        payload = []
+        for d in decisions:
+            values = new_scheme_values(d)
+            payload.append((*(values[c] for c in columns), self.actor_id, self.actor_id))
         sql = f"""
             INSERT INTO {self.schema}.scheme_master_table
-                (state_scheme_id, centre_scheme_id, scheme_name,
-                 fhtc_count, planned_fhtc, latitude, longitude,
-                 work_status, operating_status{code_column},
+                ({", ".join(columns)},
                  created_by, created_at, updated_by, updated_at)
             VALUES %s
             RETURNING id
@@ -2090,7 +2233,7 @@ class TenantWriter:
         with self.conn.cursor() as cur:
             ids = psycopg2.extras.execute_values(
                 cur, sql, payload,
-                template=f"(%s,%s,%s,%s,%s,%s,%s,%s,%s{code_placeholder},%s,NOW(),%s,NOW())",
+                template="(" + ",".join(["%s"] * len(columns)) + ",%s,NOW(),%s,NOW())",
                 fetch=True,
             )
         # execute_values preserves input order in RETURNING for a single INSERT.
@@ -2153,11 +2296,6 @@ class TenantWriter:
         Clearing deleted_by as well as deleted_at matters: a live row still
         carrying the id of whoever retired it misreports its own history to
         anyone reading the audit columns.
-
-        is_active is deliberately left alone. scheme-service's
-        SchemeActivitySyncScheduler owns that column and recomputes it from
-        recent flow readings; a scheme only ever gets retired here when it had
-        none, so FALSE is the right value until that job next runs.
         """
         ids = sorted(set(scheme_ids))
         if not ids:
@@ -2170,28 +2308,6 @@ class TenantWriter:
                 WHERE id = ANY(%s) AND deleted_at IS NOT NULL
                 RETURNING id
             """, (self.actor_id, ids))
-            return len(cur.fetchall())
-
-    def retire_schemes(self, scheme_ids: Iterable[int]) -> int:
-        """Soft-delete schemes the latest snapshot has dropped.
-
-        Both halves are needed. is_active = FALSE is what the application reads,
-        but SchemeActivitySyncScheduler recomputes that column on a timer and
-        would flip it back; it only skips rows `WHERE deleted_at IS NULL`, so
-        setting deleted_at in the same statement is what makes the retirement
-        stick.
-        """
-        ids = sorted(set(scheme_ids))
-        if not ids:
-            return 0
-        with self.conn.cursor() as cur:
-            cur.execute(f"""
-                UPDATE {self.schema}.scheme_master_table
-                SET deleted_at = NOW(), deleted_by = %s, is_active = FALSE,
-                    updated_by = %s, updated_at = NOW()
-                WHERE id = ANY(%s) AND deleted_at IS NULL
-                RETURNING id
-            """, (self.actor_id, self.actor_id, ids))
             return len(cur.fetchall())
 
     def insert_users(self, plans: list[UserPlan]) -> None:
@@ -2312,7 +2428,11 @@ class TenantWriter:
             )
             return len(inserted)
 
-    def insert_lgd_mappings(self, pairs: list[tuple[int, int]]) -> int:
+    def insert_lgd_mappings(
+        self, pairs: list[tuple[int, int]], state_lgd_id: Optional[int] = None
+    ) -> int:
+        """A pair naming the state node is the no-village placeholder and is
+        labelled as such; every other pair is a village."""
         if not pairs:
             return 0
         sql = f"""
@@ -2325,7 +2445,12 @@ class TenantWriter:
         with self.conn.cursor() as cur:
             inserted = psycopg2.extras.execute_values(
                 cur, sql,
-                [(s, l, LGD_MAPPING_LEVEL, self.actor_id, self.actor_id) for s, l in pairs],
+                [
+                    (s, l,
+                     LGD_STATE_MAPPING_LEVEL if l == state_lgd_id else LGD_MAPPING_LEVEL,
+                     self.actor_id, self.actor_id)
+                    for s, l in pairs
+                ],
                 template="(%s,%s,%s,%s,NOW(),%s,NOW())",
                 page_size=1000, fetch=True,
             )
@@ -2679,35 +2804,31 @@ class AnalyticsWriter:
             )
         return [row[0] for row in touched]
 
-    def deactivate_schemes(self, scheme_ids: Iterable[int]) -> int:
-        """Mark a retired scheme's dim rows inactive.
+    def delete_state_placeholder_rows(
+        self, scheme_ids: Iterable[int], state_lgd_id: int
+    ) -> int:
+        """Drop the state-level row of schemes that now sit under a village.
 
-        The rows themselves cannot go: fact_water_quantity_table,
-        fact_meter_reading_table, fact_scheme_performance_table and
-        dim_operator_attendance_table all carry a foreign key to
-        dim_scheme_table (tenant_id, scheme_id), and a scheme retired for having
-        no *recent* readings can still have years of older facts behind it.
-        Deleting the dimension row would either fail on the constraint or take
-        the history with it. operating_status = 0 is the warehouse's own
-        INACTIVE marker (see V39), which is what the reports read.
+        Left in place it would count the scheme twice in any metric summed over
+        rows at state level. Only the placeholder goes: the scheme's facts are
+        keyed on (tenant_id, scheme_id), which its village rows still carry, and
+        no foreign key has referenced dim_scheme_table since V24.
         """
         ids = sorted(set(scheme_ids))
         if not ids:
             return 0
         with self.conn.cursor() as cur:
             cur.execute("""
-                UPDATE analytics_schema.dim_scheme_table
-                SET operating_status = 0, updated_at = NOW()
-                WHERE tenant_id = %s AND scheme_id = ANY(%s) AND operating_status <> 0
-                RETURNING id
-            """, (self.tenant_id, ids))
-            return len(cur.fetchall())
+                DELETE FROM analytics_schema.dim_scheme_table
+                WHERE tenant_id = %s AND parent_lgd_location_id = %s AND scheme_id = ANY(%s)
+            """, (self.tenant_id, state_lgd_id, ids))
+            return cur.rowcount
 
     def delete_scheme_user_mappings(self, scheme_ids: Iterable[int]) -> int:
         """Drop warehouse coverage for retired schemes.
 
-        Unlike the dim row, these carry no history worth keeping — they only say
-        who is responsible today, and after the retirement nobody is.
+        These carry no history worth keeping — they only say who is responsible
+        today, and after the retirement nobody is. The scheme's own rows stay.
         """
         ids = sorted(set(scheme_ids))
         if not ids:
@@ -2811,8 +2932,7 @@ class IngestPlan:
     user_plans: dict[str, UserPlan]             # phone -> plan
     user_conflicts: list[dict]
     sheet_issues: list[dict]
-    dup_centre: dict[str, list[int]]
-    dup_state: dict[str, list[int]]
+    dup_pairs: dict[tuple[str, str], list[int]]
     scheme_index: SchemeIndex
     lgd: "LocationIndex"
     dept: "LocationIndex"
@@ -2834,6 +2954,20 @@ class IngestPlan:
     # the warehouse was not reachable (--skip-analytics or no DSN in analyze).
     dim_rows: dict[int, list[DimSchemeState]] = field(default_factory=dict)
     dim_read: bool = False
+    # The LGD node a scheme with no village is placed under; None when the
+    # hierarchy does not hold exactly one state-level node.
+    state_lgd_id: Optional[int] = None
+    # Existing schemes by what their LGD mappings will be once this run is
+    # applied: none but the state placeholder, or at least one real village.
+    state_mapped_scheme_ids: set[int] = field(default_factory=set)
+    village_mapped_scheme_ids: set[int] = field(default_factory=set)
+
+    def maps_to_state(self, decision: SchemeDecision) -> bool:
+        """Does this written scheme sit under the state rather than a village?"""
+        if decision.category == CAT_NEW:
+            loc = self.locations.get(decision.row.row_no)
+            return not (loc and loc.village_ids)
+        return decision.scheme_id in self.state_mapped_scheme_ids
 
     def by_category(self) -> dict[str, list[SchemeDecision]]:
         grouped: dict[str, list[SchemeDecision]] = defaultdict(list)
@@ -2876,7 +3010,7 @@ def build_plan(
 ) -> IngestPlan:
     LOG.info("Loading existing schemes from %s …", tenant.schema)
     # The public code is only usable when both sides carry it: the source needs
-    # a public_id column and the database needs V38's state_scheme_code.
+    # a public_id column and the database needs V42's state_scheme_code.
     if shape.state_scheme_code_supported and not tenant.state_scheme_code_column_exists():
         shape = dataclass_replace(shape, state_scheme_code_supported=False)
         if PUBLIC_ID_COLUMN in shape.columns:
@@ -2892,14 +3026,19 @@ def build_plan(
         len(scheme_index.live_ids), len(scheme_index.snapshots) - len(scheme_index.live_ids),
     )
 
-    dup_centre, dup_state = find_sheet_duplicates(rows)
-    if dup_centre or dup_state:
+    dup_pairs = find_sheet_duplicates(rows)
+    if dup_pairs:
         LOG.warning(
-            "Sheet has %d repeated imis_id and %d repeated smt_id value(s) — those rows are skipped",
-            len(dup_centre), len(dup_state),
+            "Sheet repeats %d imis_id + smt_id pair(s) — those rows are skipped", len(dup_pairs),
         )
     LOG.info("Classifying %d sheet rows …", len(rows))
-    decisions = [classify_scheme(row, scheme_index, dup_centre, dup_state) for row in rows]
+    decisions = classify_rows(rows, scheme_index)
+    contested = sum(1 for d in decisions if d.category == CAT_CONTESTED)
+    if contested:
+        LOG.warning(
+            "%d sheet row(s) reach an existing scheme another row also reaches — skipped",
+            contested,
+        )
     dup_public_id = resolve_public_ids(decisions, scheme_index, shape)
     if dup_public_id and shape.has_public_id:
         LOG.warning(
@@ -2913,6 +3052,8 @@ def build_plan(
     lgd = tenant.load_locations(region_type=1)
     dept = tenant.load_locations(region_type=2)
     LOG.info("  %d LGD nodes, %d department nodes", len(lgd), len(dept))
+    state_nodes = lgd.ids_at_level(LGD_LEVELS["state"])
+    state_lgd_id = state_nodes[0] if len(state_nodes) == 1 else None
 
     locations: dict[int, RowLocations] = {}
     if shape.has_villages or shape.has_sub_divisions:
@@ -2940,8 +3081,7 @@ def build_plan(
         user_plans=user_plans,
         user_conflicts=user_conflicts,
         sheet_issues=sheet_issues,
-        dup_centre=dup_centre,
-        dup_state=dup_state,
+        dup_pairs=dup_pairs,
         scheme_index=scheme_index,
         lgd=lgd,
         dept=dept,
@@ -2949,6 +3089,7 @@ def build_plan(
         replace=replace,
         window_days=window_days,
         dup_public_id=dup_public_id,
+        state_lgd_id=state_lgd_id,
     )
 
     plan.legacy = _judge_legacy_schemes(plan, tenant, window_days)
@@ -2974,7 +3115,7 @@ def _judge_legacy_schemes(
     Computed on every run, not only under --replace, because the analysis is
     supposed to surface the drift whether or not this run acts on it.
     """
-    claimed = {d.scheme_id for d in plan.decisions if d.will_write and d.scheme_id}
+    claimed = schemes_named_by_sheet(plan.decisions, plan.scheme_index)
     absent = plan.scheme_index.live_ids - claimed
     if not absent:
         return []
@@ -3005,6 +3146,7 @@ def _reconcile_all_mappings(plan: IngestPlan, tenant: TenantDb) -> None:
     what keeps a re-run from duplicating rows, and that is not something
     --replace should have to be passed to get.
     """
+    # Retirement reaches the user mappings only; the scheme keeps its locations.
     retiring = plan.schemes_to_retire
     # Schemes this snapshot actually spoke about; nothing outside them is judged
     # except through the retirement cascade above.
@@ -3024,23 +3166,43 @@ def _reconcile_all_mappings(plan: IngestPlan, tenant: TenantDb) -> None:
         for village_id in loc.village_ids:
             desired_lgd.add((decision.scheme_id, village_id))
 
-    def lgd_prune(pair: tuple[int, int]) -> Optional[tuple[str, str]]:
-        scheme_id = pair[0]
-        if scheme_id in retiring:
-            return (REMOVAL_SCHEME_RETIRED,
-                    "the scheme itself is being retired by this run")
+    def village_prune(pair: tuple[int, int]) -> Optional[tuple[str, str]]:
         if not plan.replace or not plan.shape.has_villages:
             return None
         # Only prune where the snapshot gave this scheme a village we could
         # resolve. Otherwise a village name we simply failed to look up would
         # read as "the snapshot dropped it" and take the mapping with it.
-        if scheme_id in stated_villages:
+        if pair[0] in stated_villages:
             return (REMOVAL_NOT_IN_SNAPSHOT,
                     "the snapshot no longer places this scheme in this village")
         return None
 
+    # A written scheme left with no village once this run is applied is placed
+    # under the state instead; a scheme that has a village loses any such
+    # placeholder, whether or not this snapshot names it.
+    lgd_ledger = tenant.load_lgd_mapping_ledger()
+    state_id = plan.state_lgd_id
+    with_village = {
+        scheme_id
+        for scheme_id, location_id in _surviving_pairs(desired_lgd, lgd_ledger, village_prune)
+        if location_id != state_id
+    }
+    plan.village_mapped_scheme_ids = with_village
+    plan.state_mapped_scheme_ids = claimed - with_village
+    _require_state_node(plan)
+    desired_lgd |= {(scheme_id, state_id) for scheme_id in plan.state_mapped_scheme_ids}
+
+    def lgd_prune(pair: tuple[int, int]) -> Optional[tuple[str, str]]:
+        scheme_id, location_id = pair
+        if location_id == state_id:
+            if scheme_id in with_village:
+                return (REMOVAL_STATE_SUPERSEDED,
+                        "the scheme now has a village, so its state-level placeholder goes")
+            return None
+        return village_prune(pair)
+
     plan.lgd_reconciliation = reconcile_pairs(
-        "scheme_lgd_mapping_table", desired_lgd, tenant.load_lgd_mapping_ledger(), lgd_prune,
+        "scheme_lgd_mapping_table", desired_lgd, lgd_ledger, lgd_prune,
     )
 
     LOG.info("Reconciling scheme -> sub-division mappings …")
@@ -3056,13 +3218,9 @@ def _reconcile_all_mappings(plan: IngestPlan, tenant: TenantDb) -> None:
         desired_dept.add((decision.scheme_id, loc.dept_id))
 
     def dept_prune(pair: tuple[int, int]) -> Optional[tuple[str, str]]:
-        scheme_id = pair[0]
-        if scheme_id in retiring:
-            return (REMOVAL_SCHEME_RETIRED,
-                    "the scheme itself is being retired by this run")
         if not plan.replace or not plan.shape.has_sub_divisions:
             return None
-        if scheme_id in stated_depts:
+        if pair[0] in stated_depts:
             return (REMOVAL_NOT_IN_SNAPSHOT,
                     "the snapshot no longer places this scheme in this sub-division")
         return None
@@ -3100,7 +3258,8 @@ def _reconcile_all_mappings(plan: IngestPlan, tenant: TenantDb) -> None:
         user_id, scheme_id = pair
         if scheme_id in retiring:
             return (REMOVAL_SCHEME_RETIRED,
-                    "the scheme itself is being retired by this run")
+                    "the scheme is retired by this run: nobody covers it any more, "
+                    "though the scheme and its locations stay")
         if not plan.replace or not plan.shape.has_users:
             return None
         if scheme_id not in claimed or scheme_id in unwritable_people_schemes:
@@ -3139,14 +3298,42 @@ def _reconcile_all_mappings(plan: IngestPlan, tenant: TenantDb) -> None:
         user.new_scheme_ids = known | placeholders
 
 
+def _surviving_pairs(
+    desired: set[tuple[int, int]],
+    ledger: dict[tuple[int, int], list[MappingRowState]],
+    prune_reason: Any,
+) -> set[tuple[int, int]]:
+    """The pairs reconcile_pairs(desired, ledger, prune_reason) would leave in
+    effect, worked out before it runs so the result can shape what it is asked."""
+    surviving = set(desired)
+    for pair, rows in ledger.items():
+        if pair not in surviving and any(r.usable for r in rows) and prune_reason(pair) is None:
+            surviving.add(pair)
+    return surviving
+
+
+def _require_state_node(plan: IngestPlan) -> None:
+    """Refuse to place a scheme under a state the hierarchy does not pin down."""
+    needed = plan.state_mapped_scheme_ids or any(
+        d.will_write and d.category == CAT_NEW and plan.maps_to_state(d) for d in plan.decisions
+    )
+    if needed and plan.state_lgd_id is None:
+        found = plan.lgd.ids_at_level(LGD_LEVELS["state"])
+        raise SystemExit(
+            f"{len(found)} LGD location(s) sit at the state level "
+            f"(level {LGD_LEVELS['state']}); exactly one is needed to map a scheme "
+            f"with no village to the state."
+        )
+
+
 def scheme_attribute_targets(plan: IngestPlan) -> list[SchemeAttributes]:
     """The scheme-level dim columns each written scheme should end up with.
 
     One entry per scheme, not per sheet row and not per village: these are
     exactly the columns that must agree across all of a scheme's dim rows.
-    Where the sheet is silent the tenant's existing value is carried over, so
-    the result is the post-state of scheme_master_table rather than a partial
-    view of the sheet.
+    They are projected from scheme_post_state — the tenant row exactly as this
+    run leaves it — so every dim row ends up agreeing with scheme_master_table,
+    not merely with its siblings.
 
     Called from the analysis (to show which warehouse rows have drifted) and
     from the execute leg (to fix them), so both describe the same target.
@@ -3155,34 +3342,19 @@ def scheme_attribute_targets(plan: IngestPlan) -> list[SchemeAttributes]:
     for decision in plan.decisions:
         if not decision.will_write or not decision.scheme_id:
             continue
-        row = decision.row
-        snap = plan.scheme_index.snapshots.get(decision.scheme_id)
-        if valid_latlon(row.latitude, row.longitude):
-            latitude, longitude = row.latitude, row.longitude
-        else:
-            latitude = snap.latitude if snap else None
-            longitude = snap.longitude if snap else None
+        post = scheme_post_state(decision, plan.scheme_index.snapshots)
         targets[decision.scheme_id] = SchemeAttributes(
             scheme_id=decision.scheme_id,
-            scheme_name=row.scheme_name,
-            state_scheme_id=as_int_or_zero(row.state_id or (snap.state_scheme_id if snap else "")),
-            centre_scheme_id=as_int_or_zero(row.centre_id or (snap.centre_scheme_id if snap else "")),
-            latitude=latitude,
-            longitude=longitude,
-            # Mirror the tenant post-state: keep the existing value when the
-            # sheet is silent (matched scheme), default only for a new insert.
-            operating_status=row.operating_status if row.operating_status is not None
-            else (snap.operating_status if snap and snap.operating_status is not None
-                  else DEFAULT_OPERATING_STATUS),
-            work_status=row.work_status if row.work_status is not None
-            else (snap.work_status if snap else None),
-            fhtc_count=row.achieved_fhtc if row.achieved_fhtc is not None else (
-                (snap.fhtc_count or 0) if snap else 0
-            ),
-            planned_fhtc=row.planned_fhtc if row.planned_fhtc is not None else (
-                (snap.planned_fhtc or 0) if snap else 0
-            ),
-            house_hold_count=(snap.house_hold_count if snap and snap.house_hold_count else 0),
+            scheme_name=post["scheme_name"],
+            state_scheme_id=as_int_or_zero(post["state_scheme_id"]),
+            centre_scheme_id=as_int_or_zero(post["centre_scheme_id"]),
+            latitude=post["latitude"],
+            longitude=post["longitude"],
+            operating_status=post["operating_status"],
+            work_status=post["work_status"],
+            fhtc_count=post["fhtc_count"] or 0,
+            planned_fhtc=post["planned_fhtc"] or 0,
+            house_hold_count=post["house_hold_count"] or 0,
         )
     return list(targets.values())
 
@@ -3222,6 +3394,13 @@ def build_summary_frame(plan: IngestPlan) -> pd.DataFrame:
         "action": "no write",
         "sheet rows": len(no_op),
     })
+    records.append({
+        "category": "(of the written rows) mapped to the state",
+        "what it means": "the scheme has no village, so it is placed under the state "
+                         "(scheme_lgd_mapping_table level STATE, and a state-level dim row)",
+        "action": "map to state",
+        "sheet rows": len([d for d in plan.decisions if d.will_write and plan.maps_to_state(d)]),
+    })
 
     if plan.shape.has_public_id:
         writable = [d for d in plan.decisions if d.will_write]
@@ -3243,7 +3422,7 @@ def build_summary_frame(plan: IngestPlan) -> pd.DataFrame:
         records.append({
             "category": "public_id -> state_scheme_code",
             "what it means": "source carries public_id but the database has no "
-                             "state_scheme_code column (apply V38)",
+                             "state_scheme_code column (apply V42)",
             "action": "ignored",
             "sheet rows": 0,
         })
@@ -3259,7 +3438,8 @@ def build_summary_frame(plan: IngestPlan) -> pd.DataFrame:
     })
     records.append({
         "category": "LEGACY: … retired (no recent readings)",
-        "what it means": "is_active = FALSE + soft delete, mappings retired with them",
+        "what it means": "their user -> scheme mappings are removed from both DBs; the "
+                         "scheme and its village / sub-division mappings stay",
         "action": "retire" if plan.replace else "reported only — pass --replace to apply",
         "sheet rows": retiring,
     })
@@ -3299,7 +3479,6 @@ def build_legacy_frames(plan: IngestPlan) -> tuple[pd.DataFrame, pd.DataFrame]:
             "imis_id": entry.snapshot.centre_scheme_id,
             "smt_id": entry.snapshot.state_scheme_id,
             "state_scheme_code": entry.snapshot.state_scheme_code,
-            "is_active": entry.snapshot.is_active,
             "work_status": entry.snapshot.work_status,
             "operating_status": entry.snapshot.operating_status,
             f"readings_last_{plan.window_days}d": act.recent_readings,
@@ -3341,6 +3520,7 @@ def build_removal_frames(plan: IngestPlan) -> tuple[pd.DataFrame, pd.DataFrame]:
             "unchanged": rec.unchanged,
             "retire: not in snapshot": by_reason.get(REMOVAL_NOT_IN_SNAPSHOT, 0),
             "retire: scheme retired": by_reason.get(REMOVAL_SCHEME_RETIRED, 0),
+            "retire: state placeholder superseded": by_reason.get(REMOVAL_STATE_SUPERSEDED, 0),
             "retire: duplicate collapsed": by_reason.get(REMOVAL_DUPLICATE, 0),
         })
         is_user_table = rec.kind == "user_scheme_mapping_table"
@@ -3426,23 +3606,33 @@ def build_scheme_detail_frame(plan: IngestPlan) -> pd.DataFrame:
 
 
 def build_conflict_frame(plan: IngestPlan) -> pd.DataFrame:
-    """Rows skipped because the two ids disagree — the list to hand back for correction."""
+    """Rows skipped because their ids do not settle on one scheme — the list to
+    hand back for correction."""
     records = []
     for decision in plan.decisions:
-        if decision.category not in (CAT_CONFLICT, CAT_AMBIGUOUS):
+        if decision.category not in (CAT_CONFLICT, CAT_AMBIGUOUS, CAT_CONTESTED):
             continue
-        centre_snap = plan.scheme_index.snapshots.get(decision.conflict_centre_scheme_id)
-        state_snap = plan.scheme_index.snapshots.get(decision.conflict_state_scheme_id)
+        centre_id, state_id = decision.conflict_centre_scheme_id, decision.conflict_state_scheme_id
+        if decision.category == CAT_CONTESTED:
+            # One scheme, reached through whichever of its ids this row carries.
+            snap = plan.scheme_index.snapshots.get(decision.scheme_id)
+            row = decision.row
+            if snap and scheme_id_key(snap.centre_scheme_id) == row.centre_key:
+                centre_id = decision.scheme_id
+            if snap and scheme_id_key(snap.state_scheme_id) == row.state_key:
+                state_id = decision.scheme_id
+        centre_snap = plan.scheme_index.snapshots.get(centre_id)
+        state_snap = plan.scheme_index.snapshots.get(state_id)
         records.append({
             "row_no": decision.row.row_no,
             "category": decision.category,
             "sheet_scheme_name": decision.row.scheme_name,
             "sheet_imis_id": decision.row.centre_id,
             "sheet_smt_id": decision.row.state_id,
-            "our_scheme_id_via_imis": decision.conflict_centre_scheme_id,
+            "our_scheme_id_via_imis": centre_id,
             "our_name_via_imis": centre_snap.scheme_name if centre_snap else "",
             "our_smt_id_via_imis": centre_snap.state_scheme_id if centre_snap else "",
-            "our_scheme_id_via_smt": decision.conflict_state_scheme_id,
+            "our_scheme_id_via_smt": state_id,
             "our_name_via_smt": state_snap.scheme_name if state_snap else "",
             "our_imis_id_via_smt": state_snap.centre_scheme_id if state_snap else "",
             "reason": decision.reason,
@@ -3545,12 +3735,14 @@ def build_user_frames(plan: IngestPlan, include_pii: bool) -> tuple[pd.DataFrame
 
 
 def build_analytics_frame(plan: IngestPlan, drift: pd.DataFrame) -> pd.DataFrame:
-    """dim_scheme_table.parent_lgd_location_id is NOT NULL, so a scheme with no
-    resolvable village cannot get a *new* row in the warehouse. It can still
-    have rows from an earlier run, and those are kept in step by the attribute
-    sync rather than left to drift."""
+    """dim_scheme_table.parent_lgd_location_id is NOT NULL: a scheme gets a row
+    per resolved village, or one under the state when it has no village at all.
+    One whose villages exist but did not resolve here gets no *new* row; its
+    earlier rows are kept in step by the attribute sync rather than left to
+    drift."""
     writable = [d for d in plan.decisions if d.will_write]
     with_village = 0
+    at_state = 0
     without_village = 0
     dim_rows = 0
     for decision in writable:
@@ -3559,6 +3751,9 @@ def build_analytics_frame(plan: IngestPlan, drift: pd.DataFrame) -> pd.DataFrame
         if village_ids:
             with_village += 1
             dim_rows += len(village_ids)
+        elif plan.maps_to_state(decision):
+            at_state += 1
+            dim_rows += 1
         else:
             without_village += 1
 
@@ -3570,9 +3765,12 @@ def build_analytics_frame(plan: IngestPlan, drift: pd.DataFrame) -> pd.DataFrame
         {"metric": "schemes written to tenant DB", "value": len(writable)},
         {"metric": "…with >=1 resolved village (eligible for a new dim_scheme_table row)",
          "value": with_village},
-        {"metric": "…with no resolved village (no new dim row: parent_lgd_location_id is NOT NULL)",
+        {"metric": "…with no village at all (one dim row under the state)",
+         "value": at_state},
+        {"metric": "…whose villages did not resolve here (no new dim row; existing rows synced)",
          "value": without_village},
-        {"metric": "dim_scheme_table rows upserted (one per scheme x village)", "value": dim_rows},
+        {"metric": "dim_scheme_table rows upserted (one per scheme x village, or at state level)",
+         "value": dim_rows},
         {"metric": "dim_user_table rows upserted",
          "value": len([u for u in plan.user_plans.values() if not u.action.startswith("skip_")])},
     ]
@@ -3584,8 +3782,12 @@ def build_analytics_frame(plan: IngestPlan, drift: pd.DataFrame) -> pd.DataFrame
              "value": fanned_out},
             {"metric": "…rows currently out of sync with the post-state (realigned by this run)",
              "value": len(drift)},
-            {"metric": "dim rows dropped to operating_status = 0 (retired schemes)",
-             "value": sum(len(plan.dim_rows.get(s, [])) for s in plan.schemes_to_retire)},
+            {"metric": "state-level rows deleted (the scheme now has a village)",
+             "value": sum(
+                 1 for s in plan.village_mapped_scheme_ids
+                 for state in plan.dim_rows.get(s, [])
+                 if state.parent_lgd_location_id == plan.state_lgd_id
+             ) if plan.state_lgd_id is not None else 0},
         ])
     else:
         records.append({
@@ -3646,10 +3848,10 @@ def write_analysis_workbook(plan: IngestPlan, path: str, include_pii: bool, cont
 def execute_tenant(plan: IngestPlan, writer: TenantWriter) -> dict[str, int]:
     """Apply the whole tenant-side plan in one transaction.
 
-    Order matters in two places. Revivals happen before anything is written to
-    a scheme, because an update statement filters on `deleted_at IS NULL` and
-    would silently skip a row still marked deleted. Retirements happen last, so
-    a scheme is only ever retired after every mapping hanging off it has been.
+    Revivals happen before anything is written to a scheme, because an update
+    statement filters on `deleted_at IS NULL` and would silently skip a row
+    still marked deleted. A retired scheme is not written at all: retiring it
+    means retiring its user mappings, which the user reconciliation carries.
     """
     grouped = plan.by_category()
     stats: dict[str, int] = {}
@@ -3722,7 +3924,8 @@ def execute_tenant(plan: IngestPlan, writer: TenantWriter) -> dict[str, int]:
         "scheme_lgd_mapping_table", lgd_rec.revivals
     )
     stats["scheme_lgd_mappings_inserted"] = writer.insert_lgd_mappings(
-        sorted(_with_new_scheme_ids(lgd_rec.to_insert, plan, placeholder_to_real, "villages"))
+        sorted(_with_new_scheme_ids(lgd_rec.to_insert, plan, placeholder_to_real, "villages")),
+        plan.state_lgd_id,
     )
     stats["scheme_department_mappings_revived"] = writer.revive_mapping_rows(
         "scheme_department_mapping_table", dept_rec.revivals
@@ -3742,7 +3945,7 @@ def execute_tenant(plan: IngestPlan, writer: TenantWriter) -> dict[str, int]:
     )
 
     if plan.replace:
-        stats["schemes_retired"] = writer.retire_schemes(plan.schemes_to_retire)
+        stats["schemes_retired (user mappings only)"] = len(plan.schemes_to_retire)
         stats["schemes_spared_recent_readings"] = len(plan.spared_scheme_ids)
     return stats
 
@@ -3758,7 +3961,7 @@ def _with_new_scheme_ids(
     A scheme created by this run had no id when the ledger was diffed, so its
     location mappings never reached the reconciler. It also holds no rows in
     that ledger — it did not exist — so adding them here cannot duplicate
-    anything.
+    anything. A new scheme with no resolved village goes under the state.
     """
     result = set(pairs)
     for decision in plan.decisions:
@@ -3768,11 +3971,12 @@ def _with_new_scheme_ids(
         if not scheme_id:
             continue
         loc = plan.locations.get(decision.row.row_no)
-        if loc is None:
-            continue
         if kind == "villages":
-            result.update((scheme_id, village_id) for village_id in loc.village_ids)
-        elif loc.dept_id:
+            if plan.maps_to_state(decision):
+                result.add((scheme_id, plan.state_lgd_id))
+            else:
+                result.update((scheme_id, village_id) for village_id in loc.village_ids)
+        elif loc and loc.dept_id:
             result.add((scheme_id, loc.dept_id))
     return result
 
@@ -3785,15 +3989,17 @@ def execute_analytics(
 ) -> dict[str, int]:
     """Project the post-state into the warehouse.
 
-    dim_scheme_table needs one row per (scheme, village, sub-division) and its
-    parent_lgd_location_id is NOT NULL, so a scheme whose village never
-    resolved gets no *new* row. It can still have rows from earlier runs, and
-    the attribute sync below reaches those, which is the whole point of doing
-    the sync separately from the upsert.
+    dim_scheme_table needs one row per (scheme, location, sub-division) and its
+    parent_lgd_location_id is NOT NULL. A scheme gets a row per village this
+    source resolved, or — when it has no village at all — one row under the
+    state. A scheme whose villages exist but were not resolved here gets no new
+    row; the attribute sync below still reaches the rows it already has, which
+    is the whole point of doing the sync separately from the upsert.
     """
     stats: dict[str, int] = {}
     dim_rows: list[DimSchemeRow] = []
     skipped_no_village = 0
+    state_level = 0
 
     targets = {a.scheme_id: a for a in scheme_attribute_targets(plan)}
 
@@ -3801,8 +4007,11 @@ def execute_analytics(
         if not decision.will_write or not decision.scheme_id:
             continue
         loc = plan.locations.get(decision.row.row_no)
-        village_ids = loc.village_ids if loc else []
-        if not village_ids:
+        parents = loc.village_ids if loc else []
+        if not parents and plan.maps_to_state(decision):
+            parents = [plan.state_lgd_id]
+            state_level += 1
+        if not parents:
             skipped_no_village += 1
             continue
 
@@ -3810,7 +4019,7 @@ def execute_analytics(
         dept_id = loc.dept_id if loc else None
         dept_levels = hierarchy_levels(dept_id, plan.dept.nodes) if dept_id else [None] * 5
 
-        for village_id in village_ids:
+        for parent_id in parents:
             dim_rows.append(DimSchemeRow(
                 scheme_id=attrs.scheme_id,
                 scheme_name=attrs.scheme_name,
@@ -3818,8 +4027,8 @@ def execute_analytics(
                 centre_scheme_id=attrs.centre_scheme_id,
                 latitude=attrs.latitude,
                 longitude=attrs.longitude,
-                parent_lgd_location_id=village_id,
-                lgd_levels=hierarchy_levels(village_id, plan.lgd.nodes),
+                parent_lgd_location_id=parent_id,
+                lgd_levels=hierarchy_levels(parent_id, plan.lgd.nodes),
                 parent_department_location_id=dept_id,
                 dept_levels=dept_levels,
                 operating_status=attrs.operating_status,
@@ -3830,7 +4039,12 @@ def execute_analytics(
             ))
 
     stats["dim_scheme_rows_upserted"] = analytics.upsert_schemes(dim_rows)
+    stats["dim_scheme_rows_at_state_level"] = state_level
     stats["dim_scheme_skipped_no_village"] = skipped_no_village
+    if plan.state_lgd_id is not None:
+        stats["dim_scheme_state_placeholders_deleted"] = analytics.delete_state_placeholder_rows(
+            plan.village_mapped_scheme_ids, plan.state_lgd_id
+        )
 
     # Every *other* row the scheme has — a village this source did not mention,
     # a combination written by an earlier run — carries its own copy of the
@@ -3841,9 +4055,6 @@ def execute_analytics(
     stats["dim_scheme_rows_realigned"] = len(realigned)
 
     if plan.schemes_to_retire:
-        stats["dim_scheme_rows_deactivated"] = analytics.deactivate_schemes(
-            plan.schemes_to_retire
-        )
         stats["dim_user_scheme_mappings_deleted"] = analytics.delete_scheme_user_mappings(
             plan.schemes_to_retire
         )
@@ -3922,10 +4133,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--execute", action="store_true",
                         help="apply the plan; without this the run is read-only")
     parser.add_argument("--replace", action="store_true",
-                        help="treat the snapshot as the complete current truth: retire live "
-                             "schemes it does not name (unless they still have recent "
-                             "readings) and the mappings it contradicts. Without it the "
-                             "legacy distribution is still reported, just not applied")
+                        help="treat the snapshot as the complete current truth: remove the "
+                             "user -> scheme mappings of live schemes it does not name "
+                             "(unless they still have recent readings; the schemes and "
+                             "their locations stay), and retire the mappings it "
+                             "contradicts. Without it the legacy distribution is still "
+                             "reported, just not applied")
     parser.add_argument("--reading-window-days", type=int, default=DEFAULT_READING_WINDOW_DAYS,
                         help=f"a scheme absent from the snapshot is spared if it has a flow "
                              f"reading inside this many days "
@@ -4120,8 +4333,8 @@ def _print_summary(plan: IngestPlan) -> None:
         retiring = len(plan.retirement_candidates)
         LOG.warning("%-46s %8d", "LEGACY schemes absent from the snapshot", len(plan.legacy))
         LOG.warning(
-            "%-46s %8d", f"  retire (silent >{plan.window_days}d)"
-            if plan.replace else "  WOULD retire (needs --replace)", retiring,
+            "%-46s %8d", f"  retire user mappings (silent >{plan.window_days}d)"
+            if plan.replace else "  WOULD retire user mappings (needs --replace)", retiring,
         )
         if spared:
             LOG.warning(

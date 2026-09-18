@@ -916,7 +916,7 @@ class TestExecuteTenant:
             )
             assert cur.fetchone()[0] == "DIV-1"
         assert db.pii.safe_decrypt(title) == "Fresh EE"
-        assert email == "ee_919000000001@pump-operator.local"
+        assert email is None
         assert (user_type, state_user_id, password, status) == (
             roles["EXECUTIVE_ENGINEER"], "USR-1", "CSV_ONBOARDED", 1)
 

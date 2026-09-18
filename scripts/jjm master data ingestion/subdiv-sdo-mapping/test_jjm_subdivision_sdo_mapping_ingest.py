@@ -660,7 +660,7 @@ class TestMapping:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestOfficers:
-    def test_a_new_officer_is_onboarded_with_the_sdo_email_prefix(
+    def test_a_new_officer_is_onboarded_without_an_email(
         self, db, tmp_path, roles, writers
     ):
         division = seed_dept(db, "Nagaon Division", DIVISION_LEVEL)
@@ -682,7 +682,7 @@ class TestOfficers:
                 f"WHERE id = %s", (user_id,)
             )
             email, user_type, state_user_id = cur.fetchone()
-        assert email.startswith("sdo_919000000001")
+        assert email is None
         assert user_type == roles[SDO_ROLE]
         assert state_user_id == "USR-1"
         assert db.load_user_scheme_mappings([user_id]) == {user_id: {scheme}}

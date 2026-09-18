@@ -1487,8 +1487,6 @@ class MappingIngestPlan:
             role_plans=self.role_plans,
             user_types=self.user_types,
             csv_issues=[],
-            dup_phone={},
-            dup_public_id={},
             with_state_user_id=self.with_state_user_id,
         )
 

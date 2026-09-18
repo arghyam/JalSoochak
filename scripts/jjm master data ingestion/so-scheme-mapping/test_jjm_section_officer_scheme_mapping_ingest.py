@@ -452,7 +452,7 @@ def conn_ready(conn):
         )
         _create_schema(cur, SCHEMA, with_columns=True)
         _create_schema(cur, LEGACY_SCHEMA, with_columns=False)
-        # V39, which the division/EE DDL predates: the public scheme code this
+        # V42, which the division/EE DDL predates: the public scheme code this
         # tool resolves by, and the partial UNIQUE index that makes one code at
         # most one live scheme. LEGACY_SCHEMA deliberately goes without it.
         cur.execute(
@@ -483,7 +483,7 @@ def db(conn_ready):
 
 @pytest.fixture
 def legacy_db(conn_ready):
-    """The same tool against a tenant where neither V36 nor V39 has been applied."""
+    """The same tool against a tenant where neither V36 nor V42 has been applied."""
     return SoDb(conn_ready, LEGACY_SCHEMA, _pii(), with_state_user_id=False)
 
 
@@ -502,7 +502,7 @@ def seed_scheme(db: SoDb, centre_id: str, state_id: str = "", name: str = "",
                 public_code: str = "") -> int:
     """A scheme identified the way the tenant identifies one: a centre id and a
     state id, unique as a pair rather than singly, plus the state's public code
-    where V39 has landed and the backfill has reached this scheme."""
+    where V42 has landed and the backfill has reached this scheme."""
     code_column = ", state_scheme_code" if public_code else ""
     code_value = ", %s" if public_code else ""
     with db.conn.cursor() as cur:
@@ -642,7 +642,7 @@ class TestSchemeResolution:
     def test_a_tenant_without_v39_resolves_by_the_centre_id_alone(
         self, legacy_db, tmp_path
     ):
-        """The column is checked for, not assumed: on a pre-V39 tenant the tool
+        """The column is checked for, not assumed: on a pre-V42 tenant the tool
         behaves exactly as it did before it existed, and says why."""
         scheme = seed_scheme(legacy_db, "8156128", "19394")
 
@@ -651,7 +651,7 @@ class TestSchemeResolution:
         resolved = plan.schemes[claim_key("SCH-001001", "8156128")]
         assert resolved.matched_on == MATCH_CENTRE_ID
         assert resolved.scheme_ids == {scheme}
-        assert "no state_scheme_code column (V39)" in resolved.reason
+        assert "no state_scheme_code column (V42)" in resolved.reason
 
     def test_a_soft_deleted_scheme_does_not_answer_for_its_public_id(self, db, tmp_path):
         """The partial UNIQUE index skips deleted rows, so a retired scheme can
@@ -747,7 +747,7 @@ class TestSchemeResolution:
         conflicts = build_conflict_frame(plan, include_pii=False)
         gap = conflicts[conflicts["kind"] == "SCHEME_PUBLIC_ID_UNKNOWN_HERE"]
         assert len(gap) == 1
-        assert "no state_scheme_code column (V39)" in gap.iloc[0]["detail"]
+        assert "no state_scheme_code column (V42)" in gap.iloc[0]["detail"]
 
     def test_an_officer_whose_every_claim_is_ambiguous_is_not_written(self, db, tmp_path):
         seed_scheme(db, "8156128", "19394")
@@ -1144,7 +1144,7 @@ class TestStaleMappings:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestOfficers:
-    def test_a_new_officer_is_onboarded_with_the_so_email_prefix(
+    def test_a_new_officer_is_onboarded_without_an_email(
         self, db, tmp_path, roles, writers
     ):
         scheme = seed_scheme(db, "100")
@@ -1163,7 +1163,7 @@ class TestOfficers:
                 f"WHERE id = %s", (user_id,)
             )
             email, user_type, state_user_id = cur.fetchone()
-        assert email.startswith("so_919000000001")
+        assert email is None
         assert user_type == roles[SO_ROLE]
         assert state_user_id == "USR-015758"
         assert live_mappings(db, user_id) == {scheme}

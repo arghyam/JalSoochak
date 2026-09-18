@@ -20,7 +20,7 @@ that half of the run off entirely, writes and deletions together.
 | Source | Flag | Carries | Run touches |
 | --- | --- | --- | --- |
 | `all_ascheme_exist.xlsx` | `--excel` | locations + users | everything |
-| `schemes-master-data.csv` | `--csv` | scheme columns + `public_id` | scheme attributes, `state_scheme_code`, legacy schemes |
+| `schemes-master-data.csv` | `--csv` | scheme columns + `public_id` | scheme attributes, `state_scheme_code`, legacy schemes, state placeholders |
 
 Required in both: `scheme_name`, `imis_id`, `smt_id`, `work_status`,
 `operating_status`, `planned_fhtc_imis`, `provided_fhtc_imis`, `latitude`,
@@ -37,19 +37,19 @@ Headers are on **row 2** in both formats (`--header-row` to change).
 
 | Table | Operation |
 | --- | --- |
-| `scheme_master_table` | insert / update / **revive** / **retire** |
+| `scheme_master_table` | insert / update / **revive** |
 | `user_table` | insert / update / **revive** (`PUMP_OPERATOR`, `SECTION_OFFICER`) |
 | `user_scheme_mapping_table` | insert / **revive** / **retire** |
-| `scheme_lgd_mapping_table` | insert / **revive** / **retire** (village) |
+| `scheme_lgd_mapping_table` | insert / **revive** / **retire** (village, or the state placeholder) |
 | `scheme_department_mapping_table` | insert / **revive** / **retire** (sub-division) |
 
 **Analytics DB**, schema `analytics_schema`:
 
 | Table | Operation |
 | --- | --- |
-| `dim_scheme_table` | upsert one row per scheme × village × sub-division, **plus an attribute sync across every row of a scheme** |
+| `dim_scheme_table` | upsert one row per scheme × village × sub-division (or one at state level for a scheme with no village), **plus an attribute sync across every row of a scheme**; a superseded state-level row is deleted |
 | `dim_user_table` | upsert |
-| `dim_user_scheme_mapping_table` | delete-then-insert per touched user, from the tenant DB's post-state |
+| `dim_user_scheme_mapping_table` | delete-then-insert per touched user, from the tenant DB's post-state; deleted for retired schemes |
 
 ## Idempotence
 
@@ -81,12 +81,12 @@ or that left duplicates standing, would be the run that created them.
 
 The snapshot is the complete current truth for everything it speaks for.
 
-- A **live scheme whose ids appear nowhere in the snapshot** is retired:
-  `is_active = FALSE` **and** `deleted_at` set. Both are needed —
-  scheme-service's `SchemeActivitySyncScheduler` recomputes `is_active` from
-  recent readings on a timer and would flip it back, but it skips rows whose
-  `deleted_at` is set. Its village, sub-division and user mappings are retired
-  with it, and its `dim_scheme_table` rows drop to `operating_status = 0`.
+- A **live scheme no snapshot row points at** is retired: its
+  `user_scheme_mapping_table` rows are retired and its
+  `dim_user_scheme_mapping_table` rows deleted. **The scheme itself, its village
+  and sub-division mappings and its `dim_scheme_table` rows all stay.** A row
+  skipped as a conflict, as ambiguous or as contested still *points at* the
+  schemes its ids reach, so those are never retired.
 - **A scheme is spared, loudly, when it still has a flow reading inside
   `--reading-window-days` (default 90).** Data is arriving for it, so the
   snapshot is out of date, not the scheme; retiring it would break the
@@ -103,11 +103,9 @@ Retirement is **opt-in**, but the legacy distribution is computed and reported
 on *every* run. `--replace` is refused with `--limit`: retirement decides what to
 delete from what the file does *not* contain, so it needs the whole file.
 
-`dim_scheme_table` rows are never deleted — `fact_water_quantity_table`,
-`fact_meter_reading_table`, `fact_scheme_performance_table` and
-`dim_operator_attendance_table` all carry a foreign key to
-`(tenant_id, scheme_id)`, and a scheme retired for having no *recent* readings
-can still have years of older facts.
+A retired scheme's `dim_scheme_table` rows are left exactly as they are. The only
+`dim_scheme_table` rows the run ever deletes are superseded state-level
+placeholders (see the location mapping contract).
 
 ## dim_scheme drift
 
@@ -119,7 +117,11 @@ same scheme starts reporting two different names depending on which row a query
 groups by.
 
 After the upsert the run pushes each scheme's post-state onto **all** of its
-rows, matching on `(tenant_id, scheme_id)` alone. Location columns are pointedly
+rows, matching on `(tenant_id, scheme_id)` alone. The post-state is the
+`scheme_master_table` row exactly as the run leaves it — the snapshot plus the
+update diff, or the inserted values — never the sheet re-read, so a value the
+tenant keeps (coordinates we already hold, a blank status) is kept in the
+warehouse too. Location columns are pointedly
 not touched; overwriting them from one row's location would destroy the fan-out.
 An `IS DISTINCT FROM` guard means `dim_scheme_rows_realigned` counts rows that
 were genuinely carrying drift, and `dim_scheme_drift` in the workbook lists them
@@ -144,7 +146,16 @@ other schemes*, because the pair is unique.
 | `imis_id` unused anywhere, state matches 1 | `STATE_MATCH_CENTRE_ID_UNKNOWN` | update, adopt `imis_id` |
 | centre → scheme X, state → different scheme Y | `CONFLICT_IDS_POINT_TO_DIFFERENT_SCHEMES` | **skip** |
 | either id matches >1 scheme, pair does not resolve | `AMBIGUOUS_ID_MATCHES_MULTIPLE_SCHEMES` | **skip** |
-| unusable row (blank name / both ids / `work_status`, or an id repeated *inside the source*) | `INVALID_SHEET_ROW` | **skip** |
+| unusable row (blank name / both ids / `work_status`, or an `imis_id` + `smt_id` **pair** repeated *inside the source*) | `INVALID_SHEET_ROW` | **skip** |
+
+**Repeated ids.** A single `imis_id` or `smt_id` may appear on several rows —
+two schemes sharing an IMIS id with different SMT ids are two schemes. Only the
+pair must be unique. A scheme one row matches on **both** ids belongs to that
+row, so rule 2 never hands it to another row sharing just one of those ids; that
+row is matched elsewhere or inserted as a new scheme. If two rows still reach the
+same existing scheme (each through a single id), nothing says which is really
+it: both are skipped as `SEVERAL_ROWS_MATCH_ONE_SCHEME` and listed in
+`scheme_conflicts`.
 
 **Rule 3 — the retired index.** No live scheme carries either id, but a
 soft-deleted one does → `REVIVED_SOFT_DELETED_SCHEME`: revive it. Rules 1 and 2
@@ -183,7 +194,7 @@ which also puts a partial `UNIQUE` index on it (live rows only). The script
 therefore refuses to write a code another live scheme owns, or one the source
 itself repeats: that row keeps everything else and only loses that column, with
 the reason in `scheme_detail.public_id_blocked`. Against a database that has not
-taken V38 the column is neither read nor written and the run warns once.
+taken V42 the column is neither read nor written and the run warns once.
 
 It is **stored, not matched on** — the matching contract above is unchanged.
 
@@ -198,6 +209,21 @@ When several locations share a name, the sheet's hierarchy columns disambiguate:
 Each filter is kept only if it leaves at least one candidate, so a wrong ancestor
 name degrades to `ambiguous` instead of silently selecting the wrong location.
 Anything still ambiguous is reported and left unwritten — nothing is guessed.
+
+### Schemes with no village → the state
+
+A written scheme that ends the run with **no village mapping at all** — none in
+the tenant DB and none resolved from the source — is mapped to the state
+instead: a `scheme_lgd_mapping_table` row pointing at the single LGD node at the
+state level (Assam), with `parent_lgd_level = 'STATE'`. Its `dim_scheme_table`
+row sits at state level too (`parent_lgd_location_id` and `level_1_lgd_id` = the
+state, lower levels `NULL`), so the scheme still reaches the warehouse, whose
+`parent_lgd_location_id` is `NOT NULL`.
+
+The placeholder lasts only until the scheme has a real village: then it is
+retired in the tenant DB and its state-level dim row deleted, with or without
+`--replace`, so the scheme is never counted at both levels. A hierarchy without
+exactly one state-level node stops the run rather than guess.
 
 ## Users
 
@@ -353,7 +379,8 @@ Phone numbers are **masked** (`91XXXXXXXX01`) unless `--include-pii` is passed.
 - **Transactional** — tenant and analytics each commit once, at the end; any
   failure rolls both back.
 - **Deletion is soft and opt-in** — `--replace` only, never a hard `DELETE` on a
-  tenant table, and never for a scheme still receiving readings.
+  tenant table, and never for a scheme still receiving readings. The one
+  exception is the state placeholder, which goes as soon as a village replaces it.
 - **Scoped** — a source only prunes what it speaks for: no village column, no
   village deletions; jalmitras only, no section-officer deletions.
 - Skipped rows are always *reported*, never silently dropped.
@@ -362,13 +389,13 @@ Phone numbers are **masked** (`91XXXXXXXX01`) unless `--include-pii` is passed.
 
 `schemes-master-data.csv` — 27,662 rows, 27,619 usable:
 
-- 43 rows are unusable (blank `work_status`, blank `imis_id`, or an id repeated
-  inside the file).
-- 35 `imis_id` values and 1 `smt_id` appear twice; those rows are skipped, as an
-  id repeated in the source cannot be matched 1:1.
+- Rows with a blank `imis_id` that match no existing scheme cannot be inserted.
+- A few `imis_id` / `smt_id` values appear on two rows with a different partner
+  id; each such row is matched on its pair. No `imis_id` + `smt_id` pair repeats.
 - All 27,662 `public_id` values are distinct and non-null.
 - No village, sub-division or user columns at all — a run against it touches
-  scheme attributes and legacy schemes only.
+  scheme attributes and legacy schemes only, plus the state placeholder for any
+  scheme that has no village.
 
 `all_ascheme_exist.xlsx` — 27,664 rows, carrying locations and ~21.9k distinct
 people (≈21.2k jalmitras, 649 section officers); no phone number is used for

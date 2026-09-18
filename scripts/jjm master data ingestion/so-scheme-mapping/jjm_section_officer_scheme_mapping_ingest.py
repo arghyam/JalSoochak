@@ -47,12 +47,12 @@ Scheme matching contract
 The CSV carries two scheme identifiers, and they are tried in that order of
 authority:
 
-  1. scheme_public_id (SCH-…) — the state portal's own handle, stored by V39 as
+  1. scheme_public_id (SCH-…) — the state portal's own handle, stored by V42 as
      scheme_master_table.state_scheme_code. A partial UNIQUE index holds it to
      at most one live scheme, so a claim it resolves is exact.
   2. imis_id — the centre's id, stored as centre_scheme_id. Used when the CSV
      gives no public id, when we do not hold the one it gives, or when the
-     column itself is not there yet (before V39).
+     column itself is not there yet (before V42).
 
   public id resolves to one scheme                -> mapped
   public id unknown here, imis_id resolves to one -> mapped, fall-back reported
@@ -169,7 +169,7 @@ irrelevant to this file: it touches no departmental node.
 
   --with-state-user-id   needs V36 (user_table.state_user_id)
 
-V39 (scheme_master_table.state_scheme_code) needs no option and is checked for
+V42 (scheme_master_table.state_scheme_code) needs no option and is checked for
 rather than assumed. Without it, or before it is backfilled, the public id
 cannot be looked up and every claim falls back to the centre id. What that costs
 is reported: the summary counts the fall-backs, and the conflicts sheet says how
@@ -203,7 +203,7 @@ Usage
       --actor-id 21357 --out jjm_section_officer_analysis.xlsx --execute
 
   # the same, but map an officer to every scheme behind an id that matches
-  # several instead of refusing the claim (the pre-V39 behaviour)
+  # several instead of refusing the claim (the pre-V42 behaviour)
   python3 "scripts/jjm master data ingestion/so-scheme-mapping/jjm_section_officer_scheme_mapping_ingest.py" \
       --csv "scripts/jjm master data ingestion/so-scheme-mapping/section-officer-scheme-mapping.csv" \
       --actor-id 21357 --out jjm_section_officer_analysis.xlsx \
@@ -586,7 +586,7 @@ class SchemeLookup:
     """
     by_code: dict[str, list[tuple[int, str]]]
     by_centre: dict[str, list[tuple[int, str]]]
-    # False on a tenant that has not taken V39: the public id cannot be looked
+    # False on a tenant that has not taken V42: the public id cannot be looked
     # up at all there, which is a different thing from not holding it.
     code_column_present: bool
 
@@ -601,7 +601,7 @@ class SoDb(DivisionDb):
     one and two rungs up the hierarchy. The departmental half of that base is
     simply never called: this file names its schemes outright and has no node to
     resolve. state_scheme_code_column_exists comes from the same base, so
-    whether V39 has landed is asked exactly once and in exactly one way.
+    whether V42 has landed is asked exactly once and in exactly one way.
     """
 
     def load_scheme_lookup(self) -> SchemeLookup:
@@ -621,7 +621,7 @@ class SoDb(DivisionDb):
         by_code: dict[str, list[tuple[int, str]]] = {}
         by_centre: dict[str, list[tuple[int, str]]] = {}
         has_code = self.state_scheme_code_column_exists()
-        # A literal NULL keeps the row shape identical on a pre-V39 tenant.
+        # A literal NULL keeps the row shape identical on a pre-V42 tenant.
         code_expr = STATE_SCHEME_CODE_COLUMN if has_code else "NULL::varchar"
         with self.conn.cursor(name="so_scheme_scan") as cur:
             cur.itersize = 5000
@@ -728,7 +728,7 @@ def _resolve_one_scheme(
     if plan.code_key:
         if not lookup.code_column_present:
             plan.fallback_reason = (
-                f"this tenant has no {STATE_SCHEME_CODE_COLUMN} column (V39), so "
+                f"this tenant has no {STATE_SCHEME_CODE_COLUMN} column (V42), so "
                 f"scheme_public_id {plan.public_id!r} could not be looked up"
             )
         else:
@@ -769,7 +769,7 @@ def _apply_candidates(
     if matched_on == MATCH_PUBLIC_ID:
         identifier = f"{STATE_SCHEME_CODE_COLUMN} {plan.public_id!r}"
         why_several = (
-            "which the partial UNIQUE index V39 creates should make impossible — "
+            "which the partial UNIQUE index V42 creates should make impossible — "
             "the tenant's data needs looking at"
         )
     else:
@@ -1041,7 +1041,7 @@ class SoIngestPlan(MappingIngestPlan):
     and two rungs up the hierarchy.
     """
     schemes: dict[str, SchemePlan] = field(default_factory=dict)
-    # Whether the tenant has taken V39. False turns every claim into a
+    # Whether the tenant has taken V42. False turns every claim into a
     # centre_scheme_id one, which the report has to be able to say outright
     # rather than leave as tens of thousands of identical fall-backs.
     code_column_present: bool = True
@@ -1437,7 +1437,7 @@ def build_conflict_frame(plan: SoIngestPlan, include_pii: bool) -> pd.DataFrame:
             "csv_rows": sum(len(s.csv_rows) for s in fell_back),
             "subject": f"{len(fell_back)} claim(s)",
             "detail": (
-                (f"this tenant has no {STATE_SCHEME_CODE_COLUMN} column (V39), so every "
+                (f"this tenant has no {STATE_SCHEME_CODE_COLUMN} column (V42), so every "
                  f"claim was resolved by centre_scheme_id alone"
                  if not plan.code_column_present else
                  f"{len(fell_back)} claim(s) name a scheme_public_id no live scheme "
@@ -1823,7 +1823,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                f"then imis_id -> centre_scheme_id"
                                if db.state_scheme_code_column_exists() else
                                f"imis_id -> centre_scheme_id only ({STATE_SCHEME_CODE_COLUMN} "
-                               f"is not in this tenant; apply V39)",
+                               f"is not in this tenant; apply V42)",
             "ambiguous_schemes": "every scheme sharing the id that resolved is mapped"
             if args.map_ambiguous_schemes else
             "refused — nothing is mapped from a claim matching several schemes, and "

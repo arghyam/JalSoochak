@@ -31,21 +31,23 @@ from jjm_user_master_ingest import (  # noqa: E402
     CAT_INVALID,
     CAT_NEW,
     CAT_ROLE_NOT_INGESTED,
+    CAT_SUPERSEDED,
     FIELD_NAME,
     FIELD_ROLE,
     FIELD_STATE_USER_ID,
+    ROLE_PRECEDENCE,
+    CsvDuplicates,
     PiiCrypto,
     RolePlan,
     UserDb,
     UserDecision,
     UserRow,
-    EMAIL_PREFIXES,
     INGESTED_ROLES,
     UserWriter,
+    build_conflict_frame,
     build_role_plans,
     canonical_role,
     classify_users,
-    email_prefix,
     execute_tenant,
     find_csv_duplicates,
     load_csv,
@@ -198,17 +200,6 @@ class TestCanonicalRole:
     def test_maps_csv_slugs_to_c_names(self, raw, expected):
         assert canonical_role(raw) == expected
 
-    def test_email_prefix_per_role(self):
-        assert email_prefix("PUMP_OPERATOR") == "po_"
-        assert email_prefix("SUB_DIVISIONAL_OFFICER") == "sdo_"
-        assert email_prefix("EXECUTIVE_ENGINEER") == "ee_"
-        # Defensive only — every allow-listed role has a prefix of its own.
-        assert email_prefix("BLOCK_COORDINATOR") == "usr_"
-
-    def test_every_allow_listed_role_has_an_email_prefix(self):
-        """A role without one would mint addresses under the fallback prefix."""
-        assert INGESTED_ROLES <= set(EMAIL_PREFIXES)
-
 
 class TestSafeMask:
     def test_never_reveals_a_short_value(self):
@@ -270,8 +261,7 @@ class TestRolesOutOfScope:
         assert decisions[0].category == CAT_ROLE_NOT_INGESTED
         assert decisions[1].category == CAT_NEW
 
-    def test_two_in_scope_rows_on_one_phone_still_skip_each_other(self, db):
-        """The duplicate rule is unchanged for rows that are both candidates."""
+    def test_two_in_scope_rows_on_one_phone_keep_the_higher_role(self, db):
         rows = [
             _row(3, "USR-1", "A", "919000000001", "SECTION_OFFICER"),
             _row(4, "USR-2", "B", "919000000001", "SUB_DIVISIONAL_OFFICER"),
@@ -279,22 +269,113 @@ class TestRolesOutOfScope:
 
         decisions = classify_users(rows, db)
 
-        assert [d.category for d in decisions] == [CAT_DUPLICATE, CAT_DUPLICATE]
+        assert [d.category for d in decisions] == [CAT_SUPERSEDED, CAT_NEW]
+        assert "row 4" in decisions[0].reason
+        assert "SUB_DIVISIONAL_OFFICER" in decisions[0].reason
 
 
 class TestFindCsvDuplicates:
-    def test_reports_repeats_of_both_keys(self):
+    def test_every_ingested_role_is_ranked(self):
+        """An unranked role could never win or lose a shared phone number."""
+        assert set(ROLE_PRECEDENCE) == INGESTED_ROLES
+        assert len(ROLE_PRECEDENCE) == len(INGESTED_ROLES)
+
+    @pytest.mark.parametrize("higher,lower", [
+        ("SUB_DIVISIONAL_OFFICER", "SECTION_OFFICER"),
+        ("SECTION_OFFICER", "EXECUTIVE_ENGINEER"),
+        ("EXECUTIVE_ENGINEER", "PUMP_OPERATOR"),
+        ("SUB_DIVISIONAL_OFFICER", "EXECUTIVE_ENGINEER"),
+    ])
+    @pytest.mark.parametrize("higher_first", [True, False])
+    def test_a_shared_phone_keeps_the_highest_role(self, higher, lower, higher_first):
+        """SDO > SO > EE > PO, wherever the rows sit in the file."""
+        winner = _row(3 if higher_first else 4, "USR-1", "A", "919000000001", higher)
+        loser = _row(4 if higher_first else 3, "USR-2", "B", "919000000001", lower)
+        rows = sorted([winner, loser], key=lambda r: r.row_no)
+
+        dups = find_csv_duplicates(rows)
+
+        assert dups.superseded == {loser.row_no: winner.row_no}
+        assert dups.phone == {}
+
+    def test_a_tie_on_the_top_role_skips_every_row_for_the_phone(self):
+        """Nothing tells two SDO rows apart, so none is chosen — the lower row
+        included, since taking it would pass over both SDO rows."""
         rows = [
-            _row(3, "USR-1", "A", "919000000001", "PUMP_OPERATOR"),
-            _row(4, "USR-2", "B", "919000000001", "SECTION_OFFICER"),
+            _row(3, "USR-1", "A", "919000000001", "SUB_DIVISIONAL_OFFICER"),
+            _row(4, "USR-2", "B", "919000000001", "SUB_DIVISIONAL_OFFICER"),
+            _row(5, "USR-3", "C", "919000000001", "SECTION_OFFICER"),
+        ]
+
+        dups = find_csv_duplicates(rows)
+
+        assert dups.phone == {"919000000001": [3, 4, 5]}
+        assert dups.superseded == {}
+
+    def test_a_tie_below_the_top_role_does_not_block_the_winner(self):
+        rows = [
+            _row(3, "USR-1", "A", "919000000001", "SECTION_OFFICER"),
+            _row(4, "USR-2", "B", "919000000001", "SUB_DIVISIONAL_OFFICER"),
+            _row(5, "USR-3", "C", "919000000001", "SECTION_OFFICER"),
+        ]
+
+        dups = find_csv_duplicates(rows)
+
+        assert dups.superseded == {3: 4, 5: 4}
+        assert dups.phone == {}
+
+    def test_a_superseded_row_does_not_count_towards_public_id_repeats(self):
+        """One person listed twice under the same public_id: the winning row
+        must not be knocked out by the row it replaced."""
+        rows = [
+            _row(3, "USR-1", "A", "919000000001", "SECTION_OFFICER"),
+            _row(4, "USR-1", "A", "919000000001", "SUB_DIVISIONAL_OFFICER"),
+        ]
+
+        dups = find_csv_duplicates(rows)
+
+        assert dups.superseded == {3: 4}
+        assert dups.public_id == {}
+
+    def test_a_public_id_repeated_across_phones_is_still_reported(self):
+        rows = [
             _row(5, "USR-3", "C", "919000000003", "PUMP_OPERATOR"),
             _row(6, "USR-3", "D", "919000000004", "PUMP_OPERATOR"),
         ]
 
-        by_phone, by_public_id = find_csv_duplicates(rows)
+        dups = find_csv_duplicates(rows)
 
-        assert by_phone == {"919000000001": [3, 4]}
-        assert by_public_id == {"usr-3": [5, 6]}
+        assert dups.public_id == {"usr-3": [5, 6]}
+
+    def test_out_of_scope_rows_take_no_part(self):
+        """A khalasi row neither outranks nor ties with an in-scope row."""
+        khalasi = UserRow(row_no=3, public_id="USR-1", name="A",
+                          phone_raw="919000000001", phone="919000000001",
+                          role_raw="khalasi", role="")
+        rows = [khalasi, _row(4, "USR-2", "A", "919000000001", "PUMP_OPERATOR")]
+
+        dups = find_csv_duplicates(rows)
+
+        assert dups == CsvDuplicates()
+
+
+class TestConflictFrame:
+    def test_superseded_rows_are_listed_for_review(self):
+        decision = UserDecision(
+            _row(3, "USR-1", "A", "919000000001", "SECTION_OFFICER"), CAT_SUPERSEDED,
+            reason="taken instead",
+        )
+        plan = IngestPlan(
+            decisions=[decision], role_plans=[], user_types={}, csv_issues=[],
+            duplicates=CsvDuplicates(superseded={3: 4}),
+        )
+
+        frame = build_conflict_frame(plan, include_pii=False)
+
+        assert frame.to_dict("records") == [{
+            "row_no": 3, "kind": CAT_SUPERSEDED, "public_id": "USR-1",
+            "csv_name": "A", "phone": "91XXXXXXXX01", "detail": "taken instead",
+        }]
 
 
 class TestBuildRolePlans:
@@ -426,8 +507,7 @@ def plan_of(decisions, db) -> IngestPlan:
         role_plans=build_role_plans(decisions, user_types),
         user_types=user_types,
         csv_issues=[],
-        dup_phone={},
-        dup_public_id={},
+        duplicates=CsvDuplicates(),
         with_state_user_id=db.with_state_user_id,
     )
 
@@ -514,19 +594,25 @@ class TestClassifyUsers:
         assert FIELD_STATE_USER_ID not in decisions[0].changes
         assert f"user id {owner}" in decisions[0].withheld[FIELD_STATE_USER_ID]
 
-    def test_duplicate_and_invalid_rows_never_reach_the_database(self, db):
+    def test_duplicate_superseded_and_invalid_rows_never_reach_the_database(self, db):
         rows = [
+            # Same role on one phone: a tie, so both are skipped.
             _row(3, "USR-1", "A", "919000000001", "PUMP_OPERATOR"),
-            _row(4, "USR-2", "B", "919000000001", "SECTION_OFFICER"),
-            UserRow(row_no=5, public_id="USR-3", name="", phone_raw="9000000003",
+            _row(4, "USR-2", "B", "919000000001", "PUMP_OPERATOR"),
+            # Different roles on one phone: the SO row loses to the SDO row.
+            _row(5, "USR-3", "C", "919000000002", "SECTION_OFFICER"),
+            _row(6, "USR-4", "D", "919000000002", "SUB_DIVISIONAL_OFFICER"),
+            UserRow(row_no=7, public_id="USR-5", name="", phone_raw="9000000003",
                     phone="919000000003", role_raw="jal-mitra", role="PUMP_OPERATOR",
                     issues=["row:blank name"]),
         ]
 
         decisions = classify_users(rows, db)
 
-        assert [d.category for d in decisions] == [CAT_DUPLICATE, CAT_DUPLICATE, CAT_INVALID]
-        assert all(not d.will_write for d in decisions)
+        assert [d.category for d in decisions] == [
+            CAT_DUPLICATE, CAT_DUPLICATE, CAT_SUPERSEDED, CAT_NEW, CAT_INVALID,
+        ]
+        assert [d.will_write for d in decisions] == [False, False, False, True, False]
 
 
 class TestOfficerPromotionGate:
@@ -653,34 +739,16 @@ class TestInsertUsers:
         assert db.pii.safe_decrypt(first[0]) == "Fresh Person"
         assert db.pii.safe_decrypt(first[1]) == "919000000001"
         assert first[2] == db.pii.hmac("919000000001")
-        assert first[3] == "po_919000000001@pump-operator.local"
         assert (first[4], first[5], first[6], first[7], first[8]) == (
             roles["PUMP_OPERATOR"], "USR-1", "CSV_ONBOARDED", 1, ACTOR_ID)
-        assert second[3] == "sdo_919000000002@pump-operator.local"
+        # The CSV carries no email, so none is invented — for any role. Two
+        # NULLs also show the UNIQUE constraint on email is not in the way.
+        assert first[3] is None
+        assert second[3] is None
 
         # And the new rows are findable the way the app finds them.
         found = db.load_users_for_phones([db.pii.hmac("919000000001")])
         assert found[db.pii.hmac("919000000001")]["title"] == "Fresh Person"
-
-    def test_email_collision_falls_back_to_a_unique_address(self, db, writer, roles):
-        """A soft-deleted row still occupies the address: the UNIQUE constraint
-        on email does not exclude deleted users."""
-        taken = seed_user(db, "Ghost", "919000000009", roles["PUMP_OPERATOR"],
-                          email="po_919000000001@pump-operator.local")
-        with db.conn.cursor() as cur:
-            cur.execute(f"UPDATE {SCHEMA}.user_table SET deleted_at = NOW() WHERE id = %s",
-                        (taken,))
-
-        decision = UserDecision(
-            _row(3, "USR-1", "Fresh Person", "919000000001", "PUMP_OPERATOR"), CAT_NEW)
-        writer.insert_users([decision], roles)
-
-        with db.conn.cursor() as cur:
-            cur.execute(f"SELECT email FROM {SCHEMA}.user_table WHERE id = %s",
-                        (decision.existing_id,))
-            email = cur.fetchone()[0]
-        assert email.startswith("po_919000000001_")
-        assert email.endswith("@pump-operator.local")
 
     def test_withheld_state_user_id_is_left_null(self, db, writer, roles):
         seed_user(db, "First Owner", "919000000009", roles["PUMP_OPERATOR"],
@@ -729,6 +797,23 @@ class TestUpdateUsers:
         assert dump(db, everything) == (
             "New C", db.pii.title_hash("New C"), roles["SUB_DIVISIONAL_OFFICER"],
             "USR-NEW", ACTOR_ID)
+
+    def test_an_existing_users_email_is_left_alone(self, db, writer, roles):
+        """Only new users go without an email; one already on file stays put."""
+        user_id = seed_user(db, "Old Name", "919000000001", roles["PUMP_OPERATOR"],
+                            email="po_919000000001@pump-operator.local")
+
+        decision = UserDecision(_row(3, "", "", "919000000001", ""), CAT_EXISTING)
+        decision.existing_id = user_id
+        decision.changes = {
+            FIELD_NAME: ("Old Name", "New Name"),
+            FIELD_ROLE: ("PUMP_OPERATOR", "SECTION_OFFICER"),
+        }
+        assert writer.update_users([decision], roles) == 1
+
+        with db.conn.cursor() as cur:
+            cur.execute(f"SELECT email FROM {SCHEMA}.user_table WHERE id = %s", (user_id,))
+            assert cur.fetchone()[0] == "po_919000000001@pump-operator.local"
 
     def test_a_decision_with_no_changes_writes_nothing(self, db, writer, roles):
         user_id = seed_user(db, "Unchanged", "919000000001", roles["PUMP_OPERATOR"])
@@ -835,7 +920,7 @@ class TestWithoutStateUserId:
                 (new_user.existing_id,))
             title, email = cur.fetchone()
         assert legacy_db.pii.safe_decrypt(title) == "Renamed Person"
-        assert email == "po_919000000001@pump-operator.local"
+        assert email is None
 
     def test_a_state_user_id_run_against_an_unmigrated_tenant_is_refused(self, legacy_db):
         legacy_db.with_state_user_id = True

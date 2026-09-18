@@ -23,15 +23,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from jjm_scheme_master_ingest import (  # noqa: E402
     CAT_BOTH_MATCH,
+    CAT_CONFLICT,
+    CAT_CONTESTED,
+    CAT_INVALID,
     CAT_NEW,
     CAT_REVIVED,
     EMAIL_DOMAIN,
     EMAIL_PREFIX,
+    LGD_STATE_MAPPING_LEVEL,
     MAPPING_STATUS_ACTIVE,
     MAPPING_STATUS_INACTIVE,
     REMOVAL_DUPLICATE,
     REMOVAL_NOT_IN_SNAPSHOT,
     REMOVAL_SCHEME_RETIRED,
+    REMOVAL_STATE_SUPERSEDED,
     ROLE_PUMP_OPERATOR,
     ROLE_SECTION_OFFICER,
     SCHEME_UPDATE_COLUMN_TYPES,
@@ -53,11 +58,17 @@ from jjm_scheme_master_ingest import (  # noqa: E402
     TenantDb,
     TenantWriter,
     UserPlan,
+    build_dim_drift_frame,
+    classify_rows,
     classify_scheme,
+    execute_analytics,
+    execute_tenant,
     find_legacy_schemes,
+    find_sheet_duplicates,
     load_source,
     reconcile_pairs,
     resolve_public_ids,
+    schemes_named_by_sheet,
 )
 
 DSN = os.environ.get("JJM_TEST_DSN", "postgresql://postgres:testpw@localhost:55432/shared_db")
@@ -80,7 +91,6 @@ CREATE TABLE {schema}.scheme_master_table (
     channel             INTEGER,
     work_status         INTEGER         NOT NULL,
     operating_status    INTEGER         NOT NULL,
-    is_active           BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
     created_by          INTEGER,
     updated_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
@@ -162,7 +172,7 @@ CREATE TABLE {schema}.flow_reading_table (
     deleted_at        TIMESTAMP,
     deleted_by        INTEGER
 );
--- V38's partial UNIQUE index. Present here because half of what the public-code
+-- V42's partial UNIQUE index. Present here because half of what the public-code
 -- handling does is stay on the right side of it.
 CREATE UNIQUE INDEX uq_{schema}_scheme_state_scheme_code
     ON {schema}.scheme_master_table(state_scheme_code)
@@ -741,10 +751,11 @@ class TestReconcilePairs:
 # Scheme classification — reviving instead of duplicating
 # ─────────────────────────────────────────────────────────────────────────────
 
-def sheet_row(centre: str, state: str, name: str = "scheme", public_id: str = "") -> SheetRow:
+def sheet_row(centre: str, state: str, name: str = "scheme", public_id: str = "",
+              row_no: int = 3) -> SheetRow:
     from jjm_scheme_master_ingest import scheme_id_key
     return SheetRow(
-        row_no=3, scheme_name=name, centre_id=centre, state_id=state,
+        row_no=row_no, scheme_name=name, centre_id=centre, state_id=state,
         centre_key=scheme_id_key(centre), state_key=scheme_id_key(state),
         work_status=1, operating_status=1, planned_fhtc=10, achieved_fhtc=5,
         latitude=None, longitude=None, zone="", circle="", division="",
@@ -759,7 +770,7 @@ def snapshot(scheme_id: int, centre: str, state: str, live: bool = True,
         id=scheme_id, state_scheme_id=state, centre_scheme_id=centre,
         scheme_name=f"scheme {scheme_id}", planned_fhtc=1, fhtc_count=1,
         house_hold_count=1, latitude=None, longitude=None, work_status=1,
-        operating_status=1, state_scheme_code=code, is_active=True, live=live,
+        operating_status=1, state_scheme_code=code, live=live,
     )
 
 
@@ -818,6 +829,149 @@ class TestClassifySchemeRevival:
         assert decision.category == CAT_NEW
 
 
+class TestSheetRepeats:
+    """A single id may repeat across rows; only the (imis_id, smt_id) pair must be unique."""
+
+    def test_only_an_exact_pair_repeat_is_a_duplicate(self):
+        rows = [
+            sheet_row("100", "200", row_no=3), sheet_row("100", "300", row_no=4),
+            sheet_row("500", "200", row_no=5), sheet_row("100", "200", row_no=6),
+        ]
+
+        assert find_sheet_duplicates(rows) == {("100", "200"): [3, 6]}
+
+    def test_rows_repeating_the_exact_pair_are_all_skipped(self):
+        index = index_of(snapshot(7, "100", "200"))
+
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "200", row_no=4)], index
+        )
+
+        assert [d.category for d in decisions] == [CAT_INVALID, CAT_INVALID]
+        assert "row(s) [4]" in decisions[0].reason
+
+    def test_a_shared_imis_id_is_fine_when_each_pair_matches_its_own_scheme(self):
+        index = index_of(snapshot(7, "100", "200"), snapshot(8, "100", "300"))
+
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "300", row_no=4)], index
+        )
+
+        assert [(d.category, d.scheme_id) for d in decisions] == [
+            (CAT_BOTH_MATCH, 7), (CAT_BOTH_MATCH, 8),
+        ]
+
+    def test_a_scheme_matched_on_both_ids_cannot_be_taken_through_one(self):
+        """Row 3 is exactly scheme 7, so row 4 — sharing only its imis_id — is
+        another scheme, not a new smt_id for scheme 7."""
+        index = index_of(snapshot(7, "100", "200"))
+
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "300", row_no=4)], index
+        )
+
+        assert [(d.category, d.scheme_id) for d in decisions] == [
+            (CAT_BOTH_MATCH, 7), (CAT_NEW, None),
+        ]
+
+    def test_an_id_held_by_a_matched_scheme_still_counts_as_in_use(self):
+        """imis_id 100 is scheme 7's, which row 3 matches exactly; smt_id 600 is
+        scheme 8's. Row 4 is a conflict, as it always was — being matched
+        elsewhere does not free imis_id 100 for scheme 8 to adopt."""
+        index = index_of(snapshot(7, "100", "200"), snapshot(8, "700", "600"))
+
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "600", row_no=4)], index
+        )
+
+        assert [(d.category, d.scheme_id) for d in decisions] == [
+            (CAT_BOTH_MATCH, 7), (CAT_CONFLICT, None),
+        ]
+
+    def test_the_same_holds_for_a_soft_deleted_scheme(self):
+        index = index_of(snapshot(7, "100", "200", live=False))
+
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "300", row_no=4)], index
+        )
+
+        assert [(d.category, d.scheme_id) for d in decisions] == [
+            (CAT_REVIVED, 7), (CAT_NEW, None),
+        ]
+
+    def test_two_rows_reaching_one_scheme_through_a_shared_id_are_both_skipped(self):
+        """Neither row matches scheme 7 on both ids, so nothing says which it is."""
+        index = index_of(snapshot(7, "100", "999"))
+
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "300", row_no=4)], index
+        )
+
+        assert [(d.category, d.scheme_id) for d in decisions] == [
+            (CAT_CONTESTED, 7), (CAT_CONTESTED, 7),
+        ]
+        assert "row(s) [4]" in decisions[0].reason
+        assert not any(d.will_write for d in decisions)
+
+    def test_rows_reaching_one_scheme_through_different_ids_are_both_skipped(self):
+        """Row 3 reaches scheme 7 by imis_id and row 4 by smt_id; writing both
+        would hand scheme 7 two different id pairs."""
+        index = index_of(snapshot(7, "100", "200"))
+
+        decisions = classify_rows(
+            [sheet_row("100", "300", row_no=3), sheet_row("500", "200", row_no=4)], index
+        )
+
+        assert [d.category for d in decisions] == [CAT_CONTESTED, CAT_CONTESTED]
+
+    def test_new_schemes_may_share_an_id(self):
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "300", row_no=4)], index_of()
+        )
+
+        assert [d.category for d in decisions] == [CAT_NEW, CAT_NEW]
+
+
+class TestSchemesNamedBySheet:
+    """A scheme a sheet row points at is not absent from the sheet, even when
+    that row cannot be written — it must never be judged legacy."""
+
+    def test_a_written_row_names_its_scheme(self):
+        index = index_of(snapshot(7, "100", "200"))
+        decisions = classify_rows([sheet_row("100", "200")], index)
+
+        assert schemes_named_by_sheet(decisions, index) == {7}
+
+    def test_a_conflict_row_names_both_schemes_it_points_at(self):
+        index = index_of(snapshot(7, "100", "200"), snapshot(8, "300", "400"))
+        decisions = classify_rows([sheet_row("100", "400")], index)
+
+        assert decisions[0].category == CAT_CONFLICT
+        assert schemes_named_by_sheet(decisions, index) == {7, 8}
+
+    def test_contested_rows_name_the_scheme(self):
+        index = index_of(snapshot(7, "100", "999"))
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "300", row_no=4)], index
+        )
+
+        assert schemes_named_by_sheet(decisions, index) == {7}
+
+    def test_a_skipped_exact_pair_names_only_the_scheme_it_matches(self):
+        index = index_of(snapshot(7, "100", "200"), snapshot(8, "100", "300"))
+        decisions = classify_rows(
+            [sheet_row("100", "200", row_no=3), sheet_row("100", "200", row_no=4)], index
+        )
+
+        assert schemes_named_by_sheet(decisions, index) == {7}
+
+    def test_a_scheme_no_row_points_at_is_not_named(self):
+        index = index_of(snapshot(7, "100", "200"), snapshot(8, "300", "400"))
+        decisions = classify_rows([sheet_row("100", "200")], index)
+
+        assert 8 not in schemes_named_by_sheet(decisions, index)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Legacy schemes — the reading-window guard
 # ─────────────────────────────────────────────────────────────────────────────
@@ -868,7 +1022,7 @@ class TestFindLegacySchemes:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Public scheme code (V38 state_scheme_code)
+# Public scheme code (V42 state_scheme_code)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def csv_shape(**kwargs) -> SourceShape:
@@ -886,7 +1040,7 @@ class TestResolvePublicIds:
         assert decision.public_id_blocked_by == ""
 
     def test_a_code_another_live_scheme_owns_is_refused(self):
-        """V38's partial UNIQUE index would abort the whole transaction; one
+        """V42's partial UNIQUE index would abort the whole transaction; one
         mislabelled row must cost that one column, not the run."""
         index = index_of(snapshot(7, "100", "200"), snapshot(8, "300", "400", code="SCH-1"))
         decision = classify_scheme(sheet_row("100", "200", public_id="SCH-1"), index, {}, {})
@@ -1019,38 +1173,32 @@ class TestStateSchemeCodeColumn:
 def scheme_state(conn, scheme_id: int) -> tuple:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT deleted_at IS NULL, is_active, deleted_by "
+            "SELECT deleted_at IS NULL, deleted_by "
             "FROM tenant_new.scheme_master_table WHERE id = %s", (scheme_id,)
         )
         return cur.fetchone()
 
 
-class TestRetireAndReviveSchemes:
-    def test_retire_sets_both_the_soft_delete_and_is_active(self, conn, writers):
-        """is_active alone is not durable: SchemeActivitySyncScheduler recomputes
-        it, and only skips rows whose deleted_at is set."""
-        seed_schemes(conn, 3)
+def soft_delete_scheme(conn, schema: str, scheme_id: int) -> None:
+    """Retirement no longer soft-deletes, but a scheme deleted by hand (or by an
+    older run) still has to be revived rather than duplicated."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE {schema}.scheme_master_table SET deleted_at = NOW(), deleted_by = %s "
+            f"WHERE id = %s", (ACTOR_ID, scheme_id),
+        )
 
-        assert writers["new"].retire_schemes([1, 2]) == 2
 
-        assert scheme_state(conn, 1) == (False, False, ACTOR_ID)
-        assert scheme_state(conn, 3) == (True, True, None)
-
-    def test_retiring_an_already_retired_scheme_is_a_no_op(self, conn, writers):
-        seed_schemes(conn, 2)
-        writers["new"].retire_schemes([1])
-
-        assert writers["new"].retire_schemes([1]) == 0
-
+class TestReviveSchemes:
     def test_revive_clears_deleted_by_as_well_as_deleted_at(self, conn, writers):
         """A live row still carrying the id of whoever retired it misreports its
         own history."""
         seed_schemes(conn, 2)
-        writers["new"].retire_schemes([1])
+        soft_delete_scheme(conn, "tenant_new", 1)
 
         assert writers["new"].revive_schemes([1]) == 1
 
-        live, _is_active, deleted_by = scheme_state(conn, 1)
+        live, deleted_by = scheme_state(conn, 1)
         assert live is True and deleted_by is None
 
     def test_reviving_a_live_scheme_is_a_no_op(self, conn, writers):
@@ -1058,9 +1206,9 @@ class TestRetireAndReviveSchemes:
 
         assert writers["new"].revive_schemes([1]) == 0
 
-    def test_retire_then_revive_round_trips(self, conn, writers):
+    def test_revive_never_adds_a_row(self, conn, writers):
         seed_schemes(conn, 1)
-        writers["new"].retire_schemes([1])
+        soft_delete_scheme(conn, "tenant_new", 1)
         writers["new"].revive_schemes([1])
 
         with conn.cursor() as cur:
@@ -1349,30 +1497,23 @@ class TestSyncSchemeAttributes:
         assert analytics.sync_scheme_attributes([]) == []
 
 
-class TestDeactivateSchemes:
-    def test_retired_schemes_drop_to_inactive_without_losing_their_rows(self, conn, analytics):
-        """The dim row cannot be deleted — fact_water_quantity_table and three
-        others carry a foreign key to (tenant_id, scheme_id), and a scheme
-        retired for having no *recent* readings can still have years of facts."""
-        analytics.upsert_schemes([dim_row(1, 100, 500), dim_row(1, 101, 500), dim_row(2, 200, 500)])
+class TestDeleteStatePlaceholderRows:
+    def test_only_the_state_level_row_goes(self, conn, analytics):
+        """Once a scheme has a village, its state-level row would count it twice
+        in any row-summed state total."""
+        analytics.upsert_schemes([dim_row(1, 1, None), dim_row(1, 100, None), dim_row(2, 1, None)])
 
-        assert analytics.deactivate_schemes([1]) == 2
+        assert analytics.delete_state_placeholder_rows([1], state_lgd_id=1) == 1
 
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT scheme_id, operating_status FROM analytics_schema.dim_scheme_table "
+                "SELECT scheme_id, parent_lgd_location_id FROM analytics_schema.dim_scheme_table "
                 "ORDER BY scheme_id, parent_lgd_location_id"
             )
-            assert cur.fetchall() == [(1, 0), (1, 0), (2, 1)]
-
-    def test_it_is_idempotent(self, conn, analytics):
-        analytics.upsert_schemes([dim_row(1, 100, 500)])
-        analytics.deactivate_schemes([1])
-
-        assert analytics.deactivate_schemes([1]) == 0
+            assert cur.fetchall() == [(1, 100), (2, 1)]
 
     def test_empty_input_writes_nothing(self, analytics):
-        assert analytics.deactivate_schemes([]) == 0
+        assert analytics.delete_state_placeholder_rows([], state_lgd_id=1) == 0
 
 
 class TestAnalyticsDbReads:
@@ -1678,16 +1819,20 @@ class TestPlanPruningScope:
 
         assert plan.lgd_reconciliation.removals == []
 
-    def test_a_retired_scheme_takes_its_mappings_with_it(
+    def test_retiring_a_scheme_removes_only_its_user_mappings(
         self, conn, plan_schema, tmp_path
     ):
-        """Scheme 2 is absent from the source and silent, so it retires — and a
-        retired scheme must not stay mapped to anyone or anywhere."""
+        """Scheme 2 is absent from the source and silent, so it retires — which
+        takes away who covers it and nothing else."""
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO tenant_plan.scheme_lgd_mapping_table
                     (scheme_id, parent_lgd_id, parent_lgd_level, created_by, updated_by)
                 VALUES (2, 5, 'VILLAGE', 1, 1);
+                INSERT INTO tenant_plan.scheme_department_mapping_table
+                    (scheme_id, parent_department_id, parent_department_level,
+                     created_by, updated_by)
+                VALUES (2, 5, 'Sub-division', 1, 1);
                 INSERT INTO tenant_plan.user_scheme_mapping_table (user_id, scheme_id, status)
                 VALUES (1, 2, 1);
             """)
@@ -1695,8 +1840,30 @@ class TestPlanPruningScope:
         plan = make_plan(plan_schema, tmp_path, replace=True)
 
         assert plan.schemes_to_retire == {2}
-        assert [r.reason for r in plan.lgd_reconciliation.removals] == [REMOVAL_SCHEME_RETIRED]
-        assert [r.reason for r in plan.user_reconciliation.removals] == [REMOVAL_SCHEME_RETIRED]
+        assert plan.lgd_reconciliation.removals == []
+        assert plan.dept_reconciliation.removals == []
+        assert [(r.right_id, r.reason) for r in plan.user_reconciliation.removals] == [
+            (2, REMOVAL_SCHEME_RETIRED)
+        ]
+
+    def test_a_scheme_only_a_skipped_row_names_is_not_retired(
+        self, conn, plan_schema, tmp_path
+    ):
+        """imis_id 100 is scheme 1's and smt_id 400 is scheme 2's: the row is a
+        conflict and skipped, but it still names scheme 2, so scheme 2 is not
+        'absent from the snapshot'."""
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO tenant_plan.user_scheme_mapping_table (user_id, scheme_id, status)
+                VALUES (1, 2, 1);
+            """)
+        body = "SCH-1,Alpha,100,400,Kamrup,Division A,ongoing,operative,10,5,26.1,91.2\n"
+
+        plan = make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=body, replace=True)
+
+        assert plan.decisions[0].category == CAT_CONFLICT
+        assert plan.legacy == []
+        assert plan.user_reconciliation.removals == []
 
     def test_a_scheme_with_recent_readings_keeps_everything(
         self, conn, plan_schema, tmp_path
@@ -1827,17 +1994,11 @@ class TestPlanIdempotence:
 
         assert table_counts(conn) == before
 
-    def test_a_retired_scheme_is_revived_not_duplicated_when_it_returns(
+    def test_a_soft_deleted_scheme_is_revived_not_duplicated_when_it_returns(
         self, conn, plan_schema, tmp_path
     ):
-        """Retire everything the source does not name, then hand it a source that
-        names it again."""
-        from jjm_scheme_master_ingest import execute_tenant
-
-        writer = TenantWriter(plan_schema, TENANT_ID, 1, {ROLE_PUMP_OPERATOR: 5,
-                                                          ROLE_SECTION_OFFICER: 6})
-        execute_tenant(make_plan(plan_schema, tmp_path, replace=True), writer)
-        assert scheme_is_live(conn, 2) is False
+        writer = plan_writer(plan_schema)
+        soft_delete_scheme(conn, "tenant_plan", 2)
 
         returned = FULL_ROW + "\nSCH-2,Orphan,300,400,ongoing,operative,1,1,26.1,91.2," \
                               "Kamrup,Block A,Panchayat A,Village B,Zone A,Circle A," \
@@ -1851,6 +2012,364 @@ class TestPlanIdempotence:
         with conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM tenant_plan.scheme_master_table")
             assert cur.fetchone()[0] == 2
+
+    def test_a_retired_scheme_stays_live_with_its_location_mappings(
+        self, conn, plan_schema, tmp_path
+    ):
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO tenant_plan.scheme_lgd_mapping_table
+                    (scheme_id, parent_lgd_id, parent_lgd_level, created_by, updated_by)
+                VALUES (2, 5, 'VILLAGE', 1, 1);
+                INSERT INTO tenant_plan.user_scheme_mapping_table (user_id, scheme_id, status)
+                VALUES (1, 2, 1);
+            """)
+
+        execute_tenant(make_plan(plan_schema, tmp_path, replace=True), plan_writer(plan_schema))
+
+        assert scheme_is_live(conn, 2) is True
+        with conn.cursor() as cur:
+            cur.execute("SELECT deleted_at IS NULL FROM tenant_plan.scheme_lgd_mapping_table "
+                        "WHERE scheme_id = 2")
+            assert cur.fetchall() == [(True,)]
+            cur.execute("SELECT deleted_at IS NULL, status FROM tenant_plan.user_scheme_mapping_table "
+                        "WHERE scheme_id = 2")
+            assert cur.fetchall() == [(False, MAPPING_STATUS_INACTIVE)]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# A scheme with no village is mapped to the state
+# ─────────────────────────────────────────────────────────────────────────────
+
+CSV_ROW = "SCH-1,Alpha,100,200,Kamrup,Division A,ongoing,operative,10,5,26.1,91.2\n"
+
+
+def plan_writer(tenant: TenantDb) -> TenantWriter:
+    return TenantWriter(tenant, TENANT_ID, 1, {ROLE_PUMP_OPERATOR: 5, ROLE_SECTION_OFFICER: 6})
+
+
+def seed_lgd(conn, scheme_id: int, location_id: int, level: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO tenant_plan.scheme_lgd_mapping_table
+                (scheme_id, parent_lgd_id, parent_lgd_level, created_by, updated_by)
+            VALUES (%s, %s, %s, 1, 1)
+        """, (scheme_id, location_id, level))
+
+
+def live_lgd(conn, scheme_id: int) -> list[tuple]:
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT parent_lgd_id, parent_lgd_level FROM tenant_plan.scheme_lgd_mapping_table
+            WHERE scheme_id = %s AND deleted_at IS NULL ORDER BY id
+        """, (scheme_id,))
+        return cur.fetchall()
+
+
+class TestStatePlaceholder:
+    """Assam is lgd node 1 in plan_schema, the only node at the state level."""
+
+    def test_a_scheme_with_no_village_is_mapped_to_the_state(self, plan_schema, tmp_path):
+        plan = make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW)
+
+        assert plan.state_lgd_id == 1
+        assert plan.lgd_reconciliation.to_insert == [(1, 1)]
+
+    def test_a_scheme_that_already_has_a_village_gets_no_placeholder(
+        self, conn, plan_schema, tmp_path
+    ):
+        seed_lgd(conn, 1, 5, "VILLAGE")
+
+        plan = make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW)
+
+        assert plan.lgd_reconciliation.to_insert == []
+
+    def test_an_unresolved_village_falls_back_to_the_state(self, plan_schema, tmp_path):
+        body = FULL_ROW.replace("Village A", "Village Nobody Has Heard Of") + "\n"
+
+        plan = make_plan(plan_schema, tmp_path, body=body)
+
+        assert plan.lgd_reconciliation.to_insert == [(1, 1)]
+
+    def test_the_placeholder_goes_once_a_village_resolves_even_without_replace(
+        self, conn, plan_schema, tmp_path
+    ):
+        seed_lgd(conn, 1, 1, LGD_STATE_MAPPING_LEVEL)
+
+        plan = make_plan(plan_schema, tmp_path, replace=False)
+
+        assert plan.lgd_reconciliation.to_insert == [(1, 5)]
+        assert [(r.right_id, r.reason) for r in plan.lgd_reconciliation.removals] == [
+            (1, REMOVAL_STATE_SUPERSEDED)
+        ]
+
+    def test_the_placeholder_stays_while_the_scheme_has_no_village(
+        self, conn, plan_schema, tmp_path
+    ):
+        seed_lgd(conn, 1, 1, LGD_STATE_MAPPING_LEVEL)
+
+        plan = make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW, replace=True)
+
+        assert plan.lgd_reconciliation.to_insert == []
+        assert plan.lgd_reconciliation.removals == []
+
+    def test_a_scheme_outside_the_sheet_keeps_its_placeholder(
+        self, conn, plan_schema, tmp_path
+    ):
+        seed_lgd(conn, 2, 1, LGD_STATE_MAPPING_LEVEL)
+
+        plan = make_plan(plan_schema, tmp_path, replace=True)
+
+        assert plan.lgd_reconciliation.removals == []
+
+    def test_execute_writes_it_at_state_level(self, conn, plan_schema, tmp_path):
+        execute_tenant(
+            make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW),
+            plan_writer(plan_schema),
+        )
+
+        assert live_lgd(conn, 1) == [(1, LGD_STATE_MAPPING_LEVEL)]
+
+    def test_a_new_scheme_with_no_village_is_mapped_to_the_state(
+        self, conn, plan_schema, tmp_path
+    ):
+        body = CSV_ROW + "SCH-9,Brand New,700,800,Kamrup,Division A,ongoing,operative,1,1,,\n"
+
+        plan = make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=body)
+        execute_tenant(plan, plan_writer(plan_schema))
+
+        new_id = next(d.scheme_id for d in plan.decisions if d.category == CAT_NEW)
+        assert live_lgd(conn, new_id) == [(1, LGD_STATE_MAPPING_LEVEL)]
+
+    def test_a_second_run_adds_nothing(self, conn, plan_schema, tmp_path):
+        writer = plan_writer(plan_schema)
+        execute_tenant(make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW), writer)
+
+        stats = execute_tenant(
+            make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW), writer
+        )
+
+        assert stats["scheme_lgd_mappings_inserted"] == 0
+        assert live_lgd(conn, 1) == [(1, LGD_STATE_MAPPING_LEVEL)]
+
+    def test_without_exactly_one_state_node_it_refuses_to_guess(
+        self, conn, plan_schema, tmp_path
+    ):
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO tenant_plan.lgd_location_master_table
+                    (id, title, parent_id, lgd_location_config_id)
+                VALUES (90, 'Another State', NULL, 1)
+            """)
+
+        with pytest.raises(SystemExit, match="state level"):
+            make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Warehouse leg of a whole run
+# ─────────────────────────────────────────────────────────────────────────────
+
+WAREHOUSE_USER_DDL = """
+CREATE TABLE analytics_schema.dim_user_table (
+    user_id INT, tenant_id INT, email VARCHAR(255), user_type INT, title TEXT,
+    uuid VARCHAR(36), status INT, created_at TIMESTAMP, updated_at TIMESTAMP,
+    UNIQUE (tenant_id, user_id)
+);
+CREATE TABLE analytics_schema.dim_user_scheme_mapping_table (
+    uuid VARCHAR(36), user_id INT, scheme_id INT, status INT, tenant_id INT,
+    created_at TIMESTAMP, updated_at TIMESTAMP
+);
+"""
+
+
+@pytest.fixture
+def warehouse(conn, analytics):
+    with conn.cursor() as cur:
+        cur.execute(WAREHOUSE_USER_DDL)
+    return analytics
+
+
+def run_both(tenant: TenantDb, warehouse: AnalyticsWriter, plan) -> None:
+    execute_tenant(plan, plan_writer(tenant))
+    execute_analytics(plan, warehouse, tenant, {ROLE_PUMP_OPERATOR: 5, ROLE_SECTION_OFFICER: 6})
+
+
+def dim_placements(conn, scheme_id: int) -> list[tuple]:
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT parent_lgd_location_id, level_1_lgd_id, level_2_lgd_id, level_5_lgd_id
+            FROM analytics_schema.dim_scheme_table WHERE scheme_id = %s
+            ORDER BY parent_lgd_location_id
+        """, (scheme_id,))
+        return cur.fetchall()
+
+
+class TestExecuteAnalytics:
+    def test_a_scheme_with_no_village_gets_a_state_level_dim_row(
+        self, conn, plan_schema, warehouse, tmp_path
+    ):
+        run_both(plan_schema, warehouse,
+                 make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW))
+
+        assert dim_placements(conn, 1) == [(1, 1, None, None)]
+
+    def test_a_resolved_village_replaces_the_state_level_row(
+        self, conn, plan_schema, warehouse, tmp_path
+    ):
+        run_both(plan_schema, warehouse,
+                 make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=CSV_ROW))
+
+        run_both(plan_schema, warehouse, make_plan(plan_schema, tmp_path))
+
+        assert dim_placements(conn, 1) == [(5, 1, 2, 5)]
+        assert live_lgd(conn, 1) == [(5, "VILLAGE")]
+
+    def test_retirement_drops_coverage_but_keeps_the_scheme(
+        self, conn, plan_schema, warehouse, tmp_path
+    ):
+        warehouse.upsert_schemes([dim_row(2, 5, None)])
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO analytics_schema.dim_user_scheme_mapping_table
+                    (uuid, user_id, scheme_id, status, tenant_id)
+                VALUES ('m1', 1, 2, 1, %s)
+            """, (TENANT_ID,))
+
+        run_both(plan_schema, warehouse, make_plan(plan_schema, tmp_path, replace=True))
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM analytics_schema.dim_user_scheme_mapping_table "
+                        "WHERE scheme_id = 2")
+            assert cur.fetchone()[0] == 0
+            cur.execute("SELECT operating_status FROM analytics_schema.dim_scheme_table "
+                        "WHERE scheme_id = 2")
+            assert cur.fetchall() == [(1,)]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Every dim row of a written scheme mirrors scheme_master_table
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The scheme-level columns, as the warehouse types them. Selecting the same list
+# from both sides turns "no drift" into a plain tuple comparison.
+SCHEME_LEVEL_COLUMNS = (
+    "scheme_name, state_scheme_id::int, centre_scheme_id::int, latitude, longitude, "
+    "operating_status, work_status, fhtc_count, planned_fhtc, house_hold_count"
+)
+
+
+def tenant_scheme_attributes(conn, scheme_id: int) -> tuple:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {SCHEME_LEVEL_COLUMNS} FROM tenant_plan.scheme_master_table "
+                    f"WHERE id = %s", (scheme_id,))
+        return cur.fetchone()
+
+
+def dim_scheme_attributes(conn, scheme_id: int) -> list[tuple]:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {SCHEME_LEVEL_COLUMNS} FROM analytics_schema.dim_scheme_table "
+                    f"WHERE scheme_id = %s ORDER BY parent_lgd_location_id", (scheme_id,))
+        return cur.fetchall()
+
+
+def set_tenant_scheme(conn, scheme_id: int, **columns) -> None:
+    assignments = ", ".join(f"{name} = %s" for name in columns)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE tenant_plan.scheme_master_table SET {assignments} WHERE id = %s",
+                    (*columns.values(), scheme_id))
+
+
+def seed_dim_rows_from_tenant(conn, scheme_id: int, villages: list[int]) -> None:
+    """Warehouse rows already in step with the tenant, one per village."""
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO analytics_schema.dim_scheme_table (
+                scheme_id, tenant_id, parent_lgd_location_id, parent_department_location_id,
+                scheme_name, state_scheme_id, centre_scheme_id, latitude, longitude,
+                operating_status, work_status, fhtc_count, planned_fhtc, house_hold_count)
+            SELECT id, %s, village, 5, {SCHEME_LEVEL_COLUMNS}
+            FROM tenant_plan.scheme_master_table, unnest(%s::int[]) AS village
+            WHERE id = %s
+        """, (TENANT_ID, villages, scheme_id))
+
+
+class TestDimSchemeMirrorsTenant:
+    """Village A (5) is the one the source names; Village B (6) is a row an
+    earlier run wrote, which the upsert never reaches and only the attribute
+    sync can keep in step."""
+
+    def test_a_status_update_reaches_every_dim_row_of_the_scheme(
+        self, conn, plan_schema, warehouse, tmp_path
+    ):
+        warehouse.upsert_schemes([dim_row(1, 5, 5, name="stale"), dim_row(1, 6, 5, name="stale")])
+        body = FULL_ROW.replace("ongoing,operative", "completed,non operative") + "\n"
+
+        run_both(plan_schema, warehouse, make_plan(plan_schema, tmp_path, body=body))
+
+        tenant = tenant_scheme_attributes(conn, 1)
+        assert (tenant[5], tenant[6]) == (0, 2)   # operating_status, work_status
+        assert dim_scheme_attributes(conn, 1) == [tenant, tenant]
+
+    def test_coordinates_the_tenant_keeps_are_the_ones_every_dim_row_gets(
+        self, conn, plan_schema, warehouse, tmp_path
+    ):
+        """The source never overwrites coordinates the tenant already holds, so
+        the warehouse must not take the source's either."""
+        set_tenant_scheme(conn, 1, latitude=25.5, longitude=90.5)
+        warehouse.upsert_schemes([dim_row(1, 5, 5), dim_row(1, 6, 5)])
+
+        run_both(plan_schema, warehouse, make_plan(plan_schema, tmp_path))
+
+        tenant = tenant_scheme_attributes(conn, 1)
+        assert (tenant[3], tenant[4]) == (25.5, 90.5)
+        assert dim_scheme_attributes(conn, 1) == [tenant, tenant]
+
+    def test_a_blank_status_keeps_the_existing_value_on_every_dim_row(
+        self, conn, plan_schema, warehouse, tmp_path
+    ):
+        set_tenant_scheme(conn, 1, operating_status=2)
+        warehouse.upsert_schemes([dim_row(1, 5, 5), dim_row(1, 6, 5)])
+        body = FULL_ROW.replace("ongoing,operative", "ongoing,") + "\n"
+
+        run_both(plan_schema, warehouse, make_plan(plan_schema, tmp_path, body=body))
+
+        tenant = tenant_scheme_attributes(conn, 1)
+        assert tenant[5] == 2
+        assert dim_scheme_attributes(conn, 1) == [tenant, tenant]
+
+    def test_a_source_without_villages_still_realigns_every_existing_dim_row(
+        self, conn, plan_schema, warehouse, tmp_path
+    ):
+        """The CSV export carries no village, so it upserts no dim row for a
+        scheme that already has villages — the sync is all that reaches them."""
+        seed_lgd(conn, 1, 5, "VILLAGE")
+        seed_lgd(conn, 1, 6, "VILLAGE")
+        warehouse.upsert_schemes([dim_row(1, 5, 5, name="stale"), dim_row(1, 6, 5, name="stale")])
+        body = CSV_ROW.replace("ongoing,operative", "completed,partially operative")
+        plan = make_plan(plan_schema, tmp_path, header=CSV_HEADER, body=body)
+
+        execute_tenant(plan, plan_writer(plan_schema))
+        stats = execute_analytics(plan, warehouse, plan_schema,
+                                  {ROLE_PUMP_OPERATOR: 5, ROLE_SECTION_OFFICER: 6})
+
+        tenant = tenant_scheme_attributes(conn, 1)
+        assert stats["dim_scheme_rows_upserted"] == 0
+        assert stats["dim_scheme_rows_realigned"] == 2
+        assert dim_scheme_attributes(conn, 1) == [tenant, tenant]
+
+    def test_the_analysis_reports_no_drift_for_rows_already_in_step_with_the_tenant(
+        self, conn, plan_schema, warehouse, tmp_path
+    ):
+        """Only the coordinates differ between the source and the tenant, and
+        the tenant keeps its own — so rows carrying them have not drifted."""
+        set_tenant_scheme(conn, 1, latitude=25.5, longitude=90.5,
+                          fhtc_count=5, planned_fhtc=10)
+        seed_dim_rows_from_tenant(conn, 1, [5, 6])
+
+        plan = make_plan(plan_schema, tmp_path, analytics_db=AnalyticsDb(conn, TENANT_ID))
+
+        assert build_dim_drift_frame(plan).empty
 
 
 def table_counts(conn) -> dict:
