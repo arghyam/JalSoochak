@@ -621,13 +621,16 @@ class GlificMeterWorkflowServiceManualReadingTest {
                         BigDecimal.ZERO
                 )));
         when(telemetryTenantRepository.countAnomaliesByTypeForToday(anyString(), anyLong(), anyLong(), anyInt())).thenReturn(0);
+        // One reading of the clock: five separate calls could straddle an IST midnight and hand back a
+        // run of dates that is not consecutive, which is exactly what this test needs it to be.
+        LocalDate today = ReadingTime.today();
         when(telemetryTenantRepository.findAnomalyDatesByType(anyString(), anyLong(), anyLong(), anyInt(), anyInt()))
                 .thenReturn(List.of(
-                        ReadingTime.today(),
-                        ReadingTime.today().minusDays(1),
-                        ReadingTime.today().minusDays(2),
-                        ReadingTime.today().minusDays(3),
-                        ReadingTime.today().minusDays(4)
+                        today,
+                        today.minusDays(1),
+                        today.minusDays(2),
+                        today.minusDays(3),
+                        today.minusDays(4)
                 ));
 
         doNothing().when(telemetryTenantRepository).createTenantAnomalyRecord(
