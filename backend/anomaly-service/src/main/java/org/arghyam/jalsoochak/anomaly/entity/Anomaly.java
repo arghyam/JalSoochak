@@ -75,6 +75,10 @@ public class Anomaly {
     @Column(name = "correlation_id")
     private String correlationId;
 
+    /** ANOMALY-SUBMISSION-LINK (V48): the submission that caused this anomaly. */
+    @Column(name = "submission_correlation_id")
+    private String submissionCorrelationId;
+
     @Column(name = "resolved_by")
     private Integer resolvedBy;
 

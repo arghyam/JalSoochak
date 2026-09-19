@@ -20,6 +20,13 @@ import java.util.Objects;
  * {@code uuid} is database-generated and unrelated to the event uuid analytics derives, so the two
  * rows are matched on {@code (user_id, scheme_id, type, created_at)} rather than by key.
  *
+ * <p>ANOMALY-SUBMISSION-LINK: {@code flowReadingId} is the one real key on this record — the
+ * {@code flow_reading_table} row the anomaly was raised over. It is the submission's surrogate id
+ * and not its {@code correlation_id} because the latter is mutable (an issue report overwrites it
+ * on a reused same-day row), carries no unique constraint, is deliberately shared across rows by the
+ * Glific flows, and is overloaded with {@code scheme-selection-}/{@code issue-report-} prefixes that
+ * are matched with LIKE. {@code createFlowReading} already returns the id at every call site.
+ *
  * @param userId                    operator the anomaly is filed against
  * @param schemeId                  scheme the anomaly is filed against
  * @param type                      an {@code AnomalyConstants.TYPE_*} code
@@ -34,6 +41,13 @@ import java.util.Objects;
  *                                  stored value — see {@code AnomalyConstants}
  * @param previousReadingDate       when that baseline was recorded
  * @param consecutiveDaysOverridden run length behind a consecutive-override anomaly
+ * @param flowReadingId             the {@code flow_reading_table} row this anomaly was raised over,
+ *                                  or {@code null} for the types that have no submission behind them
+ *                                  — 1 UNREADABLE_IMAGE, 4 DUPLICATE_IMAGE_SUBMISSION and 5
+ *                                  READING_LESS_THAN_PREVIOUS are rejected before any row is
+ *                                  inserted, 6 NO_WATER_SUPPLY and 9 NO_SUBMISSION come from the
+ *                                  issue-report menu, and 3 CONSECUTIVE_OVERRIDE_5_DAYS is an
+ *                                  aggregate over days with no single row to point at
  */
 @Builder
 public record TenantAnomalyRecord(
@@ -48,7 +62,8 @@ public record TenantAnomalyRecord(
         Integer retries,
         BigDecimal previousReading,
         LocalDateTime previousReadingDate,
-        Integer consecutiveDaysOverridden
+        Integer consecutiveDaysOverridden,
+        Long flowReadingId
 ) {
 
     /**

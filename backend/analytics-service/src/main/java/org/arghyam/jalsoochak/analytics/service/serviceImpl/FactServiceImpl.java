@@ -136,6 +136,9 @@ public class FactServiceImpl implements FactService {
                 .readingDate(readingDate)
                 .submissionStatus(submissionStatus)
                 .readingType(readingType)
+                // ANOMALY-SUBMISSION-LINK: the counterpart an anomaly's submission_correlation_id
+                // joins against.
+                .correlationId(event.getCorrelationId())
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -627,6 +630,10 @@ public class FactServiceImpl implements FactService {
                 .reason(event.getReason())
                 .status(status)
                 .correlationId(correlationId)
+                // ANOMALY-SUBMISSION-LINK: taken straight off the event, never derived. Unlike
+                // correlationId above there is no fallback to synthesise one — an anomaly with no
+                // submission behind it must keep this NULL rather than be linked to a guess.
+                .submissionCorrelationId(event.getSubmissionCorrelationId())
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

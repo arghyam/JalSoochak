@@ -35,6 +35,11 @@ public class AnomalyListItemDto {
     private Integer statusCode;
     private String remarks;
     private String correlationId;
+    /**
+     * ANOMALY-SUBMISSION-LINK: lets a dashboard open the submission behind the anomaly — the value
+     * and the photo — instead of guessing at it from operator, scheme and day.
+     */
+    private String submissionCorrelationId;
     private Integer resolvedBy;
     private LocalDateTime resolvedAt;
     private LocalDateTime deletedAt;

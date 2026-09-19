@@ -54,6 +54,15 @@ public class FactMeterReading {
     @Column(name = "image_url")
     private String imageUrl;
 
+    /**
+     * ANOMALY-SUBMISSION-LINK (V48): the source row's {@code flow_reading_table.correlation_id}, so
+     * an anomaly can be resolved to the fact row it was raised over. Not unique — the tenant column
+     * has no unique constraint and the Glific flows share one value across rows — so this is a
+     * drill-down key, never a counting key.
+     */
+    @Column(name = "correlation_id")
+    private String correlationId;
+
     @Column(name = "reading_at", nullable = false)
     private LocalDateTime readingAt;
 
