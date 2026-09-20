@@ -29,5 +29,11 @@ public class AnomalyEvent {
     private Integer consecutiveDaysMissed;
     private String reason;
     private Integer status;
+    /** The dedup key {@code anomaly_table.uuid} is derived from — not a pointer. Do not repurpose. */
     private String correlationId;
+    /**
+     * ANOMALY-SUBMISSION-LINK: {@code flow_reading_table.correlation_id} of the submission that
+     * caused this anomaly. Null for the types raised without one (1, 3, 4, 6, 9).
+     */
+    private String submissionCorrelationId;
 }

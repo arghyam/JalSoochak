@@ -112,7 +112,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 contains("Unreadable image"),
                 eq(AnomalyConstants.STATUS_OPEN),
                 correlationCaptor.capture()
-        );
+        , any());
         assertEquals(2, correlationCaptor.getAllValues().size());
         assertFalse(correlationCaptor.getAllValues().get(0).isBlank());
         assertEquals(correlationCaptor.getAllValues().get(0), correlationCaptor.getAllValues().get(1));
@@ -174,7 +174,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 contains("Duplicate image submission detected"),
                 eq(AnomalyConstants.STATUS_OPEN),
                 correlationCaptor.capture()
-        );
+        , any());
         assertEquals(2, correlationCaptor.getAllValues().size());
         assertFalse(correlationCaptor.getAllValues().get(0).isBlank());
         verify(telemetryTenantRepository, times(2)).createTenantAnomalyRecord(

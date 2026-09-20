@@ -31,4 +31,10 @@ public class MeterReadingEvent {
     private String readingDate;
     private Integer submissionStatus;
     private Integer readingType;
+    /**
+     * ANOMALY-SUBMISSION-LINK: {@code flow_reading_table.correlation_id} of the row this event was
+     * published from, so {@code fact_meter_reading_table} has a counterpart for the anomaly's
+     * {@code submission_correlation_id} to join against. Not unique — see {@code AnomalyEvent}.
+     */
+    private String correlationId;
 }

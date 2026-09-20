@@ -137,7 +137,8 @@ public class TelemetryEventPublisher {
                                        Integer consecutiveDaysMissed,
                                        String reason,
                                        Integer status,
-                                       String correlationId) {
+                                       String correlationId,
+                                       String submissionCorrelationId) {
         String eventUuid = resolveAnomalyEventUuid(correlationId, userId);
         AnomalyEvent event = AnomalyEvent.builder()
                 .eventType(EVENT_ANOMALY_RECORDED)
@@ -156,6 +157,9 @@ public class TelemetryEventPublisher {
                 .reason(reason)
                 .status(status)
                 .correlationId(correlationId)
+                // ANOMALY-SUBMISSION-LINK: carried separately from correlationId, which is the dedup
+                // key the event uuid above is derived from and must keep its meaning.
+                .submissionCorrelationId(submissionCorrelationId)
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);
@@ -205,7 +209,8 @@ public class TelemetryEventPublisher {
                                             Integer channel,
                                             LocalDate readingDate,
                                             Integer submissionStatus,
-                                            Integer readingType) {
+                                            Integer readingType,
+                                            String correlationId) {
         LocalDate effectiveDate = readingDate != null ? readingDate : (readingAt != null ? readingAt.toLocalDate() : null);
         MeterReadingEvent event = MeterReadingEvent.builder()
                 .eventType(EVENT_METER_READING_RECORDED)
@@ -221,6 +226,9 @@ public class TelemetryEventPublisher {
                 .readingDate(effectiveDate != null ? effectiveDate.toString() : null)
                 .submissionStatus(submissionStatus)
                 .readingType(readingType)
+                // ANOMALY-SUBMISSION-LINK: the warehouse counterpart an anomaly's
+                // submission_correlation_id joins against.
+                .correlationId(correlationId)
                 .build();
 
         boolean ok = kafkaProducer.publishJson(TOPIC, event);

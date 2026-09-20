@@ -670,7 +670,12 @@ public class GlificMeterWorkflowService {
                         0,
                         resolvedIssueReason,
                         AnomalyConstants.STATUS_OPEN,
-                        correlationId
+                        correlationId,
+                        // ANOMALY-SUBMISSION-LINK: NO_WATER_SUPPLY / NO_SUBMISSION come from the
+                        // issue-report menu and mean nothing was submitted. createIssueReportRecord
+                        // runs only in the else-branch below, for issues NOT stored as anomalies, so
+                        // this branch writes no flow_reading_table row to link.
+                        null
                 );
                 telemetryEventPublisher.publishOutageOrNonSubmissionReason(
                         tenantId,
@@ -984,6 +989,9 @@ public class GlificMeterWorkflowService {
                     0,
                     issueReason,
                     AnomalyConstants.STATUS_OPEN,
+                    null,
+                    // ANOMALY-SUBMISSION-LINK: /others/submitted is a free-text non-submission
+                    // report — no reading was sent and no row is written.
                     null
             );
             telemetryEventPublisher.publishOutageOrNonSubmissionReason(
@@ -1229,6 +1237,13 @@ public class GlificMeterWorkflowService {
                                         .retries(0)
                                         .previousReading(previousConfirmed)
                                         .previousReadingDate(previousConfirmedAt)
+                                        // ANOMALY-SUBMISSION-LINK: the rejected manual value is never
+                                        // stored, but the pending row it was entered against is the
+                                        // submission this anomaly is about — the same rule the refused
+                                        // correction on the BFM path follows. Null when the operator
+                                        // typed a value with no pending row open.
+                                        .flowReadingId(pendingOpt
+                                                .map(TelemetryPendingMeterChangeRecord::id).orElse(null))
                                         .build()
                         );
                         telemetryEventPublisher.publishAnomalyRecorded(
@@ -1245,7 +1260,8 @@ public class GlificMeterWorkflowService {
                                 0,
                                 "Manual reading is above allowed maximum reading (" + toPlain(maxAllowedReading) + ").",
                                 AnomalyConstants.STATUS_OPEN,
-                                null
+                                null,
+                                pendingOpt.map(TelemetryPendingMeterChangeRecord::correlationId).orElse(null)
                         );
                         // THRESHOLD-DISCLOSURE: the reply says the value was too high but not what the
                         // limit is. Echoing "Maximum allowed reading: N" let any caller read the tenant's
@@ -1271,10 +1287,16 @@ public class GlificMeterWorkflowService {
                 }
             }
 
+            // ANOMALY-SUBMISSION-LINK: the flow_reading_table row the manual value lands on, captured
+            // across all three branches below so the MANUAL_OVERRIDE anomaly recorded after them can
+            // point at it. Every branch ends with a real row — one reused, one updated, one created —
+            // so this is never null by the time the anomaly is written.
+            Long manualReadingId;
             if (pendingOpt.isPresent()) {
                 // Manual reading submissions should only update confirmed_reading (never extracted_reading).
                 // A pending meter-change row has confirmed_reading = 0 by query invariant, so it can never
                 // carry rollover-resolved provenance — tag MANUAL unconditionally, folded into the same UPDATE.
+                manualReadingId = pendingOpt.get().id();
                 telemetryTenantRepository.updateConfirmedReading(
                         operatorWithSchema.schemaName(),
                         pendingOpt.get().id(),
@@ -1301,6 +1323,7 @@ public class GlificMeterWorkflowService {
 
                 if (todaysFlowOpt.isPresent()) {
                     TelemetryFlowReadingDetails todaysFlow = todaysFlowOpt.get();
+                    manualReadingId = todaysFlow.id();
                     // Manual reading submissions should only update confirmed_reading (never extracted_reading),
                     // regardless of whether extracted_reading exists for today's row. Today's row may have been
                     // rollover-resolved earlier, so retag MANUAL only when the value actually changes — a
@@ -1336,7 +1359,7 @@ public class GlificMeterWorkflowService {
                     // own would commit exactly the mislabelled row this is here to prevent. NORMAL
                     // ingestion with no submitted ids skips the tracking UPDATE, so this is the same two
                     // statements the API path already runs, under one transaction.
-                    telemetryTenantRepository.persistFlowReadingWithTracking(
+                    manualReadingId = telemetryTenantRepository.persistFlowReadingWithTracking(
                             operatorWithSchema.schemaName(),
                             null,
                             schemeId,
@@ -1380,6 +1403,11 @@ public class GlificMeterWorkflowService {
                                     .map(TelemetryConfirmedReadingSnapshot::confirmedReading).orElse(null))
                             .previousReadingDate(previousSnapshotOpt
                                     .map(TelemetryConfirmedReadingSnapshot::createdAt).orElse(null))
+                            // ANOMALY-SUBMISSION-LINK: the row the manual value was just written to,
+                            // captured across the three branches above. This is the one anomaly type
+                            // that always has a submission, and the link was previously dropped even
+                            // though the id was in scope a few lines up.
+                            .flowReadingId(manualReadingId)
                             .build()
             );
             telemetryEventPublisher.publishAnomalyRecorded(
@@ -1396,7 +1424,11 @@ public class GlificMeterWorkflowService {
                     0,
                     "Manual reading submitted as override.",
                     AnomalyConstants.STATUS_OPEN,
-                    null
+                    null,
+                    // ANOMALY-SUBMISSION-LINK: correlationId here is already the submission's own —
+                    // reused from the pending row or today's row a few lines up, or minted for the
+                    // row just created — so the warehouse gets the same value the fact row carries.
+                    correlationId
             );
 
             int consecutiveOverrideDays = calculateConsecutiveDays(

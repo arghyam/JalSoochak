@@ -1713,6 +1713,10 @@ public class TelemetryTenantRepository {
         putIfWritable(schemaName, row, "previous_reading", anomaly.previousReading());
         putIfWritable(schemaName, row, "previous_reading_date", anomaly.previousReadingDate());
         putIfWritable(schemaName, row, "consecutive_days_overridden", anomaly.consecutiveDaysOverridden());
+        // ANOMALY-SUBMISSION-LINK: the submission this anomaly was raised over. Goes through the same
+        // gate as every other optional column, so a schema below V43 still takes the insert — losing
+        // the link beats losing the anomaly.
+        putIfWritable(schemaName, row, "flow_reading_id", anomaly.flowReadingId());
 
         String sql = String.format("""
                 INSERT INTO %s.anomaly_table (%s, created_at)

@@ -113,7 +113,7 @@ class BfmReadingServiceDeclaredChannelTest {
         verify(telemetryEventPublisher).publishMeterReadingRecorded(eq(TENANT_ID), eq(SCHEME_ID),
                 eq(OPERATOR_ID), isNull(), eq(new BigDecimal("150")), isNull(), isNull(),
                 any(LocalDateTime.class), eq(ReadingChannel.ELM.getCode()), any(LocalDate.class),
-                eq(1), eq(0));
+                eq(1), eq(0), any());
     }
 
     @Test

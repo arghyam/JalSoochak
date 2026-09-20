@@ -146,6 +146,83 @@ class TelemetryTenantRepositoryAnomalyWriteIntegrationTest {
     }
 
     @Test
+    @DisplayName("ANOMALY-SUBMISSION-LINK: the anomaly points at the submission it was raised over")
+    void writesTheSubmissionLink() {
+        long readingId = insertFlowReading(MIGRATED_SCHEMA, "corr-link-1");
+
+        repository().createTenantAnomalyRecord(MIGRATED_SCHEMA, TenantAnomalyRecord.builder()
+                .userId(OPERATOR)
+                .schemeId(SCHEME)
+                .type(TYPE_IMPLAUSIBLE_WATER_SUPPLY)
+                .reason("Submitted reading implies an implausible daily water supply for this scheme.")
+                .status(STATUS_OPEN)
+                .overriddenReading(ATTEMPTED)
+                .flowReadingId(readingId)
+                .build());
+
+        Map<String, Object> row = latestAnomaly(MIGRATED_SCHEMA);
+
+        assertEquals((int) readingId, row.get("flow_reading_id"),
+                "the quarantined row is in hand at the call site; it must survive into the table");
+    }
+
+    @Test
+    @DisplayName("ANOMALY-SUBMISSION-LINK: a type with no submission behind it leaves the link NULL")
+    void omittedSubmissionLinkStaysNull() {
+        repository().createTenantAnomalyRecord(MIGRATED_SCHEMA, TenantAnomalyRecord.builder()
+                .userId(OPERATOR)
+                .schemeId(SCHEME)
+                // Type 9 NO_SUBMISSION comes from the issue-report menu: nothing was ever submitted.
+                .type(9)
+                .reason("Meter not working.")
+                .status(STATUS_OPEN)
+                .build());
+
+        assertNull(latestAnomaly(MIGRATED_SCHEMA).get("flow_reading_id"),
+                "five of the ten types have no submission; the column must stay nullable");
+    }
+
+    @Test
+    @DisplayName("ANOMALY-SUBMISSION-LINK: a hard-deleted reading costs the link, not the anomaly")
+    void hardDeletedReadingNullsTheLinkButKeepsTheRow() {
+        long readingId = insertFlowReading(MIGRATED_SCHEMA, "corr-link-2");
+        repository().createTenantAnomalyRecord(MIGRATED_SCHEMA, TenantAnomalyRecord.builder()
+                .userId(OPERATOR)
+                .schemeId(SCHEME)
+                .type(TYPE_IMPLAUSIBLE_WATER_SUPPLY)
+                .reason("Correction rejected.")
+                .status(STATUS_OPEN)
+                .flowReadingId(readingId)
+                .build());
+        long anomalyId = ((Number) latestAnomaly(MIGRATED_SCHEMA).get("id")).longValue();
+
+        jdbcTemplate.update("DELETE FROM " + MIGRATED_SCHEMA + ".flow_reading_table WHERE id = ?", readingId);
+
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT * FROM " + MIGRATED_SCHEMA + ".anomaly_table WHERE id = ?", anomalyId);
+        assertNull(row.get("flow_reading_id"), "ON DELETE SET NULL, not RESTRICT");
+        assertEquals("Correction rejected.", row.get("reason"),
+                "the anomaly itself must outlive the reading it pointed at");
+    }
+
+    @Test
+    @DisplayName("ANOMALY-SUBMISSION-LINK: a schema without the column still takes the insert")
+    void preMigrationSchemaSkipsTheSubmissionLink() {
+        repository().createTenantAnomalyRecord(PRE_MIGRATION_SCHEMA, TenantAnomalyRecord.builder()
+                .userId(OPERATOR)
+                .schemeId(SCHEME)
+                .type(TYPE_IMPLAUSIBLE_WATER_SUPPLY)
+                .reason("Correction rejected.")
+                .status(STATUS_OPEN)
+                // Supplied, but tenant_zz predates V43 and has nowhere to put it. Same rule as every
+                // other optional column: losing the link beats losing the anomaly.
+                .flowReadingId(4242L)
+                .build());
+
+        assertEquals(TYPE_IMPLAUSIBLE_WATER_SUPPLY, latestAnomaly(PRE_MIGRATION_SCHEMA).get("type"));
+    }
+
+    @Test
     @DisplayName("a pre-V8 schema still takes the insert, under its own column names")
     void preMigrationSchemaSkipsTheColumnsItDoesNotHave() {
         repository().createTenantAnomalyRecord(PRE_MIGRATION_SCHEMA, TenantAnomalyRecord.builder()
@@ -181,5 +258,16 @@ class TelemetryTenantRepositoryAnomalyWriteIntegrationTest {
     private static Map<String, Object> latestAnomaly(String schemaName) {
         return jdbcTemplate.queryForMap(
                 "SELECT * FROM " + schemaName + ".anomaly_table ORDER BY id DESC LIMIT 1");
+    }
+
+    /** A submission for the anomaly to point at. Only the NOT NULL columns are filled. */
+    private static long insertFlowReading(String schemaName, String correlationId) {
+        Number id = jdbcTemplate.queryForObject(
+                "INSERT INTO " + schemaName + ".flow_reading_table "
+                        + "(scheme_id, reading_at, reading_date, extracted_reading, confirmed_reading, "
+                        + " correlation_id, created_by) "
+                        + "VALUES (?, NOW(), CURRENT_DATE, 0, 0, ?, ?) RETURNING id",
+                Number.class, SCHEME, correlationId, OPERATOR);
+        return id.longValue();
     }
 }

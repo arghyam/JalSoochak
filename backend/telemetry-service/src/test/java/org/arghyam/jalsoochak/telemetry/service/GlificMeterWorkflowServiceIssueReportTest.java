@@ -20,6 +20,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -111,7 +112,7 @@ class GlificMeterWorkflowServiceIssueReportTest {
                 eq("Meter not working"),
                 eq(AnomalyConstants.STATUS_OPEN),
                 org.mockito.ArgumentMatchers.anyString()
-        );
+        , any());
         verify(telemetryTenantRepository, never()).createIssueReportRecord(
                 eq("tenant_test"),
                 eq(10L),

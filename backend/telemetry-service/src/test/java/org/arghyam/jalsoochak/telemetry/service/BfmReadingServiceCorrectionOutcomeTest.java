@@ -144,7 +144,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
         verify(repo, never()).updateConfirmedReading(anyString(), anyLong(), any(), anyLong(), any());
         verify(repo, never()).applyQuarantineReason(anyString(), anyLong(), anyInt());
         verify(telemetryEventPublisher, never()).publishMeterReadingRecorded(
-                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     private TenantAnomalyRecord capturedAnomaly() {
@@ -180,7 +180,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
                     eq(TENANT_ID), eq(SCHEME_ID), eq(OPERATOR_ID), any(), eq(PLAUSIBLE), isNull(),
-                    any(), any(), any(), eq(READING_DATE), eq(1), eq(0));
+                    any(), any(), any(), eq(READING_DATE), eq(1), eq(0), any());
             assertThat(response.isSuccess()).isTrue();
             assertThat(response.getQualityStatus()).isEqualTo("CONFIRMED");
         }
@@ -197,7 +197,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
             verify(repo).applyQuarantineReason(SCHEMA, READING_ID, QuarantineReason.NONE);
             verify(telemetryEventPublisher).publishMeterReadingRecorded(
                     eq(TENANT_ID), eq(SCHEME_ID), eq(OPERATOR_ID), any(), eq(PLAUSIBLE), isNull(),
-                    any(), any(), any(), eq(READING_DATE), eq(1), eq(0));
+                    any(), any(), any(), eq(READING_DATE), eq(1), eq(0), any());
             assertThat(response.isSuccess()).isTrue();
         }
 
@@ -326,7 +326,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                     eq(0),
                     eq(AnomalyConstants.REASON_IMPLAUSIBLE_SUPPLY_CORRECTION_REJECTED_PUBLISHED),
                     eq(AnomalyConstants.STATUS_OPEN),
-                    isNull());
+                    isNull(), any());
         }
 
         /**
@@ -370,7 +370,7 @@ class BfmReadingServiceCorrectionOutcomeTest {
                             && anomaly.reason() != null));
             verify(telemetryEventPublisher, times(2)).publishAnomalyRecorded(
                     any(), eq(AnomalyConstants.TYPE_IMPLAUSIBLE_WATER_SUPPLY), any(), any(), any(),
-                    any(), any(), any(), any(), any(), any(), anyString(), any(), isNull());
+                    any(), any(), any(), any(), any(), any(), anyString(), any(), isNull(), any());
         }
     }
 

@@ -151,7 +151,7 @@ class BfmReadingServiceMeterReplacedTest {
                 anyString(),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 anyString()
-        );
+        , any());
     }
 
     @Test

@@ -280,7 +280,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 anyString(),
                 ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 anyString()
-        );
+        , any());
     }
 
     @Test
@@ -673,7 +673,7 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 org.mockito.ArgumentMatchers.eq("Manual reading submitted as override."),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.STATUS_OPEN),
                 any()
-        );
+        , any());
         verify(telemetryEventPublisher, never()).publishAnomalyRecorded(
                 org.mockito.ArgumentMatchers.eq(1),
                 org.mockito.ArgumentMatchers.eq(AnomalyConstants.TYPE_CONSECUTIVE_OVERRIDE_5_DAYS),
@@ -689,6 +689,6 @@ class GlificMeterWorkflowServiceManualReadingTest {
                 anyString(),
                 anyInt(),
                 any()
-        );
+        , any());
     }
 }
