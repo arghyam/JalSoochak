@@ -42,4 +42,17 @@ public class SendLoginOtpEvent {
     /** {@code "WHATSAPP"} or {@code "SMS"} — from {@code otp.delivery-channel} config. */
     @JsonProperty("deliveryChannel")
     String deliveryChannel;
+
+    /**
+     * Tenant the staff user belongs to. Optional and additive — an event without it
+     * is delivered through the system default provider.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty("tenantId")
+    Integer tenantId;
+
+    /** State code of {@link #tenantId} (e.g. {@code "MP"}). Optional, see {@link #tenantId}. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty("tenantCode")
+    String tenantCode;
 }

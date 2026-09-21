@@ -1,5 +1,6 @@
 package org.arghyam.jalsoochak.user.event;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,7 @@ class EventDtoTest {
                     .inviteLink("https://example.com/invite?token=abc")
                     .expiryHours(24)
                     .stateName("Madhya Pradesh")
+                    .tenantCode("MP")
                     .build();
 
             assertThat(event.getEventType()).isEqualTo("INVITE_EMAIL");
@@ -35,6 +37,36 @@ class EventDtoTest {
             assertThat(event.getInviteLink()).isEqualTo("https://example.com/invite?token=abc");
             assertThat(event.getExpiryHours()).isEqualTo(24);
             assertThat(event.getStateName()).isEqualTo("Madhya Pradesh");
+            assertThat(event.getTenantCode()).isEqualTo("MP");
+        }
+
+        @Test
+        @DisplayName("tenantCode is null when not set (super-user invite)")
+        void tenantCodeIsNullByDefault() {
+            InviteEmailEvent event = InviteEmailEvent.builder()
+                    .eventType("INVITE_EMAIL")
+                    .to("super@example.com")
+                    .name("Carol")
+                    .role("SUPER_USER")
+                    .inviteLink("https://example.com/invite?token=pqr")
+                    .expiryHours(24)
+                    .build();
+
+            assertThat(event.getTenantCode()).isNull();
+        }
+
+        @Test
+        @DisplayName("tenantCode is omitted from JSON when null")
+        void tenantCodeOmittedFromJsonWhenNull() throws Exception {
+            InviteEmailEvent event = InviteEmailEvent.builder()
+                    .eventType("SEND_INVITE_EMAIL")
+                    .to("super@example.com")
+                    .role("SUPER_USER")
+                    .inviteLink("https://example.com/invite")
+                    .expiryHours(24)
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event)).doesNotContain("tenantCode");
         }
 
         @Test
@@ -110,12 +142,45 @@ class EventDtoTest {
                     .to("admin@example.com")
                     .resetLink("https://example.com/reset?token=def")
                     .expiryMinutes(30)
+                    .tenantId(7)
+                    .tenantCode("MP")
                     .build();
 
             assertThat(event.getEventType()).isEqualTo("RESET_PASSWORD_EMAIL");
             assertThat(event.getTo()).isEqualTo("admin@example.com");
             assertThat(event.getResetLink()).isEqualTo("https://example.com/reset?token=def");
             assertThat(event.getExpiryMinutes()).isEqualTo(30);
+            assertThat(event.getTenantId()).isEqualTo(7);
+            assertThat(event.getTenantCode()).isEqualTo("MP");
+        }
+
+        @Test
+        @DisplayName("tenant fields are null when not set (super-user reset)")
+        void tenantFieldsNullByDefault() {
+            ResetPasswordEmailEvent event = ResetPasswordEmailEvent.builder()
+                    .eventType("RESET_PASSWORD_EMAIL")
+                    .to("super@example.com")
+                    .resetLink("https://example.com/reset")
+                    .expiryMinutes(30)
+                    .build();
+
+            assertThat(event.getTenantId()).isNull();
+            assertThat(event.getTenantCode()).isNull();
+        }
+
+        @Test
+        @DisplayName("tenant fields are omitted from JSON when null")
+        void tenantFieldsOmittedFromJsonWhenNull() throws Exception {
+            ResetPasswordEmailEvent event = ResetPasswordEmailEvent.builder()
+                    .eventType("SEND_PASSWORD_RESET_EMAIL")
+                    .to("super@example.com")
+                    .resetLink("https://example.com/reset")
+                    .expiryMinutes(30)
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event))
+                    .doesNotContain("tenantId")
+                    .doesNotContain("tenantCode");
         }
 
         @Test
@@ -172,6 +237,8 @@ class EventDtoTest {
                     .otp("123456")
                     .expiryMinutes(5)
                     .deliveryChannel("WHATSAPP")
+                    .tenantId(3)
+                    .tenantCode("MP")
                     .build();
 
             assertThat(event.getEventType()).isEqualTo("SEND_LOGIN_OTP");
@@ -180,6 +247,24 @@ class EventDtoTest {
             assertThat(event.getOtp()).isEqualTo("123456");
             assertThat(event.getExpiryMinutes()).isEqualTo(5);
             assertThat(event.getDeliveryChannel()).isEqualTo("WHATSAPP");
+            assertThat(event.getTenantId()).isEqualTo(3);
+            assertThat(event.getTenantCode()).isEqualTo("MP");
+        }
+
+        @Test
+        @DisplayName("tenant fields are omitted from JSON when null")
+        void tenantFieldsOmittedFromJsonWhenNull() throws Exception {
+            SendLoginOtpEvent event = SendLoginOtpEvent.builder()
+                    .eventType("SEND_LOGIN_OTP")
+                    .officerPhoneNumber("91XXXXXXXXXX")
+                    .otp("123456")
+                    .expiryMinutes(5)
+                    .deliveryChannel("SMS")
+                    .build();
+
+            assertThat(new ObjectMapper().writeValueAsString(event))
+                    .doesNotContain("tenantId")
+                    .doesNotContain("tenantCode");
         }
 
         @Test
