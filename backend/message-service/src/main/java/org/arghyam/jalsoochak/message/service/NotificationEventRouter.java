@@ -1,11 +1,11 @@
 package org.arghyam.jalsoochak.message.service;
 
-import org.arghyam.jalsoochak.message.channel.DailyReportSendOutcome;
-import org.arghyam.jalsoochak.message.channel.GlificSendResult;
-import org.arghyam.jalsoochak.message.channel.GlificSendStage;
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
-import org.arghyam.jalsoochak.message.channel.SmsSender;
-import org.arghyam.jalsoochak.message.channel.TenantChannelProviders;
+import org.arghyam.jalsoochak.message.channel.glific.DailyReportSendOutcome;
+import org.arghyam.jalsoochak.message.channel.glific.GlificSendResult;
+import org.arghyam.jalsoochak.message.channel.glific.GlificSendStage;
+import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.provider.SmsSender;
+import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;

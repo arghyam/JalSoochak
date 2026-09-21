@@ -2,8 +2,8 @@ package org.arghyam.jalsoochak.message.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.message.channel.EmailSender;
-import org.arghyam.jalsoochak.message.channel.TenantChannelProviders;
+import org.arghyam.jalsoochak.message.channel.provider.EmailSender;
+import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
 import org.arghyam.jalsoochak.message.dto.TenantRef;

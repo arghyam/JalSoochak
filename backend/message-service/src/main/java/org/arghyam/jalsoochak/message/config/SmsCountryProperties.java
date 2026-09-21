@@ -14,7 +14,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * customer from one host and a per-tenant URL would only add an attacker-chosen destination for
  * the auth token (O2-13).
  *
- * <p>Replaces the seven {@code @Value} fields {@code SmsCountryService} carried while it was a
+ * <p>Replaces the seven {@code @Value} fields {@code SmsCountrySender} carried while it was a
  * singleton {@code @Component}. Deliberately <em>not</em> {@code @Validated}: the binding happens
  * whatever {@code notification.sms.provider} names, so a required-field check here would newly
  * fail a deployment that does not use SMSCountry at all. {@code SystemDefaultProviders} makes the
@@ -30,7 +30,7 @@ public record SmsCountryProperties(
         String dltTemplateId,
         String dltHeaderId) {
 
-    /** As the former {@code @Value} default on {@code SmsCountryService.baseUrl}. */
+    /** As the former {@code @Value} default on {@code SmsCountrySender.baseUrl}. */
     public static final String DEFAULT_BASE_URL = "https://restapi.smscountry.com/v0.1";
 
     public SmsCountryProperties {

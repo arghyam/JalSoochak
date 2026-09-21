@@ -3,8 +3,8 @@ package org.arghyam.jalsoochak.message.config;
 import java.util.Base64;
 import java.util.Map;
 
-import org.arghyam.jalsoochak.message.channel.EmailSender;
-import org.arghyam.jalsoochak.message.channel.SmsSender;
+import org.arghyam.jalsoochak.message.channel.provider.EmailSender;
+import org.arghyam.jalsoochak.message.channel.provider.SmsSender;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
 import org.junit.jupiter.api.AfterEach;

@@ -30,7 +30,7 @@ public record SmsProviderSettings(SmsProviderType provider, SmsCountry smscountr
 
         /**
          * The OTP text a tenant that set none should get: character for character what
-         * {@code SmsCountryService} sends today, with its two {@code String.formatted} placeholders
+         * {@code SmsCountrySender} sends today, with its two {@code String.formatted} placeholders
          * written as the named ones tenant-service validates (O2-15). Duplicated from
          * {@code SmsProviderConfigDTO.DEFAULT_OTP_TEMPLATE}; the two must stay equal, or a tenant
          * would see a different message depending on whether the field was stored or defaulted.

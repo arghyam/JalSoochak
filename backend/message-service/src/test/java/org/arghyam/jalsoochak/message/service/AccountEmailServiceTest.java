@@ -1,7 +1,7 @@
 package org.arghyam.jalsoochak.message.service;
 
-import org.arghyam.jalsoochak.message.channel.EmailSender;
-import org.arghyam.jalsoochak.message.channel.TenantChannelProviders;
+import org.arghyam.jalsoochak.message.channel.provider.EmailSender;
+import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
 import org.arghyam.jalsoochak.message.dto.TenantRef;

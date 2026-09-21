@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.arghyam.jalsoochak.message.channel.GlificGraphQLClient;
+import org.arghyam.jalsoochak.message.channel.glific.GlificGraphQLClient;
 import org.arghyam.jalsoochak.message.dto.GlificDeliveryOutcome;
 import org.arghyam.jalsoochak.message.dto.GlificMessageStatus;
 import org.junit.jupiter.api.BeforeEach;

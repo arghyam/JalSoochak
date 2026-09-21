@@ -2,8 +2,8 @@ package org.arghyam.jalsoochak.message.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.arghyam.jalsoochak.message.channel.GlificAuthService;
-import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
+import org.arghyam.jalsoochak.message.channel.glific.GlificAuthService;
+import org.arghyam.jalsoochak.message.channel.glific.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.dto.EmailProviderSettings;
 import org.arghyam.jalsoochak.message.dto.MessagingAllowedHosts;
 import org.arghyam.jalsoochak.message.dto.SmsProviderSettings;

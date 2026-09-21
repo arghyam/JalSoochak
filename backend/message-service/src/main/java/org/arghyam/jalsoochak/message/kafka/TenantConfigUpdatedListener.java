@@ -3,7 +3,7 @@ package org.arghyam.jalsoochak.message.kafka;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import org.arghyam.jalsoochak.message.channel.TenantChannelProviders;
+import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.enums.MessagingChannel;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;

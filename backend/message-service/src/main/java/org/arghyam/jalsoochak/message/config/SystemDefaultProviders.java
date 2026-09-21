@@ -1,13 +1,13 @@
 package org.arghyam.jalsoochak.message.config;
 
-import org.arghyam.jalsoochak.message.channel.EmailSender;
-import org.arghyam.jalsoochak.message.channel.SendGridMailSender;
-import org.arghyam.jalsoochak.message.channel.SendGridSettings;
-import org.arghyam.jalsoochak.message.channel.SmsCountryService;
-import org.arghyam.jalsoochak.message.channel.SmsCountrySettings;
-import org.arghyam.jalsoochak.message.channel.SmsSender;
-import org.arghyam.jalsoochak.message.channel.SmtpMailSender;
-import org.arghyam.jalsoochak.message.channel.SmtpSettings;
+import org.arghyam.jalsoochak.message.channel.provider.EmailSender;
+import org.arghyam.jalsoochak.message.channel.provider.SendGridMailSender;
+import org.arghyam.jalsoochak.message.channel.provider.SendGridSettings;
+import org.arghyam.jalsoochak.message.channel.provider.SmsCountrySender;
+import org.arghyam.jalsoochak.message.channel.provider.SmsCountrySettings;
+import org.arghyam.jalsoochak.message.channel.provider.SmsSender;
+import org.arghyam.jalsoochak.message.channel.provider.SmtpMailSender;
+import org.arghyam.jalsoochak.message.channel.provider.SmtpSettings;
 import org.arghyam.jalsoochak.message.dto.SmsProviderSettings;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,7 +21,7 @@ import org.springframework.web.reactive.function.client.WebClient;
  * The system default senders — the ones the platform's own accounts send through.
  *
  * <p>PER-TENANT-PROVIDERS: {@code SendGridMailSender}, {@code SmtpMailSender} and
- * {@code SmsCountryService} used to be {@code @Component}s carrying these
+ * {@code SmsCountrySender} used to be {@code @Component}s carrying these
  * {@code @ConditionalOnProperty} annotations themselves. They are plain classes now, so that
  * several accounts can coexist (O2-2), and the conditions move here unchanged:
  * {@code notification.mail.provider} and {@code notification.sms.provider} still select the
@@ -126,6 +126,6 @@ public class SystemDefaultProviders {
                 // a property: the message must match a DLT registration, so changing it is a
                 // registration change, not a restart.
                 SmsProviderSettings.SmsCountry.DEFAULT_OTP_TEMPLATE);
-        return new SmsCountryService(webClientBuilder, settings, dryRun);
+        return new SmsCountrySender(webClientBuilder, settings, dryRun);
     }
 }
