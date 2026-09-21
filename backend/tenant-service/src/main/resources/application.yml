@@ -193,6 +193,10 @@ pii:
 # To rotate: add v2, point active-master-key-id at it, POST
 # /api/v1/system/messaging-secrets/rewrap, then remove v1 once no key still names it.
 messaging:
+  provider:
+    # Whether a tenant's SMTP host may resolve to a loopback/private address. Local development
+    # against a mail catcher only; must stay false in every deployed environment.
+    allow-internal-hosts: ${MESSAGING_PROVIDER_ALLOW_INTERNAL_HOSTS:false}
   secret:
     active-master-key-id: ${MESSAGING_SECRET_ACTIVE_MASTER_KEY_ID:}
     master-keys:

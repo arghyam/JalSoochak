@@ -21,5 +21,8 @@ public sealed interface ConfigValueDTO permits
         GlificMessagesConfigDTO,
         WaterSupplyThresholdConfigDTO,
         IncludedWorkStatusesConfigDTO,
-        RegularityThresholdConfigDTO {
+        RegularityThresholdConfigDTO,
+        EmailProviderConfigDTO,
+        SmsProviderConfigDTO,
+        MessagingAllowedHostsConfigDTO {
 }

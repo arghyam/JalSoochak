@@ -5,8 +5,11 @@ import org.arghyam.jalsoochak.tenant.config.RequiresTenantAccess;
 import org.arghyam.jalsoochak.tenant.dto.common.ApiErrorResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.common.ApiResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.request.SetMessagingProviderSecretsRequestDTO;
+import org.arghyam.jalsoochak.tenant.dto.request.SetMessagingProviderSettingsRequestDTO;
+import org.arghyam.jalsoochak.tenant.dto.response.MessagingProviderConfigResponseDTO;
 import org.arghyam.jalsoochak.tenant.dto.response.MessagingProviderSecretStatusResponseDTO;
 import org.arghyam.jalsoochak.tenant.enums.MessagingChannel;
+import org.arghyam.jalsoochak.tenant.service.TenantMessagingProviderService;
 import org.arghyam.jalsoochak.tenant.service.TenantMessagingSecretService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,7 +32,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * MESSAGING-PROVIDER-SECRETS: a tenant's own email and SMS provider configuration.
+ * MESSAGING-PROVIDER-SETTINGS / SECRETS: a tenant's own email and SMS provider configuration.
+ *
+ * <p>Two halves behind one path. The collection endpoints carry the settings — which provider,
+ * which from address, which template and DLT ids — and the {@code /{channel}/secrets} endpoints
+ * carry the credentials those settings need. They are stored separately (an ordinary config row
+ * against encrypted rows under a per-tenant data key) but neither is usable alone, so the
+ * collection {@code GET} reports both and says whether the tenant's provider will actually be used.
  *
  * <p>{@code @RequiresTenantAccess} on every endpoint: a SUPER_USER may configure any
  * tenant, a STATE_ADMIN only the tenant matching their {@code tenant_state_code} claim.
@@ -37,7 +46,9 @@ import lombok.extern.slf4j.Slf4j;
  * ops involvement — but cannot read or change another state's.
  *
  * <p>Secrets are write-only. A {@code GET} answers SET or MISSING per secret name; there is
- * no response shape anywhere that carries a value back out.
+ * no response shape anywhere that carries a value back out. Settings deliberately hold no
+ * credential and no reference to one — the server derives each secret's location from the tenant,
+ * the channel and the name (O2-8).
  */
 @RestController
 @RequestMapping("/api/v1/tenants/{tenantId}/messaging-providers")
@@ -49,6 +60,66 @@ import lombok.extern.slf4j.Slf4j;
 public class TenantMessagingProviderController {
 
     private final TenantMessagingSecretService messagingSecretService;
+    private final TenantMessagingProviderService messagingProviderService;
+
+    // ── settings ────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Set provider settings for a tenant",
+            description = "Stores the tenant's email and/or SMS provider settings. A channel left out of "
+                    + "the body keeps its current settings. Credentials are not accepted here \u2014 store them "
+                    + "with PUT /{channel}/secrets.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Settings stored successfully",
+                    content = @Content(mediaType = "application/json",
+                            schema = @Schema(implementation = MessagingProviderConfigResponseDTO.class))),
+            @ApiResponse(responseCode = "400",
+                    description = "Unsupported provider, missing required field, an SMTP host that is not "
+                            + "allowlisted, not TLS or not publicly resolvable, or an invalid OTP template",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponseDTO.class)))
+    })
+    @RequiresTenantAccess
+    @PutMapping
+    public ResponseEntity<ApiResponseDTO<MessagingProviderConfigResponseDTO>> setProviderSettings(
+            @PathVariable Integer tenantId,
+            @Valid @RequestBody SetMessagingProviderSettingsRequestDTO request) {
+        log.info("PUT /api/v1/tenants/{}/messaging-providers [email={}, sms={}]",
+                tenantId, request.getEmail() != null, request.getSms() != null);
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Messaging provider settings stored successfully",
+                messagingProviderService.setProviderSettings(tenantId, request)));
+    }
+
+    @Operation(summary = "Get provider settings and secret status for a tenant",
+            description = "Returns both channels' settings together with SET/MISSING per credential. "
+                    + "Never returns a secret value.")
+    @ApiResponse(responseCode = "200", description = "Provider configuration retrieved successfully",
+            content = @Content(mediaType = "application/json",
+                    schema = @Schema(implementation = MessagingProviderConfigResponseDTO.class)))
+    @RequiresTenantAccess
+    @GetMapping
+    public ResponseEntity<ApiResponseDTO<MessagingProviderConfigResponseDTO>> getProviderConfig(
+            @PathVariable Integer tenantId) {
+        log.info("GET /api/v1/tenants/{}/messaging-providers", tenantId);
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Messaging provider configuration retrieved successfully",
+                messagingProviderService.getProviderConfig(tenantId)));
+    }
+
+    @Operation(summary = "Delete provider settings for a channel",
+            description = "Removes the channel's settings, so the tenant falls back to the system default "
+                    + "provider. Stored credentials are left alone; delete those separately.")
+    @ApiResponse(responseCode = "200", description = "Settings deleted successfully",
+            content = @Content(mediaType = "application/json",
+                    schema = @Schema(implementation = MessagingProviderConfigResponseDTO.class)))
+    @RequiresTenantAccess
+    @DeleteMapping("/{channel}")
+    public ResponseEntity<ApiResponseDTO<MessagingProviderConfigResponseDTO>> deleteProviderSettings(
+            @PathVariable Integer tenantId,
+            @Parameter(description = "Messaging channel", example = "EMAIL") @PathVariable MessagingChannel channel) {
+        log.info("DELETE /api/v1/tenants/{}/messaging-providers/{}", tenantId, channel);
+        return ResponseEntity.ok(ApiResponseDTO.of(200, "Messaging provider settings deleted successfully",
+                messagingProviderService.deleteProviderSettings(tenantId, channel)));
+    }
+
+    // ── secrets ─────────────────────────────────────────────────────────────────
 
     @Operation(summary = "Store provider secrets for a channel",
             description = "Encrypts and stores the named credentials for the tenant's own provider account. "

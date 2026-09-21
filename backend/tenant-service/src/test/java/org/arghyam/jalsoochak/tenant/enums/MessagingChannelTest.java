@@ -33,6 +33,35 @@ class MessagingChannelTest {
     }
 
     @Test
+    @DisplayName("Each channel's settings config key names a real TenantConfigKeyEnum constant")
+    void settingsConfigKeysResolve() {
+        // MessagingChannel holds the key as a string because it predates the two enum constants,
+        // and a secret write raises TENANT_CONFIG_UPDATED under it so message-service evicts the
+        // right cache entry. If the constants are ever renamed without this string following,
+        // eviction breaks silently — this is the assertion that stops that.
+        assertThat(TenantConfigKeyEnum.valueOf(MessagingChannel.EMAIL.getSettingsConfigKey()))
+                .isEqualTo(TenantConfigKeyEnum.EMAIL_PROVIDER_SETTINGS);
+        assertThat(TenantConfigKeyEnum.valueOf(MessagingChannel.SMS.getSettingsConfigKey()))
+                .isEqualTo(TenantConfigKeyEnum.SMS_PROVIDER_SETTINGS);
+    }
+
+    @Test
+    @DisplayName("Each channel's secret names cover every provider that channel supports")
+    void secretNamesCoverEveryProvider() {
+        // The settings say which credential a provider needs; the secret store says whether it is
+        // present. A provider whose required name the channel does not accept could never be made
+        // usable, and the failure would only show at send time.
+        for (EmailProviderType provider : EmailProviderType.values()) {
+            assertThat(MessagingChannel.EMAIL.getSecretNames())
+                    .containsAll(provider.getRequiredSecretNames());
+        }
+        for (SmsProviderType provider : SmsProviderType.values()) {
+            assertThat(MessagingChannel.SMS.getSecretNames())
+                    .containsAll(provider.getRequiredSecretNames());
+        }
+    }
+
+    @Test
     @DisplayName("Unknown, null and differently-cased names are not supported")
     void unknownNamesRejected() {
         assertThat(MessagingChannel.EMAIL.supportsSecret("apikey")).isFalse();

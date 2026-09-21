@@ -165,8 +165,33 @@ public class GlobalExceptionHandler {
             log.warn("Invalid format in request body: {}", message);
             return build(HttpStatus.BAD_REQUEST, message);
         }
+        // A DTO that rejects its input from a @JsonCreator or a @JsonAnySetter — as the messaging
+        // provider settings do — reaches here wrapped in a JsonMappingException. Its own message
+        // names the offending property or value, which is the whole point of rejecting it; the
+        // generic fallback below would throw that away and leave the caller guessing.
+        String rejection = illegalArgumentRootCauseMessage(cause);
+        if (rejection != null) {
+            log.warn("Rejected request body: {}", rejection);
+            return build(HttpStatus.BAD_REQUEST, rejection);
+        }
         log.warn("Malformed request body: {}", ex.getMessage());
         return build(HttpStatus.BAD_REQUEST, "Malformed or unreadable request body");
+    }
+
+    /**
+     * Walks to the root cause and returns its message when a DTO rejected the value itself.
+     * Bounded, because a cause chain can in principle be cyclic.
+     */
+    private static String illegalArgumentRootCauseMessage(Throwable cause) {
+        Throwable current = cause;
+        for (int depth = 0; current != null && depth < 10; depth++) {
+            if (current instanceof IllegalArgumentException && current.getMessage() != null
+                    && !current.getMessage().isBlank()) {
+                return current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)

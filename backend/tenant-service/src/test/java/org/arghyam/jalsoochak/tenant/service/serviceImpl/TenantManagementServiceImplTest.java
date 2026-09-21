@@ -1124,6 +1124,31 @@ class TenantManagementServiceImplTest {
         }
 
         @Test
+        @DisplayName("Should reject the messaging provider settings keys on the generic config API")
+        void setTenantConfigs_messagingProviderKeys_throwsInvalidConfigKeyException() throws Exception {
+            // MESSAGING-PROVIDER-SETTINGS: these two are the only way an SMTP host reaches the
+            // database, so the generic endpoint must refuse them — writing one here would skip the
+            // allowlist, TLS and address checks entirely.
+            for (TenantConfigKeyEnum key : List.of(
+                    TenantConfigKeyEnum.EMAIL_PROVIDER_SETTINGS,
+                    TenantConfigKeyEnum.SMS_PROVIDER_SETTINGS)) {
+                Integer tenantId = 1;
+                TenantResponseDTO tenant = TenantResponseDTO.builder().id(tenantId).stateCode("TN").build();
+                Map<TenantConfigKeyEnum, JsonNode> configs = new HashMap<>();
+                configs.put(key, objectMapper.readTree("{\"provider\":\"smtp\"}"));
+                SetTenantConfigRequestDTO request = SetTenantConfigRequestDTO.builder().configs(configs).build();
+
+                when(tenantCommonRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+                when(SecurityUtils.getCurrentUserUuid()).thenReturn("user-uuid");
+                when(tenantCommonRepository.findUserIdByUuid("user-uuid")).thenReturn(Optional.of(100));
+
+                assertThrows(InvalidConfigKeyException.class,
+                        () -> tenantManagementService.setTenantConfigs(tenantId, request));
+            }
+            verify(tenantCommonRepository, never()).upsertConfig(any(), any(), any(), any());
+        }
+
+        @Test
         @DisplayName("Should save tenant channels when all are valid system channels")
         void setTenantConfigs_ValidChannels_SavesSuccessfully() throws Exception {
             // Arrange
