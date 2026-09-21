@@ -1,8 +1,11 @@
 package org.arghyam.jalsoochak.message.service;
 
 import org.arghyam.jalsoochak.message.channel.EmailSender;
+import org.arghyam.jalsoochak.message.channel.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
+import org.arghyam.jalsoochak.message.dto.TenantRef;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -21,21 +24,37 @@ import static org.mockito.Mockito.*;
  * <p>Verifies that each public send-method delegates to {@link EmailSender} with
  * the correct {@link MailTemplate} and template variables, and that exceptions
  * thrown by the sender propagate to the caller (enabling Kafka DLT routing).</p>
+ *
+ * <p>PER-TENANT-PROVIDERS: only the calls below changed — each carries the event's
+ * {@link TenantRef}, and the sender is now whatever {@link TenantChannelProviders} hands back for
+ * it rather than an injected one. Every template and variable assertion is unchanged, which is the
+ * regression proof.
  */
 @ExtendWith(MockitoExtension.class)
 class AccountEmailServiceTest {
 
+    private static final TenantRef TENANT = new TenantRef(7, "MP");
+
+    @Mock
+    private TenantChannelProviders channelProviders;
+
+    /** The sender {@code channelProviders} hands back, as it does while the flag is off. */
     @Mock
     private EmailSender mailSender;
 
     @InjectMocks
     private AccountEmailService accountEmailService;
 
+    @BeforeEach
+    void setUp() {
+        lenient().when(channelProviders.emailFor(any())).thenReturn(mailSender);
+    }
+
     // ─────────────────────────── sendInviteEmail ───────────────────────────────
 
     @Test
     void sendInviteEmail_throwsIllegalArgumentException_forStateAdminRole() {
-        assertThatThrownBy(() -> accountEmailService.sendInviteEmail(
+        assertThatThrownBy(() -> accountEmailService.sendInviteEmail(TENANT,
                 "admin@state.gov", "Ravi Kumar", "STATE_ADMIN",
                 "https://activate?token=abc", 24))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -48,7 +67,7 @@ class AccountEmailServiceTest {
     void sendInviteEmail_selectsSuperUserTemplate_forSuperUserRole() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendInviteEmail(
+        accountEmailService.sendInviteEmail(TENANT,
                 "su@arghyam.in", "Priya", "SUPER_USER",
                 "https://activate?token=xyz", 48);
 
@@ -60,7 +79,7 @@ class AccountEmailServiceTest {
     void sendInviteEmail_selectsDefaultTemplate_forUnknownRole() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendInviteEmail(
+        accountEmailService.sendInviteEmail(TENANT,
                 "op@tenant.in", "Mohan", "FIELD_OFFICER",
                 "https://activate?token=def", 12);
 
@@ -72,7 +91,7 @@ class AccountEmailServiceTest {
     void sendInviteEmail_selectsDefaultTemplate_whenRoleIsNull() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendInviteEmail(
+        accountEmailService.sendInviteEmail(TENANT,
                 "op@tenant.in", "Mohan", null,
                 "https://activate?token=def", 12);
 
@@ -84,7 +103,7 @@ class AccountEmailServiceTest {
     void sendInviteEmail_populatesAllTemplateVariables() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendInviteEmail(
+        accountEmailService.sendInviteEmail(TENANT,
                 "op@tenant.in", "Sunita", "SUPER_USER",
                 "https://activate?token=tok1", 48);
 
@@ -100,7 +119,7 @@ class AccountEmailServiceTest {
     void sendInviteEmail_fallsBackToUser_whenNameIsNull() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendInviteEmail(
+        accountEmailService.sendInviteEmail(TENANT,
                 "op@tenant.in", null, "SUPER_USER",
                 "https://activate?token=def", 24);
 
@@ -112,7 +131,7 @@ class AccountEmailServiceTest {
     void sendInviteEmail_propagatesException_whenMailSenderThrows() {
         doThrow(new RuntimeException("delivery failed")).when(mailSender).send(any());
 
-        assertThatThrownBy(() -> accountEmailService.sendInviteEmail(
+        assertThatThrownBy(() -> accountEmailService.sendInviteEmail(TENANT,
                 "op@tenant.in", "Dev", "SUPER_USER", "https://link", 24))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("delivery failed");
@@ -124,7 +143,7 @@ class AccountEmailServiceTest {
     void sendStateAdminInviteEmail_includesStateName_inTemplateVariables() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendStateAdminInviteEmail(
+        accountEmailService.sendStateAdminInviteEmail(TENANT,
                 "sa@mp.gov.in", "Nitish Kumar", "Madhya Pradesh",
                 "https://activate?token=sa1", 24);
 
@@ -139,7 +158,7 @@ class AccountEmailServiceTest {
 
     @Test
     void sendStateAdminInviteEmail_throwsIllegalArgumentException_whenStateNameIsNull() {
-        assertThatThrownBy(() -> accountEmailService.sendStateAdminInviteEmail(
+        assertThatThrownBy(() -> accountEmailService.sendStateAdminInviteEmail(TENANT,
                 "sa@mp.gov.in", "Admin", null, "https://activate", 24))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("stateName must not be null or blank");
@@ -149,7 +168,7 @@ class AccountEmailServiceTest {
 
     @Test
     void sendStateAdminInviteEmail_throwsIllegalArgumentException_whenStateNameIsBlank() {
-        assertThatThrownBy(() -> accountEmailService.sendStateAdminInviteEmail(
+        assertThatThrownBy(() -> accountEmailService.sendStateAdminInviteEmail(TENANT,
                 "sa@mp.gov.in", "Admin", "   ", "https://activate", 24))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("stateName must not be null or blank");
@@ -163,7 +182,7 @@ class AccountEmailServiceTest {
     void sendReinviteEmail_selectsReinvitationTemplate() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendReinviteEmail(
+        accountEmailService.sendReinviteEmail(TENANT,
                 "op@tenant.in", "Sunita", "https://activate?token=re1", 72);
 
         verify(mailSender).send(captor.capture());
@@ -179,7 +198,7 @@ class AccountEmailServiceTest {
     void sendReinviteEmail_fallsBackToUser_whenNameIsNull() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendReinviteEmail("op@tenant.in", null, "https://link", 48);
+        accountEmailService.sendReinviteEmail(TENANT, "op@tenant.in", null, "https://link", 48);
 
         verify(mailSender).send(captor.capture());
         assertThat(captor.getValue().templateVariables()).containsEntry("name", "User");
@@ -189,7 +208,7 @@ class AccountEmailServiceTest {
     void sendReinviteEmail_propagatesException_whenMailSenderThrows() {
         doThrow(new RuntimeException("delivery failed")).when(mailSender).send(any());
 
-        assertThatThrownBy(() -> accountEmailService.sendReinviteEmail(
+        assertThatThrownBy(() -> accountEmailService.sendReinviteEmail(TENANT,
                 "op@tenant.in", "Dev", "https://link", 24))
                 .isInstanceOf(RuntimeException.class);
     }
@@ -200,7 +219,7 @@ class AccountEmailServiceTest {
     void sendPasswordResetEmail_selectsPasswordResetTemplate() {
         ArgumentCaptor<MailRequest> captor = ArgumentCaptor.forClass(MailRequest.class);
 
-        accountEmailService.sendPasswordResetEmail(
+        accountEmailService.sendPasswordResetEmail(TENANT,
                 "user@example.com", "https://reset?token=r1", 30);
 
         verify(mailSender).send(captor.capture());
@@ -211,11 +230,36 @@ class AccountEmailServiceTest {
         assertThat(req.templateVariables()).containsEntry("expiry_minutes", 30);
     }
 
+    // ──────────────────── provider resolution (PER-TENANT-PROVIDERS) ───────────
+
+    @Test
+    void everyMethod_asksTheResolverForThatTenantsSender() {
+        accountEmailService.sendInviteEmail(TENANT, "op@tenant.in", "Sunita", "SUPER_USER", "https://a", 24);
+        accountEmailService.sendStateAdminInviteEmail(TENANT, "sa@mp.gov.in", "Nitish", "Madhya Pradesh",
+                "https://a", 24);
+        accountEmailService.sendReinviteEmail(TENANT, "op@tenant.in", "Sunita", "https://a", 24);
+        accountEmailService.sendPasswordResetEmail(TENANT, "user@example.com", "https://r", 30);
+
+        verify(channelProviders, times(4)).emailFor(TENANT);
+        verify(mailSender, times(4)).send(any());
+    }
+
+    @Test
+    void anEventWithNoTenant_stillResolvesThroughTheSamePath() {
+        // A super-user invitation belongs to no state. TenantRef.NONE is not a special case here:
+        // it goes to the resolver like any other and comes back as the system default (O2-7).
+        accountEmailService.sendInviteEmail(TenantRef.NONE, "su@arghyam.in", "Priya", "SUPER_USER",
+                "https://a", 48);
+
+        verify(channelProviders).emailFor(TenantRef.NONE);
+        verify(mailSender).send(any());
+    }
+
     @Test
     void sendPasswordResetEmail_propagatesException_whenMailSenderThrows() {
         doThrow(new RuntimeException("delivery failed")).when(mailSender).send(any());
 
-        assertThatThrownBy(() -> accountEmailService.sendPasswordResetEmail(
+        assertThatThrownBy(() -> accountEmailService.sendPasswordResetEmail(TENANT,
                 "user@example.com", "https://link", 30))
                 .isInstanceOf(RuntimeException.class);
     }

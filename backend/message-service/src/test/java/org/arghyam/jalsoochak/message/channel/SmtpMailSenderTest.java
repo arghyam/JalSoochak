@@ -21,6 +21,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 
+/**
+ * PER-TENANT-PROVIDERS: only the construction below changed — the adapter is built from an
+ * {@link SmtpSettings} instead of the whole {@code MailProperties}. Every assertion is the one it
+ * made before, which is the regression proof for the conversion (O2-2).
+ */
 @ExtendWith(MockitoExtension.class)
 class SmtpMailSenderTest {
 
@@ -49,12 +54,9 @@ class SmtpMailSenderTest {
 
         MailProperties.SmtpTemplates smtpTemplates = new MailProperties.SmtpTemplates(
                 pwReset, reinvite, defaultInvite, superUser, stateAdmin);
-        MailProperties mailProperties = new MailProperties(
-                "smtp", "noreply@test.com", "Test", null,
-                null,
-                new MailProperties.Smtp(smtpTemplates));
 
-        smtpMailSender = new SmtpMailSender(mailProperties, javaMailSender);
+        smtpMailSender = new SmtpMailSender(
+                new SmtpSettings("noreply@test.com", null, smtpTemplates), javaMailSender);
     }
 
     @Test

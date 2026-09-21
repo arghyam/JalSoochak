@@ -7,7 +7,10 @@ import org.arghyam.jalsoochak.message.enums.SmsProviderType;
 /**
  * PER-TENANT-PROVIDERS: builds an {@link SmsSender} for one tenant's own account (O2-2).
  *
- * @see EmailSenderFactory for why the ports land before any implementation does
+ * <p>{@link SmsCountrySenderFactory} implements it. One factory per {@link SmsProviderType}
+ * constant, registered unconditionally.
+ *
+ * @see EmailSenderFactory for the same port on the email channel
  */
 public interface SmsSenderFactory {
 

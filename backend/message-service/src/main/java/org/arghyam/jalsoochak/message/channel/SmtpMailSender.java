@@ -4,11 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -17,24 +15,31 @@ import java.util.Map;
  * {@link EmailSender} implementation that delivers transactional emails via SMTP
  * using Spring's {@link JavaMailSender}.
  *
- * <p>Subject and body are read from {@code notification.mail.smtp.templates.*} in
- * {@code application.yml}. Placeholder tokens in the form {@code {key}} are replaced
- * with the corresponding values from {@link MailRequest#templateVariables()}.
+ * <p>Subject and body come from {@code notification.mail.smtp.templates.*} in
+ * {@code application.yml}, which is this service's own configuration for every relay alike
+ * (O2-17). Placeholder tokens in the form {@code {key}} are replaced with the corresponding
+ * values from {@link MailRequest#templateVariables()}.
  *
- * <p>Activated when {@code notification.mail.provider=smtp}.
- * Requires {@code spring.mail.*} to be configured so that Spring Boot
- * auto-configures a {@link JavaMailSender} bean.
+ * <p>PER-TENANT-PROVIDERS: a plain class, not a {@code @Component}. One instance per relay —
+ * {@code SystemDefaultProviders} pairs the platform's settings with Spring Boot's auto-configured
+ * {@code spring.mail.*} sender, and {@link SmtpMailSenderFactory} pairs a tenant's settings with a
+ * {@code JavaMailSenderImpl} built for that tenant's host and credentials — because several relays
+ * now have to coexist in one process, which a singleton bean selected by
+ * {@code @ConditionalOnProperty} could not do (O2-2). Everything below the constructor is
+ * unchanged: same message, same interpolation, same outcomes.
  */
-@Component
-@ConditionalOnProperty(name = "notification.mail.provider", havingValue = "smtp")
 @Slf4j
 public class SmtpMailSender implements EmailSender {
 
-    private final MailProperties mailProperties;
+    private final SmtpSettings settings;
     private final JavaMailSender javaMailSender;
 
-    public SmtpMailSender(MailProperties mailProperties, JavaMailSender javaMailSender) {
-        this.mailProperties = mailProperties;
+    /**
+     * @param settings       the identity this instance sends under, and the platform's templates
+     * @param javaMailSender the relay this instance sends through
+     */
+    public SmtpMailSender(SmtpSettings settings, JavaMailSender javaMailSender) {
+        this.settings = settings;
         this.javaMailSender = javaMailSender;
     }
 
@@ -44,13 +49,13 @@ public class SmtpMailSender implements EmailSender {
 
         // Merge logo_image from config so template authors can use {logo_image} in body templates.
         Map<String, Object> vars = new HashMap<>(request.templateVariables());
-        vars.put("logo_image", mailProperties.logoImageUrl() != null ? mailProperties.logoImageUrl() : "");
+        vars.put("logo_image", settings.logoImageUrl() != null ? settings.logoImageUrl() : "");
 
         String subject = interpolate(tmpl.subject(), vars);
         String body = interpolate(tmpl.body(), vars);
 
         SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(mailProperties.fromAddress());
+        message.setFrom(settings.fromAddress());
         message.setTo(request.to());
         message.setSubject(subject);
         message.setText(body);
@@ -73,17 +78,17 @@ public class SmtpMailSender implements EmailSender {
     }
 
     private MailProperties.SmtpTemplate resolveTemplate(MailTemplate template) {
-        if (mailProperties.smtp() == null) {
-            throw new IllegalStateException(
-                    "Missing SMTP configuration: notification.mail.smtp must be configured when provider=smtp");
-        }
-        
-        MailProperties.SmtpTemplates templates = mailProperties.smtp().templates();
+        // Still checked here rather than in the constructor: a deployment whose templates are
+        // missing failed at the first send before this class took them as a parameter, and moving
+        // that to startup would be a behaviour change. The tenant path does not reach this — its
+        // factory refuses to build a sender without templates, so the tenant falls back instead of
+        // failing per message (O2-9).
+        MailProperties.SmtpTemplates templates = settings.templates();
         if (templates == null) {
             throw new IllegalStateException(
                     "Missing SMTP configuration: notification.mail.smtp.templates must be configured when provider=smtp");
         }
-        
+
         return switch (template) {
             case PASSWORD_RESET         -> templates.passwordReset();
             case REINVITATION           -> templates.reinvitation();

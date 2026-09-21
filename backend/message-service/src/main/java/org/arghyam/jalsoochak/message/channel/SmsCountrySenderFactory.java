@@ -13,8 +13,9 @@ import org.springframework.web.reactive.function.client.WebClient;
  * PER-TENANT-PROVIDERS: builds one tenant's {@link SmsCountryService} from its stored settings and
  * its decrypted credentials (O2-2).
  *
- * <p>Registered unconditionally, unlike the system default bean in {@code SmsConfig}: the factories
- * exist so that several accounts can coexist, so gating one on
+ * <p>Registered unconditionally, unlike the system default bean in
+ * {@code SystemDefaultProviders}: the factories exist so that several accounts can coexist, so
+ * gating one on
  * {@code notification.sms.provider} — which now names only the <em>system default</em> provider
  * (O2-4) — would stop a tenant using SMSCountry because the platform does not.
  *

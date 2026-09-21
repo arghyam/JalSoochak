@@ -7,7 +7,7 @@ import reactor.core.publisher.Mono;
  *
  * <p>Implementations are plain classes, one instance per SMS account. The
  * {@code notification.sms.provider} property selects the <em>system default</em>
- * one, built in {@code SmsConfig}:
+ * one, built in {@code SystemDefaultProviders}:
  * <ul>
  *   <li>{@code smscountry} — {@link SmsCountryService} (default)</li>
  * </ul>

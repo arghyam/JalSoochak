@@ -34,10 +34,11 @@ import lombok.extern.slf4j.Slf4j;
  * keeps depending only on the {@link EmailSender} and {@link SmsSender} ports (O2-1) and no
  * business logic learns that tenants can have providers at all.
  *
- * <p><b>Nothing calls this yet.</b> The router and {@code AccountEmailService} are wired to it in
- * the two PRs that follow, and no {@link EmailSenderFactory} or {@link SmsSenderFactory} is
- * registered until then — so today every lookup resolves to the system default by the same path a
- * tenant with no settings takes, which makes that path the best-tested one before it matters.
+ * <p>Its two callers are {@code AccountEmailService} and {@code NotificationEventRouter}'s SMS
+ * branch, which ask per event rather than holding a sender, so a settings change takes effect
+ * without a restart. While {@code notification.per-tenant-providers.enabled} is off — which is
+ * every deployment today — every lookup returns the system default by the same path a tenant with
+ * no settings takes.
  *
  * <h2>Resolution order</h2>
  * <ol>
@@ -114,10 +115,11 @@ public class TenantChannelProviders {
             new EnumMap<>(SmsProviderType.class);
 
     /**
-     * Today's process-wide senders, selected by {@code notification.mail.provider} and
-     * {@code notification.sms.provider}. They become {@code SystemDefaultProviders} when the
-     * adapters are converted; until then the existing beans are the system default unchanged, which
-     * is what makes this class provably behaviour-neutral (O2-4).
+     * The platform's own accounts, built by {@code SystemDefaultProviders} from
+     * {@code notification.mail.*}, {@code spring.mail.*} and {@code smscountry.*} and selected by
+     * {@code notification.mail.provider} and {@code notification.sms.provider}. Injected by type:
+     * exactly one bean of each is registered, as before the feature existed, which is what makes
+     * this class provably behaviour-neutral while the flag is off (O2-4).
      */
     private final EmailSender systemDefaultEmail;
     private final SmsSender systemDefaultSms;

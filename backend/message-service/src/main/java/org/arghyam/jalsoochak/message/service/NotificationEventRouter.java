@@ -595,11 +595,11 @@ public class NotificationEventRouter {
             if ("STATE_ADMIN".equalsIgnoreCase(event.getRole())
                     && event.getStateName() != null && !event.getStateName().isBlank()) {
                 accountEmailService.sendStateAdminInviteEmail(
-                        event.getTo(), event.getName(), event.getStateName(),
+                        tenant, event.getTo(), event.getName(), event.getStateName(),
                         event.getInviteLink(), event.getExpiryHours());
             } else {
                 accountEmailService.sendInviteEmail(
-                        event.getTo(), event.getName(), event.getRole(),
+                        tenant, event.getTo(), event.getName(), event.getRole(),
                         event.getInviteLink(), event.getExpiryHours());
             }
             log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={} {}",
@@ -631,7 +631,8 @@ public class NotificationEventRouter {
         }
         TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
         try {
-            accountEmailService.sendReinviteEmail(event.getTo(), event.getName(), event.getInviteLink(), event.getExpiryHours());
+            accountEmailService.sendReinviteEmail(tenant, event.getTo(), event.getName(),
+                    event.getInviteLink(), event.getExpiryHours());
             log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={} {}",
                     event.getRole(), tenant);
         } catch (Exception e) {
@@ -661,7 +662,8 @@ public class NotificationEventRouter {
         }
         TenantRef tenant = tenantRefResolver.resolve(event.getTenantId(), event.getTenantCode());
         try {
-            accountEmailService.sendPasswordResetEmail(event.getTo(), event.getResetLink(), event.getExpiryMinutes());
+            accountEmailService.sendPasswordResetEmail(tenant, event.getTo(), event.getResetLink(),
+                    event.getExpiryMinutes());
             log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched {}", tenant);
         } catch (Exception e) {
             log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());

@@ -13,11 +13,9 @@ import org.arghyam.jalsoochak.message.enums.EmailProviderType;
  * class built from settings and gains a factory that is always registered; the property comes to
  * mean "the system default provider" (O2-4).
  *
- * <p><b>No implementation exists yet.</b> This port and {@link SmsSenderFactory} land with the
- * resolver so the resolution path is complete and testable, and the adapters are converted in the
- * two PRs that follow ({@code SendGridMailSenderFactory}, {@code SmtpMailSenderFactory}). Until
- * then {@code TenantChannelProviders} finds no factory for any provider and every tenant falls back
- * to the system default, which is precisely today's behaviour.
+ * <p>{@link SendGridMailSenderFactory} and {@link SmtpMailSenderFactory} implement it, one per
+ * {@link EmailProviderType} constant. Both are registered unconditionally, because the provider a
+ * tenant uses is independent of the one the platform's own account uses.
  *
  * <p>Implementations must not perform I/O in {@link #create}: it runs on the send path the first
  * time a tenant is seen, and a slow build blocks the Kafka listener thread for every tenant behind

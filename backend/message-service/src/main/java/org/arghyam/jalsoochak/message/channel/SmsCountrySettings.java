@@ -9,7 +9,8 @@ package org.arghyam.jalsoochak.message.channel;
  * no URL. The two fill this record from different places:
  *
  * <ul>
- *   <li>{@code SmsConfig} builds the system default entirely from {@code smscountry.*};</li>
+ *   <li>{@code SystemDefaultProviders} builds the system default entirely from
+ *       {@code smscountry.*};</li>
  *   <li>{@link SmsCountrySenderFactory} takes the sender and DLT ids and the OTP text from the
  *       tenant's settings, the credentials from the encrypted secret store, and
  *       {@link #baseUrl()} from {@code smscountry.base-url} — system-wide in both paths, so a

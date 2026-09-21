@@ -17,8 +17,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>Replaces the seven {@code @Value} fields {@code SmsCountryService} carried while it was a
  * singleton {@code @Component}. Deliberately <em>not</em> {@code @Validated}: the binding happens
  * whatever {@code notification.sms.provider} names, so a required-field check here would newly
- * fail a deployment that does not use SMSCountry at all. {@code SmsConfig} makes the one check
- * that used to happen — a present {@code sender-id} — on the path where it applies.
+ * fail a deployment that does not use SMSCountry at all. {@code SystemDefaultProviders} makes the
+ * one check that used to happen — a present {@code sender-id} — on the path where it applies.
  */
 @ConfigurationProperties(prefix = "smscountry")
 public record SmsCountryProperties(

@@ -23,7 +23,8 @@ import reactor.core.publisher.Mono;
  * minutes."</p>
  *
  * <p>PER-TENANT-PROVIDERS: a plain class, not a {@code @Component}. One instance per SMSCountry
- * account — {@code SmsConfig} builds the system default from {@code smscountry.*} and
+ * account — {@code SystemDefaultProviders} builds the system default from {@code smscountry.*}
+ * and
  * {@link SmsCountrySenderFactory} builds one per configured tenant — because several accounts now
  * have to coexist in one process, which a singleton bean selected by
  * {@code @ConditionalOnProperty} could not do (O2-2). Everything below the constructor is

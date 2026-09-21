@@ -3,7 +3,6 @@ package org.arghyam.jalsoochak.message.channel;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
-import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.Map;
@@ -26,6 +24,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * and error handling for non-2xx responses.
  *
  * <p>Uses WireMock as a local HTTP server — no real SendGrid API is contacted.</p>
+ *
+ * <p>PER-TENANT-PROVIDERS: only the construction below changed — the adapter is built from a
+ * {@link SendGridSettings} instead of {@code MailProperties} plus a reflectively-set
+ * {@code apiUrl} field. Every assertion is the one it made before, which is the regression proof
+ * for the conversion (O2-2).
  */
 class SendGridMailSenderTest {
 
@@ -49,17 +52,12 @@ class SendGridMailSenderTest {
 
     @BeforeEach
     void setUp() {
-        MailProperties.Templates templates = new MailProperties.Templates(
-                T_PASSWORD_RESET, T_REINVITATION, T_DEFAULT_INVITATION,
-                T_SUPER_USER_INVITATION, T_STATE_ADMIN_INVITATION
-        );
-        MailProperties props = new MailProperties(
-                "sendgrid", FROM, FROM_NAME, LOGO,
-                new MailProperties.SendGrid(API_KEY, templates),
-                null
-        );
-        sender = new SendGridMailSender(props, WebClient.builder());
-        ReflectionTestUtils.setField(sender, "apiUrl", wireMockServer.baseUrl());
+        SendGridSettings settings = new SendGridSettings(
+                wireMockServer.baseUrl(), API_KEY, FROM, FROM_NAME, LOGO,
+                new SendGridSettings.Templates(
+                        T_PASSWORD_RESET, T_REINVITATION, T_DEFAULT_INVITATION,
+                        T_SUPER_USER_INVITATION, T_STATE_ADMIN_INVITATION));
+        sender = new SendGridMailSender(settings, WebClient.builder());
     }
 
     // ─────────────────────── Template ID resolution ────────────────────────────

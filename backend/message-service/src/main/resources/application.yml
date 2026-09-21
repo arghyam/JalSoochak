@@ -116,15 +116,20 @@ notification:
   # Selects the SYSTEM DEFAULT provider — what every send uses unless the tenant it belongs to
   # has configured its own account under per-tenant-providers above.
   # Switch providers by changing 'provider'. No code changes required — add an SmsSender adapter
-  # and register its SmsSenderFactory; the system default bean is built in SmsConfig.
+  # and register its SmsSenderFactory; the system default bean is built in SystemDefaultProviders.
   # provider: smscountry → requires SMSCOUNTRY_* env vars below (default)
   sms:
     provider: ${SMS_PROVIDER:smscountry}
 
   # ── Transactional account emails (invite, reinvite, password-reset) ────────
-  # Switch providers by changing 'provider'. No code changes required.
+  # Selects the SYSTEM DEFAULT provider — what every send uses unless the tenant it belongs to
+  # has configured its own account under per-tenant-providers above.
+  # Switch providers by changing 'provider'. No code changes required — add an EmailSender adapter
+  # and register its EmailSenderFactory; the system default bean is built in SystemDefaultProviders.
   # provider: smtp    → requires spring.mail.* block to be uncommented
   # provider: sendgrid → requires SENDGRID_API_KEY env var (default)
+  # api-url, from-address, from-name and logo-image-url below are the platform's own; a tenant
+  # that leaves its fromName or logoImageUrl unset falls back to these two.
   mail:
     provider: ${MAIL_PROVIDER:sendgrid}
     from-address: ${MAIL_FROM_EMAIL:noreply@example.com}

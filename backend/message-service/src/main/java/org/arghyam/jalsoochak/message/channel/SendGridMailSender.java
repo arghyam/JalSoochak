@@ -1,13 +1,9 @@
 package org.arghyam.jalsoochak.message.channel;
 
 import lombok.extern.slf4j.Slf4j;
-import org.arghyam.jalsoochak.message.config.MailProperties;
 import org.arghyam.jalsoochak.message.dto.MailRequest;
 import org.arghyam.jalsoochak.message.dto.MailTemplate;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
-import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -19,41 +15,38 @@ import java.util.Map;
  * {@link EmailSender} implementation that delivers transactional emails via
  * SendGrid's v3 Mail Send API using dynamic templates.
  *
- * <p>Template IDs are read from {@code notification.mail.sendgrid.templates.*}.
- * The {@code logo_image} variable is always injected from config — it must never
- * be included in the Kafka event payload.
+ * <p>Template IDs come from the {@link SendGridSettings} this instance was built with — the
+ * account that owns them. The {@code logo_image} variable is always injected from those settings —
+ * it must never be included in the Kafka event payload.
  *
- * <p>Activated when {@code notification.mail.provider=sendgrid} (default).
+ * <p>PER-TENANT-PROVIDERS: a plain class, not a {@code @Component}. One instance per SendGrid
+ * account — {@code SystemDefaultProviders} builds the system default from
+ * {@code notification.mail.*} and {@link SendGridMailSenderFactory} builds one per configured
+ * tenant — because several accounts now have to coexist in one process, which a singleton bean
+ * selected by {@code @ConditionalOnProperty} could not do (O2-2). Everything below the constructor
+ * is unchanged: same URL, same headers, same body, same outcomes, which is what makes the system
+ * default provably today's behaviour. The three configuration checks the constructor used to make
+ * moved to {@code SystemDefaultProviders}, where they still stop the context at startup; the
+ * tenant path checks the same things in the factory, where a failure is a fallback rather than an
+ * outage (O2-9).
+ *
+ * <p>Instances are immutable and stateless — the {@code WebClient} holds the only pooled resource
+ * — so one can be cached and shared across sends for as long as its settings stand.
  */
-@Component
-@ConditionalOnProperty(name = "notification.mail.provider", havingValue = "sendgrid", matchIfMissing = true)
 @Slf4j
 public class SendGridMailSender implements EmailSender {
 
     private static final String MAIL_SEND_PATH = "/v3/mail/send";
 
-    private final MailProperties mailProperties;
+    private final SendGridSettings settings;
     private final WebClient webClient;
 
-    @Value("${notification.mail.sendgrid.api-url:https://api.sendgrid.com}")
-    private String apiUrl;
-
-    public SendGridMailSender(MailProperties mailProperties, WebClient.Builder webClientBuilder) {
-        if (mailProperties.sendgrid() == null) {
-            throw new IllegalStateException(
-                    "Missing SendGrid configuration: notification.mail.sendgrid must be configured when provider=sendgrid");
-        }
-        
-        MailProperties.SendGrid sendgrid = mailProperties.sendgrid();
-        if (sendgrid.apiKey() == null || sendgrid.apiKey().isBlank()) {
-            throw new IllegalStateException(
-                    "Missing SendGrid API key: set SENDGRID_API_KEY environment variable when provider=sendgrid");
-        }
-        if (sendgrid.templates() == null) {
-            throw new IllegalStateException(
-                    "Missing SendGrid templates: notification.mail.sendgrid.templates must be configured when provider=sendgrid");
-        }
-        this.mailProperties = mailProperties;
+    /**
+     * @param settings         the account this instance sends through
+     * @param webClientBuilder the shared builder; each instance builds its own client
+     */
+    public SendGridMailSender(SendGridSettings settings, WebClient.Builder webClientBuilder) {
+        this.settings = settings;
         this.webClient = webClientBuilder.build();
     }
 
@@ -62,10 +55,10 @@ public class SendGridMailSender implements EmailSender {
         String templateId = resolveTemplateId(request.template());
 
         Map<String, Object> dynamicData = new HashMap<>(request.templateVariables());
-        dynamicData.put("logo_image", mailProperties.logoImageUrl() != null ? mailProperties.logoImageUrl() : "");
+        dynamicData.put("logo_image", settings.logoImageUrl() != null ? settings.logoImageUrl() : "");
 
         Map<String, Object> payload = Map.of(
-                "from", Map.of("email", mailProperties.fromAddress(), "name", mailProperties.fromName()),
+                "from", Map.of("email", settings.fromAddress(), "name", settings.fromName()),
                 "personalizations", List.of(Map.of(
                         "to", List.of(Map.of("email", request.to())),
                         "dynamic_template_data", dynamicData
@@ -75,8 +68,8 @@ public class SendGridMailSender implements EmailSender {
 
         try {
             webClient.post()
-                    .uri(apiUrl + MAIL_SEND_PATH)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + mailProperties.sendgrid().apiKey())
+                    .uri(settings.apiUrl() + MAIL_SEND_PATH)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + settings.apiKey())
                     .bodyValue(payload)
                     .retrieve()
                     .toBodilessEntity()
@@ -95,7 +88,7 @@ public class SendGridMailSender implements EmailSender {
     }
 
     private String resolveTemplateId(MailTemplate template) {
-        MailProperties.Templates t = mailProperties.sendgrid().templates();
+        SendGridSettings.Templates t = settings.templates();
         return switch (template) {
             case PASSWORD_RESET         -> t.passwordReset();
             case REINVITATION           -> t.reinvitation();

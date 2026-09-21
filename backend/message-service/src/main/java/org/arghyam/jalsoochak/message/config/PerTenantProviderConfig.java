@@ -6,9 +6,9 @@ import org.springframework.context.annotation.Configuration;
 /**
  * PER-TENANT-PROVIDERS: binds the three property namespaces the feature reads.
  *
- * <p>Follows {@code MailConfig}'s shape rather than putting
- * {@code @EnableConfigurationProperties} on the application class, so the feature's configuration
- * stays findable from one place.
+ * <p>Kept separate from {@code SystemDefaultProviders}, which binds the platform's own accounts:
+ * these three namespaces configure the feature itself — whether it is on, what it may connect to,
+ * and the key its secrets are encrypted under — and none of them belongs to a provider.
  */
 @Configuration
 @EnableConfigurationProperties({

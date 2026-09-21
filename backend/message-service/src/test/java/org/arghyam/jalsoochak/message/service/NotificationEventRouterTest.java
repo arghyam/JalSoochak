@@ -509,7 +509,7 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://app.jalsoochak.in/activate?token=abc","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(
+        verify(accountEmailService).sendInviteEmail(TenantRef.NONE,
                 "op@tenant.in", "Mohan", "NEW_ROLE",
                 "https://app.jalsoochak.in/activate?token=abc", 24);
         verify(kafkaProducer, never()).publishJson(anyString(), any());
@@ -522,7 +522,7 @@ class NotificationEventRouterTest {
                  "role":"FIELD_OFFICER","inviteLink":"https://link","expiryHours":12}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -532,7 +532,7 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://link","expiryHours":24}
                 """);
 
-        verify(accountEmailService, never()).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_to");
@@ -546,7 +546,7 @@ class NotificationEventRouterTest {
                  "role":"STATE_ADMIN","expiryHours":24}
                 """);
 
-        verify(accountEmailService, never()).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_invite_link");
@@ -556,7 +556,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenInviteEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_INVITE_EMAIL","to":"op@tenant.in","name":"Dev",
@@ -578,7 +578,7 @@ class NotificationEventRouterTest {
                  "name":"Sunita","inviteLink":"https://app.jalsoochak.in/activate?token=re","expiryHours":72}
                 """);
 
-        verify(accountEmailService).sendReinviteEmail(
+        verify(accountEmailService).sendReinviteEmail(TenantRef.NONE,
                 "op@tenant.in", "Sunita",
                 "https://app.jalsoochak.in/activate?token=re", 72);
         verify(kafkaProducer, never()).publishJson(anyString(), any());
@@ -591,7 +591,7 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://link","expiryHours":72}
                 """);
 
-        verify(accountEmailService, never()).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendReinviteEmail(any(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_to");
@@ -605,7 +605,7 @@ class NotificationEventRouterTest {
                  "name":"Sunita","expiryHours":72}
                 """);
 
-        verify(accountEmailService, never()).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendReinviteEmail(any(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_invite_link");
@@ -615,7 +615,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenReinviteEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendReinviteEmail(any(), anyString(), anyString(), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_REINVITE_EMAIL","to":"op@tenant.in","name":"Sunita",
@@ -637,7 +637,7 @@ class NotificationEventRouterTest {
                  "resetLink":"https://app.jalsoochak.in/reset?token=r1","expiryMinutes":30}
                 """);
 
-        verify(accountEmailService).sendPasswordResetEmail(
+        verify(accountEmailService).sendPasswordResetEmail(TenantRef.NONE,
                 "user@example.com", "https://app.jalsoochak.in/reset?token=r1", 30);
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
@@ -649,7 +649,7 @@ class NotificationEventRouterTest {
                  "resetLink":"https://link","expiryMinutes":15}
                 """);
 
-        verify(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -659,7 +659,7 @@ class NotificationEventRouterTest {
                  "resetLink":"https://link","expiryMinutes":30}
                 """);
 
-        verify(accountEmailService, never()).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_to");
@@ -672,7 +672,7 @@ class NotificationEventRouterTest {
                 {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com","expiryMinutes":30}
                 """);
 
-        verify(accountEmailService, never()).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), argThat(payload -> {
             String s = payload.toString();
             return s.contains("ACCOUNT_EMAIL_FAILED") && s.contains("missing_reset_link");
@@ -682,7 +682,7 @@ class NotificationEventRouterTest {
     @Test
     void route_routesToDlt_whenPasswordResetEmailSmtpFails() {
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"user@example.com",
@@ -700,7 +700,7 @@ class NotificationEventRouterTest {
         // SMTP fails triggering DLT publish, but DLT publish itself also throws.
         // The handler must swallow the DLT failure and complete normally (no rethrow → no Kafka retry).
         doThrow(new RuntimeException("SMTP down"))
-                .when(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+                .when(accountEmailService).sendPasswordResetEmail(any(), anyString(), anyString(), anyInt());
         doThrow(new RuntimeException("Kafka unavailable"))
                 .when(kafkaProducer).publishJson(anyString(), any());
 
@@ -1101,10 +1101,10 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://app.jalsoochak.in/activate?token=sa1","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendStateAdminInviteEmail(
+        verify(accountEmailService).sendStateAdminInviteEmail(TenantRef.NONE,
                 "sa@mp.gov.in", "Priya Sharma", "Madhya Pradesh",
                 "https://app.jalsoochak.in/activate?token=sa1", 24);
-        verify(accountEmailService, never()).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService, never()).sendInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(kafkaProducer, never()).publishJson(anyString(), any());
     }
 
@@ -1112,7 +1112,7 @@ class NotificationEventRouterTest {
     void route_routesToDlt_whenStateAdminInviteEmailThrows() {
         doThrow(new IllegalArgumentException("stateName must not be null or blank"))
                 .when(accountEmailService)
-                .sendStateAdminInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+                .sendStateAdminInviteEmail(any(), anyString(), anyString(), anyString(), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in",
@@ -1134,7 +1134,7 @@ class NotificationEventRouterTest {
         // The exception is caught and routed to DLT.
         doThrow(new IllegalArgumentException("STATE_ADMIN invitations require a stateName"))
                 .when(accountEmailService)
-                .sendInviteEmail(anyString(), anyString(), eq("STATE_ADMIN"), anyString(), anyInt());
+                .sendInviteEmail(any(), anyString(), anyString(), eq("STATE_ADMIN"), anyString(), anyInt());
 
         router.route("""
                 {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in",
@@ -1142,7 +1142,7 @@ class NotificationEventRouterTest {
                  "inviteLink":"https://link","expiryHours":24}
                 """);
 
-        verify(accountEmailService).sendInviteEmail(
+        verify(accountEmailService).sendInviteEmail(TenantRef.NONE,
                 "sa@mp.gov.in", "Priya Sharma", "STATE_ADMIN", "https://link", 24);
         verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
@@ -1926,7 +1926,8 @@ class NotificationEventRouterTest {
                 """);
 
         verify(tenantRefResolver).resolve(null, "MP");
-        verify(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendInviteEmail(eq(new TenantRef(1, "MP")),
+                anyString(), anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -1937,7 +1938,8 @@ class NotificationEventRouterTest {
                 """);
 
         verify(tenantRefResolver).resolve(null, null);
-        verify(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendInviteEmail(eq(TenantRef.NONE),
+                anyString(), anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -1950,7 +1952,8 @@ class NotificationEventRouterTest {
                 """);
 
         verify(tenantRefResolver).resolve(null, "MP");
-        verify(accountEmailService).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendReinviteEmail(eq(new TenantRef(1, "MP")),
+                anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -1961,7 +1964,8 @@ class NotificationEventRouterTest {
                 """);
 
         verify(tenantRefResolver).resolve(null, null);
-        verify(accountEmailService).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendReinviteEmail(eq(TenantRef.NONE),
+                anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -1974,7 +1978,8 @@ class NotificationEventRouterTest {
                 """);
 
         verify(tenantRefResolver).resolve(1, "MP");
-        verify(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendPasswordResetEmail(eq(new TenantRef(1, "MP")),
+                anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -1985,7 +1990,8 @@ class NotificationEventRouterTest {
                 """);
 
         verify(tenantRefResolver).resolve(null, null);
-        verify(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+        verify(accountEmailService).sendPasswordResetEmail(eq(TenantRef.NONE),
+                anyString(), anyString(), anyInt());
     }
 
     @Test
