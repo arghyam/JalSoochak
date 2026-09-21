@@ -1,4 +1,4 @@
-package org.arghyam.jalsoochak.tenant.security;
+package org.arghyam.jalsoochak.message.security;
 
 import java.net.InetAddress;
 
@@ -14,12 +14,17 @@ import java.net.InetAddress;
  * <p>{@code allowInternalAddresses} exists for local development, where the SMTP relay genuinely is
  * on loopback. It must stay {@code false} in every deployed environment.
  *
- * <p>This is a copy of telemetry-service's {@code security/SsrfAddressPolicy} (the original), and
- * message-service carries a third. All three are kept character-for-character identical apart from
- * the package and this paragraph. There is no shared library module in this repo — the five copies
- * of {@code PiiEncryptionService} are the standing precedent — and a divergence between this copy
- * and message-service's would mean tenant-service accepting an address that message-service later
- * refuses, which surfaces as mail that silently falls back to the system default. Change all three
+ * <p>This is the third copy of this class, after telemetry-service's
+ * {@code security/SsrfAddressPolicy} (the original) and tenant-service's. All three are kept
+ * character-for-character identical apart from the package and this paragraph. There is no shared
+ * library module in this repo — the five copies of {@code PiiEncryptionService} are the standing
+ * precedent.
+ *
+ * <p>This copy and tenant-service's are two halves of one check (O2-13): tenant-service judges an
+ * SMTP host when the settings are written, and {@code ProviderEndpointPolicy} judges it again here
+ * before a sender is built, because DNS can change in between. A divergence would mean
+ * tenant-service accepting an address this service later refuses, which surfaces not as an error
+ * anyone sees but as a tenant's mail silently falling back to the system default. Change all three
  * together.
  */
 public class SsrfAddressPolicy {
