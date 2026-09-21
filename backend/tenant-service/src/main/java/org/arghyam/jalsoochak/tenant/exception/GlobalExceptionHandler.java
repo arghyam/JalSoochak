@@ -109,6 +109,17 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
+    /**
+     * MESSAGING-PROVIDER-SECRETS: 503, not 500 — the request is valid and would succeed once
+     * the deployment configures a master key, so this is an unavailable capability rather
+     * than a failure. The message names the missing configuration, never key material.
+     */
+    @ExceptionHandler(SecretStoreUnavailableException.class)
+    public ResponseEntity<ApiErrorResponseDTO> handleSecretStoreUnavailable(SecretStoreUnavailableException ex) {
+        log.warn("Secret store unavailable: {}", ex.getMessage());
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
     @ExceptionHandler(ConfigurationException.class)
     public ResponseEntity<ApiErrorResponseDTO> handleConfigurationException(ConfigurationException ex) {
         log.error("Configuration error: {}", ex.getMessage(), ex);

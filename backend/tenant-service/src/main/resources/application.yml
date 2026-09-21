@@ -175,6 +175,30 @@ pii:
   encryption-key: ${PII_ENCRYPTION_KEY}
   hmac-key: ${PII_HMAC_KEY}
 
+# MESSAGING-PROVIDER-SECRETS: master keys (KEKs) for the per-tenant messaging credential
+# store. Independent of pii.* above on purpose — a compromise of one must not read the other.
+#
+# Defaults are empty and that is a supported state: a deployment that does not use
+# per-tenant providers needs no new environment variable, and the secret endpoints answer
+# 503 rather than the service refusing to start. Configure a key and the store switches on.
+#
+# Each value is a base64-encoded 32-byte key. Rules, all checked at startup:
+#   * keep these OUT of the database, the repo, the vault entry holding the DB password,
+#     and any backup taken with the database — a stolen backup alone must be useless
+#   * staging and production use DIFFERENT keys, so a dump restored into the wrong
+#     environment fails to decrypt instead of silently using the wrong credentials
+#   * back them up separately from the database and test the restore: losing a key makes
+#     every tenant secret unrecoverable and each state admin has to re-enter theirs
+#
+# To rotate: add v2, point active-master-key-id at it, POST
+# /api/v1/system/messaging-secrets/rewrap, then remove v1 once no key still names it.
+messaging:
+  secret:
+    active-master-key-id: ${MESSAGING_SECRET_ACTIVE_MASTER_KEY_ID:}
+    master-keys:
+      v1: ${MESSAGING_SECRET_MASTER_KEY_V1:}
+      # v2: ${MESSAGING_SECRET_MASTER_KEY_V2:}   # added during a rotation; both stay readable
+
 tenant:
   defaults:
     lgd-location-hierarchy:
