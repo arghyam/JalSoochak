@@ -31,6 +31,7 @@ import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.kafka.KafkaProducer;
@@ -94,6 +95,9 @@ class NotificationEventRouterTest {
     @Mock
     private PiiEncryptionService piiEncryptionService;
 
+    @Mock
+    private TenantRefResolver tenantRefResolver;
+
     @InjectMocks
     private NotificationEventRouter router;
 
@@ -108,6 +112,9 @@ class NotificationEventRouterTest {
         ReflectionTestUtils.setField(router, "baseUrl", "https://example.com");
         lenient().when(piiEncryptionService.hmac(anyString()))
                 .thenAnswer(inv -> "hash_" + inv.getArgument(0, String.class));
+        // Default: pass the halves through unresolved. Tests that care stub a full resolution.
+        lenient().when(tenantRefResolver.resolve(any(), any()))
+                .thenAnswer(inv -> new TenantRef(inv.getArgument(0), inv.getArgument(1)));
     }
 
     /**
@@ -1894,6 +1901,131 @@ class NotificationEventRouterTest {
                         .contains("reportDate=")
                         .doesNotContain("weekStart="));
         assertThat(lines).noneMatch(l -> l.startsWith("[Router/WEEKLY_REPORT]"));
+    }
+
+    // ──────────────────── Phase 0: tenant normalisation at the boundary ─────────
+
+    @Test
+    void route_normalisesInviteEmailTenant_fromTenantCode() {
+        when(tenantRefResolver.resolve(null, "MP")).thenReturn(new TenantRef(1, "MP"));
+
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"sa@mp.gov.in","name":"Dev","role":"FIELD_OFFICER",
+                 "inviteLink":"https://link","expiryHours":24,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver).resolve(null, "MP");
+        verify(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesInviteEmailTenant_toNone_whenEventCarriesNoTenant() {
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","to":"super@example.com","name":"Carol","role":"SUPER_USER",
+                 "inviteLink":"https://link","expiryHours":24}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+        verify(accountEmailService).sendInviteEmail(anyString(), anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesReinviteEmailTenant_fromTenantCode() {
+        when(tenantRefResolver.resolve(null, "MP")).thenReturn(new TenantRef(1, "MP"));
+
+        router.route("""
+                {"eventType":"SEND_REINVITE_EMAIL","to":"sa@mp.gov.in","name":"Sunita",
+                 "inviteLink":"https://link","expiryHours":24,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver).resolve(null, "MP");
+        verify(accountEmailService).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesReinviteEmailTenant_toNone_whenEventCarriesNoTenant() {
+        router.route("""
+                {"eventType":"SEND_REINVITE_EMAIL","to":"super@example.com","name":"Carol",
+                 "inviteLink":"https://link","expiryHours":24}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+        verify(accountEmailService).sendReinviteEmail(anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesPasswordResetTenant_fromBothHalves() {
+        when(tenantRefResolver.resolve(1, "MP")).thenReturn(new TenantRef(1, "MP"));
+
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"sa@mp.gov.in",
+                 "resetLink":"https://link","expiryMinutes":30,"tenantId":1,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver).resolve(1, "MP");
+        verify(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesPasswordResetTenant_toNone_whenEventCarriesNoTenant() {
+        router.route("""
+                {"eventType":"SEND_PASSWORD_RESET_EMAIL","to":"super@example.com",
+                 "resetLink":"https://link","expiryMinutes":30}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+        verify(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_normalisesLoginOtpTenant_fromBothHalves_onTheSmsBranch() {
+        when(smsSender.sendOtp("919876500030", "123456", 5)).thenReturn(Mono.just(true));
+        when(tenantRefResolver.resolve(1, "MP")).thenReturn(new TenantRef(1, "MP"));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"123456","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500030","expiryMinutes":5,"tenantId":1,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver).resolve(1, "MP");
+        verify(smsSender).sendOtp("919876500030", "123456", 5);
+    }
+
+    @Test
+    void route_normalisesLoginOtpTenant_toNone_whenEventCarriesNoTenant() {
+        when(smsSender.sendOtp("919876500031", "654321", 5)).thenReturn(Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"654321","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500031","expiryMinutes":5}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+        verify(smsSender).sendOtp("919876500031", "654321", 5);
+    }
+
+    @Test
+    void route_readsJsonNullTenantFieldsAsAbsent_neverAsTheTextNull() {
+        when(smsSender.sendOtp("919876500032", "777888", 5)).thenReturn(Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"777888","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500032","expiryMinutes":5,
+                 "tenantId":null,"tenantCode":null}
+                """);
+
+        verify(tenantRefResolver).resolve(null, null);
+    }
+
+    @Test
+    void route_doesNotResolveTenant_whenTheEventIsDeadLetteredFirst() {
+        router.route("""
+                {"eventType":"SEND_INVITE_EMAIL","name":"Dev","inviteLink":"https://link",
+                 "expiryHours":24,"tenantCode":"MP"}
+                """);
+
+        verify(tenantRefResolver, never()).resolve(any(), any());
+        verify(kafkaProducer).publishJson(eq("account-email-dlt"), any());
     }
 
     private void stubWeeklySend(DailyReportSendOutcome outcome) throws Exception {

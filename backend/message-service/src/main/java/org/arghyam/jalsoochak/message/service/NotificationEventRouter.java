@@ -9,6 +9,7 @@ import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
+import org.arghyam.jalsoochak.message.dto.TenantRef;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportKpis;
 import org.arghyam.jalsoochak.message.dto.WeeklyReportOfficerRow;
 import org.arghyam.jalsoochak.message.event.InviteEmailEvent;
@@ -117,6 +118,7 @@ public class NotificationEventRouter {
     private final AccountEmailService accountEmailService;
     private final JdbcTemplate jdbcTemplate;
     private final PiiEncryptionService piiEncryptionService;
+    private final TenantRefResolver tenantRefResolver;
 
     @Value("${escalation.report.dir:/tmp/escalation-reports/}")
     private String reportDir;
@@ -507,11 +509,13 @@ public class NotificationEventRouter {
                 expiryMinutes = 5;
             }
 
+            TenantRef tenant = resolveTenant(root);
+
             // Use reactive flow to avoid blocking the Kafka listener thread
             smsSender.sendOtp(phone, otp, expiryMinutes)
                     .doOnNext(sent -> {
                         if (sent) {
-                            log.info("[Router/SEND_LOGIN_OTP/SMS] → SENT");
+                            log.info("[Router/SEND_LOGIN_OTP/SMS] {} → SENT", tenant);
                             log.debug("[Router/SEND_LOGIN_OTP/SMS] phone={} → SENT", phone);
                         } else {
                             // Non-retryable failure (4xx API rejection) — log as warning, do not throw
@@ -579,6 +583,7 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "missing_invite_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
         try {
             if ("STATE_ADMIN".equalsIgnoreCase(event.getRole())
                     && event.getStateName() != null && !event.getStateName().isBlank()) {
@@ -590,7 +595,8 @@ public class NotificationEventRouter {
                         event.getTo(), event.getName(), event.getRole(),
                         event.getInviteLink(), event.getExpiryHours());
             }
-            log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={}", event.getRole());
+            log.info("[Router/INVITE_EMAIL] Invite email dispatched recipientRole={} {}",
+                    event.getRole(), tenant);
         } catch (Exception e) {
             log.error("[Router/INVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_INVITE_EMAIL", event.getTo(), "email_delivery_error");
@@ -616,9 +622,11 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "missing_invite_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(null, event.getTenantCode());
         try {
             accountEmailService.sendReinviteEmail(event.getTo(), event.getName(), event.getInviteLink(), event.getExpiryHours());
-            log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={}", event.getRole());
+            log.info("[Router/REINVITE_EMAIL] Reinvite email dispatched recipientRole={} {}",
+                    event.getRole(), tenant);
         } catch (Exception e) {
             log.error("[Router/REINVITE_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_REINVITE_EMAIL", event.getTo(), "email_delivery_error");
@@ -644,13 +652,27 @@ public class NotificationEventRouter {
             publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "missing_reset_link");
             return;
         }
+        TenantRef tenant = tenantRefResolver.resolve(event.getTenantId(), event.getTenantCode());
         try {
             accountEmailService.sendPasswordResetEmail(event.getTo(), event.getResetLink(), event.getExpiryMinutes());
-            log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched");
+            log.info("[Router/PASSWORD_RESET_EMAIL] Password reset email dispatched {}", tenant);
         } catch (Exception e) {
             log.error("[Router/PASSWORD_RESET_EMAIL] Email delivery failure, routing to DLT: {}", e.getMessage());
             publishEmailDlt("SEND_PASSWORD_RESET_EMAIL", event.getTo(), "email_delivery_error");
         }
+    }
+
+    /**
+     * Normalises the optional tenant fields on a raw event payload. Both are read strictly —
+     * a JSON null or a value of the wrong type is treated as absent, never as the text
+     * {@code "null"}.
+     */
+    private TenantRef resolveTenant(JsonNode root) {
+        JsonNode idNode = root.path("tenantId");
+        JsonNode codeNode = root.path("tenantCode");
+        return tenantRefResolver.resolve(
+                idNode.isIntegralNumber() ? idNode.asInt() : null,
+                codeNode.isTextual() ? codeNode.asText() : null);
     }
 
     private void publishEmailDlt(String originalEventType, String to, String errorReason) {

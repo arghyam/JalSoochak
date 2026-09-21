@@ -315,7 +315,7 @@ public class GlificDeliveryReconciliationService {
         if (contactIds.isEmpty()) {
             return byContactId;
         }
-        for (TenantRef tenant : activeTenants()) {
+        for (TenantSchemaRef tenant : activeTenants()) {
             if (!tenant.schema().matches(SCHEMA_PATTERN)) {
                 log.warn("[GlificStatus] Skipping tenant={} — schema '{}' is not a valid identifier",
                         tenant.id(), tenant.schema());
@@ -334,7 +334,7 @@ public class GlificDeliveryReconciliationService {
         return byContactId;
     }
 
-    private record TenantRef(int id, String schema) {}
+    private record TenantSchemaRef(int id, String schema) {}
 
     private record OfficerRow(long contactId, long userId, String role) {}
 
@@ -343,11 +343,11 @@ public class GlificDeliveryReconciliationService {
      * INACTIVE(0), SUSPENDED(4), ARCHIVED(6) and REGISTERED(7). A REGISTERED tenant has no schema at
      * all, so querying it would throw.
      */
-    private List<TenantRef> activeTenants() {
+    private List<TenantSchemaRef> activeTenants() {
         return jdbcTemplate.query(
                 "SELECT id, state_code FROM common_schema.tenant_master_table"
                         + " WHERE deleted_at IS NULL AND status IN (1, 2, 3, 5) ORDER BY id",
-                (rs, n) -> new TenantRef(rs.getInt("id"),
+                (rs, n) -> new TenantSchemaRef(rs.getInt("id"),
                         "tenant_" + rs.getString("state_code").toLowerCase(Locale.ROOT)));
     }
 
@@ -359,7 +359,7 @@ public class GlificDeliveryReconciliationService {
      * ids bind as parameters. Mirrors {@code NotificationEventRouter.resolveOfficerContactsByIds}.</p>
      */
     @SuppressWarnings("java:S2077")
-    private List<OfficerRow> queryOfficers(TenantRef tenant, Set<Long> contactIds) {
+    private List<OfficerRow> queryOfficers(TenantSchemaRef tenant, Set<Long> contactIds) {
         String sql = "SELECT u.id, u.whatsapp_connection_id, ut.c_name AS user_type FROM "
                 + tenant.schema() + ".user_table u"
                 + " JOIN common_schema.user_type_master_table ut ON ut.id = u.user_type"
