@@ -5,18 +5,23 @@ import reactor.core.publisher.Mono;
 /**
  * Port interface for transactional SMS (OTP) delivery.
  *
- * <p>Exactly one implementation is registered in the Spring context at a time,
- * controlled by the {@code notification.sms.provider} property:
+ * <p>Implementations are plain classes, one instance per SMS account. The
+ * {@code notification.sms.provider} property selects the <em>system default</em>
+ * one, built in {@code SmsConfig}:
  * <ul>
  *   <li>{@code smscountry} — {@link SmsCountryService} (default)</li>
  * </ul>
  *
- * <p>To switch providers, add a new {@code SmsSender} implementation annotated
- * with {@code @ConditionalOnProperty(name = "notification.sms.provider",
- * havingValue = "<name>")} and set {@code SMS_PROVIDER=<name>}. Callers depend
- * only on this port, so no other code changes are required — provider-specific
- * concerns (auth scheme, request/response shape, DLT template registration)
- * stay inside the adapter.
+ * <p>PER-TENANT-PROVIDERS: a tenant that has configured its own account gets its
+ * own instance of the same adapter instead, built by the matching
+ * {@link SmsSenderFactory} and handed out by {@link TenantChannelProviders}
+ * (O2-1, O2-2). Callers ask that class for a tenant's sender and otherwise
+ * depend only on this port, so no business logic changes.
+ *
+ * <p>To add a provider, write an {@code SmsSender} adapter and an
+ * {@code SmsSenderFactory} for it, and register the factory as a
+ * {@code @Component}. Provider-specific concerns (auth scheme, request and
+ * response shape, DLT template registration) stay inside the adapter.
  *
  * <p>The contract is reactive so callers can dispatch without blocking the
  * Kafka listener thread. The returned {@link Mono}:

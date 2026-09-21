@@ -5,6 +5,7 @@ import org.arghyam.jalsoochak.message.channel.GlificSendResult;
 import org.arghyam.jalsoochak.message.channel.GlificSendStage;
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
+import org.arghyam.jalsoochak.message.channel.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.OperatorEscalationDetail;
 import org.arghyam.jalsoochak.message.dto.DailyReportKpis;
@@ -108,7 +109,7 @@ public class NotificationEventRouter {
     private final ObjectMapper objectMapper;
     private final WhatsAppChannel whatsAppChannel;
     private final GlificWhatsAppService glificWhatsAppService;
-    private final SmsSender smsSender;
+    private final TenantChannelProviders channelProviders;
     private final KafkaProducer kafkaProducer;
     private final EscalationPdfService escalationPdfService;
     private final DailyReportPdfService dailyReportPdfService;
@@ -510,6 +511,12 @@ public class NotificationEventRouter {
             }
 
             TenantRef tenant = resolveTenant(root);
+
+            // PER-TENANT-PROVIDERS: the tenant's own SMSCountry account when it has configured
+            // one, the system default otherwise — including while the flag is off, which is every
+            // send today (O2-9). Resolved per message so a settings change takes effect without a
+            // restart; the lookup is cached, so it costs nothing on the OTP path.
+            SmsSender smsSender = channelProviders.smsFor(tenant);
 
             // Use reactive flow to avoid blocking the Kafka listener thread
             smsSender.sendOtp(phone, otp, expiryMinutes)

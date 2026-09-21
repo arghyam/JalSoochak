@@ -2,11 +2,8 @@ package org.arghyam.jalsoochak.message.channel;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -21,48 +18,41 @@ import reactor.core.publisher.Mono;
  *
  * <p>Endpoint: {@code POST {baseUrl}/Accounts/{authKey}/SMSes/}</p>
  * <p>Auth: HTTP Basic Auth using authKey:authToken, Base64-encoded.</p>
- * <p>The message text follows the DLT-approved template:
- * "Your OTP for Jalsoochak login is {otp}. Do not share this OTP. Valid for {expiryMinutes} minutes."</p>
+ * <p>The message text is the account's DLT-approved {@link OtpMessageTemplate}, which defaults to
+ * "Your OTP for Jalsoochak login is {otp}. Do not share this OTP. Valid for {expiryMinutes}
+ * minutes."</p>
  *
- * <p>This is the {@link SmsSender} adapter selected when
- * {@code notification.sms.provider=smscountry} (the default).</p>
+ * <p>PER-TENANT-PROVIDERS: a plain class, not a {@code @Component}. One instance per SMSCountry
+ * account — {@code SmsConfig} builds the system default from {@code smscountry.*} and
+ * {@link SmsCountrySenderFactory} builds one per configured tenant — because several accounts now
+ * have to coexist in one process, which a singleton bean selected by
+ * {@code @ConditionalOnProperty} could not do (O2-2). Everything below the constructor is
+ * unchanged: same URL, same headers, same body, same outcomes, which is what makes the system
+ * default provably today's behaviour.
+ *
+ * <p>Instances are immutable and stateless — the {@code WebClient} holds the only pooled resource
+ * — so one can be cached and shared across sends for as long as its settings stand.
  */
-@Service
-@ConditionalOnProperty(name = "notification.sms.provider", havingValue = "smscountry", matchIfMissing = true)
 @Slf4j
 public class SmsCountryService implements SmsSender {
 
-    private static final String MESSAGE_TEMPLATE =
-            "Your OTP for Jalsoochak login is %s. Do not share this OTP. Valid for %d minutes.";
-
     private final WebClient webClient;
+    private final SmsCountrySettings settings;
+    private final OtpMessageTemplate otpTemplate;
+    private final boolean dryRun;
 
-    @Value("${smscountry.base-url:https://restapi.smscountry.com/v0.1}")
-    private String baseUrl;
-
-    @Value("${smscountry.auth-key:}")
-    private String authKey;
-
-    @Value("${smscountry.auth-token:}")
-    private String authToken;
-
-    @Value("${smscountry.sender-id}")
-    private String senderId;
-
-    @Value("${smscountry.dlt-principal-entity-id:}")
-    private String dltPrincipalEntityId;
-
-    @Value("${smscountry.dlt-template-id:}")
-    private String dltTemplateId;
-
-    @Value("${smscountry.dlt-header-id:}")
-    private String dltHeaderId;
-
-    @Value("${notifications.sms.dry-run:false}")
-    private boolean dryRun;
-
-    public SmsCountryService(WebClient.Builder webClientBuilder) {
+    /**
+     * @param webClientBuilder the shared builder; each instance builds its own client
+     * @param settings         the account this instance sends through
+     * @param dryRun           {@code notifications.sms.dry-run}, global to the channel (O2-12)
+     * @throws org.arghyam.jalsoochak.message.exception.ProviderNotUsableException if the settings
+     *         carry an OTP template that cannot be rendered (O2-15)
+     */
+    public SmsCountryService(WebClient.Builder webClientBuilder, SmsCountrySettings settings, boolean dryRun) {
         this.webClient = webClientBuilder.build();
+        this.settings = settings;
+        this.otpTemplate = OtpMessageTemplate.compile(settings.otpTemplate());
+        this.dryRun = dryRun;
     }
 
     /**
@@ -86,18 +76,20 @@ public class SmsCountryService implements SmsSender {
             return Mono.just(true);
         }
 
-        String text = MESSAGE_TEMPLATE.formatted(otp, expiryMinutes);
-        String url = baseUrl + "/Accounts/" + authKey + "/SMSes/";
-        String credentials = Base64.getEncoder().encodeToString((authKey + ":" + authToken).getBytes(StandardCharsets.UTF_8));
+        String authKey = settings.authKey();
+        String text = otpTemplate.render(otp, expiryMinutes);
+        String url = settings.baseUrl() + "/Accounts/" + authKey + "/SMSes/";
+        String credentials = Base64.getEncoder()
+                .encodeToString((authKey + ":" + settings.authToken()).getBytes(StandardCharsets.UTF_8));
 
         Map<String, String> body = Map.of(
                 "Text", text,
                 "Number", phoneNumber,
-                "SenderId", senderId,
+                "SenderId", settings.senderId(),
                 "Tool", "API",
-                "DLTTemplateId", dltTemplateId,
-                "PrincipalEntityId", dltPrincipalEntityId,
-                "DLTHeaderId", dltHeaderId
+                "DLTTemplateId", settings.dltTemplateId(),
+                "PrincipalEntityId", settings.dltPrincipalEntityId(),
+                "DLTHeaderId", settings.dltHeaderId()
         );
 
         return webClient.post()

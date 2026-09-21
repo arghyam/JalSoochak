@@ -113,10 +113,11 @@ notification:
     cache-max-size: ${NOTIFICATION_PER_TENANT_PROVIDERS_CACHE_MAX_SIZE:500}
 
   # ── Transactional login OTP SMS ────────────────────────────────────────────
-  # Switch providers by changing 'provider'. No code changes required — add a new
-  # SmsSender implementation annotated with
-  # @ConditionalOnProperty(name = "notification.sms.provider", havingValue = "<name>").
-  # provider: smscountry → requires SMSCOUNTRY_* env vars (default)
+  # Selects the SYSTEM DEFAULT provider — what every send uses unless the tenant it belongs to
+  # has configured its own account under per-tenant-providers above.
+  # Switch providers by changing 'provider'. No code changes required — add an SmsSender adapter
+  # and register its SmsSenderFactory; the system default bean is built in SmsConfig.
+  # provider: smscountry → requires SMSCOUNTRY_* env vars below (default)
   sms:
     provider: ${SMS_PROVIDER:smscountry}
 

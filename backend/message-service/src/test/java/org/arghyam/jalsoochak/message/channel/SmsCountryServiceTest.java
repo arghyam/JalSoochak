@@ -2,10 +2,11 @@ package org.arghyam.jalsoochak.message.channel;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import org.arghyam.jalsoochak.message.dto.SmsProviderSettings;
+import org.arghyam.jalsoochak.message.exception.ProviderNotUsableException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.Base64;
@@ -19,6 +20,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * correct URL construction, Basic Auth header, request body, and error handling.
  *
  * <p>Uses WireMock as a local HTTP server — no real SMSCountry API is contacted.</p>
+ *
+ * <p>PER-TENANT-PROVIDERS: the settings arrive through the constructor now that the adapter is a
+ * plain class rather than a {@code @Component} full of {@code @Value} fields. Only the setup
+ * changed; every assertion below is the one that guarded the singleton, which is what proves the
+ * conversion did not change what goes on the wire.</p>
  */
 class SmsCountryServiceTest {
 
@@ -42,15 +48,18 @@ class SmsCountryServiceTest {
         wireMockServer = new WireMockServer(WireMockConfiguration.options().dynamicPort());
         wireMockServer.start();
 
-        service = new SmsCountryService(WebClient.builder());
-        ReflectionTestUtils.setField(service, "baseUrl", wireMockServer.baseUrl() + "/v0.1");
-        ReflectionTestUtils.setField(service, "authKey", AUTH_KEY);
-        ReflectionTestUtils.setField(service, "authToken", AUTH_TOKEN);
-        ReflectionTestUtils.setField(service, "senderId", SENDER_ID);
-        ReflectionTestUtils.setField(service, "dltPrincipalEntityId", DLT_PE_ID);
-        ReflectionTestUtils.setField(service, "dltTemplateId", DLT_TEMPLATE_ID);
-        ReflectionTestUtils.setField(service, "dltHeaderId", DLT_HEADER_ID);
-        ReflectionTestUtils.setField(service, "dryRun", false);
+        service = new SmsCountryService(WebClient.builder(), settings(null), false);
+    }
+
+    /** @param otpTemplate the tenant's own text, or null for the default one */
+    private SmsCountrySettings settings(String otpTemplate) {
+        return new SmsCountrySettings(
+                wireMockServer.baseUrl() + "/v0.1",
+                AUTH_KEY, AUTH_TOKEN, SENDER_ID,
+                DLT_PE_ID, DLT_TEMPLATE_ID, DLT_HEADER_ID,
+                otpTemplate == null
+                        ? SmsProviderSettings.SmsCountry.DEFAULT_OTP_TEMPLATE
+                        : otpTemplate);
     }
 
     @AfterEach
@@ -137,9 +146,10 @@ class SmsCountryServiceTest {
 
     @Test
     void sendOtp_dryRun_noHttpCallMade() {
-        ReflectionTestUtils.setField(service, "dryRun", true);
+        SmsCountryService dryRunService =
+                new SmsCountryService(WebClient.builder(), settings(null), true);
 
-        boolean result = service.sendOtp("919876543210", "123456", 5).block();
+        boolean result = dryRunService.sendOtp("919876543210", "123456", 5).block();
 
         assertThat(result).isTrue();
         wireMockServer.verify(0, postRequestedFor(urlEqualTo(SMS_PATH)));
@@ -185,5 +195,50 @@ class SmsCountryServiceTest {
         boolean result = service.sendOtp("919876543210", "123456", 5).block();
 
         assertThat(result).isFalse();
+    }
+
+    @Test
+    void sendOtp_tenantOtpTemplate_replacesBothNamedPlaceholders() {
+        // PER-TENANT-PROVIDERS: a state's own DLT-registered wording, which must go out character
+        // for character or the operator drops it (O2-15).
+        SmsCountryService tenantService = new SmsCountryService(WebClient.builder(),
+                settings("{otp} is your Jal Soochak code, valid {expiryMinutes} min."), false);
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(SUCCESS_RESPONSE)));
+
+        tenantService.sendOtp("919876543210", "246810", 15).block();
+
+        wireMockServer.verify(postRequestedFor(urlEqualTo(SMS_PATH))
+                .withRequestBody(containing("246810 is your Jal Soochak code, valid 15 min.")));
+    }
+
+    @Test
+    void sendOtp_templateWithoutExpiryPlaceholder_omitsTheExpiry() {
+        SmsCountryService tenantService = new SmsCountryService(WebClient.builder(),
+                settings("OTP: {otp}. Do not share."), false);
+        wireMockServer.stubFor(post(urlEqualTo(SMS_PATH))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(SUCCESS_RESPONSE)));
+
+        tenantService.sendOtp("919876543210", "135791", 5).block();
+
+        wireMockServer.verify(postRequestedFor(urlEqualTo(SMS_PATH))
+                .withRequestBody(containing("OTP: 135791. Do not share.")));
+    }
+
+    @Test
+    void constructor_unrenderableOtpTemplate_throwsBeforeAnySendIsAttempted() {
+        // The template is compiled in the constructor, so a bad one is a build failure that
+        // TenantChannelProviders answers with the system default (O2-9) — never an exception on
+        // the OTP path.
+        assertThatThrownBy(() ->
+                new SmsCountryService(WebClient.builder(), settings("No code in this one."), false))
+                .isInstanceOf(ProviderNotUsableException.class)
+                .hasMessageContaining("{otp}");
     }
 }

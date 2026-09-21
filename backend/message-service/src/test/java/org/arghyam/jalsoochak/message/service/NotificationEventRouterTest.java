@@ -29,6 +29,7 @@ import org.arghyam.jalsoochak.message.channel.GlificSendResult;
 import org.arghyam.jalsoochak.message.channel.GlificSendStage;
 import org.arghyam.jalsoochak.message.channel.GlificWhatsAppService;
 import org.arghyam.jalsoochak.message.channel.SmsSender;
+import org.arghyam.jalsoochak.message.channel.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.channel.WhatsAppChannel;
 import org.arghyam.jalsoochak.message.dto.ReportSchemeRow;
 import org.arghyam.jalsoochak.message.dto.TenantRef;
@@ -90,6 +91,14 @@ class NotificationEventRouterTest {
     private JdbcTemplate jdbcTemplate;
 
     @Mock
+    private TenantChannelProviders channelProviders;
+
+    /**
+     * The sender {@code channelProviders} hands back. Every existing SMS assertion below is
+     * unchanged, which is the point: the router asks for a sender per event now instead of holding
+     * one, and does the same thing with it.
+     */
+    @Mock
     private SmsSender smsSender;
 
     @Mock
@@ -115,6 +124,8 @@ class NotificationEventRouterTest {
         // Default: pass the halves through unresolved. Tests that care stub a full resolution.
         lenient().when(tenantRefResolver.resolve(any(), any()))
                 .thenAnswer(inv -> new TenantRef(inv.getArgument(0), inv.getArgument(1)));
+        // Default: one sender for every tenant, as it is while the flag is off.
+        lenient().when(channelProviders.smsFor(any())).thenReturn(smsSender);
     }
 
     /**
@@ -1975,6 +1986,40 @@ class NotificationEventRouterTest {
 
         verify(tenantRefResolver).resolve(null, null);
         verify(accountEmailService).sendPasswordResetEmail(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void route_loginOtpViaSms_sendsThroughTheSenderResolvedForTheEventsTenant() {
+        // PER-TENANT-PROVIDERS: the router holds no sender of its own; it asks for the one that
+        // belongs to the tenant the event carries (O2-1).
+        SmsSender tenantSender = mock(SmsSender.class);
+        TenantRef tenant = new TenantRef(7, "TR");
+        when(tenantRefResolver.resolve(7, "TR")).thenReturn(tenant);
+        when(channelProviders.smsFor(tenant)).thenReturn(tenantSender);
+        when(tenantSender.sendOtp("919876500033", "192837", 5)).thenReturn(Mono.just(true));
+
+        router.route("""
+                {"eventType":"SEND_LOGIN_OTP","OTP":"192837","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500033","expiryMinutes":5,"tenantId":7,"tenantCode":"TR"}
+                """);
+
+        verify(channelProviders).smsFor(tenant);
+        verify(tenantSender).sendOtp("919876500033", "192837", 5);
+        verifyNoInteractions(smsSender);
+    }
+
+    @Test
+    void route_loginOtpViaSms_resolvesTheSenderPerEvent_soSettingsChangesNeedNoRestart() {
+        when(smsSender.sendOtp(anyString(), anyString(), anyInt())).thenReturn(Mono.just(true));
+
+        String event = """
+                {"eventType":"SEND_LOGIN_OTP","OTP":"111111","deliveryChannel":"SMS",
+                 "officerPhoneNumber":"919876500034","expiryMinutes":5,"tenantId":3,"tenantCode":"MP"}
+                """;
+        router.route(event);
+        router.route(event);
+
+        verify(channelProviders, times(2)).smsFor(new TenantRef(3, "MP"));
     }
 
     @Test
