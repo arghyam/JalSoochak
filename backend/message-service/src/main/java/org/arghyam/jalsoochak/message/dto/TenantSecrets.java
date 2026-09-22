@@ -3,7 +3,6 @@ package org.arghyam.jalsoochak.message.dto;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 
 import org.arghyam.jalsoochak.message.enums.MessagingChannel;
 
@@ -25,9 +24,6 @@ import org.arghyam.jalsoochak.message.enums.MessagingChannel;
  */
 public final class TenantSecrets {
 
-    private static final TenantSecrets EMPTY_EMAIL = new TenantSecrets(MessagingChannel.EMAIL, Map.of());
-    private static final TenantSecrets EMPTY_SMS = new TenantSecrets(MessagingChannel.SMS, Map.of());
-
     private final MessagingChannel channel;
     private final Map<String, String> values;
 
@@ -40,11 +36,6 @@ public final class TenantSecrets {
         return new TenantSecrets(channel, values);
     }
 
-    /** No credential resolved for this channel. */
-    public static TenantSecrets none(MessagingChannel channel) {
-        return channel == MessagingChannel.EMAIL ? EMPTY_EMAIL : EMPTY_SMS;
-    }
-
     public MessagingChannel channel() {
         return channel;
     }
@@ -52,21 +43,6 @@ public final class TenantSecrets {
     /** The value stored under {@code name}, or {@code null} when it is not present. */
     public String get(String name) {
         return values.get(name);
-    }
-
-    /** The names present, for reporting what is missing. Never the values. */
-    public Set<String> names() {
-        return values.keySet();
-    }
-
-    public boolean hasAll(Set<String> required) {
-        for (String name : required) {
-            String value = values.get(name);
-            if (value == null || value.isBlank()) {
-                return false;
-            }
-        }
-        return true;
     }
 
     /** Names only. A credential must never reach a log line, an exception message or a heap dump label. */

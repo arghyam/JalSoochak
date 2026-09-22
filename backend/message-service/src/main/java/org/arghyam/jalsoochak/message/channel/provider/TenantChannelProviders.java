@@ -214,18 +214,6 @@ public class TenantChannelProviders {
         log.info("[Providers] Evicted cached provider [tenantId={}, channel={}]", tenantId, channel);
     }
 
-    /** Drops every cached decision. For an event that names no channel, and for tests. */
-    public void evictAll() {
-        emailCache.invalidateAll();
-        smsCache.invalidateAll();
-        log.info("[Providers] Evicted every cached provider");
-    }
-
-    /** Whether the feature is on, exposed so a caller can skip work it would only discard. */
-    public boolean isEnabled() {
-        return properties.isEnabled();
-    }
-
     // ── resolution ──────────────────────────────────────────────────────────────
 
     private boolean usesTenantProviders(TenantRef tenant) {
@@ -359,6 +347,18 @@ public class TenantChannelProviders {
      * both {@code WebClient}-based ones are stateless and SMTP's {@code JavaMailSenderImpl} opens a
      * transport per send — but a future adapter that does must not leak one every time a state
      * edits its settings, and that leak would be invisible until it exhausted something.
+     *
+     * <p><strong>Before making an adapter {@link AutoCloseable}, read this.</strong> {@code emailFor}
+     * and {@code smsFor} hand the cached instance to the caller, which then calls {@code send}
+     * against it. Nothing keeps the entry alive for the duration of that call: a TTL expiry, an
+     * {@code evict} from {@code TenantConfigUpdatedListener}, or a {@code maximumSize} eviction in
+     * that window makes Caffeine run this listener — on the common ForkJoinPool — on the very
+     * instance being used. For every adapter that exists today that is inert, because the
+     * {@code instanceof} below never matches. The first adapter that does implement
+     * {@code AutoCloseable} turns it into a use-after-close whose only symptom is intermittent send
+     * failures under cache churn, so that adapter must arrive with the lifetime handled — a
+     * refcount held across the send, or a close deferred until the last borrower is done — and not
+     * with this listener left as it stands.
      */
     private <T> void closeIfNeeded(Integer tenantId, Resolved<T> resolved) {
         if (resolved == null || !(resolved.sender() instanceof AutoCloseable closeable)) {

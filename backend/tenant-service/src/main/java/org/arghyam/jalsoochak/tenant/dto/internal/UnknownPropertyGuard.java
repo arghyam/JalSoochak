@@ -1,5 +1,7 @@
 package org.arghyam.jalsoochak.tenant.dto.internal;
 
+import org.arghyam.jalsoochak.tenant.exception.SettingsRejectedException;
+
 /**
  * MESSAGING-PROVIDER-SETTINGS: rejects any JSON property a settings DTO does not declare.
  *
@@ -23,10 +25,11 @@ public final class UnknownPropertyGuard {
     /**
      * @param property the unknown property's name — never its value, which may be a credential
      * @param context  human-readable name of the settings object, for the error message
-     * @throws IllegalArgumentException always; surfaced as 400 by {@code GlobalExceptionHandler}
+     * @throws SettingsRejectedException always; surfaced as 400 by {@code GlobalExceptionHandler},
+     *                                   which echoes this message and no other binding failure's
      */
     public static void reject(String property, String context) {
-        throw new IllegalArgumentException("Unknown property '" + property + "' in " + context
+        throw new SettingsRejectedException("Unknown property '" + property + "' in " + context
                 + ". Provider settings hold no credentials — store those with "
                 + "PUT /api/v1/tenants/{tenantId}/messaging-providers/{channel}/secrets.");
     }

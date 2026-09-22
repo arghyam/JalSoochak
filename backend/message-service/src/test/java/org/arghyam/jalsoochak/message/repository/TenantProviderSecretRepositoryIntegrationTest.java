@@ -86,11 +86,11 @@ class TenantProviderSecretRepositoryIntegrationTest {
     // ── keys ────────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("the active key is found by tenant")
-    void activeKeyIsFoundByTenant() {
+    @DisplayName("a key is found by tenant and version")
+    void keyIsFoundByTenantAndVersion() {
         insertKey(TENANT_A, 1, "v1", "ACTIVE");
 
-        TenantSecretKeyRow key = repository.findActiveKey(TENANT_A).orElseThrow();
+        TenantSecretKeyRow key = repository.findKey(TENANT_A, 1).orElseThrow();
 
         assertThat(key.tenantId()).isEqualTo(TENANT_A);
         assertThat(key.keyVersion()).isEqualTo(1);
@@ -103,18 +103,18 @@ class TenantProviderSecretRepositoryIntegrationTest {
     @DisplayName("a retired key version is still findable by version")
     void retiredKeyIsFindableByVersion() {
         // Retired means "no longer used for new writes". A secret still pointing at it has to stay
-        // readable, or a send landing mid-rotation fails for a reason nobody caused.
+        // readable, or a send landing mid-rotation fails for a reason nobody caused. Status is
+        // returned but never filtered on: this read half has no notion of "whichever is active now".
         insertKey(TENANT_A, 1, "v1", "RETIRED");
         insertKey(TENANT_A, 2, "v1", "ACTIVE");
 
         assertThat(repository.findKey(TENANT_A, 1).orElseThrow().status()).isEqualTo("RETIRED");
-        assertThat(repository.findActiveKey(TENANT_A).orElseThrow().keyVersion()).isEqualTo(2);
+        assertThat(repository.findKey(TENANT_A, 2).orElseThrow().status()).isEqualTo("ACTIVE");
     }
 
     @Test
     @DisplayName("a tenant with no key reads as empty")
     void tenantWithNoKeyReadsAsEmpty() {
-        assertThat(repository.findActiveKey(TENANT_A)).isEmpty();
         assertThat(repository.findKey(TENANT_A, 1)).isEmpty();
     }
 
@@ -123,7 +123,7 @@ class TenantProviderSecretRepositoryIntegrationTest {
     void keysAreScopedToTheirTenant() {
         insertKey(TENANT_A, 1, "v1", "ACTIVE");
 
-        assertThat(repository.findActiveKey(TENANT_B)).isEmpty();
+        assertThat(repository.findKey(TENANT_B, 1)).isEmpty();
     }
 
     @Test
@@ -131,7 +131,7 @@ class TenantProviderSecretRepositoryIntegrationTest {
     void keyRowNeverPrintsItsWrappedKey() {
         insertKey(TENANT_A, 1, "v1", "ACTIVE");
 
-        assertThat(repository.findActiveKey(TENANT_A).orElseThrow().toString())
+        assertThat(repository.findKey(TENANT_A, 1).orElseThrow().toString())
                 .doesNotContain("wrapped-1-1")
                 .contains("tenantId=1")
                 .contains("masterKeyId=v1");
@@ -159,7 +159,7 @@ class TenantProviderSecretRepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("a soft-deleted secret is invisible to both reads")
+    @DisplayName("a soft-deleted secret is invisible to the read")
     void softDeletedSecretIsInvisible() {
         insertKey(TENANT_A, 1, "v1", "ACTIVE");
         insertSecret(TENANT_A, MessagingChannel.EMAIL, "apiKey", 1);
@@ -167,7 +167,6 @@ class TenantProviderSecretRepositoryIntegrationTest {
                 + " WHERE tenant_id = ? AND secret_name = ?", TENANT_A, "apiKey");
 
         assertThat(repository.findByTenantAndChannel(TENANT_A, MessagingChannel.EMAIL)).isEmpty();
-        assertThat(repository.findSecret(TENANT_A, MessagingChannel.EMAIL, "apiKey")).isEmpty();
     }
 
     @Test
@@ -178,12 +177,14 @@ class TenantProviderSecretRepositoryIntegrationTest {
         insertSecret(TENANT_A, MessagingChannel.EMAIL, "apiKey", 1);
         insertSecret(TENANT_B, MessagingChannel.EMAIL, "apiKey", 1);
 
-        assertThat(repository.findSecret(TENANT_A, MessagingChannel.EMAIL, "apiKey").orElseThrow()
-                .ciphertext()).isEqualTo("ciphertext-1-apiKey");
-        assertThat(repository.findSecret(TENANT_B, MessagingChannel.EMAIL, "apiKey").orElseThrow()
-                .ciphertext()).isEqualTo("ciphertext-2-apiKey");
+        assertThat(repository.findByTenantAndChannel(TENANT_A, MessagingChannel.EMAIL))
+                .singleElement().extracting(TenantProviderSecretRow::ciphertext)
+                .isEqualTo("ciphertext-1-apiKey");
+        assertThat(repository.findByTenantAndChannel(TENANT_B, MessagingChannel.EMAIL))
+                .singleElement().extracting(TenantProviderSecretRow::ciphertext)
+                .isEqualTo("ciphertext-2-apiKey");
         // Same name, other channel: no row.
-        assertThat(repository.findSecret(TENANT_A, MessagingChannel.SMS, "apiKey")).isEmpty();
+        assertThat(repository.findByTenantAndChannel(TENANT_A, MessagingChannel.SMS)).isEmpty();
     }
 
     @Test
@@ -194,8 +195,9 @@ class TenantProviderSecretRepositoryIntegrationTest {
         insertSecret(TENANT_A, MessagingChannel.EMAIL, "apiKey", 1);
 
         // The version on the row, not the active one: it is part of the AAD (S-7).
-        assertThat(repository.findSecret(TENANT_A, MessagingChannel.EMAIL, "apiKey").orElseThrow()
-                .keyVersion()).isEqualTo(1);
+        assertThat(repository.findByTenantAndChannel(TENANT_A, MessagingChannel.EMAIL))
+                .singleElement().extracting(TenantProviderSecretRow::keyVersion)
+                .isEqualTo(1);
     }
 
     @Test
@@ -204,8 +206,8 @@ class TenantProviderSecretRepositoryIntegrationTest {
         insertKey(TENANT_A, 1, "v1", "ACTIVE");
         insertSecret(TENANT_A, MessagingChannel.EMAIL, "apiKey", 1);
 
-        assertThat(repository.findSecret(TENANT_A, MessagingChannel.EMAIL, "apiKey").orElseThrow()
-                .toString())
+        assertThat(repository.findByTenantAndChannel(TENANT_A, MessagingChannel.EMAIL))
+                .singleElement().asString()
                 .doesNotContain("ciphertext-1-apiKey")
                 .contains("secretName=apiKey")
                 .contains("keyVersion=1");

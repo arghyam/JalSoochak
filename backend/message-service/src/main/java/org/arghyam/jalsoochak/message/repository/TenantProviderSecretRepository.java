@@ -36,9 +36,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class TenantProviderSecretRepository {
 
-    /** Status of the one key version a tenant's current secrets are encrypted under. */
-    static final String KEY_STATUS_ACTIVE = "ACTIVE";
-
     private static final RowMapper<TenantSecretKeyRow> SECRET_KEY_ROW_MAPPER = (rs, rowNum) ->
             new TenantSecretKeyRow(
                     rs.getInt("tenant_id"),
@@ -73,17 +70,6 @@ public class TenantProviderSecretRepository {
         return jdbcTemplate.query(sql, SECRET_KEY_ROW_MAPPER, tenantId, keyVersion).stream().findFirst();
     }
 
-    /** The tenant's key version for new writes, or empty when no secret was ever written for it. */
-    public Optional<TenantSecretKeyRow> findActiveKey(Integer tenantId) {
-        String sql = """
-                SELECT tenant_id, key_version, wrapped_key, master_key_id, status
-                  FROM common_schema.tenant_secret_key
-                 WHERE tenant_id = ? AND status = ?
-                """;
-        return jdbcTemplate.query(sql, SECRET_KEY_ROW_MAPPER, tenantId, KEY_STATUS_ACTIVE)
-                .stream().findFirst();
-    }
-
     /**
      * Every live secret on one channel of one tenant, in one query.
      *
@@ -99,17 +85,5 @@ public class TenantProviderSecretRepository {
                  ORDER BY secret_name
                 """;
         return jdbcTemplate.query(sql, SECRET_ROW_MAPPER, tenantId, channel.name());
-    }
-
-    /** One live secret, or empty when it was never written or has been soft-deleted. */
-    public Optional<TenantProviderSecretRow> findSecret(Integer tenantId, MessagingChannel channel,
-            String secretName) {
-        String sql = """
-                SELECT tenant_id, channel, secret_name, ciphertext, key_version
-                  FROM common_schema.tenant_provider_secret
-                 WHERE tenant_id = ? AND channel = ? AND secret_name = ? AND deleted_at IS NULL
-                """;
-        return jdbcTemplate.query(sql, SECRET_ROW_MAPPER, tenantId, channel.name(), secretName)
-                .stream().findFirst();
     }
 }

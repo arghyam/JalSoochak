@@ -165,11 +165,11 @@ public class GlobalExceptionHandler {
             log.warn("Invalid format in request body: {}", message);
             return build(HttpStatus.BAD_REQUEST, message);
         }
-        // A DTO that rejects its input from a @JsonCreator or a @JsonAnySetter — as the messaging
-        // provider settings do — reaches here wrapped in a JsonMappingException. Its own message
-        // names the offending property or value, which is the whole point of rejecting it; the
-        // generic fallback below would throw that away and leave the caller guessing.
-        String rejection = illegalArgumentRootCauseMessage(cause);
+        // A settings DTO that rejects its input from a @JsonCreator or a @JsonAnySetter — as the
+        // messaging provider settings do — reaches here wrapped in a JsonMappingException. Its own
+        // message names the offending property or value, which is the whole point of rejecting it;
+        // the generic fallback below would throw that away and leave the caller guessing.
+        String rejection = settingsRejectionMessage(cause);
         if (rejection != null) {
             log.warn("Rejected request body: {}", rejection);
             return build(HttpStatus.BAD_REQUEST, rejection);
@@ -179,13 +179,20 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Walks to the root cause and returns its message when a DTO rejected the value itself.
-     * Bounded, because a cause chain can in principle be cyclic.
+     * Walks the cause chain and returns the message of a settings DTO's own rejection.
+     *
+     * <p>Matches {@link SettingsRejectedException} and not {@link IllegalArgumentException}: any
+     * JDK or third-party {@code IllegalArgumentException} raised while deserializing any body in
+     * this service — a {@code java.time} or {@code URI} coercion, an unrelated DTO's creator —
+     * routinely quotes the input that produced it, and on the messaging endpoints that input sits
+     * next to a credential. Those stay collapsed into the opaque generic message.
+     *
+     * <p>Bounded, because a cause chain can in principle be cyclic.
      */
-    private static String illegalArgumentRootCauseMessage(Throwable cause) {
+    private static String settingsRejectionMessage(Throwable cause) {
         Throwable current = cause;
         for (int depth = 0; current != null && depth < 10; depth++) {
-            if (current instanceof IllegalArgumentException && current.getMessage() != null
+            if (current instanceof SettingsRejectedException && current.getMessage() != null
                     && !current.getMessage().isBlank()) {
                 return current.getMessage();
             }

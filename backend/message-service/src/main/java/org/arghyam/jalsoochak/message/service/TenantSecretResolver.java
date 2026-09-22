@@ -22,7 +22,8 @@ import lombok.extern.slf4j.Slf4j;
  * (S-3).
  *
  * <p>The one thing that makes this safe is what it does <em>not</em> take: a caller names a tenant,
- * a channel and a secret name, and the location is derived from those three (S-1). There is no
+ * a channel and the names its provider requires, and each row's location is derived from those
+ * (S-1), against a closed set of names per channel. There is no
  * parameter that can point at another tenant's row, and no reference stored in the settings that
  * could (O2-8) — which is the difference between this and the {@code env:} convention the OCR
  * resolver uses, where the value being resolved is named by whoever wrote the settings.
@@ -45,30 +46,6 @@ public class TenantSecretResolver {
     private final SecretCryptoService cryptoService;
 
     /**
-     * Resolves one secret.
-     *
-     * @return the plaintext, or empty when the tenant is unknown, the secret was never written, or
-     *         it has been soft-deleted
-     * @throws SecretCryptoException if a stored value exists but cannot be decrypted — a wrong or
-     *                               absent master key, a tampered row, or a key version whose row
-     *                               is missing. Never a fallback: a credential that does not
-     *                               authenticate is not returned in any form.
-     */
-    public Optional<String> resolve(TenantRef tenant, MessagingChannel channel, String secretName) {
-        if (tenant == null || tenant.id() == null) {
-            return Optional.empty();
-        }
-        if (!channel.supportsSecret(secretName)) {
-            // Not a caller's typo to be forgiven: the channel's secret names are a closed set, and a
-            // name outside it is a coding error that would otherwise read as "credential missing".
-            throw new IllegalArgumentException("Channel " + channel + " has no secret named '"
-                    + secretName + "'. Supported: " + channel.getSecretNames());
-        }
-        return secretRepository.findSecret(tenant.id(), channel, secretName)
-                .map(row -> decrypt(tenant.id(), row));
-    }
-
-    /**
      * Resolves every secret a provider requires, in one pass.
      *
      * <p>All-or-nothing: if any required name is missing the result is empty, because a provider
@@ -76,13 +53,28 @@ public class TenantSecretResolver {
      * puts that failure on the wrong side of the line — a missing credential is a configuration
      * problem, which must be answered with the system default.
      *
-     * @return the resolved credentials, or empty when at least one required name is not stored
-     * @throws SecretCryptoException if a stored value exists but cannot be decrypted
+     * @return the resolved credentials, or empty when the tenant is unknown, no name is required,
+     *         or at least one required name is not stored
+     * @throws IllegalArgumentException if a required name is outside the channel's closed set
+     * @throws SecretCryptoException if a stored value exists but cannot be decrypted — a wrong or
+     *                               absent master key, a tampered row, or a key version whose row
+     *                               is missing. Never a fallback: a credential that does not
+     *                               authenticate is not returned in any form.
      */
     public Optional<TenantSecrets> resolveAll(TenantRef tenant, MessagingChannel channel,
             Set<String> requiredNames) {
         if (tenant == null || tenant.id() == null || requiredNames.isEmpty()) {
             return Optional.empty();
+        }
+        for (String name : requiredNames) {
+            if (!channel.supportsSecret(name)) {
+                // Not a caller's typo to be forgiven: the channel's secret names are a closed set,
+                // and a name outside it is a coding error that would otherwise read as "credential
+                // missing" and send every one of this tenant's messages through the system default
+                // forever. Checked before the read, so a bad name costs no query.
+                throw new IllegalArgumentException("Channel " + channel + " has no secret named '"
+                        + name + "'. Supported: " + channel.getSecretNames());
+            }
         }
         Map<String, TenantProviderSecretRow> stored = new LinkedHashMap<>();
         for (TenantProviderSecretRow row : secretRepository.findByTenantAndChannel(tenant.id(), channel)) {

@@ -171,7 +171,6 @@ class TenantChannelProvidersTest {
 
         assertThat(providers.emailFor(TENANT)).isSameAs(systemDefaultEmail);
         assertThat(providers.smsFor(TENANT)).isSameAs(systemDefaultSms);
-        assertThat(providers.isEnabled()).isFalse();
 
         // The rollback path must not depend on the database being reachable.
         verifyNoInteractions(configRepository, secretResolver, endpointPolicy);
@@ -475,15 +474,16 @@ class TenantChannelProvidersTest {
     }
 
     @Test
-    @DisplayName("evictAll clears both channels")
-    void evictAllClearsBothChannels() {
+    @DisplayName("evicting each channel clears both caches")
+    void evictingEachChannelClearsBothCaches() {
         when(configRepository.findEmailSettings(TENANT.id())).thenReturn(Optional.empty());
         when(configRepository.findSmsSettings(TENANT.id())).thenReturn(Optional.empty());
         TenantChannelProviders providers = providers();
 
         providers.emailFor(TENANT);
         providers.smsFor(TENANT);
-        providers.evictAll();
+        providers.evict(TENANT.id(), MessagingChannel.EMAIL);
+        providers.evict(TENANT.id(), MessagingChannel.SMS);
         providers.emailFor(TENANT);
         providers.smsFor(TENANT);
 
@@ -571,7 +571,6 @@ class TenantChannelProvidersTest {
         providers().smsFor(TENANT);
 
         verify(secretResolver, never()).resolveAll(any(), any(), any());
-        verify(secretResolver, never()).resolve(any(), any(), any());
     }
 
     @Test

@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -86,143 +85,6 @@ class TenantSecretResolverTest {
         return new TenantProviderSecretRow(tenantId, channel, name, ciphertext, KEY_VERSION);
     }
 
-    // ── resolve ─────────────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("a stored secret round-trips to its plaintext")
-    void storedSecretRoundTrips() {
-        when(secretRepository.findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey"))
-                .thenReturn(Optional.of(secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY)));
-        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION))
-                .thenReturn(Optional.of(keyRow(TENANT_A_ID, tenantAWrappedKey)));
-
-        assertThat(resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "apiKey")).contains(API_KEY);
-    }
-
-    @Test
-    @DisplayName("a secret that was never written resolves to empty, not an error")
-    void missingSecretResolvesEmpty() {
-        when(secretRepository.findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey"))
-                .thenReturn(Optional.empty());
-
-        assertThat(resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "apiKey")).isEmpty();
-    }
-
-    @Test
-    @DisplayName("an event with no tenant id reads nothing")
-    void noTenantIdReadsNothing() {
-        assertThat(resolver.resolve(TenantRef.NONE, MessagingChannel.EMAIL, "apiKey")).isEmpty();
-        assertThat(resolver.resolve(new TenantRef(null, "MP"), MessagingChannel.EMAIL, "apiKey")).isEmpty();
-        assertThat(resolver.resolve(null, MessagingChannel.EMAIL, "apiKey")).isEmpty();
-
-        verifyNoInteractions(secretRepository);
-    }
-
-    @Test
-    @DisplayName("the location is derived from the tenant, never supplied by a caller")
-    void locationIsDerivedFromTheTenant() {
-        when(secretRepository.findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey"))
-                .thenReturn(Optional.empty());
-
-        resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "apiKey");
-
-        // The only tenant id that reaches the repository is the one on the TenantRef: there is no
-        // parameter through which a settings value could name another tenant's row (S-1, O2-8).
-        verify(secretRepository).findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey");
-        verify(secretRepository, never()).findSecret(eq(TENANT_B_ID), any(), anyString());
-    }
-
-    @Test
-    @DisplayName("a secret name outside the channel's closed set is a coding error")
-    void unknownSecretNameIsRejected() {
-        // Not answered with empty: "missing credential" and "the code asked for a name that does not
-        // exist" must not look the same, or a typo would read as a tenant misconfiguration forever.
-        assertThatThrownBy(() -> resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "authKey"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("has no secret named");
-        assertThatThrownBy(() -> resolver.resolve(TENANT_A, MessagingChannel.EMAIL,
-                "SPRING_DATASOURCE_PASSWORD"))
-                .isInstanceOf(IllegalArgumentException.class);
-
-        verifyNoInteractions(secretRepository);
-    }
-
-    // ── AAD binding and failure ─────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("a ciphertext copied from another tenant fails rather than decrypting")
-    void ciphertextMovedBetweenTenantsFails() {
-        // The row is tenant B's ciphertext presented as tenant A's — a copied database row, or a
-        // SQL injection that swapped a tenant_id. The AAD is what makes this fail (S-7).
-        TenantProviderSecretRow foreign = secretRow(TENANT_B_ID, MessagingChannel.EMAIL, "apiKey", API_KEY);
-        TenantProviderSecretRow relabelled = new TenantProviderSecretRow(
-                TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", foreign.ciphertext(), KEY_VERSION);
-
-        when(secretRepository.findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey"))
-                .thenReturn(Optional.of(relabelled));
-        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION))
-                .thenReturn(Optional.of(keyRow(TENANT_A_ID, tenantAWrappedKey)));
-
-        assertThatThrownBy(() -> resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "apiKey"))
-                .isInstanceOf(SecretCryptoException.class);
-    }
-
-    @Test
-    @DisplayName("a secret naming a key version that is not stored fails loudly")
-    void missingKeyVersionFails() {
-        when(secretRepository.findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey"))
-                .thenReturn(Optional.of(secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY)));
-        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "apiKey"))
-                .isInstanceOf(SecretCryptoException.class)
-                .hasMessageContaining("key version that is not stored");
-    }
-
-    @Test
-    @DisplayName("a tampered ciphertext fails; there is never a plaintext fallback")
-    void tamperedCiphertextNeverFallsBack() {
-        TenantProviderSecretRow row = secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY);
-        String tampered = row.ciphertext().substring(0, row.ciphertext().length() - 4) + "AAAA";
-
-        when(secretRepository.findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey"))
-                .thenReturn(Optional.of(new TenantProviderSecretRow(
-                        TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", tampered, KEY_VERSION)));
-        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION))
-                .thenReturn(Optional.of(keyRow(TENANT_A_ID, tenantAWrappedKey)));
-
-        assertThatThrownBy(() -> resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "apiKey"))
-                .isInstanceOf(SecretCryptoException.class);
-    }
-
-    @Test
-    @DisplayName("a failure names the row and never the value")
-    void failureNeverCarriesTheValue() {
-        when(secretRepository.findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey"))
-                .thenReturn(Optional.of(secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY)));
-        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "apiKey"))
-                .hasMessageNotContaining(API_KEY)
-                .hasMessageContaining("secretName=apiKey")
-                .hasMessageContaining("tenantId=" + TENANT_A_ID);
-    }
-
-    @Test
-    @DisplayName("a retired key version still decrypts an unrotated secret")
-    void retiredKeyVersionStillDecrypts() {
-        // Retired means "no longer used for new writes", not "unreadable": a send landing mid
-        // rotation must not fail for a reason no operator caused.
-        when(secretRepository.findSecret(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey"))
-                .thenReturn(Optional.of(secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY)));
-        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION)).thenReturn(Optional.of(
-                new TenantSecretKeyRow(TENANT_A_ID, KEY_VERSION, tenantAWrappedKey, MASTER_V1, "RETIRED")));
-
-        assertThat(resolver.resolve(TENANT_A, MessagingChannel.EMAIL, "apiKey")).contains(API_KEY);
-        // Looked up by the version the row names, never by "whichever is active now".
-        verify(secretRepository, never()).findActiveKey(anyInt());
-    }
-
     // ── resolveAll ──────────────────────────────────────────────────────────────
 
     @Test
@@ -260,6 +122,16 @@ class TenantSecretResolverTest {
     }
 
     @Test
+    @DisplayName("a credential that was never written resolves to empty, not an error")
+    void neverWrittenCredentialResolvesEmpty() {
+        when(secretRepository.findByTenantAndChannel(TENANT_A_ID, MessagingChannel.EMAIL))
+                .thenReturn(List.of());
+
+        assertThat(resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL, Set.of("apiKey"))).isEmpty();
+        verify(secretRepository, never()).findKey(anyInt(), anyInt());
+    }
+
+    @Test
     @DisplayName("resolveAll ignores stored credentials the provider does not require")
     void resolveAllIgnoresUnrequiredCredentials() {
         // A tenant that used SMTP and switched to SendGrid still has a stored password. It must not
@@ -274,17 +146,136 @@ class TenantSecretResolverTest {
                 TENANT_A, MessagingChannel.EMAIL, Set.of("apiKey"));
 
         assertThat(secrets).isPresent();
-        assertThat(secrets.get().names()).containsExactly("apiKey");
+        assertThat(secrets.get().get("apiKey")).isEqualTo(API_KEY);
         assertThat(secrets.get().get("password")).isNull();
+        // Names only, and only the required one: the unrequired credential is not even listed.
+        assertThat(secrets.get().toString()).contains("names=[apiKey]");
     }
 
     @Test
-    @DisplayName("resolveAll with no tenant or no required names reads nothing")
-    void resolveAllShortCircuits() {
+    @DisplayName("an event with no tenant id, or no required name, reads nothing")
+    void noTenantIdReadsNothing() {
         assertThat(resolver.resolveAll(TenantRef.NONE, MessagingChannel.EMAIL, Set.of("apiKey"))).isEmpty();
+        assertThat(resolver.resolveAll(new TenantRef(null, "MP"), MessagingChannel.EMAIL, Set.of("apiKey")))
+                .isEmpty();
+        assertThat(resolver.resolveAll(null, MessagingChannel.EMAIL, Set.of("apiKey"))).isEmpty();
         assertThat(resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL, Set.of())).isEmpty();
 
         verifyNoInteractions(secretRepository);
+    }
+
+    @Test
+    @DisplayName("the location is derived from the tenant, never supplied by a caller")
+    void locationIsDerivedFromTheTenant() {
+        when(secretRepository.findByTenantAndChannel(TENANT_A_ID, MessagingChannel.EMAIL))
+                .thenReturn(List.of());
+
+        resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL, Set.of("apiKey"));
+
+        // The only tenant id that reaches the repository is the one on the TenantRef: there is no
+        // parameter through which a settings value could name another tenant's row (S-1, O2-8).
+        verify(secretRepository).findByTenantAndChannel(TENANT_A_ID, MessagingChannel.EMAIL);
+        verify(secretRepository, never()).findByTenantAndChannel(eq(TENANT_B_ID), any());
+    }
+
+    @Test
+    @DisplayName("a secret name outside the channel's closed set is a coding error")
+    void unknownSecretNameIsRejected() {
+        // Not answered with empty: "missing credential" and "the code asked for a name that does not
+        // exist" must not look the same, or a typo would read as a tenant misconfiguration forever.
+        assertThatThrownBy(() -> resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL, Set.of("authKey")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("has no secret named");
+        assertThatThrownBy(() -> resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL,
+                Set.of("SPRING_DATASOURCE_PASSWORD")))
+                .isInstanceOf(IllegalArgumentException.class);
+        // One bad name poisons the whole set, rather than being quietly skipped.
+        assertThatThrownBy(() -> resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL,
+                Set.of("apiKey", "authKey")))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(secretRepository);
+    }
+
+    // ── AAD binding and failure ─────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a ciphertext copied from another tenant fails rather than decrypting")
+    void ciphertextMovedBetweenTenantsFails() {
+        // The row is tenant B's ciphertext presented as tenant A's — a copied database row, or a
+        // SQL injection that swapped a tenant_id. The AAD is what makes this fail (S-7).
+        TenantProviderSecretRow foreign = secretRow(TENANT_B_ID, MessagingChannel.EMAIL, "apiKey", API_KEY);
+        TenantProviderSecretRow relabelled = new TenantProviderSecretRow(
+                TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", foreign.ciphertext(), KEY_VERSION);
+
+        when(secretRepository.findByTenantAndChannel(TENANT_A_ID, MessagingChannel.EMAIL))
+                .thenReturn(List.of(relabelled));
+        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION))
+                .thenReturn(Optional.of(keyRow(TENANT_A_ID, tenantAWrappedKey)));
+
+        assertThatThrownBy(() -> resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL, Set.of("apiKey")))
+                .isInstanceOf(SecretCryptoException.class);
+    }
+
+    @Test
+    @DisplayName("a secret naming a key version that is not stored fails loudly")
+    void missingKeyVersionFails() {
+        when(secretRepository.findByTenantAndChannel(TENANT_A_ID, MessagingChannel.EMAIL))
+                .thenReturn(List.of(secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY)));
+        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL, Set.of("apiKey")))
+                .isInstanceOf(SecretCryptoException.class)
+                .hasMessageContaining("key version that is not stored");
+    }
+
+    @Test
+    @DisplayName("a tampered ciphertext fails; there is never a plaintext fallback")
+    void tamperedCiphertextNeverFallsBack() {
+        TenantProviderSecretRow row = secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY);
+        String tampered = row.ciphertext().substring(0, row.ciphertext().length() - 4) + "AAAA";
+
+        when(secretRepository.findByTenantAndChannel(TENANT_A_ID, MessagingChannel.EMAIL))
+                .thenReturn(List.of(new TenantProviderSecretRow(
+                        TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", tampered, KEY_VERSION)));
+        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION))
+                .thenReturn(Optional.of(keyRow(TENANT_A_ID, tenantAWrappedKey)));
+
+        assertThatThrownBy(() -> resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL, Set.of("apiKey")))
+                .isInstanceOf(SecretCryptoException.class);
+    }
+
+    @Test
+    @DisplayName("a failure names the row and never the value")
+    void failureNeverCarriesTheValue() {
+        when(secretRepository.findByTenantAndChannel(TENANT_A_ID, MessagingChannel.EMAIL))
+                .thenReturn(List.of(secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY)));
+        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> resolver.resolveAll(TENANT_A, MessagingChannel.EMAIL, Set.of("apiKey")))
+                .hasMessageNotContaining(API_KEY)
+                .hasMessageContaining("secretName=apiKey")
+                .hasMessageContaining("tenantId=" + TENANT_A_ID);
+    }
+
+    @Test
+    @DisplayName("a retired key version still decrypts an unrotated secret")
+    void retiredKeyVersionStillDecrypts() {
+        // Retired means "no longer used for new writes", not "unreadable": a send landing mid
+        // rotation must not fail for a reason no operator caused.
+        when(secretRepository.findByTenantAndChannel(TENANT_A_ID, MessagingChannel.EMAIL))
+                .thenReturn(List.of(secretRow(TENANT_A_ID, MessagingChannel.EMAIL, "apiKey", API_KEY)));
+        when(secretRepository.findKey(TENANT_A_ID, KEY_VERSION)).thenReturn(Optional.of(
+                new TenantSecretKeyRow(TENANT_A_ID, KEY_VERSION, tenantAWrappedKey, MASTER_V1, "RETIRED")));
+
+        Optional<TenantSecrets> secrets = resolver.resolveAll(
+                TENANT_A, MessagingChannel.EMAIL, Set.of("apiKey"));
+
+        assertThat(secrets).isPresent();
+        assertThat(secrets.get().get("apiKey")).isEqualTo(API_KEY);
+        // Looked up by the version the row names, never by "whichever is active now": the status on
+        // the key row is not consulted at all.
+        verify(secretRepository).findKey(TENANT_A_ID, KEY_VERSION);
     }
 
     @Test

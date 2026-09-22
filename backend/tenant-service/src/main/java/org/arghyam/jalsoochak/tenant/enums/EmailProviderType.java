@@ -3,6 +3,8 @@ package org.arghyam.jalsoochak.tenant.enums;
 import java.util.Locale;
 import java.util.Set;
 
+import org.arghyam.jalsoochak.tenant.exception.SettingsRejectedException;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
@@ -58,7 +60,7 @@ public enum EmailProviderType {
                 }
             }
         }
-        throw new IllegalArgumentException("Unsupported email provider '" + value
+        throw new SettingsRejectedException("Unsupported email provider '" + value
                 + "'. Supported providers: " + SENDGRID.wireName + ", " + SMTP.wireName);
     }
 }

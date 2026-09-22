@@ -3,6 +3,8 @@ package org.arghyam.jalsoochak.tenant.enums;
 import java.util.Locale;
 import java.util.Set;
 
+import org.arghyam.jalsoochak.tenant.exception.SettingsRejectedException;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
@@ -48,7 +50,7 @@ public enum SmsProviderType {
                 }
             }
         }
-        throw new IllegalArgumentException("Unsupported SMS provider '" + value
+        throw new SettingsRejectedException("Unsupported SMS provider '" + value
                 + "'. Supported providers: " + SMSCOUNTRY.wireName);
     }
 }
