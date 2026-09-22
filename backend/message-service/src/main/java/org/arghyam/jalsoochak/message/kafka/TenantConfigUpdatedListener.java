@@ -5,6 +5,7 @@ import java.util.Set;
 
 import org.arghyam.jalsoochak.message.channel.provider.TenantChannelProviders;
 import org.arghyam.jalsoochak.message.enums.MessagingChannel;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -40,8 +41,17 @@ import lombok.extern.slf4j.Slf4j;
  * so an event naming unrelated keys is ignored rather than clearing a cache it has no reason to.
  * A secret write raises the same event under its channel's settings key, which is why the secret
  * store needs no event of its own (§4).
+ *
+ * <p>Registered only while {@code notification.per-tenant-providers.enabled} is true, which is what
+ * makes turning the flag off a real rollback rather than a half of one. There is nothing to evict
+ * with the feature off — every lookup returns the system default without consulting a cache — so
+ * without the condition each replica would still subscribe to a topic it otherwise ignores and
+ * deserialise every config write on the platform to clear caches that are permanently empty. The
+ * group id is a fresh UUID per instance and is never rejoined, so each of those subscriptions also
+ * left an abandoned consumer group on the broker behind every restart.
  */
 @Component
+@ConditionalOnProperty(name = "notification.per-tenant-providers.enabled", havingValue = "true")
 @RequiredArgsConstructor
 @Slf4j
 public class TenantConfigUpdatedListener {

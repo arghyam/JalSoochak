@@ -17,6 +17,7 @@ import org.arghyam.jalsoochak.tenant.enums.SystemConfigKeyEnum;
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.arghyam.jalsoochak.tenant.repository.TenantCommonRepository;
 import org.arghyam.jalsoochak.tenant.security.HostAddressResolver;
+import org.arghyam.jalsoochak.tenant.security.HostNames;
 import org.arghyam.jalsoochak.tenant.security.SsrfAddressPolicy;
 import org.arghyam.jalsoochak.tenant.util.TenantConstants;
 import org.springframework.stereotype.Component;
@@ -113,7 +114,7 @@ public class MessagingProviderSettingsValidator {
 
         // An IP literal would sail past the allowlist's name matching and past any later re-check
         // of the name, so it is refused before either runs.
-        if (isIpLiteral(host)) {
+        if (HostNames.isIpLiteral(host)) {
             throw new InvalidConfigValueException(
                     "smtp.host must be a host name, not an IP address");
         }
@@ -172,14 +173,6 @@ public class MessagingProviderSettingsValidator {
             throw new InvalidConfigValueException("Malformed stored value for "
                     + SystemConfigKeyEnum.MESSAGING_PROVIDER_ALLOWED_HOSTS, e);
         }
-    }
-
-    private static boolean isIpLiteral(String host) {
-        // An IPv6 literal may arrive bracketed; either form is still a literal.
-        String candidate = host.startsWith("[") && host.endsWith("]")
-                ? host.substring(1, host.length() - 1)
-                : host;
-        return candidate.contains(":") || candidate.matches("^\\d{1,3}(\\.\\d{1,3}){3}$");
     }
 
     // ── other settings ──────────────────────────────────────────────────────────

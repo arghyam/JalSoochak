@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
+import org.arghyam.jalsoochak.tenant.security.HostNames;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -35,7 +36,9 @@ import lombok.NoArgsConstructor;
  * time someone remembered to populate it.
  *
  * <p>System config values arrive as {@code JsonNode} and are bound with {@code ObjectMapper}, which
- * does not run bean validation, so {@link #validatedSmtpHosts()} is the enforced path.
+ * does not run bean validation, so {@link #validatedSmtpHosts()} is the enforced path — on the
+ * write, where a bad pattern is the caller's to fix. {@link #allowsSmtpHost(String)} does not run
+ * it: what is already stored has to be matched as it stands, not re-judged.
  */
 @Data
 @Builder
@@ -99,6 +102,15 @@ public final class MessagingAllowedHostsConfigDTO implements ConfigValueDTO {
             throw new InvalidConfigValueException("Host pattern '" + normalised
                     + "' is not a host name or a *.suffix wildcard");
         }
+        if (HostNames.isIpLiteral(host)) {
+            // Checked here and not left to HOST_PATTERN, which matches all-numeric labels and so
+            // stores "10.0.0.5" clean. A literal in the list would be matched by name and never
+            // resolved, so the address policy — the check the allowlist exists to make meaningful —
+            // would never see it. MessagingProviderSettingsValidator refuses a literal on the
+            // settings side; this is the half that stops one being allowlisted in the first place.
+            throw new InvalidConfigValueException("Host pattern '" + normalised
+                    + "' must be a host name, not an IP address");
+        }
         if (!host.contains(".")) {
             // A single-label suffix ("*.in", or "localhost") is either a whole public suffix or an
             // internal name; neither is something a state relay should be reachable as.
@@ -113,16 +125,34 @@ public final class MessagingAllowedHostsConfigDTO implements ConfigValueDTO {
 
     /**
      * Whether {@code host} is covered by this allowlist. {@code host} is compared case-insensitively
-     * against the normalised patterns.
+     * against the stored patterns, each normalised as it is compared.
+     *
+     * <p>Matching does not re-run {@link #validatedSmtpHosts()}. Validation belongs to the write —
+     * {@code SystemManagementServiceImpl} runs it before the upsert — and re-running it here made
+     * one malformed entry in the stored list throw on <em>every</em> tenant's SMTP settings write,
+     * for any host, with an error naming nothing the caller had sent. A row written before that
+     * validation existed, or seeded directly, is exactly the case this has to survive.
+     *
+     * <p>So an unusable entry is skipped rather than fatal, character for character what
+     * message-service's {@code MessagingAllowedHosts.allowsSmtpHost} does with the same stored
+     * value. The two halves must answer alike: a host one service allows and the other refuses
+     * shows up as mail that silently falls back to the system default.
      */
     public boolean allowsSmtpHost(String host) {
-        if (host == null || host.isBlank()) {
+        if (host == null || host.isBlank() || smtp == null) {
             return false;
         }
         String candidate = host.trim().toLowerCase(Locale.ROOT);
-        for (String pattern : validatedSmtpHosts()) {
+        for (String raw : smtp) {
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            String pattern = raw.trim().toLowerCase(Locale.ROOT);
             if (pattern.startsWith(WILDCARD_PREFIX)) {
-                if (candidate.endsWith(pattern.substring(1)) && candidate.length() > pattern.length() - 1) {
+                // endsWith(".suffix") alone would let the apex through on a bare suffix of equal
+                // length, so the candidate must be strictly longer than ".suffix".
+                String suffix = pattern.substring(1);
+                if (candidate.endsWith(suffix) && candidate.length() > suffix.length()) {
                     return true;
                 }
             } else if (pattern.equals(candidate)) {

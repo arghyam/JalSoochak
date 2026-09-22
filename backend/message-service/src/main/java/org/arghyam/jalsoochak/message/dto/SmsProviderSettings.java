@@ -9,10 +9,10 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  * tenant-service's {@code SmsProviderConfigDTO}.
  *
  * @see EmailProviderSettings for why the read side ignores unknown properties while the write side
- *      rejects them
+ *      rejects them, and why {@code provider} is the raw wire name rather than the enum
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record SmsProviderSettings(SmsProviderType provider, SmsCountry smscountry) {
+public record SmsProviderSettings(String provider, SmsCountry smscountry) {
 
     /**
      * The DLT registrations belong to the sender id and each tenant registers under its own entity,
@@ -45,12 +45,21 @@ public record SmsProviderSettings(SmsProviderType provider, SmsCountry smscountr
         }
     }
 
+    /**
+     * The stored {@link #provider} as a known type, or {@code null} when it is absent, blank or
+     * names a provider this deployment does not support.
+     */
+    public SmsProviderType providerType() {
+        return SmsProviderType.fromWireNameOrNull(provider);
+    }
+
     /** The settings block the declared provider needs, or {@code null} when it is absent. */
     public Object blockForProvider() {
-        if (provider == null) {
+        SmsProviderType type = providerType();
+        if (type == null) {
             return null;
         }
-        return switch (provider) {
+        return switch (type) {
             case SMSCOUNTRY -> smscountry;
         };
     }

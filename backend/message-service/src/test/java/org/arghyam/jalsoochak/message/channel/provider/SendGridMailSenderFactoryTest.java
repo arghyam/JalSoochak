@@ -190,7 +190,7 @@ class SendGridMailSenderFactoryTest {
     @Test
     void create_settingsWithoutSendGridBlock_isRefused() {
         EmailProviderSettings noBlock = new EmailProviderSettings(
-                EmailProviderType.SENDGRID, "noreply@mp.gov.in", "MP Jal", null, null, null);
+                EmailProviderType.SENDGRID.getWireName(), "noreply@mp.gov.in", "MP Jal", null, null, null);
 
         assertThatThrownBy(() -> factory.create(noBlock, secrets(TENANT_A_KEY)))
                 .isInstanceOf(ProviderNotUsableException.class)
@@ -234,7 +234,7 @@ class SendGridMailSenderFactoryTest {
 
     private static EmailProviderSettings settings(String fromAddress, String fromName,
             String logoImageUrl, EmailProviderSettings.Templates templates) {
-        return new EmailProviderSettings(EmailProviderType.SENDGRID, fromAddress, fromName,
+        return new EmailProviderSettings(EmailProviderType.SENDGRID.getWireName(), fromAddress, fromName,
                 logoImageUrl, new EmailProviderSettings.SendGrid(templates), null);
     }
 

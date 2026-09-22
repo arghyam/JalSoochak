@@ -19,10 +19,18 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  *
  * <p>No credentials: {@code apiKey} and {@code password} live in the encrypted secret store and are
  * resolved separately by {@code TenantSecretResolver} from a location the server derives (O2-8).
+ *
+ * <p>{@code provider} is the raw wire name rather than an {@link EmailProviderType}, which is that
+ * same leniency again. {@link EmailProviderType#fromWireName} is the {@code @JsonCreator}
+ * and it throws, so binding the field as the enum would turn a provider this deployment does not
+ * know — one a newer tenant-service validated and stored — into a parse failure for the whole row,
+ * indistinguishable from a tenant that configured nothing. Held as a string, the row still parses
+ * and {@link #providerType()} returns {@code null}, so the fallback is taken by
+ * {@code TenantChannelProviders} with a provider name to log and to count (O2-9).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record EmailProviderSettings(
-        EmailProviderType provider,
+        String provider,
         String fromAddress,
         String fromName,
         String logoImageUrl,
@@ -67,14 +75,23 @@ public record EmailProviderSettings(
     }
 
     /**
+     * The stored {@link #provider} as a known type, or {@code null} when it is absent, blank or
+     * names a provider this deployment does not support.
+     */
+    public EmailProviderType providerType() {
+        return EmailProviderType.fromWireNameOrNull(provider);
+    }
+
+    /**
      * The settings block the declared provider needs, or {@code null} when it is absent — which is
      * a build failure, not a parse failure, so the tenant falls back rather than the read throwing.
      */
     public Object blockForProvider() {
-        if (provider == null) {
+        EmailProviderType type = providerType();
+        if (type == null) {
             return null;
         }
-        return switch (provider) {
+        return switch (type) {
             case SENDGRID -> sendgrid;
             case SMTP -> smtp;
         };

@@ -3,7 +3,9 @@ package org.arghyam.jalsoochak.tenant.dto.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 import org.arghyam.jalsoochak.tenant.exception.InvalidConfigValueException;
 import org.junit.jupiter.api.DisplayName;
@@ -22,6 +24,11 @@ class MessagingAllowedHostsConfigDTOTest {
 
     private static MessagingAllowedHostsConfigDTO of(String... patterns) {
         return MessagingAllowedHostsConfigDTO.builder().smtp(List.of(patterns)).build();
+    }
+
+    /** As {@link #of}, but tolerating a null entry — what a stored list may actually hold. */
+    private static MessagingAllowedHostsConfigDTO ofRaw(String... patterns) {
+        return MessagingAllowedHostsConfigDTO.builder().smtp(Arrays.asList(patterns)).build();
     }
 
     @Nested
@@ -71,6 +78,32 @@ class MessagingAllowedHostsConfigDTOTest {
         void rejectsInvalidPatterns(String pattern) {
             assertThatThrownBy(() -> of(pattern).validatedSmtpHosts())
                     .isInstanceOf(InvalidConfigValueException.class);
+        }
+
+        @ParameterizedTest(name = "rejects the IP literal \"{0}\"")
+        @ValueSource(strings = {
+                "10.0.0.5",
+                "192.168.1.1",
+                "127.0.0.1",
+                "::1",
+                "[::1]",
+                "[fd00::1]",
+                "*.10.0.0.5"
+        })
+        @DisplayName("Rejects IP literals, which HOST_PATTERN's numeric labels would otherwise store clean")
+        void rejectsIpLiterals(String pattern) {
+            // A literal in the list would be matched by name and never resolved, so SsrfAddressPolicy
+            // — the check the allowlist exists to make meaningful — would never see it.
+            assertThatThrownBy(() -> of(pattern).validatedSmtpHosts())
+                    .isInstanceOf(InvalidConfigValueException.class)
+                    .hasMessageContaining("IP address");
+        }
+
+        @Test
+        @DisplayName("A host name with numeric labels is still a host name")
+        void numericLabelsAreNotAnIpLiteral() {
+            assertThat(of("smtp1.mp.gov.in", "10.mp.gov.in").validatedSmtpHosts())
+                    .containsExactly("smtp1.mp.gov.in", "10.mp.gov.in");
         }
 
         @Test
@@ -129,6 +162,76 @@ class MessagingAllowedHostsConfigDTOTest {
 
             assertThat(allowed.allowsSmtpHost(null)).isFalse();
             assertThat(allowed.allowsSmtpHost("  ")).isFalse();
+        }
+
+        @Test
+        @DisplayName("A null smtp list allows nothing rather than throwing")
+        void nullListAllowsNothing() {
+            assertThat(new MessagingAllowedHostsConfigDTO().allowsSmtpHost("smtp.mp.gov.in")).isFalse();
+        }
+
+        @Test
+        @DisplayName("An unusable stored entry is skipped, not a reason to refuse every host")
+        void unusableStoredEntryIsSkipped() {
+            // A value written before validatedSmtpHosts() existed, or seeded directly. Matching
+            // used to re-validate, so one entry like this made every tenant's SMTP settings write
+            // fail — for any host, with an error naming nothing the caller had sent.
+            MessagingAllowedHostsConfigDTO allowed = ofRaw("smtp.mp.gov.in", "", "   ", null);
+
+            assertThat(allowed.allowsSmtpHost("smtp.mp.gov.in")).isTrue();
+            assertThat(allowed.allowsSmtpHost("smtp.evil.test")).isFalse();
+        }
+
+        @Test
+        @DisplayName("Matches an entry an older tenant-service stored without normalising it")
+        void matchesAnUnnormalisedStoredEntry() {
+            assertThat(ofRaw(" SMTP.MP.GOV.IN ").allowsSmtpHost("smtp.mp.gov.in")).isTrue();
+        }
+
+        @Test
+        @DisplayName("Answers alike to message-service's twin on the same stored list")
+        void agreesWithTheReadSideTwin() {
+            // The two halves must not diverge: a host one service allows and the other refuses is
+            // mail that silently falls back to the system default. These are the cases where the
+            // write side used to throw and the read side used to answer.
+            List<String> stored = Arrays.asList("smtp.mp.gov.in", "*.nic.in", "", null, "10.0.0.5");
+            MessagingAllowedHostsConfigDTO writeSide =
+                    MessagingAllowedHostsConfigDTO.builder().smtp(stored).build();
+
+            for (String host : List.of("smtp.mp.gov.in", "mail.up.nic.in", "nic.in", "10.0.0.5",
+                    "evilnic.in", "smtp.evil.test")) {
+                assertThat(writeSide.allowsSmtpHost(host))
+                        .as("host %s", host)
+                        .isEqualTo(readSideAllows(stored, host));
+            }
+        }
+
+        /**
+         * message-service's {@code MessagingAllowedHosts.allowsSmtpHost}, transcribed. Copied rather
+         * than imported because the two services are separate Maven modules; it is short enough that
+         * transcribing it is the cheaper way to pin the contract, and a drift in either body shows
+         * up here.
+         */
+        private static boolean readSideAllows(List<String> smtp, String host) {
+            if (host == null || host.isBlank()) {
+                return false;
+            }
+            String candidate = host.trim().toLowerCase(Locale.ROOT);
+            for (String raw : smtp) {
+                if (raw == null || raw.isBlank()) {
+                    continue;
+                }
+                String pattern = raw.trim().toLowerCase(Locale.ROOT);
+                if (pattern.startsWith("*.")) {
+                    String suffix = pattern.substring(1);
+                    if (candidate.endsWith(suffix) && candidate.length() > suffix.length()) {
+                        return true;
+                    }
+                } else if (pattern.equals(candidate)) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 }

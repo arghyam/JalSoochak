@@ -21,6 +21,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * cached forever in memory; the map is bounded by the number of tenants. Misses are not cached,
  * because a tenant created after this instance started must resolve on its next event.
  *
+ * <p>Only a pair this class read from {@code tenant_master_table} itself is cached. An event that
+ * already carries both halves is used as it stands but not remembered: it costs nothing to skip —
+ * that event needed no lookup anyway — and remembering it would let one producer emitting a
+ * mismatched pair pin {@code id → wrong code} and {@code code → wrong id} forever, so that every
+ * later half-populated event for either half resolved to the wrong tenant and picked the wrong
+ * tenant's provider account.
+ *
  * <p>A lookup failure is never fatal: the partially-resolved reference is returned and the send
  * continues, which leaves it on the system default provider rather than dropping the message.
  */
@@ -46,7 +53,6 @@ public class TenantRefResolver {
             return TenantRef.NONE;
         }
         if (ref.isComplete()) {
-            remember(ref.id(), ref.code());
             return ref;
         }
         return ref.id() != null

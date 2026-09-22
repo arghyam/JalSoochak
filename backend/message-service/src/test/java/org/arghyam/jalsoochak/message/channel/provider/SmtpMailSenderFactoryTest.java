@@ -156,7 +156,7 @@ class SmtpMailSenderFactoryTest {
     @Test
     void create_settingsWithoutSmtpBlock_isRefused() {
         EmailProviderSettings noBlock = new EmailProviderSettings(
-                EmailProviderType.SMTP, "noreply@mp.gov.in", "MP Jal", null, null, null);
+                EmailProviderType.SMTP.getWireName(), "noreply@mp.gov.in", "MP Jal", null, null, null);
 
         assertThatThrownBy(() -> factory.create(noBlock, secrets(TENANT_A_PASSWORD)))
                 .isInstanceOf(ProviderNotUsableException.class)
@@ -235,7 +235,7 @@ class SmtpMailSenderFactoryTest {
 
     private static EmailProviderSettings settings(String host, Integer port, String username,
             Boolean startTls, String fromAddress, String logoImageUrl) {
-        return new EmailProviderSettings(EmailProviderType.SMTP, fromAddress, "MP Jal",
+        return new EmailProviderSettings(EmailProviderType.SMTP.getWireName(), fromAddress, "MP Jal",
                 logoImageUrl, null,
                 new EmailProviderSettings.Smtp(host, port, username, startTls));
     }

@@ -70,6 +70,22 @@ class TenantRefResolverTest {
     }
 
     @Test
+    @DisplayName("a pair carried on the event is not cached, so it cannot poison a later lookup")
+    void bothHalvesPresentIsNotCached() {
+        // A producer emitting a mismatched pair — a replayed event from before a state-code change,
+        // a hand-published test message — would otherwise pin id 1 to "XX" and "XX" to id 1 for the
+        // life of the instance, and every later half-populated event for either half would resolve
+        // to the wrong tenant and pick the wrong tenant's provider account.
+        when(jdbcTemplate.query(contains("SELECT state_code"), any(RowMapper.class), eq(1)))
+                .thenReturn(List.of("MP"));
+
+        assertThat(resolver.resolve(1, "XX")).isEqualTo(new TenantRef(1, "XX"));
+
+        assertThat(resolver.resolve(1, null)).isEqualTo(new TenantRef(1, "MP"));
+        assertThat(resolver.resolve(null, "XX")).isEqualTo(new TenantRef(null, "XX"));
+    }
+
+    @Test
     @DisplayName("caches a resolved mapping, so a second event queries nothing")
     void cachesResolvedMapping() {
         when(jdbcTemplate.query(contains("SELECT state_code"), any(RowMapper.class), eq(1)))

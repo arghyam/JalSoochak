@@ -127,19 +127,19 @@ class TenantChannelProvidersTest {
     }
 
     private static EmailProviderSettings sendGridSettings() {
-        return new EmailProviderSettings(EmailProviderType.SENDGRID, "noreply@mp.gov.in", "MP", null,
+        return new EmailProviderSettings(EmailProviderType.SENDGRID.getWireName(), "noreply@mp.gov.in", "MP", null,
                 new EmailProviderSettings.SendGrid(new EmailProviderSettings.Templates(
                         "d-1", "d-2", "d-3", "d-4", "d-5")),
                 null);
     }
 
     private static EmailProviderSettings smtpSettings() {
-        return new EmailProviderSettings(EmailProviderType.SMTP, "noreply@mp.gov.in", "MP", null, null,
+        return new EmailProviderSettings(EmailProviderType.SMTP.getWireName(), "noreply@mp.gov.in", "MP", null, null,
                 new EmailProviderSettings.Smtp("smtp.mp.gov.in", 587, "mailer", true));
     }
 
     private static SmsProviderSettings smsCountrySettings() {
-        return new SmsProviderSettings(SmsProviderType.SMSCOUNTRY,
+        return new SmsProviderSettings(SmsProviderType.SMSCOUNTRY.getWireName(),
                 new SmsProviderSettings.SmsCountry("MPJLSK", "pe-1", "tpl-1", "hdr-1", null));
     }
 
@@ -152,6 +152,13 @@ class TenantChannelProvidersTest {
         return meterRegistry.find(TenantChannelProviders.METRIC_RESOLUTION)
                 .tag("channel", channel).tag("outcome", outcome).counters()
                 .stream().mapToDouble(c -> c.count()).sum();
+    }
+
+    /** Every distinct {@code provider} tag the channel's counters were given. */
+    private List<String> providerTagsFor(String channel) {
+        return meterRegistry.find(TenantChannelProviders.METRIC_RESOLUTION)
+                .tag("channel", channel).counters()
+                .stream().map(c -> c.getId().getTag("provider")).distinct().toList();
     }
 
     // ── the flag ────────────────────────────────────────────────────────────────
@@ -252,10 +259,8 @@ class TenantChannelProvidersTest {
     }
 
     @Test
-    @DisplayName("an unknown provider falls back and is counted as a fallback, not a default")
-    void unknownProviderFallsBack() {
-        // provider parsed to null, which is what a settings row from a newer tenant-service looks
-        // like once the lenient read has done its job.
+    @DisplayName("settings naming no provider at all fall back and are counted as a fallback")
+    void absentProviderFallsBack() {
         when(configRepository.findEmailSettings(TENANT.id())).thenReturn(Optional.of(
                 new EmailProviderSettings(null, "noreply@mp.gov.in", null, null, null, null)));
 
@@ -264,6 +269,48 @@ class TenantChannelProvidersTest {
         // other is a tenant that did and is not getting it.
         assertThat(countFor("email", TenantChannelProviders.OUTCOME_FALLBACK)).isEqualTo(1);
         assertThat(countFor("email", TenantChannelProviders.OUTCOME_SYSTEM_DEFAULT)).isZero();
+    }
+
+    @Test
+    @DisplayName("a provider this deployment does not know is counted as a fallback under its own name")
+    void unknownProviderFallsBackUnderItsOwnName() {
+        // A settings row written by a newer tenant-service. Binding provider as the enum would have
+        // failed the whole row in the repository, and the tenant would have been indistinguishable
+        // from one that configured nothing; the whole point of outcome=fallback is telling them
+        // apart, so an operator can see a tenant that configured a provider and is not using it.
+        when(configRepository.findEmailSettings(TENANT.id())).thenReturn(Optional.of(
+                new EmailProviderSettings("mailgun", "noreply@mp.gov.in", null, null, null, null)));
+
+        assertThat(providers().emailFor(TENANT)).isSameAs(systemDefaultEmail);
+        assertThat(countFor("email", TenantChannelProviders.OUTCOME_FALLBACK)).isEqualTo(1);
+        assertThat(countFor("email", TenantChannelProviders.OUTCOME_SYSTEM_DEFAULT)).isZero();
+        assertThat(providerTagsFor("email")).containsExactly("mailgun");
+    }
+
+    @Test
+    @DisplayName("an SMS provider this deployment does not know falls back under its own name")
+    void unknownSmsProviderFallsBackUnderItsOwnName() {
+        when(configRepository.findSmsSettings(TENANT.id())).thenReturn(Optional.of(
+                new SmsProviderSettings("twilio", null)));
+
+        assertThat(providers().smsFor(TENANT)).isSameAs(systemDefaultSms);
+        assertThat(countFor("sms", TenantChannelProviders.OUTCOME_FALLBACK)).isEqualTo(1);
+        assertThat(providerTagsFor("sms")).containsExactly("twilio");
+    }
+
+    @Test
+    @DisplayName("a stored provider name too malformed to be a tag value does not become one")
+    void malformedProviderNameIsNotUsedAsATag() {
+        // The name still reaches the operator through the ERROR line; what it must not do is give
+        // an unbounded string a place in the metric's cardinality.
+        when(configRepository.findEmailSettings(TENANT.id())).thenReturn(Optional.of(
+                new EmailProviderSettings("send grid; drop table", "noreply@mp.gov.in", null, null,
+                        null, null)));
+
+        assertThat(providers().emailFor(TENANT)).isSameAs(systemDefaultEmail);
+        assertThat(countFor("email", TenantChannelProviders.OUTCOME_FALLBACK)).isEqualTo(1);
+        assertThat(providerTagsFor("email"))
+                .containsExactly(TenantChannelProviders.PROVIDER_UNSUPPORTED);
     }
 
     @Test
@@ -280,8 +327,8 @@ class TenantChannelProvidersTest {
     @DisplayName("settings whose provider block is absent fall back")
     void missingProviderBlockFallsBack() {
         when(configRepository.findEmailSettings(TENANT.id())).thenReturn(Optional.of(
-                new EmailProviderSettings(EmailProviderType.SENDGRID, "noreply@mp.gov.in", null, null,
-                        null, null)));
+                new EmailProviderSettings(EmailProviderType.SENDGRID.getWireName(), "noreply@mp.gov.in",
+                        null, null, null, null)));
 
         assertThat(providers(List.of(emailFactory(EmailProviderType.SENDGRID, tenantEmail)), List.of())
                 .emailFor(TENANT)).isSameAs(systemDefaultEmail);

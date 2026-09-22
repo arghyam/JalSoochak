@@ -6,6 +6,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.arghyam.jalsoochak.message.config.PerTenantProviderProperties;
 import org.arghyam.jalsoochak.message.dto.EmailProviderSettings;
@@ -104,6 +105,12 @@ public class TenantChannelProviders {
     static final String METRIC_RESOLUTION = "notification.provider.resolution";
     private static final String PROVIDER_NONE = "none";
 
+    /** The {@code provider} tag for a stored name too malformed to be a tag value of its own. */
+    static final String PROVIDER_UNSUPPORTED = "unsupported";
+
+    /** What a wire name tenant-service could have written looks like, after normalisation. */
+    private static final Pattern TAG_SAFE_PROVIDER = Pattern.compile("[a-z0-9][a-z0-9_-]{0,31}");
+
     private final TenantProviderConfigRepository configRepository;
     private final TenantSecretResolver secretResolver;
     private final ProviderEndpointPolicy endpointPolicy;
@@ -189,16 +196,21 @@ public class TenantChannelProviders {
      *
      * <p>Called by {@code TenantConfigUpdatedListener} when tenant-service reports that this
      * tenant's settings or secrets changed (O2-10).
+     *
+     * <p>A switch <em>expression</em> rather than an if/else, so that adding the WHATSAPP constant
+     * {@link MessagingChannel} already reserves is a compile error here. The bare {@code else} it
+     * replaces would have invalidated the SMS cache for it: a good sender dropped, the new channel's
+     * entry left stale, and a log line claiming it evicted WHATSAPP.
      */
     public void evict(Integer tenantId, MessagingChannel channel) {
         if (tenantId == null || channel == null) {
             return;
         }
-        if (channel == MessagingChannel.EMAIL) {
-            emailCache.invalidate(tenantId);
-        } else {
-            smsCache.invalidate(tenantId);
-        }
+        Cache<Integer, ?> cache = switch (channel) {
+            case EMAIL -> emailCache;
+            case SMS -> smsCache;
+        };
+        cache.invalidate(tenantId);
         log.info("[Providers] Evicted cached provider [tenantId={}, channel={}]", tenantId, channel);
     }
 
@@ -229,11 +241,14 @@ public class TenantChannelProviders {
             return Resolved.systemDefault();
         }
         EmailProviderSettings settings = stored.get();
-        EmailProviderType provider = settings.provider();
-        String providerId = provider == null ? PROVIDER_NONE : provider.getWireName();
+        EmailProviderType provider = settings.providerType();
+        String providerId = providerTag(settings.provider());
         try {
             if (provider == null) {
-                throw new ProviderNotUsableException("email settings name no provider");
+                throw new ProviderNotUsableException(PROVIDER_NONE.equals(providerId)
+                        ? "email settings name no provider"
+                        : "email settings name provider '" + providerId
+                                + "', which this deployment does not support");
             }
             if (settings.blockForProvider() == null) {
                 throw new ProviderNotUsableException(
@@ -262,11 +277,14 @@ public class TenantChannelProviders {
             return Resolved.systemDefault();
         }
         SmsProviderSettings settings = stored.get();
-        SmsProviderType provider = settings.provider();
-        String providerId = provider == null ? PROVIDER_NONE : provider.getWireName();
+        SmsProviderType provider = settings.providerType();
+        String providerId = providerTag(settings.provider());
         try {
             if (provider == null) {
-                throw new ProviderNotUsableException("SMS settings name no provider");
+                throw new ProviderNotUsableException(PROVIDER_NONE.equals(providerId)
+                        ? "SMS settings name no provider"
+                        : "SMS settings name provider '" + providerId
+                                + "', which this deployment does not support");
             }
             if (settings.blockForProvider() == null) {
                 throw new ProviderNotUsableException(
@@ -291,6 +309,26 @@ public class TenantChannelProviders {
         return secretResolver.resolveAll(tenant, channel, requiredNames)
                 .orElseThrow(() -> new ProviderNotUsableException("provider '" + providerId
                         + "' needs " + requiredNames + " but at least one is not stored"));
+    }
+
+    /**
+     * The {@code provider} metric tag and log name for a stored wire name: the name itself, or
+     * {@link #PROVIDER_NONE} when the settings declare none.
+     *
+     * <p>A name this deployment does not know still has to reach the operator, because "a tenant
+     * configured its own provider and is silently not using it" is exactly what the counter exists
+     * to surface. It is a tag value, though, so it is bounded rather than passed through: only a
+     * wire name tenant-service could have written — lower case, short, and no punctuation beyond
+     * {@code -} and {@code _} — is used as-is, and anything else is counted as
+     * {@link #PROVIDER_UNSUPPORTED} so a malformed row cannot grow the metric's cardinality. The
+     * ERROR line from {@link #fallback} names the row either way.
+     */
+    private static String providerTag(String wireName) {
+        if (wireName == null || wireName.isBlank()) {
+            return PROVIDER_NONE;
+        }
+        String normalised = wireName.trim().toLowerCase(Locale.ROOT);
+        return TAG_SAFE_PROVIDER.matcher(normalised).matches() ? normalised : PROVIDER_UNSUPPORTED;
     }
 
     private <T> Resolved<T> fallback(TenantRef tenant, MessagingChannel channel, String providerId,

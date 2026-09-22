@@ -106,7 +106,7 @@ class TenantProviderConfigRepositoryIntegrationTest {
 
         EmailProviderSettings settings = repository.findEmailSettings(TENANT_ID).orElseThrow();
 
-        assertThat(settings.provider()).isEqualTo(EmailProviderType.SENDGRID);
+        assertThat(settings.providerType()).isEqualTo(EmailProviderType.SENDGRID);
         assertThat(settings.fromAddress()).isEqualTo("noreply@mp.gov.in");
         assertThat(settings.fromName()).isEqualTo("Jal Soochak MP");
         assertThat(settings.logoImageUrl()).isEqualTo("https://example.test/logo.png");
@@ -124,7 +124,7 @@ class TenantProviderConfigRepositoryIntegrationTest {
 
         EmailProviderSettings settings = repository.findEmailSettings(TENANT_ID).orElseThrow();
 
-        assertThat(settings.provider()).isEqualTo(EmailProviderType.SMTP);
+        assertThat(settings.providerType()).isEqualTo(EmailProviderType.SMTP);
         assertThat(settings.smtp().host()).isEqualTo("smtp.mp.gov.in");
         assertThat(settings.smtp().port()).isEqualTo(587);
         assertThat(settings.smtp().username()).isEqualTo("mailer");
@@ -139,7 +139,7 @@ class TenantProviderConfigRepositoryIntegrationTest {
 
         SmsProviderSettings settings = repository.findSmsSettings(TENANT_ID).orElseThrow();
 
-        assertThat(settings.provider()).isEqualTo(SmsProviderType.SMSCOUNTRY);
+        assertThat(settings.providerType()).isEqualTo(SmsProviderType.SMSCOUNTRY);
         assertThat(settings.smscountry().senderId()).isEqualTo("MPJLSK");
         assertThat(settings.smscountry().dltPrincipalEntityId()).isEqualTo("pe-1");
         assertThat(settings.smscountry().dltTemplateId()).isEqualTo("tpl-1");
@@ -199,7 +199,7 @@ class TenantProviderConfigRepositoryIntegrationTest {
                 + " WHERE tenant_id = ? AND config_key = ?", TENANT_ID, "EMAIL_PROVIDER_SETTINGS");
         writeConfig(TENANT_ID, "EMAIL_PROVIDER_SETTINGS", SENDGRID_JSON);
 
-        assertThat(repository.findEmailSettings(TENANT_ID).orElseThrow().provider())
+        assertThat(repository.findEmailSettings(TENANT_ID).orElseThrow().providerType())
                 .isEqualTo(EmailProviderType.SENDGRID);
     }
 
@@ -240,7 +240,25 @@ class TenantProviderConfigRepositoryIntegrationTest {
         writeConfig(TENANT_ID, "EMAIL_PROVIDER_SETTINGS",
                 "{\"provider\":\"mailgun\",\"fromAddress\":\"noreply@mp.gov.in\"}");
 
-        assertThat(repository.findEmailSettings(TENANT_ID)).isEmpty();
+        EmailProviderSettings settings = repository.findEmailSettings(TENANT_ID).orElseThrow();
+
+        // The name survives — it is what the ERROR line and the outcome=fallback counter name —
+        // while the type does not resolve, which is what sends the tenant to the system default.
+        assertThat(settings.provider()).isEqualTo("mailgun");
+        assertThat(settings.providerType()).isNull();
+        assertThat(settings.blockForProvider()).isNull();
+    }
+
+    @Test
+    @DisplayName("an unknown SMS provider parses to null rather than failing the row")
+    void unknownSmsProviderParsesToNull() {
+        writeConfig(TENANT_ID, "SMS_PROVIDER_SETTINGS",
+                "{\"provider\":\"twilio\",\"smscountry\":null}");
+
+        SmsProviderSettings settings = repository.findSmsSettings(TENANT_ID).orElseThrow();
+
+        assertThat(settings.provider()).isEqualTo("twilio");
+        assertThat(settings.providerType()).isNull();
     }
 
     @Test
@@ -258,7 +276,7 @@ class TenantProviderConfigRepositoryIntegrationTest {
 
         EmailProviderSettings settings = repository.findEmailSettings(TENANT_ID).orElseThrow();
 
-        assertThat(settings.provider()).isEqualTo(EmailProviderType.SENDGRID);
+        assertThat(settings.providerType()).isEqualTo(EmailProviderType.SENDGRID);
         assertThat(settings.sendgrid().templates().isComplete()).isTrue();
     }
 
@@ -269,7 +287,9 @@ class TenantProviderConfigRepositoryIntegrationTest {
 
         EmailProviderSettings settings = repository.findEmailSettings(TENANT_ID).orElseThrow();
 
-        assertThat(settings.toString()).doesNotContain("mailer").contains("SMTP");
+        assertThat(settings.toString())
+                .doesNotContain("mailer")
+                .contains(EmailProviderType.SMTP.getWireName());
     }
 
     // ── allowlist ───────────────────────────────────────────────────────────────

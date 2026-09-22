@@ -141,7 +141,7 @@ class SmsCountrySenderFactoryTest {
 
     @Test
     void create_settingsWithoutSmsCountryBlock_isRefused() {
-        SmsProviderSettings noBlock = new SmsProviderSettings(SmsProviderType.SMSCOUNTRY, null);
+        SmsProviderSettings noBlock = new SmsProviderSettings(SmsProviderType.SMSCOUNTRY.getWireName(), null);
 
         assertThatThrownBy(() -> factory.create(noBlock, secrets(TENANT_A_KEY, TENANT_A_TOKEN)))
                 .isInstanceOf(ProviderNotUsableException.class)
@@ -270,7 +270,7 @@ class SmsCountrySenderFactoryTest {
 
     private static SmsProviderSettings settings(String senderId, String principalEntityId,
             String templateId, String headerId, String otpTemplate) {
-        return new SmsProviderSettings(SmsProviderType.SMSCOUNTRY,
+        return new SmsProviderSettings(SmsProviderType.SMSCOUNTRY.getWireName(),
                 new SmsProviderSettings.SmsCountry(
                         senderId, principalEntityId, templateId, headerId, otpTemplate));
     }
