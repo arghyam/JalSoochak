@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.arghyam.jalsoochak.message.config.PerTenantProviderProperties;
 import org.arghyam.jalsoochak.message.dto.EmailProviderSettings;
@@ -518,12 +520,12 @@ class TenantChannelProvidersTest {
 
     @Test
     @DisplayName("a replaced sender that is AutoCloseable is closed")
-    void replacedCloseableSenderIsClosed() {
+    void replacedCloseableSenderIsClosed() throws Exception {
         // None of today's adapters hold a connection, but one that does must not leak an instance
         // every time a state edits its settings — a leak that stays invisible until it exhausts
         // something.
         class CloseableEmailSender implements EmailSender, AutoCloseable {
-            private boolean closed;
+            private final CountDownLatch closed = new CountDownLatch(1);
 
             @Override
             public void send(org.arghyam.jalsoochak.message.dto.MailRequest request) {
@@ -531,7 +533,7 @@ class TenantChannelProvidersTest {
 
             @Override
             public void close() {
-                closed = true;
+                closed.countDown();
             }
         }
         CloseableEmailSender sender = new CloseableEmailSender();
@@ -542,10 +544,13 @@ class TenantChannelProvidersTest {
 
         providers.emailFor(TENANT);
         providers.evict(TENANT.id(), MessagingChannel.EMAIL);
-        // Caffeine runs removal listeners on the common pool; an immediate read forces maintenance.
-        providers.emailFor(TENANT);
 
-        assertThat(sender.closed).isTrue();
+        // Caffeine dispatches removalListener on its executor — the common ForkJoinPool — so the
+        // close happens on another thread at an unspecified time. A latch, not a boolean read right
+        // after evict(): that read both races the listener and has no happens-before edge to it.
+        assertThat(sender.closed.await(5, TimeUnit.SECONDS))
+                .as("the evicted sender should have been closed")
+                .isTrue();
     }
 
     // ── wiring ──────────────────────────────────────────────────────────────────
