@@ -10,7 +10,8 @@ import com.fasterxml.jackson.annotation.JsonValue;
  * The SMS providers a tenant may point its own account at.
  *
  * <p>PER-TENANT-PROVIDERS: the read-side twin of tenant-service's
- * {@code enums/SmsProviderType}. Kept identical apart from the package and this paragraph.
+ * {@code enums/SmsProviderType}. The constants, their wire names and their required secret
+ * names must match that copy exactly; only the unknown-value path differs.
  *
  * @see EmailProviderType for why an unknown value returns {@code null} rather than throwing
  */

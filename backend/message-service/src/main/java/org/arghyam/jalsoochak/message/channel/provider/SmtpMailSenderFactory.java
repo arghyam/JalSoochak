@@ -39,8 +39,9 @@ public class SmtpMailSenderFactory implements EmailSenderFactory {
     /**
      * The name {@code EmailProviderType.SMTP.getRequiredSecretNames()} declares, which is what
      * {@code TenantChannelProviders} has already resolved by the time {@link #create} is called.
-     * Duplicated because the enum is kept byte-identical to tenant-service's twin;
-     * {@code SmtpMailSenderFactoryTest} asserts the two agree.
+     * Duplicated because the enum is a copy of tenant-service's, which is what the secret store
+     * writes against; the two must declare the same secret name and
+     * {@code SmtpMailSenderFactoryTest} asserts they do.
      */
     static final String SECRET_PASSWORD = "password";
 

@@ -75,8 +75,8 @@ class SendGridMailSenderFactoryTest {
 
     @Test
     void secretNameConstants_matchTheOnesTheProviderTypeDeclares() {
-        // The factory duplicates the name because the enum is kept byte-identical to
-        // tenant-service's twin. If the two ever drift, every configured tenant falls back.
+        // The factory duplicates the name because the enum is a copy of tenant-service's, which is
+        // what the secret store writes against. If the two drift, every configured tenant falls back.
         assertThat(EmailProviderType.SENDGRID.getRequiredSecretNames())
                 .containsExactly(SendGridMailSenderFactory.SECRET_API_KEY);
     }

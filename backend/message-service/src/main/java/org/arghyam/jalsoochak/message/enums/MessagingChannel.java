@@ -6,8 +6,9 @@ import java.util.Set;
  * A messaging channel whose provider a tenant may configure for itself.
  *
  * <p>PER-TENANT-PROVIDERS: the read-side twin of tenant-service's
- * {@code enums/MessagingChannel}. Kept identical apart from the package and this paragraph.
- * There is no shared library module in this repo — the five copies of
+ * {@code enums/MessagingChannel}. The constants, their {@code settingsConfigKey} strings and
+ * their {@code secretNames} must match that copy exactly; {@link #forSettingsConfigKey} is the
+ * one addition this read side needs. There is no shared library module in this repo — the five copies of
  * {@code PiiEncryptionService} are the standing precedent — and the two halves must agree
  * exactly: the {@code settingsConfigKey} strings are what tenant-service writes into
  * {@code TENANT_CONFIG_UPDATED} and what this service's cache eviction matches on, and the

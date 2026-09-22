@@ -10,9 +10,9 @@ import com.fasterxml.jackson.annotation.JsonValue;
  * The email providers a tenant may point its own account at.
  *
  * <p>PER-TENANT-PROVIDERS: the read-side twin of tenant-service's
- * {@code enums/EmailProviderType}, which is what validates a settings write. Kept identical
- * apart from the package and this paragraph — see {@link MessagingChannel} for why the two
- * copies must not drift.
+ * {@code enums/EmailProviderType}, which is what validates a settings write. The constants,
+ * their wire names and their required secret names must match that copy exactly — see
+ * {@link MessagingChannel} for why. Only the unknown-value path below differs.
  *
  * <p>The wire form is lower case, matching {@code notification.mail.provider}, so a stored
  * tenant setting and the system default are written the same way.

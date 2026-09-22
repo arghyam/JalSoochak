@@ -80,8 +80,8 @@ class PerTenantProviderStartupValidatorTest {
     }
 
     @Test
-    @DisplayName("the check runs before the Kafka listeners start")
-    void checkRunsBeforeTheKafkaListenersStart() throws Exception {
+    @DisplayName("the check is a @PostConstruct, not an ApplicationReadyEvent listener")
+    void validateIsAPostConstructNotAnApplicationReadyListener() throws Exception {
         // The lifecycle point is the whole value of the check. KafkaListenerEndpointRegistry is a
         // SmartLifecycle started inside finishRefresh(), which precedes ApplicationReadyEvent: a
         // check deferred to that event would let NotificationEventRouter drain common-topic first,
