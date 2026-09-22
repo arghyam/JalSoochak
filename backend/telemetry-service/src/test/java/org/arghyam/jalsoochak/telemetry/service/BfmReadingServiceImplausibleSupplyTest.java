@@ -109,6 +109,7 @@ class BfmReadingServiceImplausibleSupplyTest {
                 new RolloverResolutionService(false, new ObjectMapper()),
                 SupplyPlausibilityFixtures.guard(mode, repo, tenantConfigRepository),
                 null,
+                null,
                 null);
     }
 

@@ -309,7 +309,7 @@ recorded when the reading was first submitted.
 | POST | `/api/v1/telemetry/others/submitted`              | Save “other issue” details |
 | POST | `/api/v1/telemetry/take-meter-reading`            | Return the take‑meter‑reading prompt/options |
 | POST | `/api/v1/telemetry/manual-reading`                | Submit a manual meter reading |
-| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact |
+| POST | `/api/v1/telemetry/location`                      | Submit/update location details for a contact. Response carries `locationMismatch` — see [location-affinity-check.md](../docs/location-affinity-check.md) |
 | POST | `/api/v1/telemetry/update-previous-reading`       | Update the previous reading for a contact |
 
 ---

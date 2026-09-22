@@ -75,6 +75,7 @@ class BfmReadingServiceAnomalyDedupTest {
                 SupplyPlausibilityFixtures.guard(
                         SupplyPlausibilityProperties.Mode.AUDIT, telemetryTenantRepository, tenantConfigRepository),
                 null,
+                null,
                 null
         );
     }

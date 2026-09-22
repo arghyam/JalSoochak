@@ -2,9 +2,9 @@
 
 The authoritative specification for the three WhatsApp PDF reports JalSoochak sends to field officers:
 
-| Report                                             | Recipient                | Schedule (IST) | Data window                        |
-| -------------------------------------------------- | ------------------------ | -------------- | ---------------------------------- |
-| **A. Daily Water Service Situation Report**        | `SECTION_OFFICER` only   | 16:00 daily    | **today** 00:00 → 16:00            |
+| Report                                             | Recipient                | Schedule (IST) | Data window                                                    |
+| -------------------------------------------------- | ------------------------ | -------------- | -------------------------------------------------------------- |
+| **A. Daily Water Service Situation Report**        | `SECTION_OFFICER` only   | 16:00 daily    | **today** 00:00 → 16:00                                        |
 | **B. Weekly Water Service Situation Report (SO)**  | `SECTION_OFFICER`        | Monday 09:00¹  | **previous** full week, `weekStartDay` → +6d (default Mon–Sun) |
 | **C. Weekly Water Service Situation Report (SDO)** | `SUB_DIVISIONAL_OFFICER` | Monday 09:00¹  | **previous** full week, `weekStartDay` → +6d (default Mon–Sun) |
 
@@ -332,19 +332,21 @@ migration V29 hold the numeric **code** as a string. The label mapping handles b
 | Duplicate Image            | `DUPLICATE_IMAGE_SUBMISSION` | 4           |
 | Unreadable Image           | `UNREADABLE_IMAGE`           | 1           |
 | No Water Supply            | `NO_WATER_SUPPLY`            | 6           |
-| **Location Mismatch**      | **— does not exist —**       | —           |
+| Location Mismatch          | `LOCATION_MISMATCH`          | 11          |
 
 Other types that can appear: `MANUAL_OVERRIDE` (2), `CONSECUTIVE_OVERRIDE_5_DAYS` (3),
 `LOW_WATER_SUPPLY` (7), `OVER_WATER_SUPPLY` (8), `NO_SUBMISSION` (9),
 `IMPLAUSIBLE_WATER_SUPPLY` (10). The section is data-driven: it renders whatever types actually
 occurred, so new types appear without a code change.
 
-**On "Location Mismatch"** — it appears in the template but has no anomaly constant, no stored value
-and no detection logic anywhere in the platform. The raw material exists (`flow_reading_table.latitude`
-/`longitude`, `scheme_master_table.latitude`/`longitude`, and a `LOCATION_CHECK_REQUIRED` tenant config
-that today only decides whether to _prompt_ for location), but no distance comparison is performed. It
-is therefore **not implemented**, and will simply never appear in this section until detection is
-built. See §8.
+**On "Location Mismatch"** — this compares the reading's `flow_reading_table.latitude`/`longitude`
+against `scheme_master_table.latitude`/`longitude` and appears when the distance exceeds the
+`LOCATION_AFFINITY_THRESHOLD` metres configured at system level (`tenant_id = 0`). It is raised only
+for tenants whose `LOCATION_CHECK_REQUIRED` is `YES`, and only when both the reading and the scheme
+have coordinates — anything missing is skipped rather than reported, so a row here always means a
+real measured overshoot. Unlike every other type in this section it does **not** mean the reading
+was rejected: the value is stored and counted normally. See
+[location-affinity-check.md](location-affinity-check.md).
 
 ---
 
@@ -588,9 +590,9 @@ Both crons are stored in `common_schema.tenant_config_master_table` and read at 
 `application.yml` as the fallback. `TenantSchedulerManager` holds one `ScheduledFuture` per job per
 tenant and re-schedules on config change without a restart.
 
-| Config key                     | JSON                                                                | Default          |
-| ------------------------------ | ------------------------------------------------------------------- | ---------------- |
-| `DAILY_SITUATION_REPORT_TIME`  | `{"dailyReport":{"schedule":{"hour":16,"minute":0}}}`               | 16:00 IST daily  |
+| Config key                     | JSON                                                                                 | Default                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------ | --------------------------------------- |
+| `DAILY_SITUATION_REPORT_TIME`  | `{"dailyReport":{"schedule":{"hour":16,"minute":0}}}`                                | 16:00 IST daily                         |
 | `WEEKLY_SITUATION_REPORT_TIME` | `{"weeklyReport":{"schedule":{"dayOfWeek":1,"hour":9,"minute":0},"weekStartDay":1}}` | Fires Monday 09:00 IST, reports Mon–Sun |
 
 `dayOfWeek` and `weekStartDay` both follow the cron convention 0–7 where both 0 and 7 are Sunday; 1 is
@@ -613,16 +615,12 @@ one's own tenant.
 
 ## 8. Known gaps and deliberate choices
 
-1. **"Location Mismatch" is not implemented.** It appears in the SO daily template but has no anomaly
-   constant, no stored value and no detection logic. Building it means a new type in
-   `AnomalyConstants` and `EscalationType`, a label entry, and a distance check at ingestion comparing
-   the reading's lat/long to the scheme's. Until then the label can never appear. (§3.5)
-2. **"HHs with water supply" is scheme-attributed, not measured.** Supply is recorded per scheme, never
+1. **"HHs with water supply" is scheme-attributed, not measured.** Supply is recorded per scheme, never
    per household. The figure is the FHTC of schemes that supplied — it assumes every connected
    household on a supplying scheme received water, which a scheme-level meter cannot confirm. (§3.3)
-3. **`Total Schemes` is not historical.** Scheme mappings carry no validity dates, so week-over-week
+2. **`Total Schemes` is not historical.** Scheme mappings carry no validity dates, so week-over-week
    comparisons use today's mapping for both columns. (§4.3)
-4. **Schemes with `fhtc_count = 0` are excluded from LPCD lists**, since their LPCD is undefined rather
+3. **Schemes with `fhtc_count = 0` are excluded from LPCD lists**, since their LPCD is undefined rather
    than zero. They still appear in scheme counts and in the no-supply lists. (§4.4)
 
 ---

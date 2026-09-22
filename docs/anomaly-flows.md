@@ -56,6 +56,7 @@ The current anomaly type constants in `telemetry-service` are:
 - `8` - `OVER_WATER_SUPPLY`
 - `9` - `NO_SUBMISSION`
 - `10` - `IMPLAUSIBLE_WATER_SUPPLY`
+- `11` - `LOCATION_MISMATCH`
 
 Source: `telemetry-service` `AnomalyConstants`.
 
@@ -76,6 +77,12 @@ of three situations produced it, and the anomaly's `reason` text says which:
 
 See [implausible-water-supply-runbook.md](implausible-water-supply-runbook.md) §5 before treating
 such a gap as a pipeline fault, or a type-10 anomaly as evidence of one.
+
+`11` is the only type that does **not** reject or withhold the reading. It records that a submission
+was made farther from the scheme than the configured `LOCATION_AFFINITY_THRESHOLD` metres; the
+reading itself is stored and counted normally. On the WhatsApp path the operator saw a warning and
+chose to proceed, and on the state-IT reading API there is no interactive step at all. See
+[location-affinity-check.md](location-affinity-check.md).
 
 ---
 

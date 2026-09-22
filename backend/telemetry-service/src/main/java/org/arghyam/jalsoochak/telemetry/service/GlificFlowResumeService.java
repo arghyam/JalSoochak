@@ -174,6 +174,9 @@ public class GlificFlowResumeService {
         resultPayload.put("quality_status", result != null ? result.getQualityStatus() : null);
         resultPayload.put("quality_confidence", result != null ? result.getQualityConfidence() : null);
         resultPayload.put("last_confirmed_reading", result != null ? result.getLastConfirmedReading() : null);
+        // LOCATION-AFFINITY: the same flag the synchronous /location response carries, so a flow
+        // resumed after async image processing can branch on one variable name either way.
+        resultPayload.put("location_mismatch", result != null && result.isLocationMismatch());
 
         String stringifiedResult = stringifyResult(resultPayload);
         Map<String, Object> variables = new HashMap<>();
